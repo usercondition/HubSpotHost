@@ -282,7 +282,7 @@ export default function Operations() {
                 print_gross_profit = amount − material − labor − packaging − shipping
               </p>
               <p className="mt-1.5" data-testid="text-formula-margin">
-                print_margin_percentage = amount &gt; 0 ? (gross_profit ÷ amount) × 100 : 0
+                print_margin_percentage = amount &gt; 0 ? (gross_profit / amount) * 100 : 0
               </p>
               <p className="mt-1.5 font-sans text-muted-foreground">
                 Blank inputs count as zero. Both outputs round to 2 decimals.
