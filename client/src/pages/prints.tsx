@@ -512,6 +512,11 @@ export default function Prints() {
                   </div>
                   <StatusPill tone="good" icon={CheckCircle2} label="CTB analyzed" testId="status-ctb-analyzed" />
                 </div>
+                {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ? (
+                  <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
+                    Encrypted Chitubox settings were decrypted in memory for this plate ({staged.metrics.formatRevision}).
+                  </p>
+                ) : null}
                 <FileMetrics metrics={staged.metrics} />
                 <div className="flex flex-col justify-between gap-3 rounded-lg border border-card-border bg-card p-4 sm:flex-row sm:items-center">
                   <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
