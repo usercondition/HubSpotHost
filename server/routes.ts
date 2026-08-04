@@ -69,12 +69,15 @@ import {
   describeOrderLinksStorage,
   submitClientOrder,
 } from "./lib/order-links";
+import { applyCostDefaults, previewCostDefaults } from "./lib/cost-defaults";
 import {
   ORDER_INTAKE_STATUSES,
   clientOrderSubmissionSchema,
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  costDefaultsApplySchema,
+  costDefaultsPreviewSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
   lineItemsForIntake,
@@ -818,6 +821,77 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           error instanceof Error
             ? error.message
             : "Could not attach CTB production metrics to the Print Order",
+      });
+    }
+  });
+
+  /**
+   * Preview proposed material/labor/packaging/shipping values before any write.
+   * Owner-gated. Never writes HubSpot.
+   */
+  app.post("/api/prints/cost-defaults/preview", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = costDefaultsPreviewSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+
+    try {
+      const preview = await previewCostDefaults({
+        dealId: parsed.data.dealId,
+        laborRatePerHour: parsed.data.laborRatePerHour ?? undefined,
+        packagingAmount: parsed.data.packagingAmount ?? undefined,
+        shippingAmount: parsed.data.shippingAmount,
+        includeMaterial: parsed.data.includeMaterial,
+        includeLabor: parsed.data.includeLabor,
+        includePackaging: parsed.data.includePackaging,
+        includeShipping: parsed.data.includeShipping,
+        overwriteExisting: parsed.data.overwriteExisting,
+      });
+      return res.json({ ok: true, preview });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not preview cost defaults",
+      });
+    }
+  });
+
+  /**
+   * Confirm-write cost defaults onto a deal, then recalculate profit outputs.
+   * Requires confirm:true. Never auto-runs from attach or intake.
+   */
+  app.post("/api/prints/cost-defaults/apply", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = costDefaultsApplySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+
+    try {
+      const result = await applyCostDefaults({
+        dealId: parsed.data.dealId,
+        confirm: true,
+        laborRatePerHour: parsed.data.laborRatePerHour ?? undefined,
+        packagingAmount: parsed.data.packagingAmount ?? undefined,
+        shippingAmount: parsed.data.shippingAmount,
+        includeMaterial: parsed.data.includeMaterial,
+        includeLabor: parsed.data.includeLabor,
+        includePackaging: parsed.data.includePackaging,
+        includeShipping: parsed.data.includeShipping,
+        overwriteExisting: parsed.data.overwriteExisting,
+      });
+      return res.json({
+        ok: true,
+        ...result,
+        message: `Wrote ${result.written.length} cost field${result.written.length === 1 ? "" : "s"} to HubSpot${result.recalculated ? " and recalculated profit" : ""}.`,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not apply cost defaults",
       });
     }
   });

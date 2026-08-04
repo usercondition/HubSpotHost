@@ -66,6 +66,28 @@ interface StagedPrintFile {
   expiresAt: string;
 }
 
+interface CostFieldProposal {
+  field: "material" | "labor" | "packaging" | "shipping";
+  property: string;
+  label: string;
+  proposed: number | null;
+  current: number | null;
+  source: string;
+  willWrite: boolean;
+  skipReason: string | null;
+}
+
+interface CostDefaultsPreview {
+  dealId: string;
+  dealName: string;
+  plateCount: number;
+  totalPrintHours: number | null;
+  totalResinCost: number | null;
+  laborRatePerHour: number;
+  packagingAmount: number;
+  fields: CostFieldProposal[];
+}
+
 function formatHours(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return "Not reported";
   const hours = Math.floor(seconds / 3_600);
@@ -195,6 +217,15 @@ export default function Prints() {
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
+  const [includeMaterial, setIncludeMaterial] = useState(true);
+  const [includeLabor, setIncludeLabor] = useState(true);
+  const [includePackaging, setIncludePackaging] = useState(true);
+  const [includeShipping, setIncludeShipping] = useState(false);
+  const [overwriteCosts, setOverwriteCosts] = useState(false);
+  const [laborRate, setLaborRate] = useState("25");
+  const [packagingAmount, setPackagingAmount] = useState("5");
+  const [shippingAmount, setShippingAmount] = useState("");
+  const [costPreview, setCostPreview] = useState<CostDefaultsPreview | null>(null);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -357,6 +388,7 @@ export default function Prints() {
     onSuccess: ({ summary, message }) => {
       setStaged(null);
       setIncludeAttached(true);
+      setCostPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
       toast({
         title: `Plate ${summary.plateCount} attached`,
@@ -372,6 +404,74 @@ export default function Prints() {
     },
   });
 
+  const costDefaultsBody = () => ({
+    dealId,
+    laborRatePerHour: laborRate || null,
+    packagingAmount: packagingAmount || null,
+    shippingAmount: includeShipping ? shippingAmount || null : null,
+    includeMaterial,
+    includeLabor,
+    includePackaging,
+    includeShipping,
+    overwriteExisting: overwriteCosts,
+  });
+
+  const previewCosts = useMutation({
+    mutationFn: async () => {
+      if (!dealId) throw new Error("Choose a Print Order first");
+      const response = await apiRequest(
+        "POST",
+        "/api/prints/cost-defaults/preview",
+        costDefaultsBody(),
+        { headers },
+      );
+      return (await response.json()) as { ok: true; preview: CostDefaultsPreview };
+    },
+    onSuccess: ({ preview }) => {
+      setCostPreview(preview);
+      setLaborRate(String(preview.laborRatePerHour));
+      setPackagingAmount(String(preview.packagingAmount));
+    },
+    onError: (error: Error) => {
+      setCostPreview(null);
+      toast({
+        title: "Could not preview cost defaults",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const applyCosts = useMutation({
+    mutationFn: async () => {
+      if (!dealId) throw new Error("Choose a Print Order first");
+      const response = await apiRequest(
+        "POST",
+        "/api/prints/cost-defaults/apply",
+        { ...costDefaultsBody(), confirm: true },
+        { headers },
+      );
+      return (await response.json()) as {
+        ok: true;
+        preview: CostDefaultsPreview;
+        written: Array<{ property: string; value: number }>;
+        recalculated: boolean;
+        message: string;
+      };
+    },
+    onSuccess: ({ preview, message }) => {
+      setCostPreview(preview);
+      toast({ title: "Cost defaults written", description: message });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Cost defaults were not written",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
     setStaged(null);
@@ -380,6 +480,10 @@ export default function Prints() {
 
   const candidates = prints.data?.candidates ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+  const selectedHasPlates =
+    Boolean(selected?.hasPrintFile) ||
+    (prints.data?.records ?? []).some((record) => record.hubspotDealId === dealId);
+  const writableCostCount = costPreview?.fields.filter((field) => field.willWrite).length ?? 0;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -588,7 +692,10 @@ export default function Prints() {
                     <select
                       id="print-order-select"
                       value={dealId}
-                      onChange={(event) => setDealId(event.target.value)}
+                      onChange={(event) => {
+                        setDealId(event.target.value);
+                        setCostPreview(null);
+                      }}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       data-testid="select-print-order"
                     >
@@ -654,6 +761,170 @@ export default function Prints() {
                 </p>
               </section>
             )}
+
+            {dealId ? (
+              <Panel
+                title="3. Apply cost defaults"
+                description="Fill blank HubSpot cost fields from attached plates and simple defaults. Nothing writes until you confirm."
+              >
+                <div className="space-y-4" data-testid="panel-cost-defaults">
+                  {!selectedHasPlates ? (
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Attach at least one CTB plate to this order first so material and labor can be estimated from plate data.
+                    </p>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-labor-rate">Labor rate ($/hr)</Label>
+                      <Input
+                        id="cost-labor-rate"
+                        inputMode="decimal"
+                        value={laborRate}
+                        onChange={(event) => {
+                          setLaborRate(event.target.value);
+                          setCostPreview(null);
+                        }}
+                        data-testid="input-cost-labor-rate"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-packaging">Packaging default ($)</Label>
+                      <Input
+                        id="cost-packaging"
+                        inputMode="decimal"
+                        value={packagingAmount}
+                        onChange={(event) => {
+                          setPackagingAmount(event.target.value);
+                          setCostPreview(null);
+                        }}
+                        data-testid="input-cost-packaging"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-shipping">Shipping postage ($)</Label>
+                      <Input
+                        id="cost-shipping"
+                        inputMode="decimal"
+                        value={shippingAmount}
+                        placeholder="Paste from Pirate Ship"
+                        disabled={!includeShipping}
+                        onChange={(event) => {
+                          setShippingAmount(event.target.value);
+                          setCostPreview(null);
+                        }}
+                        data-testid="input-cost-shipping"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        ["material", includeMaterial, setIncludeMaterial, "Material from plate resin estimates"],
+                        ["labor", includeLabor, setIncludeLabor, "Labor = print hours × rate"],
+                        ["packaging", includePackaging, setIncludePackaging, "Packaging flat default"],
+                        ["shipping", includeShipping, setIncludeShipping, "Shipping (paste postage)"],
+                      ] as const
+                    ).map(([key, checked, setChecked, label]) => (
+                      <label key={key} className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            setChecked(event.target.checked);
+                            setCostPreview(null);
+                          }}
+                          className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring"
+                          data-testid={`checkbox-cost-${key}`}
+                        />
+                        <span className="text-muted-foreground">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <label className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
+                    <input
+                      type="checkbox"
+                      checked={overwriteCosts}
+                      onChange={(event) => {
+                        setOverwriteCosts(event.target.checked);
+                        setCostPreview(null);
+                      }}
+                      className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring"
+                      data-testid="checkbox-cost-overwrite"
+                    />
+                    <span className="text-muted-foreground">
+                      Overwrite fields that already have a value in HubSpot. Leave unchecked to fill blanks only.
+                    </span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => previewCosts.mutate()}
+                      disabled={!dealId || previewCosts.isPending}
+                      data-testid="button-preview-cost-defaults"
+                    >
+                      {previewCosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}
+                      Preview proposals
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => applyCosts.mutate()}
+                      disabled={!dealId || !costPreview || writableCostCount === 0 || applyCosts.isPending}
+                      data-testid="button-apply-cost-defaults"
+                    >
+                      {applyCosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                      Confirm write to HubSpot
+                    </Button>
+                  </div>
+                  {costPreview ? (
+                    <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3" data-testid="panel-cost-preview">
+                      <p className="text-sm font-medium">
+                        {costPreview.dealName}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {costPreview.plateCount} plate{costPreview.plateCount === 1 ? "" : "s"}
+                          {costPreview.totalPrintHours != null ? ` · ${costPreview.totalPrintHours}h print time` : ""}
+                        </span>
+                      </p>
+                      <ul className="space-y-2">
+                        {costPreview.fields.map((field) => (
+                          <li
+                            key={field.field}
+                            className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-2 text-xs last:border-b-0 last:pb-0"
+                            data-testid={`row-cost-proposal-${field.field}`}
+                          >
+                            <div>
+                              <p className="font-medium">{field.label}</p>
+                              <p className="mt-0.5 text-muted-foreground">{field.source}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="numeric font-medium">
+                                {field.proposed != null ? `$${field.proposed.toFixed(2)}` : "—"}
+                              </p>
+                              <p className={field.willWrite ? "text-chart-4" : "text-muted-foreground"}>
+                                {field.willWrite
+                                  ? field.current != null
+                                    ? `Will replace $${field.current.toFixed(2)}`
+                                    : "Will write"
+                                  : field.skipReason || "Skipped"}
+                              </p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      {writableCostCount === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Nothing will be written with the current selections. Attach plates, paste shipping, or enable overwrite.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Confirm writes {writableCostCount} field{writableCostCount === 1 ? "" : "s"} and recalculates profit. Slicer estimates are not actual material cost until you confirm.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </Panel>
+            ) : null}
 
             <Panel title="Recent plate history" description="A local record of each attached plate. HubSpot receives the matching rolling totals for every order.">
               {prints.data.records.length ? (
