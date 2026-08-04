@@ -6,6 +6,7 @@ import {
   FileUp,
   Loader2,
   PackagePlus,
+  PlusCircle,
   ReceiptText,
   RefreshCw,
   ShoppingBag,
@@ -23,19 +24,26 @@ import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
   SUPPLY_CATEGORIES,
   SUPPLY_CATEGORY_LABELS,
+  lineItemsForSupplyPurchase,
   type SupplyCategory,
   type SupplyPurchase,
+  type SupplyPurchaseLineItem,
 } from "@shared/schema";
+
+type LineDraft = {
+  itemName: string;
+  quantity: string;
+  lineAmount: string;
+  category: "" | SupplyCategory;
+};
 
 type SupplyForm = {
   source: string;
   orderReference: string;
-  itemName: string;
-  category: "" | SupplyCategory;
-  quantity: string;
   totalAmount: string;
   purchasedAt: string;
   notes: string;
+  lineItems: LineDraft[];
 };
 
 function localToday(): string {
@@ -44,16 +52,18 @@ function localToday(): string {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
+function emptyLine(): LineDraft {
+  return { itemName: "", quantity: "1", lineAmount: "", category: "" };
+}
+
 function emptyForm(): SupplyForm {
   return {
     source: "Amazon",
     orderReference: "",
-    itemName: "",
-    category: "",
-    quantity: "1",
     totalAmount: "",
     purchasedAt: localToday(),
     notes: "",
+    lineItems: [emptyLine()],
   };
 }
 
@@ -89,6 +99,16 @@ function displayDate(value: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+function toLineDrafts(items: SupplyPurchaseLineItem[] | undefined): LineDraft[] {
+  if (!items || items.length === 0) return [emptyLine()];
+  return items.map((item) => ({
+    itemName: item.itemName || "",
+    quantity: String(item.quantity || 1),
+    lineAmount: item.lineAmount || "",
+    category: item.category || "",
+  }));
+}
+
 type ParsedInvoiceResponse = {
   ok: true;
   fields: {
@@ -100,6 +120,7 @@ type ParsedInvoiceResponse = {
     totalAmount: string;
     purchasedAt: string;
     notes: string;
+    lineItems: SupplyPurchaseLineItem[];
   };
   warnings: string[];
   pageCount: number;
@@ -148,13 +169,27 @@ export default function Supplies() {
 
   const createPurchase = useMutation({
     mutationFn: async () => {
+      const lineItems = form.lineItems
+        .map((line) => ({
+          itemName: line.itemName.trim(),
+          quantity: Number(line.quantity) || 1,
+          lineAmount: line.lineAmount.trim(),
+          category: line.category || undefined,
+        }))
+        .filter((line) => line.itemName.length >= 2);
+
       const response = await apiRequest(
         "POST",
         "/api/supplies",
         {
-          ...form,
-          category: form.category || undefined,
-          quantity: Number(form.quantity) || 1,
+          source: form.source,
+          orderReference: form.orderReference,
+          totalAmount: form.totalAmount,
+          purchasedAt: form.purchasedAt,
+          notes: form.notes,
+          lineItems,
+          itemName: lineItems[0]?.itemName ?? "",
+          quantity: lineItems.reduce((sum, line) => sum + line.quantity, 0) || 1,
         },
         { headers },
       );
@@ -164,9 +199,13 @@ export default function Supplies() {
       setForm(emptyForm());
       queryClient.invalidateQueries({ queryKey: ["/api/supplies"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      const lines = lineItemsForSupplyPurchase(purchase);
       toast({
         title: "Supply purchase saved",
-        description: `${SUPPLY_CATEGORY_LABELS[purchase.category]}: ${purchase.itemName}.`,
+        description:
+          lines.length > 1
+            ? `${lines.length} items logged · ${money(purchase.totalAmount)}.`
+            : `${SUPPLY_CATEGORY_LABELS[purchase.category]}: ${purchase.itemName}.`,
       });
     },
     onError: (error: Error) => {
@@ -186,18 +225,30 @@ export default function Supplies() {
       return (await response.json()) as ParsedInvoiceResponse;
     },
     onSuccess: ({ fields, warnings }) => {
+      const lineItems = toLineDrafts(
+        fields.lineItems?.length
+          ? fields.lineItems
+          : fields.itemName
+            ? [
+                {
+                  itemName: fields.itemName,
+                  quantity: fields.quantity || 1,
+                  lineAmount: "",
+                  category: fields.category,
+                },
+              ]
+            : [],
+      );
       setForm({
         source: fields.source || "Amazon",
         orderReference: fields.orderReference || "",
-        itemName: fields.itemName || "",
-        category: fields.category || "",
-        quantity: String(fields.quantity || 1),
         totalAmount: fields.totalAmount || "",
         purchasedAt: fields.purchasedAt || localToday(),
         notes: fields.notes || "",
+        lineItems,
       });
       toast({
-        title: "Invoice fields filled in",
+        title: lineItems.length > 1 ? "Invoice item breakdown filled in" : "Invoice fields filled in",
         description:
           warnings.length > 0
             ? `${warnings[0]} Review the form before saving.`
@@ -226,9 +277,21 @@ export default function Supplies() {
     parseInvoice.mutate(file);
   };
 
+  const updateLine = (index: number, patch: Partial<LineDraft>) => {
+    setForm((current) => ({
+      ...current,
+      lineItems: current.lineItems.map((line, i) => (i === index ? { ...line, ...patch } : line)),
+    }));
+  };
+
   const submit = () => {
-    if (form.itemName.trim().length < 2) {
-      toast({ title: "Add the item name", description: "Enter what you purchased before saving it.", variant: "destructive" });
+    const named = form.lineItems.filter((line) => line.itemName.trim().length >= 2);
+    if (named.length === 0) {
+      toast({
+        title: "Add at least one item",
+        description: "Enter what you purchased before saving it.",
+        variant: "destructive",
+      });
       return;
     }
     if (!form.totalAmount.trim()) {
@@ -294,7 +357,7 @@ export default function Supplies() {
               <div>
                 <p className="rule-label">Regular Amazon account workflow</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Copy a receipt total here after a business purchase. The category is suggested automatically unless you choose a different one.
+                  Log a receipt with one or more items. PDF invoices fill the item breakdown automatically when the text is readable.
                 </p>
               </div>
               <StatusPill
@@ -306,7 +369,7 @@ export default function Supplies() {
             </section>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="Log a supply purchase" description="Drop a PDF invoice to fill the form, or enter the receipt total by hand.">
+              <Panel title="Log a supply purchase" description="Drop a PDF invoice to fill the item breakdown, or enter items by hand.">
                 <div className="mb-5 space-y-2">
                   <input
                     ref={invoiceInputRef}
@@ -348,7 +411,7 @@ export default function Supplies() {
                       {parseInvoice.isPending ? "Reading invoice…" : "Drop a PDF invoice here"}
                     </span>
                     <span className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                      Amazon and supplier PDFs work best when they contain selectable text. Fields are filled for review — nothing is saved until you confirm.
+                      Multi-item Amazon orders fill each line for review. Nothing is saved until you confirm.
                     </span>
                   </button>
                 </div>
@@ -360,16 +423,104 @@ export default function Supplies() {
                     submit();
                   }}
                 >
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="supply-item-name">Item purchased</Label>
-                    <Input
-                      id="supply-item-name"
-                      value={form.itemName}
-                      onChange={(event) => setForm((current) => ({ ...current, itemName: event.target.value }))}
-                      placeholder="Example: Elegoo ABS-like resin, 2 kg"
-                      data-testid="input-supply-item-name"
-                    />
+                  <div className="space-y-3 sm:col-span-2" data-testid="panel-supply-line-items">
+                    <div>
+                      <p className="text-sm font-medium">Items bought</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Add every SKU from the receipt. Line amounts are optional; the receipt total below is what counts for spend.
+                      </p>
+                    </div>
+                    {form.lineItems.map((line, index) => (
+                      <div
+                        key={index}
+                        className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.5fr)_5.5rem_6.5rem_minmax(8rem,0.8fr)_auto]"
+                        data-testid={`row-supply-line-${index}`}
+                      >
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`supply-line-name-${index}`}>
+                            Item {index + 1}
+                            <span className="text-primary"> *</span>
+                          </Label>
+                          <Input
+                            id={`supply-line-name-${index}`}
+                            value={line.itemName}
+                            onChange={(event) => updateLine(index, { itemName: event.target.value })}
+                            placeholder="Elegoo ABS-like resin, 2 kg"
+                            data-testid={`input-supply-line-name-${index}`}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`supply-line-qty-${index}`}>Qty</Label>
+                          <Input
+                            id={`supply-line-qty-${index}`}
+                            type="number"
+                            min="1"
+                            value={line.quantity}
+                            onChange={(event) => updateLine(index, { quantity: event.target.value })}
+                            data-testid={`input-supply-line-qty-${index}`}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`supply-line-amount-${index}`}>Line $</Label>
+                          <Input
+                            id={`supply-line-amount-${index}`}
+                            inputMode="decimal"
+                            value={line.lineAmount}
+                            onChange={(event) => updateLine(index, { lineAmount: event.target.value })}
+                            placeholder="Optional"
+                            data-testid={`input-supply-line-amount-${index}`}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`supply-line-category-${index}`}>Category</Label>
+                          <select
+                            id={`supply-line-category-${index}`}
+                            value={line.category}
+                            onChange={(event) =>
+                              updateLine(index, { category: event.target.value as LineDraft["category"] })
+                            }
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            data-testid={`select-supply-line-category-${index}`}
+                          >
+                            <option value="">Auto</option>
+                            {SUPPLY_CATEGORIES.map((category) => (
+                              <option key={category} value={category}>
+                                {SUPPLY_CATEGORY_LABELS[category]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={form.lineItems.length <= 1}
+                            onClick={() =>
+                              setForm((current) => ({
+                                ...current,
+                                lineItems: current.lineItems.filter((_, i) => i !== index),
+                              }))
+                            }
+                            data-testid={`button-remove-supply-line-${index}`}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setForm((current) => ({ ...current, lineItems: [...current.lineItems, emptyLine()] }))}
+                      data-testid="button-add-supply-line"
+                    >
+                      <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                      Add another item
+                    </Button>
                   </div>
+
                   <div className="space-y-1.5">
                     <Label htmlFor="supply-total">Total paid</Label>
                     <Input
@@ -390,36 +541,6 @@ export default function Supplies() {
                       onChange={(event) => setForm((current) => ({ ...current, purchasedAt: event.target.value }))}
                       data-testid="input-supply-date"
                     />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="supply-quantity">Quantity</Label>
-                    <Input
-                      id="supply-quantity"
-                      type="number"
-                      min="1"
-                      value={form.quantity}
-                      onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))}
-                      data-testid="input-supply-quantity"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="supply-category">Category</Label>
-                    <select
-                      id="supply-category"
-                      value={form.category}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, category: event.target.value as SupplyForm["category"] }))
-                      }
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      data-testid="select-supply-category"
-                    >
-                      <option value="">Auto-categorize from item name</option>
-                      {SUPPLY_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>
-                          {SUPPLY_CATEGORY_LABELS[category]}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="supply-source">Source</Label>
@@ -510,32 +631,51 @@ export default function Supplies() {
               </div>
             </section>
 
-            <Panel title="Recent supply purchases" description="The most recent receipt records in your command center.">
+            <Panel title="Recent supply purchases" description="Each receipt shows the items that were bought.">
               {supplies.data.purchases.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
                     <thead className="border-b border-border text-xs text-muted-foreground">
                       <tr>
                         <th className="px-2 py-2 font-medium">Purchase</th>
-                        <th className="px-2 py-2 font-medium">Category</th>
+                        <th className="px-2 py-2 font-medium">Items</th>
                         <th className="px-2 py-2 font-medium">Reference</th>
                         <th className="px-2 py-2 text-right font-medium">Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {supplies.data.purchases.map((purchase) => (
-                        <tr key={purchase.id} className="border-b border-border/70 last:border-0" data-testid={`row-supply-purchase-${purchase.id}`}>
-                          <td className="px-2 py-3">
-                            <span className="block font-medium">{purchase.itemName}</span>
-                            <span className="mt-0.5 block text-xs text-muted-foreground">
-                              {purchase.source} · {displayDate(purchase.purchasedAt)} · Qty {purchase.quantity}
-                            </span>
-                          </td>
-                          <td className="px-2 py-3 text-xs text-muted-foreground">{SUPPLY_CATEGORY_LABELS[purchase.category]}</td>
-                          <td className="px-2 py-3 text-xs text-muted-foreground">{purchase.orderReference || "—"}</td>
-                          <td className="numeric px-2 py-3 text-right font-medium">{money(purchase.totalAmount)}</td>
-                        </tr>
-                      ))}
+                      {supplies.data.purchases.map((purchase) => {
+                        const lines = lineItemsForSupplyPurchase(purchase);
+                        return (
+                          <tr key={purchase.id} className="border-b border-border/70 last:border-0" data-testid={`row-supply-purchase-${purchase.id}`}>
+                            <td className="px-2 py-3 align-top">
+                              <span className="block font-medium">
+                                {lines.length > 1 ? `${lines.length} items` : lines[0]?.itemName || purchase.itemName}
+                              </span>
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {purchase.source} · {displayDate(purchase.purchasedAt)}
+                              </span>
+                            </td>
+                            <td className="px-2 py-3 align-top">
+                              <ul className="space-y-1.5" data-testid={`list-supply-items-${purchase.id}`}>
+                                {lines.map((line, index) => (
+                                  <li key={`${purchase.id}-${index}`} className="text-xs leading-5">
+                                    <span className="font-medium text-foreground">{line.itemName}</span>
+                                    <span className="mt-0.5 block text-muted-foreground">
+                                      Qty {line.quantity}
+                                      {line.lineAmount ? ` · ${money(line.lineAmount)}` : ""}
+                                      {" · "}
+                                      {SUPPLY_CATEGORY_LABELS[line.category]}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </td>
+                            <td className="px-2 py-3 align-top text-xs text-muted-foreground">{purchase.orderReference || "—"}</td>
+                            <td className="numeric px-2 py-3 align-top text-right font-medium">{money(purchase.totalAmount)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

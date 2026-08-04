@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
   total_amount TEXT NOT NULL,
   purchased_at TEXT NOT NULL,
   notes TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  line_items_json TEXT NOT NULL DEFAULT '[]'
 );
 `;
 
@@ -294,6 +295,22 @@ function ensureOrderIntakeColumns(sqlite: Database.Database): void {
   }
 }
 
+const SUPPLY_PURCHASE_COLUMN_MIGRATIONS: Array<[string, string]> = [
+  ["line_items_json", "TEXT NOT NULL DEFAULT '[]'"],
+];
+
+function ensureSupplyPurchaseColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (
+      sqlite.prepare("PRAGMA table_info(supply_purchases)").all() as Array<{ name: string }>
+    ).map((row) => row.name),
+  );
+  for (const [name, type] of SUPPLY_PURCHASE_COLUMN_MIGRATIONS) {
+    if (existing.has(name)) continue;
+    sqlite.exec(`ALTER TABLE supply_purchases ADD COLUMN ${name} ${type}`);
+  }
+}
+
 let db: BetterSQLite3Database | null = null;
 
 function databaseFile(): string {
@@ -349,6 +366,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
+  ensureSupplyPurchaseColumns(sqlite);
   db = drizzle(sqlite);
   return db;
 }

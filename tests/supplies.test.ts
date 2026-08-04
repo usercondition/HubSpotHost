@@ -58,10 +58,49 @@ test("supply purchases are local records with a rolling spend summary", () => {
   assert.equal(first.category, "materials");
   assert.equal(second.category, "consumables");
   assert.equal(listSupplyPurchases().length, 2);
+  assert.match(first.lineItemsJson, /Elegoo ABS-like resin/i);
 
   const summary = buildSupplySpendSummary(new Date("2026-08-04T12:00:00.000Z"));
   assert.equal(summary.purchases, 2);
   assert.equal(summary.total, 51.49);
   assert.equal(summary.byCategory.find((bucket) => bucket.category === "materials")?.total, 38.99);
   assert.equal(summary.byCategory.find((bucket) => bucket.category === "consumables")?.total, 12.5);
+});
+
+test("multi-item supply purchases store a breakdown and allocate category spend", () => {
+  const purchase = createSupplyPurchase({
+    source: "Amazon",
+    orderReference: "111-999",
+    itemName: "",
+    totalAmount: "59.39",
+    purchasedAt: "2026-08-02",
+    quantity: 1,
+    notes: "",
+    lineItems: [
+      {
+        itemName: "ELEGOO ABS-Like Resin 1000g",
+        quantity: 1,
+        lineAmount: "29.99",
+        category: "materials",
+      },
+      {
+        itemName: "Nitrile gloves, 100 pack",
+        quantity: 2,
+        lineAmount: "25.00",
+        category: "consumables",
+      },
+    ],
+  });
+
+  assert.match(purchase.itemName, /2 items:/i);
+  assert.equal(purchase.quantity, 3);
+  const lines = JSON.parse(purchase.lineItemsJson) as Array<{ itemName: string; lineAmount: string }>;
+  assert.equal(lines.length, 2);
+
+  const summary = buildSupplySpendSummary(new Date("2026-08-04T12:00:00.000Z"));
+  const materials = summary.byCategory.find((bucket) => bucket.category === "materials");
+  const consumables = summary.byCategory.find((bucket) => bucket.category === "consumables");
+  assert.ok(materials && materials.total > 30);
+  assert.ok(consumables && consumables.total > 25);
+  assert.equal(summary.total, 110.88);
 });

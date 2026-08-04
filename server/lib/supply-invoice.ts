@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import pdfParse from "pdf-parse";
 import { suggestSupplyCategory } from "./supplies";
-import type { SupplyCategory } from "../../shared/schema";
+import {
+  summarizeSupplyLineItems,
+  type SupplyCategory,
+  type SupplyPurchaseLineItem,
+} from "../../shared/schema";
 
 const MEBIBYTE = 1024 * 1024;
 export const SUPPLY_INVOICE_MAX_BYTES = 12 * MEBIBYTE;
@@ -16,6 +20,7 @@ export interface SupplyInvoiceFields {
   totalAmount: string;
   purchasedAt: string;
   notes: string;
+  lineItems: SupplyPurchaseLineItem[];
 }
 
 export interface SupplyInvoiceParseResult {
@@ -180,47 +185,129 @@ function looksLikeNoiseItem(line: string): boolean {
   );
 }
 
-function extractItemName(text: string): string | null {
+function isSectionEnd(line: string): boolean {
+  return /^(subtotal|shipping|tax|estimated tax|total before|grand total|order total|amount due|payment information|billing address|shipping address)/i.test(
+    line,
+  );
+}
+
+function extractLineItems(text: string): SupplyPurchaseLineItem[] {
   const lines = text
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean);
 
+  const items: SupplyPurchaseLineItem[] = [];
+  let inItems = false;
+
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    const line = lines[index]!;
+
     if (/^Items?\s+Ordered$/i.test(line) || /^Order\s+Details$/i.test(line)) {
-      for (let offset = 1; offset <= 6; offset += 1) {
-        const candidate = lines[index + offset];
-        if (!candidate || looksLikeNoiseItem(candidate)) continue;
-        if (/sold by|quantity|unit price|asin/i.test(candidate)) continue;
-        return candidate.slice(0, 300);
+      inItems = true;
+      continue;
+    }
+    if (inItems && isSectionEnd(line)) break;
+    if (!inItems) continue;
+    if (looksLikeNoiseItem(line)) continue;
+    if (/sold by|condition:|asin|unit price|of:|shipment/i.test(line)) continue;
+    if (/^quantity\b/i.test(line)) continue;
+
+    // Product title line — gather qty / price from the next few lines.
+    if (!/[a-zA-Z]{3,}/.test(line) || line.length < 6) continue;
+
+    let quantity = 1;
+    let unitPrice: string | null = null;
+    let lineTotal: string | null = null;
+
+    for (let offset = 1; offset <= 8; offset += 1) {
+      const next = lines[index + offset];
+      if (!next || isSectionEnd(next)) break;
+
+      const qtyMatch = next.match(/\b(?:Qty\.?|Quantity)\s*[:\s]*(\d{1,5})\b/i);
+      if (qtyMatch) quantity = Number(qtyMatch[1]) || 1;
+
+      const unitMatch = next.match(/\bUnit\s*Price\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i);
+      if (unitMatch) unitPrice = moneyFromMatch(unitMatch[1]);
+
+      const totalMatch = next.match(
+        /\b(?:Item\s*)?(?:Sub)?total\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i,
+      );
+      if (totalMatch) lineTotal = moneyFromMatch(totalMatch[1]);
+
+      // Amazon often prints "$28.99" alone after quantity.
+      if (!unitPrice && !lineTotal) {
+        const lone = next.match(/^\$?\s*([\d,]+\.\d{2})$/);
+        if (lone) unitPrice = moneyFromMatch(lone[1]);
+      }
+
+      // Next product title ends this block.
+      if (
+        offset > 1 &&
+        /[a-zA-Z]{6,}/.test(next) &&
+        !/sold by|condition:|quantity|unit price|asin|total/i.test(next) &&
+        !looksLikeNoiseItem(next) &&
+        next.length >= 12
+      ) {
+        break;
       }
     }
+
+    let amount = lineTotal;
+    if (!amount && unitPrice) {
+      amount = (Number(unitPrice) * quantity).toFixed(2);
+    }
+
+    items.push({
+      itemName: line.slice(0, 300),
+      quantity,
+      lineAmount: amount ?? "",
+      category: suggestSupplyCategory(line),
+    });
+
+    if (items.length >= 40) break;
   }
 
+  if (items.length > 0) return items;
+
+  // Generic single-description invoices.
   const titled = text.match(
     /(?:Item(?:\s*Description)?|Description|Product)\s*[:\s]+([^\n]{4,300})/i,
   );
   if (titled?.[1] && !looksLikeNoiseItem(titled[1])) {
-    return normalizeWhitespace(titled[1]).slice(0, 300);
+    const itemName = normalizeWhitespace(titled[1]).slice(0, 300);
+    return [
+      {
+        itemName,
+        quantity: extractQuantity(text) ?? 1,
+        lineAmount: "",
+        category: suggestSupplyCategory(itemName),
+      },
+    ];
   }
 
-  // Prefer a line that looks like a product title (letters + maybe size/kg).
   for (const line of lines) {
     if (looksLikeNoiseItem(line)) continue;
     if (!/[a-zA-Z]{3,}/.test(line)) continue;
     if (/\b(resin|filament|glove|fep|ipa|isopropyl|mailer|box|printer|vat|bottle)\b/i.test(line)) {
-      return line.slice(0, 300);
+      return [
+        {
+          itemName: line.slice(0, 300),
+          quantity: extractQuantity(text) ?? 1,
+          lineAmount: "",
+          category: suggestSupplyCategory(line),
+        },
+      ];
     }
   }
 
-  for (const line of lines) {
-    if (looksLikeNoiseItem(line)) continue;
-    if (/[a-zA-Z]{6,}/.test(line) && line.length >= 12 && line.length <= 180) {
-      return line.slice(0, 300);
-    }
-  }
+  return [];
+}
 
+function extractItemName(text: string): string | null {
+  const items = extractLineItems(text);
+  if (items.length === 1) return items[0]!.itemName;
+  if (items.length > 1) return summarizeSupplyLineItems(items).itemName;
   return null;
 }
 
@@ -251,29 +338,48 @@ export function extractSupplyInvoiceFromText(
   const cleaned = text.replace(/\u0000/g, " ");
   const warnings: string[] = [];
 
-  const itemName = extractItemName(cleaned);
+  const lineItems = extractLineItems(cleaned);
+  const summary = summarizeSupplyLineItems(lineItems);
+  const itemName = summary.itemName || extractItemName(cleaned);
   const totalAmount = extractTotalAmount(cleaned);
   const purchasedAt = extractPurchasedAt(cleaned);
   const orderReference = extractOrderReference(cleaned);
-  const quantity = extractQuantity(cleaned);
+  const quantity = summary.quantity || extractQuantity(cleaned) || 1;
   const source = detectSource(cleaned, options.fileName);
 
-  if (!itemName) warnings.push("Could not find a clear item name — enter it manually.");
+  if (lineItems.length === 0) warnings.push("Could not find a clear item name — enter it manually.");
   if (!totalAmount) warnings.push("Could not find a receipt total — enter the amount paid.");
   if (!purchasedAt) warnings.push("Could not find a purchase date — today's date was used.");
   if (!orderReference) warnings.push("No order or invoice number was found.");
-  if (!quantity) warnings.push("Quantity was not found — defaulted to 1.");
+  if (lineItems.length > 1) {
+    warnings.push(`Found ${lineItems.length} line items — review the breakdown before saving.`);
+  } else if (lineItems.length === 1 && !lineItems[0]!.quantity) {
+    warnings.push("Quantity was not found — defaulted to 1.");
+  }
 
   const resolvedItem = itemName ?? "";
   const fields: SupplyInvoiceFields = {
     source,
     orderReference: orderReference ?? "",
     itemName: resolvedItem,
-    category: resolvedItem ? suggestSupplyCategory(resolvedItem) : "other",
-    quantity: quantity ?? 1,
+    category: summary.category || (resolvedItem ? suggestSupplyCategory(resolvedItem) : "other"),
+    quantity,
     totalAmount: totalAmount ?? "",
     purchasedAt: purchasedAt ?? localTodayIso(),
     notes: options.fileName ? `Imported from ${options.fileName}` : "",
+    lineItems:
+      lineItems.length > 0
+        ? lineItems
+        : resolvedItem
+          ? [
+              {
+                itemName: resolvedItem,
+                quantity,
+                lineAmount: "",
+                category: suggestSupplyCategory(resolvedItem),
+              },
+            ]
+          : [],
   };
 
   return {

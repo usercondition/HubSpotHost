@@ -2,6 +2,10 @@ import { desc } from "drizzle-orm";
 import {
   SUPPLY_CATEGORIES,
   SUPPLY_CATEGORY_LABELS,
+  lineItemsForSupplyPurchase,
+  normalizeSupplyLineItems,
+  parseAmountNumber,
+  summarizeSupplyLineItems,
   supplyPurchases,
   type CreateSupplyPurchaseInput,
   type SupplyCategory,
@@ -83,19 +87,29 @@ export function suggestSupplyCategory(itemName: string): SupplyCategory {
 }
 
 export function createSupplyPurchase(input: CreateSupplyPurchaseInput): SupplyPurchase {
-  const totalAmount = money(input.totalAmount);
+  const lines = normalizeSupplyLineItems({
+    ...input,
+    category: input.category,
+  }).map((line) => ({
+    ...line,
+    category: line.category || suggestSupplyCategory(line.itemName),
+  }));
+  const summary = summarizeSupplyLineItems(lines);
+  const totalAmount = money(input.totalAmount) || summary.lineTotal || 0;
+
   return getDb()
     .insert(supplyPurchases)
     .values({
       source: input.source || "Amazon",
       orderReference: input.orderReference ?? "",
-      itemName: input.itemName,
-      category: input.category ?? suggestSupplyCategory(input.itemName),
-      quantity: input.quantity,
+      itemName: summary.itemName || input.itemName,
+      category: input.category ?? summary.category,
+      quantity: summary.quantity || input.quantity || 1,
       totalAmount: totalAmount.toFixed(2),
       purchasedAt: purchaseDate(input.purchasedAt),
       notes: input.notes ?? "",
       createdAt: new Date().toISOString(),
+      lineItemsJson: JSON.stringify(lines),
     })
     .returning()
     .get();
@@ -135,12 +149,34 @@ export function buildSupplySpendSummary(now = new Date()): SupplySpendSummary {
     const purchasedAt = new Date(purchase.purchasedAt);
     if (!Number.isFinite(purchasedAt.getTime()) || purchasedAt < startsAt || purchasedAt > now) continue;
     const amount = money(purchase.totalAmount);
-    const bucket = buckets.get(purchase.category);
-    if (!bucket) continue;
-    bucket.total += amount;
-    bucket.count += 1;
     total += amount;
     purchases += 1;
+
+    const lines = lineItemsForSupplyPurchase(purchase);
+    const lineAmounts = lines.map((line) => parseAmountNumber(line.lineAmount));
+    const knownLineTotal = lineAmounts.reduce(
+      (sum, value) => sum + (Number.isFinite(value) && value > 0 ? value : 0),
+      0,
+    );
+    const canAllocateLines =
+      lines.length > 1 && lineAmounts.every((value) => Number.isFinite(value) && value > 0);
+
+    if (canAllocateLines) {
+      lines.forEach((line, index) => {
+        const lineAmount = lineAmounts[index] ?? 0;
+        const share =
+          knownLineTotal > 0 && amount > 0 ? (lineAmount / knownLineTotal) * amount : lineAmount;
+        const bucket = buckets.get(line.category);
+        if (!bucket) return;
+        bucket.total += share;
+        bucket.count += 1;
+      });
+    } else {
+      const bucket = buckets.get(purchase.category);
+      if (!bucket) continue;
+      bucket.total += amount;
+      bucket.count += 1;
+    }
   }
 
   return {
