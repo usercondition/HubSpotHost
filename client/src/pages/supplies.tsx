@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Boxes,
   CheckCircle2,
+  FileUp,
   Loader2,
   PackagePlus,
   ReceiptText,
@@ -88,10 +89,28 @@ function displayDate(value: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+type ParsedInvoiceResponse = {
+  ok: true;
+  fields: {
+    source: string;
+    orderReference: string;
+    itemName: string;
+    category: SupplyCategory;
+    quantity: number;
+    totalAmount: string;
+    purchasedAt: string;
+    notes: string;
+  };
+  warnings: string[];
+  pageCount: number;
+};
+
 export default function Supplies() {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
   const [form, setForm] = useState<SupplyForm>(emptyForm);
+  const [draggingInvoice, setDraggingInvoice] = useState(false);
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
 
   const supplies = useQuery<SupplyResponse>({
     queryKey: ["/api/supplies", ownerCode],
@@ -158,6 +177,54 @@ export default function Supplies() {
       });
     },
   });
+
+  const parseInvoice = useMutation({
+    mutationFn: async (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await apiRequest("POST", "/api/supplies/parse-invoice", body, { headers });
+      return (await response.json()) as ParsedInvoiceResponse;
+    },
+    onSuccess: ({ fields, warnings }) => {
+      setForm({
+        source: fields.source || "Amazon",
+        orderReference: fields.orderReference || "",
+        itemName: fields.itemName || "",
+        category: fields.category || "",
+        quantity: String(fields.quantity || 1),
+        totalAmount: fields.totalAmount || "",
+        purchasedAt: fields.purchasedAt || localToday(),
+        notes: fields.notes || "",
+      });
+      toast({
+        title: "Invoice fields filled in",
+        description:
+          warnings.length > 0
+            ? `${warnings[0]} Review the form before saving.`
+            : "Review the extracted fields, then save the purchase.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Invoice could not be read",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const acceptInvoice = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+      toast({
+        title: "PDF invoices only",
+        description: "Drop an Amazon or supplier invoice saved as a PDF.",
+        variant: "destructive",
+      });
+      return;
+    }
+    parseInvoice.mutate(file);
+  };
 
   const submit = () => {
     if (form.itemName.trim().length < 2) {
@@ -239,7 +306,53 @@ export default function Supplies() {
             </section>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="Log a supply purchase" description="Use the final total from your Amazon order confirmation or receipt.">
+              <Panel title="Log a supply purchase" description="Drop a PDF invoice to fill the form, or enter the receipt total by hand.">
+                <div className="mb-5 space-y-2">
+                  <input
+                    ref={invoiceInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="sr-only"
+                    onChange={(event) => {
+                      acceptInvoice(event.target.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                    data-testid="input-supply-invoice"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => invoiceInputRef.current?.click()}
+                    onDragEnter={(event) => {
+                      event.preventDefault();
+                      setDraggingInvoice(true);
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDragLeave={() => setDraggingInvoice(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setDraggingInvoice(false);
+                      acceptInvoice(event.dataTransfer.files?.[0]);
+                    }}
+                    disabled={parseInvoice.isPending}
+                    className={`flex min-h-28 w-full flex-col items-center justify-center rounded-md border border-dashed px-5 text-center transition-colors ${
+                      draggingInvoice ? "border-primary bg-primary/10" : "border-border bg-muted/35 hover:bg-muted/60"
+                    }`}
+                    data-testid="dropzone-supply-invoice"
+                  >
+                    {parseInvoice.isPending ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : (
+                      <FileUp className="h-5 w-5 text-primary" />
+                    )}
+                    <span className="mt-2 text-sm font-medium">
+                      {parseInvoice.isPending ? "Reading invoice…" : "Drop a PDF invoice here"}
+                    </span>
+                    <span className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+                      Amazon and supplier PDFs work best when they contain selectable text. Fields are filled for review — nothing is saved until you confirm.
+                    </span>
+                  </button>
+                </div>
+
                 <form
                   className="grid gap-4 sm:grid-cols-2"
                   onSubmit={(event) => {
