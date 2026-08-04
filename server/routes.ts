@@ -18,6 +18,9 @@ import {
   verifyCallbackToken,
   verifyWebhookRequest,
 } from "./lib/signature";
+import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError } from "./lib/hubspot";
+import { buildPerformanceSnapshot } from "./lib/performance";
+import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 import {
   analyzeMarketplaceConversation,
@@ -41,6 +44,7 @@ import {
   ORDER_INTAKE_STATUSES,
   clientOrderSubmissionSchema,
   createOrderLinkSchema,
+  createSupplyPurchaseSchema,
   reviewEditSchema,
   type OrderIntakeLink,
   type OrderIntakeStatus,
@@ -407,6 +411,63 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       counts: orderLinkCounts(),
       links: listOrderLinks(status).map(ownerLinkView),
     });
+  });
+
+  /**
+   * Owner-only supply ledger. Regular Amazon accounts have no clean, official
+   * order-feed integration, so the owner records receipt totals here. This
+   * remains independent from actual cost fields on a HubSpot deal to prevent
+   * double-counting the same spend in gross-profit calculations.
+   */
+  app.get("/api/supplies", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({
+      ok: true,
+      purchases: listSupplyPurchases(),
+      summary: buildSupplySpendSummary(),
+    });
+  });
+
+  app.post("/api/supplies", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = createSupplyPurchaseSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const purchase = createSupplyPurchase(parsed.data);
+    return res.status(201).json({
+      ok: true,
+      purchase,
+      summary: buildSupplySpendSummary(),
+    });
+  });
+
+  /**
+   * Owner-only, read-only performance summary. The API token remains server
+   * side and this route deliberately performs no HubSpot writes.
+   */
+  app.get("/api/performance", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const [deals, stages] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+      ]);
+      return res.json(
+        buildPerformanceSnapshot({
+          deals,
+          stages,
+          intakeCounts: orderLinkCounts(),
+          supplySpend: buildSupplySpendSummary(),
+        }),
+      );
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
+      });
+    }
   });
 
   app.get("/api/order-links/:id", (req: Request, res: Response) => {

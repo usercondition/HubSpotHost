@@ -1,9 +1,8 @@
-import { HubSpotError } from "./hubspot";
+import { HubSpotError, PRINT_ORDERS_PIPELINE } from "./hubspot";
 import { getConfig, getToken } from "./config";
 import { type PaidOrderDraft, splitName } from "./intake";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-export const PRINT_ORDERS_PIPELINE = "default";
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
 
 interface HubSpotRecord {

@@ -3,11 +3,13 @@ import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Activity,
+  BarChart3,
   ClipboardCheck,
   ExternalLink,
   Home,
   Link2,
   Moon,
+  ShoppingBag,
   Settings2,
   ShipWheel,
   Sun,
@@ -105,7 +107,9 @@ const NAV = [
     testId: "link-nav-paid-orders",
     group: "Daily work",
   },
+  { href: "/supplies", label: "Supply spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Daily work" },
   { href: "/operations", label: "Profit automation", icon: Activity, testId: "link-nav-operations", group: "Control" },
+  { href: "/performance", label: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Control" },
   { href: "/setup", label: "System setup", icon: Settings2, testId: "link-nav-setup", group: "Control" },
 ];
 

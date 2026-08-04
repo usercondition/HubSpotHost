@@ -65,6 +65,21 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
 );
 `;
 
+const CREATE_SUPPLY_PURCHASES_SQL = `
+CREATE TABLE IF NOT EXISTS supply_purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL DEFAULT 'Amazon',
+  order_reference TEXT NOT NULL DEFAULT '',
+  item_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  total_amount TEXT NOT NULL,
+  purchased_at TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+`;
+
 let db: BetterSQLite3Database | null = null;
 
 function databaseFile(): string {
@@ -80,6 +95,7 @@ export function getDb(): BetterSQLite3Database {
   const sqlite = new Database(file);
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
+  sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
   db = drizzle(sqlite);
   return db;
 }

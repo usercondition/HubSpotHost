@@ -267,6 +267,29 @@ test("owner management routes require the intake access code", async () => {
   assert.equal(created.status, 401);
 });
 
+test("performance and supply routes require the owner code, and supply records never call HubSpot", async () => {
+  const performanceBlocked = await fetch(`${appBase}/api/performance`);
+  assert.equal(performanceBlocked.status, 401);
+  const suppliesBlocked = await fetch(`${appBase}/api/supplies`);
+  assert.equal(suppliesBlocked.status, 401);
+
+  mockCalls = [];
+  const saved = await ownerRequest("POST", "/api/supplies", {
+    itemName: "Elegoo ABS-like resin",
+    totalAmount: "38.99",
+    purchasedAt: "2026-08-03",
+    quantity: 1,
+  });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.body.purchase.category, "materials");
+  assert.equal(mockCalls.length, 0, "saving a supply purchase stays local");
+
+  const listed = await ownerRequest("GET", "/api/supplies");
+  assert.equal(listed.status, 200);
+  assert.ok(listed.body.purchases.some((purchase: { id: number }) => purchase.id === saved.body.purchase.id));
+  assert.equal(mockCalls.length, 0, "reading supply purchases stays local");
+});
+
 test("a client submission writes to the queue and never calls HubSpot", async () => {
   const create = await ownerRequest("POST", "/api/order-links", {
     internalLabel: "MIG-2002",

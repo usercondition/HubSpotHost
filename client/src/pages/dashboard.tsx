@@ -3,11 +3,13 @@ import { Link } from "wouter";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight,
+  BarChart3,
   CheckCircle2,
   ClipboardCheck,
   ExternalLink,
   Link2,
   PackageCheck,
+  ShoppingBag,
   ShipWheel,
   SlidersHorizontal,
   Store,
@@ -147,6 +149,12 @@ export default function Dashboard() {
                     Enter one manually
                   </Link>
                 </Button>
+                <Button asChild variant="outline" data-testid="button-view-performance">
+                  <Link href="/performance">
+                    <BarChart3 className="mr-2 h-4 w-4" />
+                    View performance
+                  </Link>
+                </Button>
               </div>
             </div>
             <div className="border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
@@ -196,6 +204,51 @@ export default function Dashboard() {
               action="See cost fields"
               icon={ShipWheel}
             />
+          </div>
+        </section>
+
+        <section
+          className="overflow-hidden rounded-lg border border-card-border bg-card"
+          aria-labelledby="control-loop-title"
+          data-testid="panel-control-loop"
+        >
+          <div className="border-b border-border px-5 py-4">
+            <p className="rule-label">Control loop</p>
+            <h2 id="control-loop-title" className="mt-1 text-base font-semibold tracking-tight">
+              Keep the whole business visible
+            </h2>
+          </div>
+          <div className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
+            <Link
+              href="/supplies"
+              data-testid="link-control-loop-supplies"
+              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+            >
+              <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  Log supply purchases <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Copy Amazon receipt totals into a clean materials, consumables, and packaging ledger.
+                </span>
+              </span>
+            </Link>
+            <Link
+              href="/performance"
+              data-testid="link-control-loop-performance"
+              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+            >
+              <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  Review performance <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  See pipeline workload, recent revenue, margins, supply spend, and orders that need attention.
+                </span>
+              </span>
+            </Link>
           </div>
         </section>
 

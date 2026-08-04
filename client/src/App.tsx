@@ -10,6 +10,8 @@ import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
 import OrderLinks from "@/pages/order-links";
+import Performance from "@/pages/performance";
+import Supplies from "@/pages/supplies";
 import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
 
@@ -22,6 +24,8 @@ function ShellRoutes() {
         <Route path="/orders" component={OrderLinks} />
         <Route path="/operations" component={Operations} />
         <Route path="/paid-orders" component={PaidOrders} />
+        <Route path="/supplies" component={Supplies} />
+        <Route path="/performance" component={Performance} />
         <Route path="/setup" component={Setup} />
         <Route component={NotFound} />
       </Switch>

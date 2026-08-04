@@ -19,6 +19,24 @@ export const OUTPUT_PROPERTY_LABELS: Record<string, string> = {
   print_margin_percentage: "Margin Percentage",
 };
 
+export const SUPPLY_CATEGORIES = [
+  "materials",
+  "consumables",
+  "packaging_shipping",
+  "equipment_maintenance",
+  "other",
+] as const;
+
+export type SupplyCategory = (typeof SUPPLY_CATEGORIES)[number];
+
+export const SUPPLY_CATEGORY_LABELS: Record<SupplyCategory, string> = {
+  materials: "Materials",
+  consumables: "Consumables",
+  packaging_shipping: "Packaging & shipping",
+  equipment_maintenance: "Equipment & maintenance",
+  other: "Other",
+};
+
 export type TriggerOrigin = "webhook" | "manual";
 export type AttemptStatus = "written" | "dry-run" | "error";
 
@@ -102,6 +120,57 @@ export interface CalculationsResponse {
   count: number;
   limit: number;
   entries: AuditEntry[];
+}
+
+export interface PerformanceResponse {
+  generatedAt: string;
+  period: {
+    days: number;
+    startsAt: string;
+  };
+  thresholds: {
+    marginPercent: number;
+    staleDays: number;
+  };
+  summary: {
+    revenue: number;
+    grossProfit: number;
+    weightedMarginPercent: number;
+    orders: number;
+    averageOrderValue: number;
+    activeOrders: number;
+    attentionCount: number;
+  };
+  intake: {
+    awaitingClient: number;
+    pendingReview: number;
+    approved: number;
+  };
+  supplySpend: {
+    periodDays: number;
+    total: number;
+    purchases: number;
+    byCategory: Array<{
+      category: SupplyCategory;
+      label: string;
+      total: number;
+      count: number;
+    }>;
+  };
+  pipeline: Array<{
+    id: string;
+    label: string;
+    count: number;
+    closed: boolean;
+  }>;
+  attention: Array<{
+    dealId: string;
+    dealName: string;
+    stage: string;
+    issue: string;
+    detail: string;
+    severity: "neutral" | "warn" | "bad";
+  }>;
 }
 
 export interface WebhookSummary {
@@ -234,6 +303,26 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
 
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
 
+/**
+ * A manual record of a supply purchase, usually copied from a regular Amazon
+ * order confirmation. These records remain separate from per-deal actual
+ * costs until the owner allocates an actual cost on the HubSpot deal.
+ */
+export const supplyPurchases = sqliteTable("supply_purchases", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  source: text("source").notNull().default("Amazon"),
+  orderReference: text("order_reference").notNull().default(""),
+  itemName: text("item_name").notNull(),
+  category: text("category").notNull().$type<SupplyCategory>(),
+  quantity: integer("quantity").notNull().default(1),
+  totalAmount: text("total_amount").notNull(),
+  purchasedAt: text("purchased_at").notNull(),
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
+
 const trimmed = (max: number) => z.string().trim().max(max);
 const amountLike = z
   .string()
@@ -243,6 +332,25 @@ const amountLike = z
     const parsed = Number(value.replace(/[$,\s]/g, ""));
     return Number.isFinite(parsed) && parsed > 0;
   }, "Enter an agreed amount greater than zero");
+
+const supplyPurchaseDate = z
+  .string()
+  .trim()
+  .min(1, "Enter the purchase date")
+  .refine((value) => Number.isFinite(new Date(value).getTime()), "Enter a valid purchase date");
+
+export const createSupplyPurchaseSchema = z.object({
+  source: trimmed(80).default("Amazon"),
+  orderReference: trimmed(120).default(""),
+  itemName: trimmed(300).min(2, "Enter the item you purchased"),
+  category: z.enum(SUPPLY_CATEGORIES).optional(),
+  quantity: z.coerce.number().int().min(1).max(100_000).default(1),
+  totalAmount: amountLike,
+  purchasedAt: supplyPurchaseDate,
+  notes: trimmed(1_000).default(""),
+});
+
+export type CreateSupplyPurchaseInput = z.infer<typeof createSupplyPurchaseSchema>;
 
 /** Owner form that mints a new one-time client link. */
 export const createOrderLinkSchema = z.object({
