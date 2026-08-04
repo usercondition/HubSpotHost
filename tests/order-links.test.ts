@@ -98,6 +98,16 @@ function newLink(overrides: Partial<{ expiryDays: number }> = {}) {
   });
 }
 
+test("the server automatically assigns a readable order reference when none is supplied", () => {
+  const created = store.createOrderLink({
+    itemDescription: "Automatically numbered test order",
+    agreedAmount: "125",
+    expiryDays: 14,
+  });
+  assert.match(created.link.internalLabel, /^PO-\d{8}-\d{6}$/);
+  assert.equal(store.getOrderLink(created.link.id)?.internalLabel, created.link.internalLabel);
+});
+
 before(async () => {
   mock = http.createServer((req, res) => {
     let body = "";

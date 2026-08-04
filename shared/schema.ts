@@ -246,7 +246,7 @@ const amountLike = z
 
 /** Owner form that mints a new one-time client link. */
 export const createOrderLinkSchema = z.object({
-  internalLabel: trimmed(120).min(2, "Add a short internal label or order reference"),
+  internalLabel: trimmed(120).default(""),
   itemDescription: trimmed(400).min(2, "Describe the agreed item or model"),
   agreedAmount: amountLike,
   paymentMethod: trimmed(80).default(""),

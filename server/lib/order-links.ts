@@ -114,6 +114,11 @@ function addDays(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString();
 }
 
+function generatedOrderReference(id: number, createdAt: string): string {
+  const date = createdAt.slice(0, 10).replaceAll("-", "");
+  return `PO-${date}-${String(id).padStart(6, "0")}`;
+}
+
 function isExpired(link: OrderIntakeLink, at = nowIso()): boolean {
   return link.expiresAt <= at;
 }
@@ -135,18 +140,18 @@ function settleExpiry(link: OrderIntakeLink): OrderIntakeLink {
 /* ------------------------------------------------------------------ owner */
 
 export function createOrderLink(
-  input: Required<Pick<CreateOrderLinkInput, "internalLabel" | "itemDescription" | "agreedAmount">> &
-    Omit<CreateOrderLinkInput, "internalLabel" | "itemDescription" | "agreedAmount">,
+  input: Required<Pick<CreateOrderLinkInput, "itemDescription" | "agreedAmount">> &
+    Omit<CreateOrderLinkInput, "itemDescription" | "agreedAmount">,
   baseUrl = "",
 ): CreatedOrderLink {
   const token = generateLinkToken();
   const expiryDays = Number(input.expiryDays ?? 14);
-  const link = getDb()
+  const initial = getDb()
     .insert(orderIntakeLinks)
     .values({
       tokenHash: hashLinkToken(token),
       status: "awaiting_client",
-      internalLabel: input.internalLabel,
+      internalLabel: input.internalLabel || "Generating reference",
       itemDescription: input.itemDescription,
       agreedAmount: input.agreedAmount,
       paymentMethod: input.paymentMethod ?? "",
@@ -160,6 +165,11 @@ export function createOrderLink(
     })
     .returning()
     .get();
+  const internalLabel = input.internalLabel || generatedOrderReference(initial.id, initial.createdAt);
+  if (initial.internalLabel !== internalLabel) {
+    getDb().update(orderIntakeLinks).set({ internalLabel }).where(eq(orderIntakeLinks.id, initial.id)).run();
+  }
+  const link = { ...initial, internalLabel };
 
   return {
     link,

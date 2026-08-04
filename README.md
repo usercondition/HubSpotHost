@@ -42,7 +42,7 @@ Do not enable both live-write environment settings until a test deal produces th
 **Order links** is the main way a paid Marketplace order enters the system. Nothing reaches HubSpot until you approve it.
 
 1. Agree the order in Marketplace and take payment.
-2. Open **Order links**, unlock owner tools with the access code, and create a link: internal label, agreed item, amount paid, optional payment method/reference, optional buyer name or username, expiry (14 days by default), optional private notes.
+2. Open **Order links**, unlock owner tools with the access code, and create a link: agreed item, amount paid, optional payment method/reference, optional buyer name or username, expiry (14 days by default), optional private notes. The app automatically creates an internal reference such as `PO-20260803-000123`.
 3. Press **Copy link** and paste the link into the Marketplace conversation. The link is shown once, right after creation.
 4. The buyer opens `/#/client-order/<token>` and fills in a short form: name, Marketplace username, email, phone, ship-or-pickup, shipping address, item confirmation (pre-filled and editable), quantity, notes, and a checkbox confirming they already paid. The page states clearly that it collects details only, takes no payment, and does not place a final order. No internal cost or margin fields are shown.
 5. The submission lands in the private **Review queue** as *Pending review*. Nothing is written to HubSpot at this point.

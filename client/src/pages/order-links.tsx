@@ -63,7 +63,6 @@ const STATUS_ICON = {
 } as const;
 
 const EMPTY_FORM = {
-  internalLabel: "",
   itemDescription: "",
   agreedAmount: "",
   paymentMethod: "",
@@ -213,10 +212,10 @@ export default function OrderLinks() {
   };
 
   const submitCreate = () => {
-    if (form.internalLabel.trim().length < 2 || form.itemDescription.trim().length < 2) {
+    if (form.itemDescription.trim().length < 2) {
       toast({
         title: "Add the order basics",
-        description: "An internal label and the agreed item description are required.",
+        description: "Add the agreed item or model before creating the client link.",
         variant: "destructive",
       });
       return;
@@ -302,13 +301,6 @@ export default function OrderLinks() {
               >
                 <div className="grid gap-4 sm:grid-cols-2">
                   <TextField
-                    id="internal-label"
-                    label="Internal label or order reference"
-                    value={form.internalLabel}
-                    onChange={(v) => set("internalLabel", v)}
-                    required
-                  />
-                  <TextField
                     id="agreed-amount"
                     label="Agreed amount already paid"
                     value={form.agreedAmount}
@@ -316,6 +308,10 @@ export default function OrderLinks() {
                     inputMode="decimal"
                     required
                   />
+                  <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">Order reference: </span>
+                    generated automatically when you create the link.
+                  </div>
                   <div className="sm:col-span-2 space-y-1.5">
                     <Label htmlFor="item-description">
                       Agreed item or model<span className="text-primary"> *</span>
