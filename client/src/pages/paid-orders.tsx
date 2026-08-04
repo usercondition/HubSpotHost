@@ -74,7 +74,7 @@ export default function PaidOrders() {
       const res = await apiRequest(
         "POST",
         "/api/paid-orders/analyze",
-        { conversation },
+        { conversation, intakeAccessCode: accessCode },
         { headers: headers() },
       );
       return (await res.json()) as { ok: true; analysis: PaidOrderAnalysis };
@@ -90,8 +90,13 @@ export default function PaidOrders() {
     },
     onError: (error: Error) => {
       const message = error.message;
+      const apiMessage = message.match(/"error":"([^"]+)"/)?.[1];
       const description = message.startsWith("401:")
-        ? "The intake code is missing, expired, or does not match the current code. Re-enter the replacement code you set during rotation."
+        ? apiMessage === "No intake access code reached the live service"
+          ? "Your browser did not deliver the code to the service. The updated page now also sends it securely in the request body. Refresh and try once more."
+          : apiMessage === "The intake access code does not match the active code"
+            ? "The live server has a different intake code than the one entered. We need to replace the saved code with a fresh one."
+            : "The intake code is missing, expired, or does not match the current code."
         : message.startsWith("503:")
           ? "The live service does not have an intake code configured yet. Refresh the page and try again in a moment."
           : message.startsWith("400:")
@@ -107,7 +112,12 @@ export default function PaidOrders() {
 
   const create = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/paid-orders", draft, { headers: headers() });
+      const res = await apiRequest(
+        "POST",
+        "/api/paid-orders",
+        { ...draft, intakeAccessCode: accessCode },
+        { headers: headers() },
+      );
       return (await res.json()) as { ok: true; result: PaidOrderCreateResult };
     },
     onSuccess: ({ result }) => {

@@ -96,12 +96,22 @@ function timingSafeMatch(actual: string, expected: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function intakeAuthorized(req: Request): boolean {
+function providedIntakeAccessCode(req: Request): string {
+  const headerValue = req.get("x-paid-order-access-code") ?? "";
+  const bodyValue =
+    req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>).intakeAccessCode
+      : "";
+  return normalizedAccessCode(headerValue || (typeof bodyValue === "string" ? bodyValue : ""));
+}
+
+function intakeAuthorizationStatus(req: Request): "authorized" | "not-configured" | "missing" | "mismatch" {
   const expected = intakeAccessCode();
-  if (!expected) return false;
-  const provided = normalizedAccessCode(req.get("x-paid-order-access-code") ?? "");
+  if (!expected) return "not-configured";
+  const provided = providedIntakeAccessCode(req);
+  if (!provided) return "missing";
   const normalizedExpected = normalizedAccessCode(expected);
-  return provided.length > 0 && timingSafeMatch(provided, normalizedExpected);
+  return timingSafeMatch(provided, normalizedExpected) ? "authorized" : "mismatch";
 }
 
 function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
@@ -126,12 +136,16 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
 }
 
 function rejectUnsecuredIntake(req: Request, res: Response): boolean {
-  if (intakeAccessCode() && intakeAuthorized(req)) return false;
-  res.status(intakeAccessCode() ? 401 : 503).json({
+  const status = intakeAuthorizationStatus(req);
+  if (status === "authorized") return false;
+  res.status(status === "not-configured" ? 503 : 401).json({
     ok: false,
-    error: intakeAccessCode()
-      ? "Paid Order Intake access code is invalid or missing"
-      : "Paid Order Intake access code is not configured",
+    error:
+      status === "not-configured"
+        ? "Paid Order Intake access code is not configured"
+        : status === "missing"
+          ? "No intake access code reached the live service"
+          : "The intake access code does not match the active code",
   });
   return true;
 }
