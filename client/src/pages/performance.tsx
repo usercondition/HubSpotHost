@@ -21,6 +21,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
+import { BooksBalancePanel } from "@/components/books-balance";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -323,6 +324,8 @@ export default function Performance() {
               </Panel>
             </section>
 
+            <BooksBalancePanel books={snapshot.books} showSuppliesLink />
+
             <section className="grid gap-5 lg:grid-cols-2">
               <Panel title="Paid order intake" description="Your queue before an order becomes a HubSpot deal.">
                 <div className="grid grid-cols-3 gap-2">
@@ -343,11 +346,11 @@ export default function Performance() {
               </Panel>
 
               <Panel
-                title="Supply spend"
-                description="Receipt totals are operational spend, separate from per-order actual costs."
+                title="Supply spend detail"
+                description="Receipt totals by category from the Supply Spend ledger."
                 actions={
                   <Link href="/supplies" className="text-xs font-medium text-primary hover:underline" data-testid="link-performance-supplies">
-                    Log a purchase
+                    Open supply spend
                   </Link>
                 }
               >
@@ -370,9 +373,6 @@ export default function Performance() {
                     </p>
                   </div>
                 )}
-                <p className="mt-4 text-xs leading-5 text-muted-foreground">
-                  Do not subtract this total from gross profit here. Add an actual material, labor, packaging, or shipping cost on the individual HubSpot deal when it belongs to that order.
-                </p>
               </Panel>
             </section>
           </>

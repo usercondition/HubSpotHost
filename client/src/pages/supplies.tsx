@@ -19,12 +19,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { BooksBalancePanel } from "@/components/books-balance";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
   SUPPLY_CATEGORIES,
   SUPPLY_CATEGORY_LABELS,
   lineItemsForSupplyPurchase,
+  type PerformanceResponse,
   type SupplyCategory,
   type SupplyPurchase,
   type SupplyPurchaseLineItem,
@@ -142,6 +144,15 @@ export default function Supplies() {
     },
   });
 
+  const books = useQuery<PerformanceResponse>({
+    queryKey: ["/api/performance", ownerCode, "books"],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/performance", undefined, { headers });
+      return (await response.json()) as PerformanceResponse;
+    },
+  });
+
   const unlock = useMutation({
     mutationFn: async (code: string) => {
       const response = await apiRequest("GET", "/api/supplies", undefined, {
@@ -199,6 +210,7 @@ export default function Supplies() {
       setForm(emptyForm());
       queryClient.invalidateQueries({ queryKey: ["/api/supplies"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      void books.refetch();
       const lines = lineItemsForSupplyPurchase(purchase);
       toast({
         title: "Supply purchase saved",
@@ -367,6 +379,12 @@ export default function Supplies() {
                 testId="status-supplies"
               />
             </section>
+
+            {books.data?.books ? (
+              <BooksBalancePanel books={books.data.books} />
+            ) : books.isLoading ? (
+              <Skeleton className="h-[22rem] rounded-lg" data-testid="skeleton-books-balance" />
+            ) : null}
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
               <Panel title="Log a supply purchase" description="Drop a PDF invoice to fill the item breakdown, or enter items by hand.">

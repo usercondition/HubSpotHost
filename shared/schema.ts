@@ -135,6 +135,44 @@ export interface CalculationsResponse {
   entries: AuditEntry[];
 }
 
+/** Slim supply summary shape used when building the books balance. */
+export interface SupplySpendSummaryLike {
+  periodDays: number;
+  total: number;
+  purchases: number;
+  byCategory: Array<{
+    category: SupplyCategory;
+    label: string;
+    total: number;
+    count: number;
+  }>;
+}
+
+/**
+ * Revenue / gross profit from Print Orders vs logged supply receipts.
+ * `afterSupplySpend` is a management view — not GAAP net profit — because
+ * supply receipts may overlap with actual costs already on HubSpot deals.
+ */
+export interface SupplyBooksBalance {
+  periodDays: number;
+  revenue: number;
+  orderCosts: number;
+  grossProfit: number;
+  orders: number;
+  supplySpend: number;
+  supplyPurchases: number;
+  afterSupplySpend: number;
+  supplyShareOfRevenuePercent: number;
+  supplyShareOfGrossProfitPercent: number;
+  byCategory: Array<{
+    category: SupplyCategory;
+    label: string;
+    total: number;
+    count: number;
+    shareOfSupplyPercent: number;
+  }>;
+}
+
 export interface PerformanceResponse {
   generatedAt: string;
   period: {
@@ -159,17 +197,9 @@ export interface PerformanceResponse {
     pendingReview: number;
     approved: number;
   };
-  supplySpend: {
-    periodDays: number;
-    total: number;
-    purchases: number;
-    byCategory: Array<{
-      category: SupplyCategory;
-      label: string;
-      total: number;
-      count: number;
-    }>;
-  };
+  supplySpend: SupplySpendSummaryLike;
+  /** Where money went: order profit set against logged supply purchases. */
+  books: SupplyBooksBalance;
   pipeline: Array<{
     id: string;
     label: string;
