@@ -100,21 +100,21 @@ export function Mark({ className }: { className?: string }) {
 /* ---------------------------------------------------------------- shell --- */
 
 const NAV = [
-  { href: "/", label: "Command center", icon: Home, testId: "link-nav-home", group: "Home" },
-  { href: "/orders", label: "Paid order intake", icon: Link2, testId: "link-nav-order-links", group: "Daily work" },
+  { href: "/", label: "Command Center", icon: Home, testId: "link-nav-home", group: "Home" },
+  { href: "/orders", label: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Daily Work" },
   {
     href: "/paid-orders",
-    label: "Manual order entry",
+    label: "Manual Order Entry",
     icon: ClipboardCheck,
     testId: "link-nav-paid-orders",
-    group: "Daily work",
+    group: "Daily Work",
   },
-  { href: "/supplies", label: "Supply spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Daily work" },
-  { href: "/prints", label: "Print files", icon: FileUp, testId: "link-nav-prints", group: "Daily work" },
-  { href: "/printers", label: "Printer fleet", icon: Printer, testId: "link-nav-printers", group: "Daily work" },
-  { href: "/operations", label: "Profit automation", icon: Activity, testId: "link-nav-operations", group: "Control" },
+  { href: "/supplies", label: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Daily Work" },
+  { href: "/prints", label: "Print Files", icon: FileUp, testId: "link-nav-prints", group: "Daily Work" },
+  { href: "/printers", label: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Daily Work" },
+  { href: "/operations", label: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Control" },
   { href: "/performance", label: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Control" },
-  { href: "/setup", label: "System setup", icon: Settings2, testId: "link-nav-setup", group: "Control" },
+  { href: "/setup", label: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Control" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
