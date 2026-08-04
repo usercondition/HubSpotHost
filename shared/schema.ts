@@ -194,6 +194,20 @@ export interface PerformanceResponse {
   hubspotPortalId: string | null;
 }
 
+export interface TrackerAssistantAction {
+  label: string;
+  href: string;
+  external?: boolean;
+}
+
+export interface TrackerAssistantResponse {
+  ok: true;
+  mode: "rules" | "model";
+  reply: string;
+  actions: TrackerAssistantAction[];
+  usedFacts: string[];
+}
+
 export interface WebhookSummary {
   ok: boolean;
   received: number;

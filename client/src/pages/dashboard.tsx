@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -366,7 +367,7 @@ function TodaysWork() {
 
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const { isUnlocked, lock } = useOwnerSession();
+  const { isUnlocked, lock, ownerCode } = useOwnerSession();
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -388,6 +389,7 @@ export default function Dashboard() {
 
       <div className="page-stack">
         <TodaysWork />
+        {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
           className="overflow-hidden rounded-lg border border-card-border bg-card"
