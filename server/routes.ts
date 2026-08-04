@@ -55,6 +55,12 @@ import {
 } from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import {
+  isPdfInvoiceFileName,
+  parseSupplyInvoicePdf,
+  SUPPLY_INVOICE_MAX_BYTES,
+  SUPPLY_INVOICE_MAX_LABEL,
+} from "./lib/supply-invoice";
+import {
   refreshResinPriceFromAmazon,
   resinProfileView,
   upsertActiveResinProfile,
@@ -120,6 +126,17 @@ const printFileUpload = multer({
     },
   }),
   limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
+});
+
+const supplyInvoiceUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => {
+      const extension = path.extname(file.originalname || "").toLowerCase() || ".pdf";
+      cb(null, `supply-invoice-${crypto.randomUUID()}${extension}`);
+    },
+  }),
+  limits: { fileSize: SUPPLY_INVOICE_MAX_BYTES, files: 1 },
 });
 
 function removeTempUpload(filePath: string | undefined): void {
@@ -553,6 +570,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       summary: buildSupplySpendSummary(),
     });
   });
+
+  /**
+   * Prefill the supply form from a PDF invoice. Does not create a purchase —
+   * the owner still reviews and saves.
+   */
+  app.post(
+    "/api/supplies/parse-invoice",
+    (req: Request, res: Response, next) => {
+      if (rejectUnsecuredIntake(req, res)) return;
+      next();
+    },
+    supplyInvoiceUpload.single("file"),
+    async (req: Request, res: Response) => {
+      const file = req.file;
+      if (!file?.path) {
+        return res.status(400).json({
+          ok: false,
+          error: "Drop one PDF invoice to extract receipt fields",
+        });
+      }
+      if (!isPdfInvoiceFileName(file.originalname)) {
+        removeTempUpload(file.path);
+        return res.status(400).json({
+          ok: false,
+          error: "Only PDF invoices can be extracted here",
+        });
+      }
+
+      try {
+        const parsed = await parseSupplyInvoicePdf(file.path, file.originalname);
+        return res.json({
+          ok: true,
+          fields: parsed.fields,
+          warnings: parsed.warnings,
+          pageCount: parsed.pageCount,
+          maxUploadLabel: SUPPLY_INVOICE_MAX_LABEL,
+        });
+      } catch (error) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The invoice PDF could not be read. Enter the receipt manually.",
+        });
+      } finally {
+        removeTempUpload(file.path);
+      }
+    },
+  );
 
   /**
    * Active resin used to estimate plate cost when a CTB has no slicer price.
