@@ -1,9 +1,9 @@
 [build]
 builder = "NIXPACKS"
-# Railway service variables may set NODE_ENV=production, which makes its
-# automatic install omit Vite/esbuild/tsx. The build stage needs those tools,
-# while the running service does not, so install dev dependencies explicitly.
-buildCommand = "npm ci --include=dev && npm run build"
+# The app build needs Vite/esbuild/tsx. Keep the install in Railway's install
+# phase, rather than running npm ci a second time during build.
+installCommand = "npm ci --include=dev"
+buildCommand = "npm run build"
 
 [deploy]
 startCommand = "npm run start"
