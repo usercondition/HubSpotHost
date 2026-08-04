@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, ClipboardCheck, Moon, Settings2, Sun } from "lucide-react";
+import { Activity, ClipboardCheck, Link2, Moon, Settings2, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -86,8 +86,9 @@ export function Mark({ className }: { className?: string }) {
 /* ---------------------------------------------------------------- shell --- */
 
 const NAV = [
-  { href: "/", label: "Operations", icon: Activity, testId: "link-nav-operations" },
-  { href: "/paid-orders", label: "Paid order intake", icon: ClipboardCheck, testId: "link-nav-paid-orders" },
+  { href: "/", label: "Order links", icon: Link2, testId: "link-nav-order-links" },
+  { href: "/operations", label: "Operations", icon: Activity, testId: "link-nav-operations" },
+  { href: "/paid-orders", label: "Conversation intake", icon: ClipboardCheck, testId: "link-nav-paid-orders" },
   { href: "/setup", label: "Setup", icon: Settings2, testId: "link-nav-setup" },
 ];
 
@@ -96,7 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[13.5rem_1fr] md:grid-rows-1">
-      <aside className="flex shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-6 md:border-b-0 md:border-r md:px-3 md:py-4">
+      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-6 md:border-b-0 md:border-r md:px-3 md:py-4">
         <Link
           href="/"
           className="flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md md:px-1"
@@ -109,7 +110,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </Link>
 
-        <nav className="flex flex-1 items-center gap-1 md:flex-col md:items-stretch md:gap-0.5">
+        {/* On phones the nav becomes a horizontally scrollable strip so it cannot widen the grid. */}
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:flex-col md:items-stretch md:gap-0.5 md:overflow-visible">
           {NAV.map((item) => {
             const active = location === item.href;
             return (
@@ -118,7 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 href={item.href}
                 data-testid={item.testId}
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
+                  "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm transition-colors",
                   active
                     ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                     : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",

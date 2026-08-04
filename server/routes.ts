@@ -25,6 +25,26 @@ import {
   validatePaidOrderDraft,
 } from "./lib/intake";
 import { createPaidOrder } from "./lib/paid-orders";
+import {
+  applyReviewEdits,
+  clientLinkPath,
+  createOrderLink,
+  expireOrderLink,
+  getOrderLink,
+  listOrderLinks,
+  lookupClientOrder,
+  markOrderLinkCreated,
+  orderLinkCounts,
+  submitClientOrder,
+} from "./lib/order-links";
+import {
+  ORDER_INTAKE_STATUSES,
+  clientOrderSubmissionSchema,
+  createOrderLinkSchema,
+  reviewEditSchema,
+  type OrderIntakeLink,
+  type OrderIntakeStatus,
+} from "../shared/schema";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const DEFAULT_INTAKE_ACCESS_CODE_HASH = "9c8d6cb9a08c8026d4009c956faac43be8eff7b959b5cc13e7eda5d475b0e47b";
@@ -150,6 +170,85 @@ function rejectUnsecuredIntake(req: Request, res: Response): boolean {
   return true;
 }
 
+function firstIssue(error: { issues: Array<{ message: string }> }): string {
+  return error.issues[0]?.message ?? "Some details are missing or invalid";
+}
+
+/** The owner-side representation. `tokenHash` never leaves the server. */
+function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> {
+  const { tokenHash: _tokenHash, ...safe } = link;
+  return safe;
+}
+
+function tokenFromBody(body: unknown): string {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const token = typeof record.token === "string" ? record.token.trim() : "";
+  return /^[A-Za-z0-9_-]{16,200}$/.test(token) ? token : "";
+}
+
+/**
+ * Small in-memory throttle. The token space is 256 bits, so this exists to blunt
+ * automated probing rather than to be a complete rate limiter.
+ */
+const clientAttempts = new Map<string, { count: number; resetAt: number }>();
+const CLIENT_ATTEMPT_WINDOW_MS = 60_000;
+const CLIENT_ATTEMPT_LIMIT = 40;
+
+function tooManyClientAttempts(req: Request, res: Response): boolean {
+  const key = req.ip || "unknown";
+  const now = Date.now();
+  const entry = clientAttempts.get(key);
+  if (!entry || entry.resetAt <= now) {
+    clientAttempts.set(key, { count: 1, resetAt: now + CLIENT_ATTEMPT_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  if (entry.count > CLIENT_ATTEMPT_LIMIT) {
+    res.status(429).json({ ok: false, reason: "throttled" });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Maps a reviewed intake onto the existing paid-order draft shape so the
+ * approval path reuses `createPaidOrder` unchanged. Only structured fields and
+ * a short summary are sent — never a raw conversation.
+ */
+function draftFromIntake(link: OrderIntakeLink): PaidOrderDraft {
+  const item = link.confirmedItem || link.itemDescription;
+  const summary = [
+    "Source: Facebook Marketplace one-time client details link.",
+    `Internal reference: ${link.internalLabel}.`,
+    `Agreed item: ${item}${link.quantity > 1 ? ` (qty ${link.quantity})` : ""}.`,
+    link.paymentMethod ? `Payment method: ${link.paymentMethod}.` : "",
+    link.paymentReference ? `Payment reference: ${link.paymentReference}.` : "",
+    link.clientPaymentConfirmed ? "Buyer confirmed payment on the client form." : "",
+    "Owner verified payment before HubSpot creation.",
+    link.shippingRequired ? "Shipping required." : "Local pickup / no shipping required.",
+    link.clientNotes ? `Buyer notes: ${link.clientNotes}` : "",
+    link.ownerNotes ? `Owner notes: ${link.ownerNotes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    paymentConfirmed: true,
+    fullName: link.clientFullName,
+    marketplaceUsername: link.clientUsername || link.buyerUsernameHint,
+    email: link.clientEmail,
+    phone: link.clientPhone,
+    address: link.shippingRequired ? link.shippingStreet : "",
+    city: link.shippingRequired ? link.shippingCity : "",
+    state: link.shippingRequired ? link.shippingState : "",
+    postalCode: link.shippingRequired ? link.shippingPostalCode : "",
+    country: link.shippingRequired ? link.shippingCountry : "",
+    productName: link.quantity > 1 ? `${item} (x${link.quantity})` : item,
+    amount: link.agreedAmount,
+    conversationSummary: summary,
+  };
+}
+
 /**
  * v3 signs HubSpot's public target URL. The canonical value is configured
  * through PUBLIC_BASE_URL, while these alternatives exist solely to pinpoint
@@ -239,6 +338,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       paidOrderIntake: {
         accessCodeConfigured: Boolean(intakeAccessCodeHash()),
         buildId: INTAKE_BUILD_ID,
+        clientLinkWorkflow: "enabled",
       },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
@@ -256,6 +356,167 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       audit: { retained: auditCount(), limit: AUDIT_LIMIT },
       serverTime: new Date().toISOString(),
     });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Client order links — the primary paid-order intake workflow.       */
+  /*                                                                   */
+  /* Owner routes are gated by the intake access code. The two public   */
+  /* routes take the link token in the request BODY (never the path or  */
+  /* query string) so the token can never appear in request logs.       */
+  /*                                                                   */
+  /* PRODUCTION HARDENING: the owner gate is one shared app-owned       */
+  /* access code, not real authentication. A production pass should     */
+  /* replace it with per-user accounts, sessions, and per-user audit    */
+  /* attribution before more than one person needs owner access.        */
+  /* ---------------------------------------------------------------- */
+
+  app.post("/api/order-links", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = createOrderLinkSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const created = createOrderLink(parsed.data);
+    // `token` and `path` are returned exactly once. Nothing here is logged.
+    return res.status(201).json({
+      ok: true,
+      link: ownerLinkView(created.link),
+      token: created.token,
+      path: clientLinkPath(created.token),
+    });
+  });
+
+  app.get("/api/order-links", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const statusParam = firstQueryValue(req.query?.status);
+    const status = ORDER_INTAKE_STATUSES.includes(statusParam as OrderIntakeStatus)
+      ? (statusParam as OrderIntakeStatus)
+      : undefined;
+    return res.json({
+      ok: true,
+      counts: orderLinkCounts(),
+      links: listOrderLinks(status).map(ownerLinkView),
+    });
+  });
+
+  app.get("/api/order-links/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const link = getOrderLink(Number(req.params.id));
+    if (!link) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    return res.json({ ok: true, link: ownerLinkView(link) });
+  });
+
+  app.patch("/api/order-links/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = reviewEditSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const link = applyReviewEdits(Number(req.params.id), parsed.data);
+    if (!link) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    if (link.status !== "pending_review") {
+      return res.status(409).json({
+        ok: false,
+        error: "Only an intake that is pending review can be edited",
+        link: ownerLinkView(link),
+      });
+    }
+    return res.json({ ok: true, link: ownerLinkView(link) });
+  });
+
+  app.post("/api/order-links/:id/expire", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const link = expireOrderLink(Number(req.params.id));
+    if (!link) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    if (link.status === "created") {
+      return res.status(409).json({
+        ok: false,
+        error: "An intake that already produced HubSpot records cannot be expired",
+        link: ownerLinkView(link),
+      });
+    }
+    return res.json({ ok: true, link: ownerLinkView(link) });
+  });
+
+  /**
+   * The ONLY route in this workflow that talks to HubSpot. It requires the
+   * owner's access code plus an explicit `paymentVerified: true`, and it can
+   * run once per intake because the status guard is part of the UPDATE.
+   */
+  app.post("/api/order-links/:id/create-order", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+    if (body.paymentVerified !== true) {
+      return res.status(400).json({
+        ok: false,
+        error: "Confirm that you verified the payment before creating HubSpot records",
+      });
+    }
+    const link = getOrderLink(Number(req.params.id));
+    if (!link) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    if (link.status === "created") {
+      return res.status(409).json({
+        ok: false,
+        error: "This intake already created a Contact and Print Order",
+        link: ownerLinkView(link),
+      });
+    }
+    if (link.status !== "pending_review") {
+      return res.status(409).json({
+        ok: false,
+        error: "Only an intake with submitted client details can be approved",
+        link: ownerLinkView(link),
+      });
+    }
+
+    const draft = draftFromIntake(link);
+    const validationError = validatePaidOrderDraft(draft);
+    if (validationError) return res.status(400).json({ ok: false, error: validationError });
+
+    try {
+      const result = await createPaidOrder(draft);
+      const updated = markOrderLinkCreated(link.id, {
+        contactId: result.contactId,
+        dealId: result.dealId,
+        dealName: result.dealName,
+      });
+      return res.status(201).json({ ok: true, result, link: updated ? ownerLinkView(updated) : null });
+    } catch (error) {
+      const status =
+        error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;
+      return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not create the paid HubSpot order",
+      });
+    }
+  });
+
+  /** Public: validate a client link. Reveals nothing owner-side. */
+  app.post("/api/client-order/lookup", (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const token = tokenFromBody(req.body);
+    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
+    const result = lookupClientOrder(token);
+    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
+    return res.json(result);
+  });
+
+  /**
+   * Public: one buyer submission per link. This writes ONLY to the local
+   * SQLite queue — it never calls HubSpot.
+   */
+  app.post("/api/client-order/submit", (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const token = tokenFromBody(req.body);
+    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
+    const parsed = clientOrderSubmissionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: "invalid-details", error: firstIssue(parsed.error) });
+    }
+    const result = submitClientOrder(token, parsed.data);
+    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
+    return res.status(201).json({ ok: true });
   });
 
   app.post("/api/paid-orders/analyze", (req: Request, res: Response) => {

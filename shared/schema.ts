@@ -3,6 +3,9 @@
  * The audit log is a small local file kept server-side.
  */
 
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
+
 export const INPUT_PROPERTY_LABELS: Record<string, string> = {
   amount: "Amount",
   print_material_cost: "Actual material cost",
@@ -154,4 +157,168 @@ export interface PaidOrderCreateResult {
   dealName: string;
   pipeline: string;
   dealStage: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client order intake links (SQLite-backed, Drizzle)                  */
+/* ------------------------------------------------------------------ */
+
+
+/**
+ * One row per one-time client details link.
+ *
+ * Only a SHA-256 hash of the link token is stored. The raw token is returned
+ * exactly once, in the creation response, and is never logged or persisted.
+ * Client submissions land here and never touch HubSpot; the owner's explicit
+ * approval is the only path that creates HubSpot records.
+ */
+export const orderIntakeLinks = sqliteTable("order_intake_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tokenHash: text("token_hash").notNull().unique(),
+  status: text("status").notNull().$type<OrderIntakeStatus>(),
+
+  /* Owner-entered, agreed before the link is sent */
+  internalLabel: text("internal_label").notNull(),
+  itemDescription: text("item_description").notNull(),
+  agreedAmount: text("agreed_amount").notNull(),
+  paymentMethod: text("payment_method").notNull().default(""),
+  paymentReference: text("payment_reference").notNull().default(""),
+  buyerNameHint: text("buyer_name_hint").notNull().default(""),
+  buyerUsernameHint: text("buyer_username_hint").notNull().default(""),
+  ownerNotes: text("owner_notes").notNull().default(""),
+
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  submittedAt: text("submitted_at"),
+  decidedAt: text("decided_at"),
+
+  /* Buyer-submitted details */
+  clientFullName: text("client_full_name").notNull().default(""),
+  clientUsername: text("client_username").notNull().default(""),
+  clientEmail: text("client_email").notNull().default(""),
+  clientPhone: text("client_phone").notNull().default(""),
+  shippingRequired: integer("shipping_required", { mode: "boolean" }).notNull().default(false),
+  shippingStreet: text("shipping_street").notNull().default(""),
+  shippingCity: text("shipping_city").notNull().default(""),
+  shippingState: text("shipping_state").notNull().default(""),
+  shippingPostalCode: text("shipping_postal_code").notNull().default(""),
+  shippingCountry: text("shipping_country").notNull().default(""),
+  confirmedItem: text("confirmed_item").notNull().default(""),
+  quantity: integer("quantity").notNull().default(1),
+  clientNotes: text("client_notes").notNull().default(""),
+  clientPaymentConfirmed: integer("client_payment_confirmed", { mode: "boolean" })
+    .notNull()
+    .default(false),
+
+  /* Set only after the owner approves and HubSpot accepts the write */
+  hubspotContactId: text("hubspot_contact_id"),
+  hubspotDealId: text("hubspot_deal_id"),
+  hubspotDealName: text("hubspot_deal_name"),
+});
+
+export type OrderIntakeStatus = "awaiting_client" | "pending_review" | "created" | "expired";
+
+export const ORDER_INTAKE_STATUSES: OrderIntakeStatus[] = [
+  "awaiting_client",
+  "pending_review",
+  "created",
+  "expired",
+];
+
+export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
+  awaiting_client: "Awaiting client details",
+  pending_review: "Pending review",
+  created: "Approved / created",
+  expired: "Expired",
+};
+
+export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
+
+const trimmed = (max: number) => z.string().trim().max(max);
+const amountLike = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => {
+    const parsed = Number(value.replace(/[$,\s]/g, ""));
+    return Number.isFinite(parsed) && parsed > 0;
+  }, "Enter an agreed amount greater than zero");
+
+/** Owner form that mints a new one-time client link. */
+export const createOrderLinkSchema = z.object({
+  internalLabel: trimmed(120).min(2, "Add a short internal label or order reference"),
+  itemDescription: trimmed(400).min(2, "Describe the agreed item or model"),
+  agreedAmount: amountLike,
+  paymentMethod: trimmed(80).default(""),
+  paymentReference: trimmed(120).default(""),
+  buyerNameHint: trimmed(120).default(""),
+  buyerUsernameHint: trimmed(120).default(""),
+  ownerNotes: trimmed(2000).default(""),
+  expiryDays: z.coerce.number().int().min(1).max(90).default(14),
+});
+export type CreateOrderLinkInput = z.input<typeof createOrderLinkSchema>;
+
+/** The public buyer form. Deliberately contains no internal cost fields. */
+export const clientOrderSubmissionSchema = z.object({
+  clientFullName: trimmed(120).min(2, "Enter your full name"),
+  clientUsername: trimmed(120).default(""),
+  clientEmail: z.string().trim().email("Enter a valid email address").max(200),
+  clientPhone: trimmed(40).default(""),
+  shippingRequired: z.boolean().default(true),
+  shippingStreet: trimmed(200).default(""),
+  shippingCity: trimmed(120).default(""),
+  shippingState: trimmed(120).default(""),
+  shippingPostalCode: trimmed(40).default(""),
+  shippingCountry: trimmed(120).default(""),
+  confirmedItem: trimmed(400).min(2, "Confirm or correct the item description"),
+  quantity: z.coerce.number().int().min(1).max(999).default(1),
+  clientNotes: trimmed(2000).default(""),
+  clientPaymentConfirmed: z
+    .boolean()
+    .refine((value) => value === true, "Please confirm that you already paid for this order"),
+});
+export type ClientOrderSubmission = z.infer<typeof clientOrderSubmissionSchema>;
+
+/**
+ * Owner corrections applied before approval. Declared field by field on purpose:
+ * `clientOrderSubmissionSchema.partial()` would keep the inner `.default("")` values,
+ * so an absent key would silently blank a stored column instead of leaving it alone.
+ */
+export const reviewEditSchema = z.object({
+  clientFullName: trimmed(120).min(2, "Enter the buyer's full name").optional(),
+  clientUsername: trimmed(120).optional(),
+  clientEmail: z.string().trim().email("Enter a valid email address").max(200).optional(),
+  clientPhone: trimmed(40).optional(),
+  shippingRequired: z.boolean().optional(),
+  shippingStreet: trimmed(200).optional(),
+  shippingCity: trimmed(120).optional(),
+  shippingState: trimmed(120).optional(),
+  shippingPostalCode: trimmed(40).optional(),
+  shippingCountry: trimmed(120).optional(),
+  confirmedItem: trimmed(400).min(2, "Confirm or correct the item description").optional(),
+  quantity: z.coerce.number().int().min(1).max(999).optional(),
+  clientNotes: trimmed(2000).optional(),
+  agreedAmount: amountLike.optional(),
+  itemDescription: trimmed(400).optional(),
+  paymentMethod: trimmed(80).optional(),
+  paymentReference: trimmed(120).optional(),
+  ownerNotes: trimmed(2000).optional(),
+  clientPaymentConfirmed: z.boolean().optional(),
+});
+export type ReviewEditInput = z.infer<typeof reviewEditSchema>;
+
+/** What the public client page is allowed to see once a token validates. */
+export interface ClientOrderView {
+  itemDescription: string;
+  agreedAmount: string;
+  expiresAt: string;
+  buyerNameHint: string;
+  buyerUsernameHint: string;
+}
+
+export interface CreatedOrderLink {
+  link: OrderIntakeLink;
+  /** Returned exactly once. Never stored, never logged. */
+  token: string;
+  url: string;
 }

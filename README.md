@@ -37,9 +37,38 @@ The service starts in safe mode:
 
 Do not enable both live-write environment settings until a test deal produces the expected dry-run values.
 
-## Paid Order Intake
+## Client order links (primary intake)
 
-The **Paid order intake** screen is a payment-confirmed, review-first route for Facebook Marketplace orders. It is deliberately not a lead-capture tool:
+**Order links** is the main way a paid Marketplace order enters the system. Nothing reaches HubSpot until you approve it.
+
+1. Agree the order in Marketplace and take payment.
+2. Open **Order links**, unlock owner tools with the access code, and create a link: internal label, agreed item, amount paid, optional payment method/reference, optional buyer name or username, expiry (14 days by default), optional private notes.
+3. Press **Copy link** and paste the link into the Marketplace conversation. The link is shown once, right after creation.
+4. The buyer opens `/#/client-order/<token>` and fills in a short form: name, Marketplace username, email, phone, ship-or-pickup, shipping address, item confirmation (pre-filled and editable), quantity, notes, and a checkbox confirming they already paid. The page states clearly that it collects details only, takes no payment, and does not place a final order. No internal cost or margin fields are shown.
+5. The submission lands in the private **Review queue** as *Pending review*. Nothing is written to HubSpot at this point.
+6. Open **Review**, correct anything the buyer typed loosely, press **Save corrections**, then tick **I verified this payment cleared and the price is correct**. That unlocks **Create Contact and Print Order in HubSpot**, and a browser confirmation appears immediately before the write.
+7. Approval reuses the same paid-order creation path: a Contact is created or reused by email, and one associated Deal is created in the **Print Orders** pipeline at **Deposit Received**. The stored HubSpot contact and deal IDs are shown, and the intake is locked as *Approved / created* so it cannot be created twice.
+
+Queue tabs: **Awaiting client details**, **Pending review**, **Approved / created**, **Expired**. You can expire any link manually. Only structured fields and short notes are stored — never a raw conversation.
+
+### Link security model
+
+- The token is 32 bytes of `crypto.randomBytes` (256 bits) rendered base64url. Only its SHA-256 hash is stored; the plain token is returned exactly once in the creation response and never persisted, re-displayed, logged, or written to the audit file.
+- The buyer's token travels in the JSON request body, not in a URL path or query string, so the request logger never records it.
+- A link accepts exactly one submission. The single-submission and expiry checks are enforced in the SQL `WHERE` clause, so concurrent or repeated posts cannot double-submit.
+- An unknown, expired, or already-used token returns a generic "not valid" or "closed" message. The buyer page renders no order information until the token validates.
+- Public buyer requests are rate-limited per IP. A buyer submission writes only to this app's local database. HubSpot is called from exactly one route: the owner's approval endpoint, which additionally requires `paymentVerified: true`.
+- Owner routes (create link, list queue, view, edit, expire, approve) reuse the existing intake access-code gate. The code is sent as a request header, is held in page memory only, and is never placed in the frontend source, browser storage, or cookies.
+
+> **Production hardening.** The owner gate is a single shared app-owned access code, not real authentication. Before treating this as a multi-user production system, replace it with per-user accounts, sessions, and audit attribution. The code comments in `server/routes.ts` and `client/src/pages/order-links.tsx` say the same.
+
+### Persistence caveat
+
+Order links live in a SQLite file (`data.db` in the project root, overridable with `ORDER_LINKS_DB_FILE`). It is created on first use, is git-ignored, and is local to whichever host runs the process. It is not replicated or backed up: a fresh deployment starts with an empty queue, and a host that loses its filesystem loses pending intakes. Copy or back up `data.db` before redeploying if a queue is in flight, and move to managed storage if this becomes business-critical.
+
+## Paid Order Intake (conversation route)
+
+The **Conversation intake** screen (nav: *Conversation intake*) is the earlier payment-confirmed, review-first route for Facebook Marketplace orders. It is deliberately not a lead-capture tool:
 
 1. Paste the relevant part of a paid Marketplace conversation.
 2. The screen creates editable suggestions for the customer, Marketplace username, model, paid amount, shipping details, and a brief order summary.
@@ -100,7 +129,8 @@ Copy `.env.example` and keep `.env` out of source control.
 | `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
-| `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Optional override | SHA-256 hash of the Paid Order Intake access code. The server never stores the plain code. |
+| `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Optional override | SHA-256 hash of the owner access code used by both intake routes and all Order links owner APIs. The server never stores the plain code. |
+| `ORDER_LINKS_DB_FILE` | Optional | Path to the SQLite file holding order links. Defaults to `data.db` in the working directory. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
 
 ## HubSpot private-app webhook setup
@@ -140,6 +170,14 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
 | `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions. |
 | `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Orders Deal. |
+| `POST /api/order-links` | Protected. Mints a one-time client link and returns the plain token exactly once. |
+| `GET /api/order-links` | Protected. Queue listing with per-status counts. Never returns the token hash. |
+| `GET /api/order-links/:id` | Protected. Full detail for one intake. |
+| `PATCH /api/order-links/:id` | Protected. Owner corrections while the intake is pending review. |
+| `POST /api/order-links/:id/expire` | Protected. Manually expires a link. |
+| `POST /api/order-links/:id/create-order` | Protected. The only HubSpot-writing route in this flow. Requires `paymentVerified: true`. |
+| `POST /api/client-order/lookup` | Public. Token in the body. Returns only client-safe agreed-order details. |
+| `POST /api/client-order/submit` | Public. Writes the buyer's details to the local queue. Never calls HubSpot. |
 
 ## Production notes
 
@@ -148,6 +186,8 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 - The local audit file is a small operational trail, not a long-term accounting system. Route logs to managed storage if durable historical audit retention is required.
 - The HubSpot credential must retain permission to read and update deal properties.
 - The Paid Order Intake creation endpoint needs permission to create contacts, create deals, search contacts by email, and associate contacts with deals.
+- Back up or migrate `data.db` when redeploying: pending order links and unreviewed buyer submissions live only in that file.
+- Replace the shared owner access code with real authentication before more than one person needs owner access.
 
 ## References
 

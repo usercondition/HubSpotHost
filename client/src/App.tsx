@@ -8,16 +8,22 @@ import { AppShell, ThemeProvider } from "@/components/shell";
 import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
+import OrderLinks from "@/pages/order-links";
+import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
 
-function AppRouter() {
+/** Owner-facing routes live inside the operations shell. */
+function ShellRoutes() {
   return (
-    <Switch>
-      <Route path="/" component={Operations} />
-      <Route path="/paid-orders" component={PaidOrders} />
-      <Route path="/setup" component={Setup} />
-      <Route component={NotFound} />
-    </Switch>
+    <AppShell>
+      <Switch>
+        <Route path="/" component={OrderLinks} />
+        <Route path="/operations" component={Operations} />
+        <Route path="/paid-orders" component={PaidOrders} />
+        <Route path="/setup" component={Setup} />
+        <Route component={NotFound} />
+      </Switch>
+    </AppShell>
   );
 }
 
@@ -28,9 +34,11 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router hook={useHashLocation}>
-            <AppShell>
-              <AppRouter />
-            </AppShell>
+            <Switch>
+              {/* Public, buyer-facing. Deliberately outside the owner shell. */}
+              <Route path="/client-order/:token" component={ClientOrder} />
+              <Route component={ShellRoutes} />
+            </Switch>
           </Router>
         </TooltipProvider>
       </ThemeProvider>
