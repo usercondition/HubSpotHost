@@ -15,13 +15,14 @@ export async function apiRequest(
   data?: unknown | undefined,
   options?: { headers?: Record<string, string> },
 ): Promise<Response> {
+  const isFormData = typeof FormData !== "undefined" && data instanceof FormData;
   const res = await fetch(`${API_BASE}${url}`, {
     method,
     headers: {
-      ...(data ? { "Content-Type": "application/json" } : {}),
+      ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(options?.headers ?? {}),
     },
-    body: data ? JSON.stringify(data) : undefined,
+    body: data ? (isFormData ? data : JSON.stringify(data)) : undefined,
   });
 
   await throwIfResNotOk(res);

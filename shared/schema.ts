@@ -323,6 +323,93 @@ export const supplyPurchases = sqliteTable("supply_purchases", {
 
 export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
 
+/* ------------------------------------------------------------------ */
+/* Sliced print files                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The production metadata extracted from a Chitubox CTB slice file. These
+ * values describe the entire build plate, not one individual model on it.
+ */
+export interface PrintFileMetrics {
+  fileName: string;
+  fileSizeBytes: number;
+  sha256: string;
+  format: "CTB";
+  formatRevision: string;
+  printTimeSeconds: number | null;
+  resinVolumeMl: number | null;
+  resinMassG: number | null;
+  layerCount: number | null;
+  layerHeightMm: number | null;
+  resolutionX: number | null;
+  resolutionY: number | null;
+  buildVolumeXmm: number | null;
+  buildVolumeYmm: number | null;
+  buildVolumeZmm: number | null;
+  printerProfile: string | null;
+}
+
+/**
+ * The rolling production plan for one HubSpot order. Every CTB file remains
+ * an individual plate record locally; HubSpot receives these cumulative values
+ * so a multi-plate job can be understood from its deal card at a glance.
+ */
+export interface PrintFileOrderSummary {
+  plateCount: number;
+  totalPrintTimeSeconds: number | null;
+  totalResinVolumeMl: number | null;
+  totalResinMassG: number | null;
+  totalLayerCount: number | null;
+  latest: PrintFileMetrics;
+}
+
+/** A short-lived server-side analysis. The binary is never persisted. */
+export const printFileAnalyses = sqliteTable("print_file_analyses", {
+  id: text("id").primaryKey(),
+  metricsJson: text("metrics_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+});
+
+export type PrintFileAnalysis = typeof printFileAnalyses.$inferSelect;
+
+/**
+ * A durable production record. It stores extracted metadata only, never the
+ * CTB binary itself, so large slicer files are not retained in Railway.
+ */
+export const printFileRecords = sqliteTable("print_file_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  analysisId: text("analysis_id").notNull(),
+  hubspotDealId: text("hubspot_deal_id").notNull(),
+  hubspotDealName: text("hubspot_deal_name").notNull(),
+  dealStage: text("deal_stage").notNull().default(""),
+  fileName: text("file_name").notNull(),
+  fileSizeBytes: integer("file_size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  formatRevision: text("format_revision").notNull(),
+  printTimeSeconds: integer("print_time_seconds"),
+  resinVolumeMl: text("resin_volume_ml"),
+  resinMassG: text("resin_mass_g"),
+  layerCount: integer("layer_count"),
+  layerHeightMm: text("layer_height_mm"),
+  resolutionX: integer("resolution_x"),
+  resolutionY: integer("resolution_y"),
+  printerProfile: text("printer_profile"),
+  hubspotSyncedAt: text("hubspot_synced_at").notNull(),
+  attachedAt: text("attached_at").notNull(),
+});
+
+export type PrintFileRecord = typeof printFileRecords.$inferSelect;
+
+export interface PrintFileCandidateDeal {
+  dealId: string;
+  dealName: string;
+  stage: string;
+  hasPrintFile: boolean;
+}
+
 const trimmed = (max: number) => z.string().trim().max(max);
 const amountLike = z
   .string()
@@ -351,6 +438,16 @@ export const createSupplyPurchaseSchema = z.object({
 });
 
 export type CreateSupplyPurchaseInput = z.infer<typeof createSupplyPurchaseSchema>;
+
+export const attachPrintFileSchema = z.object({
+  analysisId: z.string().uuid("Analyze the CTB file again before attaching it"),
+  dealId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{1,20}$/, "Select a valid active Print Order"),
+});
+
+export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
 
 /** Owner form that mints a new one-time client link. */
 export const createOrderLinkSchema = z.object({

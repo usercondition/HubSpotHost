@@ -80,6 +80,42 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
 );
 `;
 
+const CREATE_PRINT_FILE_ANALYSES_SQL = `
+CREATE TABLE IF NOT EXISTS print_file_analyses (
+  id TEXT PRIMARY KEY,
+  metrics_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+`;
+
+const CREATE_PRINT_FILE_RECORDS_SQL = `
+CREATE TABLE IF NOT EXISTS print_file_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  analysis_id TEXT NOT NULL,
+  hubspot_deal_id TEXT NOT NULL,
+  hubspot_deal_name TEXT NOT NULL,
+  deal_stage TEXT NOT NULL DEFAULT '',
+  file_name TEXT NOT NULL,
+  file_size_bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  format_revision TEXT NOT NULL,
+  print_time_seconds INTEGER,
+  resin_volume_ml TEXT,
+  resin_mass_g TEXT,
+  layer_count INTEGER,
+  layer_height_mm TEXT,
+  resolution_x INTEGER,
+  resolution_y INTEGER,
+  printer_profile TEXT,
+  hubspot_synced_at TEXT NOT NULL,
+  attached_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS print_file_records_deal_id_idx
+  ON print_file_records (hubspot_deal_id, attached_at DESC);
+`;
+
 let db: BetterSQLite3Database | null = null;
 
 function databaseFile(): string {
@@ -96,6 +132,8 @@ export function getDb(): BetterSQLite3Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
+  sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
+  sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   db = drizzle(sqlite);
   return db;
 }

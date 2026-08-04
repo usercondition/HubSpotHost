@@ -59,8 +59,11 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const oversizedUpload = err?.code === "LIMIT_FILE_SIZE";
+    const status = oversizedUpload ? 413 : err.status || err.statusCode || 500;
+    const message = oversizedUpload
+      ? "CTB file must be 64 MB or smaller"
+      : err.message || "Internal Server Error";
 
     console.error("Internal Server Error:", err);
 

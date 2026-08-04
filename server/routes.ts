@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "node:http";
 import crypto from "node:crypto";
+import multer from "multer";
 import {
   INPUT_PROPERTIES,
   OUTPUT_PROPERTIES,
@@ -18,8 +19,23 @@ import {
   verifyCallbackToken,
   verifyWebhookRequest,
 } from "./lib/signature";
-import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError } from "./lib/hubspot";
+import {
+  fetchPrintOrderDeals,
+  fetchPrintOrderPipelineStages,
+  HubSpotError,
+  patchDealPrintFileMetrics,
+} from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import { CtbParseError } from "./lib/ctb";
+import {
+  attachedPrintFileDealIds,
+  buildPrintFileOrderSummary,
+  createPrintFileRecord,
+  getStagedPrintFile,
+  listPrintFileRecords,
+  markPrintFileAnalysisUsed,
+  stagePrintFile,
+} from "./lib/print-files";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 import {
@@ -45,13 +61,20 @@ import {
   clientOrderSubmissionSchema,
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
+  attachPrintFileSchema,
   reviewEditSchema,
+  type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
 } from "../shared/schema";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
+const PRINT_FILE_MAX_BYTES = 64 * 1024 * 1024;
+const printFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
+});
 
 function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === "production";
@@ -182,6 +205,11 @@ function rejectUnsecuredIntake(req: Request, res: Response): boolean {
 
 function firstIssue(error: { issues: Array<{ message: string }> }): string {
   return error.issues[0]?.message ?? "Some details are missing or invalid";
+}
+
+function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
+  const value = stage?.metadata?.isClosed;
+  return value === true || value === "true";
 }
 
 /** The owner-side representation. `tokenHash` never leaves the server. */
@@ -466,6 +494,161 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(status).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
+      });
+    }
+  });
+
+  /**
+   * Owner-only view for attaching production metrics from a sliced CTB file.
+   * The HubSpot portion is read-only here. A later explicit attach action is
+   * required before any CRM property is written.
+   */
+  app.get("/api/prints", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const includeAttached = firstQueryValue(req.query?.includeAttached) === "true";
+
+    try {
+      const [deals, stages] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+      ]);
+      const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+      const attachedDealIds = attachedPrintFileDealIds();
+      const candidates: PrintFileCandidateDeal[] = deals
+        .filter((deal) => {
+          const pipeline = deal.properties.pipeline ?? "";
+          const stage = stageById.get(deal.properties.dealstage ?? "");
+          return pipeline === "default" && !stageIsClosed(stage);
+        })
+        .map((deal) => {
+          const stageId = deal.properties.dealstage ?? "";
+          const stage = stageById.get(stageId);
+          return {
+            dealId: deal.id,
+            dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
+            stage: stage?.label || stageId || "No stage",
+            hasPrintFile: attachedDealIds.has(deal.id),
+          };
+        })
+        .filter((deal) => includeAttached || !deal.hasPrintFile)
+        .sort((a, b) => a.stage.localeCompare(b.stage) || a.dealName.localeCompare(b.dealName));
+
+      return res.json({
+        ok: true,
+        candidates,
+        records: listPrintFileRecords(),
+        includeAttached,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load active Print Orders",
+      });
+    }
+  });
+
+  /**
+   * The CTB bytes only exist for the duration of this request. The response
+   * contains a short-lived analysis ID; no file binary is ever written to
+   * Railway storage or sent to HubSpot.
+   */
+  app.post(
+    "/api/prints/analyze",
+    (req: Request, res: Response, next) => {
+      if (rejectUnsecuredIntake(req, res)) return;
+      next();
+    },
+    printFileUpload.single("file"),
+    (req: Request, res: Response) => {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ ok: false, error: "Choose one Chitubox .ctb slice file to analyze" });
+      }
+      if (!/\.ctb$/i.test(file.originalname)) {
+        return res.status(400).json({ ok: false, error: "Only Chitubox .ctb slice files can be analyzed here" });
+      }
+
+      try {
+        const staged = stagePrintFile(file.originalname, file.buffer);
+        return res.status(201).json({ ok: true, ...staged });
+      } catch (error) {
+        const message =
+          error instanceof CtbParseError
+            ? error.message
+            : "The CTB file could not be read. Re-export the slice file from Chitubox and try again.";
+        return res.status(400).json({ ok: false, error: message });
+      }
+    },
+  );
+
+  /**
+   * This is the only CTB route that writes to HubSpot. It requires the owner
+   * code and an explicit deal selection. HubSpot succeeds first; only then is
+   * the durable local production record created.
+   */
+  app.post("/api/prints/attach", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = attachPrintFileSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+
+    const staged = getStagedPrintFile(parsed.data.analysisId);
+    if (!staged) {
+      return res.status(410).json({
+        ok: false,
+        error: "This CTB analysis has expired or was already attached. Analyze the file again before attaching it.",
+      });
+    }
+
+    try {
+      const [deals, stages] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+      ]);
+      const deal = deals.find(
+        (candidate) =>
+          candidate.id === parsed.data.dealId && candidate.properties.pipeline === "default",
+      );
+      if (!deal) {
+        return res.status(404).json({ ok: false, error: "That Print Order is no longer available" });
+      }
+
+      const stage = stages.find((candidate) => candidate.id === (deal.properties.dealstage ?? ""));
+      if (stageIsClosed(stage)) {
+        return res.status(409).json({
+          ok: false,
+          error: "That Print Order is closed. Choose an outstanding or in-work order instead.",
+        });
+      }
+
+      const attachedAt = new Date().toISOString();
+      const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
+      await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
+      const record = createPrintFileRecord({
+        analysisId: parsed.data.analysisId,
+        hubspotDealId: deal.id,
+        hubspotDealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
+        dealStage: stage?.label || deal.properties.dealstage || "No stage",
+        metrics: staged.metrics,
+      });
+      markPrintFileAnalysisUsed(parsed.data.analysisId);
+
+      return res.status(201).json({
+        ok: true,
+        record,
+        summary,
+        message: `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not attach CTB production metrics to the Print Order",
       });
     }
   });

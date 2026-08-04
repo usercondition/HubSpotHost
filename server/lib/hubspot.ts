@@ -5,6 +5,7 @@
  * variables. No connector bridge, no SDK, and the token is never logged.
  */
 import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken } from "./config";
+import type { PrintFileOrderSummary } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const PERFORMANCE_DEAL_LIMIT = 1_000;
@@ -21,6 +22,84 @@ export const PERFORMANCE_PROPERTIES = [
   "closedate",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
+] as const;
+
+/**
+ * Production-planning fields populated from an attached Chitubox slice file.
+ * They intentionally describe the full plate and remain separate from actual
+ * costs, which the owner records when the order's real production costs are known.
+ */
+const PRINT_FILE_DEAL_PROPERTIES = [
+  {
+    name: "print_slice_file_name",
+    label: "Print slice file name",
+    description: "Most recently attached Chitubox CTB filename from Print Operations.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_slice_format",
+    label: "Print slice format",
+    description: "Chitubox CTB header revision and format details.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_estimated_time_hours",
+    label: "Estimated print time (hours)",
+    description: "Total estimated print time across all attached CTB plates.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_resin_volume_ml",
+    label: "Estimated resin volume (ml)",
+    description: "Total estimated resin volume across all attached CTB plates.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_resin_mass_g",
+    label: "Estimated resin mass (g)",
+    description: "Total estimated resin mass across all attached CTB plates.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_layer_count",
+    label: "Print layer count",
+    description: "Total layers across all attached CTB plates.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_layer_height_mm",
+    label: "Print layer height (mm)",
+    description: "Layer height extracted from the CTB file.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_plate_count",
+    label: "Print plate count",
+    description: "Number of Chitubox CTB plates attached to this Print Order.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_printer_profile",
+    label: "Print printer profile",
+    description: "Printer or machine profile reported by the CTB file.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_slice_attached_at",
+    label: "Print slice attached at",
+    description: "UTC time when Print Operations attached this CTB metadata.",
+    type: "string",
+    fieldType: "text",
+  },
 ] as const;
 
 export class HubSpotError extends Error {
@@ -117,6 +196,94 @@ export async function patchDealOutputs(
   await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
     method: "PATCH",
     body: JSON.stringify({ properties }),
+  });
+}
+
+function numericString(value: number | null, digits = 3): string | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const factor = 10 ** digits;
+  return String(Math.round(value * factor) / factor);
+}
+
+function compactText(value: string | null, maxLength = 1_000): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function printFileProperties(summary: PrintFileOrderSummary, attachedAt: string): Record<string, string> {
+  const { latest } = summary;
+  const properties: Record<string, string> = {
+    print_slice_file_name: latest.fileName.slice(0, 260),
+    print_slice_format: latest.formatRevision.slice(0, 500),
+    print_slice_attached_at: attachedAt,
+    print_plate_count: String(summary.plateCount),
+  };
+  const assign = (name: string, value: string | null) => {
+    if (value !== null) properties[name] = value;
+  };
+
+  assign(
+    "print_estimated_time_hours",
+    summary.totalPrintTimeSeconds === null
+      ? null
+      : numericString(summary.totalPrintTimeSeconds / 3_600, 2),
+  );
+  assign("print_resin_volume_ml", numericString(summary.totalResinVolumeMl));
+  assign("print_resin_mass_g", numericString(summary.totalResinMassG));
+  assign("print_layer_count", numericString(summary.totalLayerCount, 0));
+  assign("print_layer_height_mm", numericString(latest.layerHeightMm, 4));
+  assign("print_printer_profile", compactText(latest.printerProfile, 500));
+  return properties;
+}
+
+/**
+ * Create the custom deal properties only when they are missing. The operation
+ * is deliberately server-side so the private app token never enters the UI.
+ */
+export async function ensurePrintFileDealProperties(): Promise<void> {
+  const data = await request("/crm/v3/properties/deals", { method: "GET" });
+  const existing = new Set(
+    (Array.isArray(data?.results) ? data.results : [])
+      .map((property: unknown) =>
+        property &&
+        typeof property === "object" &&
+        "name" in property &&
+        typeof (property as { name?: unknown }).name === "string"
+          ? (property as { name: string }).name
+          : "",
+      )
+      .filter(Boolean),
+  );
+
+  for (const property of PRINT_FILE_DEAL_PROPERTIES) {
+    if (existing.has(property.name)) continue;
+    try {
+      await request("/crm/v3/properties/deals", {
+        method: "POST",
+        body: JSON.stringify({ ...property, groupName: "dealinformation" }),
+      });
+    } catch (error) {
+      // A concurrent operator or workflow may have created the property after
+      // this check. That is safe to treat as success; any other HubSpot error
+      // is surfaced to the owner before the local record is written.
+      if (!(error instanceof HubSpotError) || error.status !== 409) throw error;
+    }
+  }
+}
+
+/**
+ * Attach calculated CTB metadata to one deal. This never writes material,
+ * labor, packaging, shipping, gross-profit, or margin fields.
+ */
+export async function patchDealPrintFileMetrics(
+  dealId: string,
+  summary: PrintFileOrderSummary,
+  attachedAt: string,
+): Promise<void> {
+  await ensurePrintFileDealProperties();
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: printFileProperties(summary, attachedAt) }),
   });
 }
 

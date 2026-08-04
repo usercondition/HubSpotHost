@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   ExternalLink,
+  FileUp,
   Link2,
   PackageCheck,
   ShoppingBag,
@@ -219,6 +220,21 @@ export default function Dashboard() {
             </h2>
           </div>
           <div className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
+            <Link
+              href="/prints"
+              data-testid="link-control-loop-prints"
+              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+            >
+              <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  Attach sliced plate data <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Turn each Chitubox CTB plate into time and resin totals on the right Print Order.
+                </span>
+              </span>
+            </Link>
             <Link
               href="/supplies"
               data-testid="link-control-loop-supplies"
