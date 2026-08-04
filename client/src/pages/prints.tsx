@@ -16,6 +16,7 @@ import {
   Scale,
   ShieldCheck,
   Timer,
+  Trash2,
   Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import type {
   PrintFileCandidateDeal,
+  PrintFileDealBoard,
   PrintFileMetrics,
   PrintFileOrderSummary,
   PrintFileRecord,
@@ -55,8 +57,11 @@ interface ResinProfileResponse {
 interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
+  boards: PrintFileDealBoard[];
   records: PrintFileRecord[];
   includeAttached: boolean;
+  lastAttachedDealId: string | null;
+  attachPreview: PrintFileOrderSummary | null;
   resin?: ResinProfileResponse;
 }
 
@@ -76,7 +81,9 @@ function formatHours(seconds: number | null | undefined): string {
 function formatNumber(value: number | string | null | undefined, suffix = ""): string {
   if (value === null || value === undefined || value === "") return "Not reported";
   const numeric = typeof value === "string" ? Number(value) : value;
-  return Number.isFinite(numeric) ? `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}` : "Not reported";
+  return Number.isFinite(numeric)
+    ? `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`
+    : "Not reported";
 }
 
 function formatMoney(value: number | string | null | undefined): string {
@@ -99,6 +106,27 @@ function localDate(value: string): string {
   return Number.isFinite(date.getTime())
     ? date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "Unknown time";
+}
+
+function costSourceLabel(source: string | null | undefined, label: string | null | undefined): string {
+  if (label) return label;
+  if (source === "ctb") return "Chitubox resin price";
+  if (source === "amazon") return "Amazon bottle rate";
+  if (source === "supplies") return "Supplies purchase rate";
+  if (source === "manual") return "Saved bottle profile";
+  return "No cost source yet";
+}
+
+function buildVolumeLabel(metrics: {
+  buildVolumeXmm?: number | string | null;
+  buildVolumeYmm?: number | string | null;
+  buildVolumeZmm?: number | string | null;
+}): string | null {
+  const x = metrics.buildVolumeXmm;
+  const y = metrics.buildVolumeYmm;
+  const z = metrics.buildVolumeZmm;
+  if (x == null || y == null || z == null || x === "" || y === "" || z === "") return null;
+  return `${formatNumber(x)} × ${formatNumber(y)} × ${formatNumber(z)} mm`;
 }
 
 function UnlockPrints({
@@ -157,12 +185,11 @@ function UnlockPrints({
 }
 
 function resinCostHint(metrics: PrintFileMetrics): string {
-  if (metrics.resinCostLabel) return metrics.resinCostLabel;
-  if (metrics.resinCostSource === "ctb") return "From Chitubox resin price setting — not actual deal cost";
-  return "No resin price in the CTB and no active bottle rate yet";
+  return costSourceLabel(metrics.resinCostSource, metrics.resinCostLabel);
 }
 
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
+  const volume = buildVolumeLabel(metrics);
   return (
     <div className="space-y-4">
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted CTB metrics">
@@ -187,9 +214,11 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
           label="Build profile"
           value={metrics.printerProfile || "Not reported"}
           hint={
-            metrics.resolutionX && metrics.resolutionY
-              ? `${metrics.resolutionX} × ${metrics.resolutionY} px`
-              : "Resolution not reported"
+            volume
+              ? volume
+              : metrics.resolutionX && metrics.resolutionY
+                ? `${metrics.resolutionX} × ${metrics.resolutionY} px`
+                : "Resolution not reported"
           }
           icon={Ruler}
           testId="metric-printer-profile"
@@ -238,12 +267,51 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   );
 }
 
+function OrderTotalsPreview({
+  title,
+  summary,
+  testId,
+}: {
+  title: string;
+  summary: Pick<
+    PrintFileOrderSummary,
+    "plateCount" | "totalPrintTimeSeconds" | "totalResinVolumeMl" | "totalResinMassG" | "totalResinCost"
+  >;
+  testId: string;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-3" data-testid={testId}>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <p className="text-sm">
+          <span className="text-muted-foreground">Plates · </span>
+          <span className="font-medium numeric">{summary.plateCount}</span>
+        </p>
+        <p className="text-sm">
+          <span className="text-muted-foreground">Time · </span>
+          <span className="font-medium numeric">{formatHours(summary.totalPrintTimeSeconds)}</span>
+        </p>
+        <p className="text-sm">
+          <span className="text-muted-foreground">Resin · </span>
+          <span className="font-medium numeric">
+            {formatNumber(summary.totalResinVolumeMl, " ml")} · {formatNumber(summary.totalResinMassG, " g")}
+          </span>
+        </p>
+        <p className="text-sm">
+          <span className="text-muted-foreground">Est. cost · </span>
+          <span className="font-medium numeric">${formatMoney(summary.totalResinCost)}</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [codeDraft, setCodeDraft] = useState("");
   const [ownerCode, setOwnerCode] = useState("");
-  const [includeAttached, setIncludeAttached] = useState(false);
+  const [includeAttached, setIncludeAttached] = useState(true);
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
   const [dealId, setDealId] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -251,18 +319,19 @@ export default function Prints() {
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
+  const [didAutoSelect, setDidAutoSelect] = useState(false);
   const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
 
   const prints = useQuery<PrintsResponse>({
-    queryKey: ["/api/prints", ownerCode, includeAttached],
+    queryKey: ["/api/prints", ownerCode, includeAttached, staged?.analysisId, dealId],
     enabled: ownerCode.length > 0,
     queryFn: async () => {
-      const response = await apiRequest(
-        "GET",
-        `/api/prints?includeAttached=${includeAttached ? "true" : "false"}`,
-        undefined,
-        { headers },
-      );
+      const params = new URLSearchParams({
+        includeAttached: includeAttached ? "true" : "false",
+      });
+      if (staged?.analysisId) params.set("analysisId", staged.analysisId);
+      if (dealId) params.set("previewDealId", dealId);
+      const response = await apiRequest("GET", `/api/prints?${params.toString()}`, undefined, { headers });
       return (await response.json()) as PrintsResponse;
     },
   });
@@ -274,7 +343,23 @@ export default function Prints() {
     setResinAsin(resin.profile.amazonAsin || "B0D6Y6JV42");
     setResinMassG(resin.profile.bottleMassG || "1000");
     setResinPrice(resin.profile.bottlePriceUsd === "0" ? "" : resin.profile.bottlePriceUsd);
-  }, [resin?.profile?.id, resin?.profile?.updatedAt, resin?.profile?.bottlePriceUsd, resin?.profile?.name, resin?.profile?.amazonAsin, resin?.profile?.bottleMassG]);
+  }, [
+    resin?.profile?.id,
+    resin?.profile?.updatedAt,
+    resin?.profile?.bottlePriceUsd,
+    resin?.profile?.name,
+    resin?.profile?.amazonAsin,
+    resin?.profile?.bottleMassG,
+  ]);
+
+  useEffect(() => {
+    if (didAutoSelect || !prints.data?.lastAttachedDealId || dealId) return;
+    const last = prints.data.lastAttachedDealId;
+    if (prints.data.candidates.some((candidate) => candidate.dealId === last)) {
+      setDealId(last);
+      setDidAutoSelect(true);
+    }
+  }, [prints.data?.lastAttachedDealId, prints.data?.candidates, dealId, didAutoSelect]);
 
   const saveResin = useMutation({
     mutationFn: async () => {
@@ -296,7 +381,10 @@ export default function Prints() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
-      toast({ title: "Resin profile saved", description: "New plate estimates will use this bottle rate when the CTB has no slicer price." });
+      toast({
+        title: "Resin profile saved",
+        description: "New plate estimates will use this bottle rate when the CTB has no Chitubox resin price.",
+      });
     },
     onError: (error: Error) => {
       toast({
@@ -331,7 +419,7 @@ export default function Prints() {
 
   const unlock = useMutation({
     mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/prints?includeAttached=false", undefined, {
+      const response = await apiRequest("GET", "/api/prints?includeAttached=true", undefined, {
         headers: { "x-paid-order-access-code": code },
       });
       return { code, data: (await response.json()) as PrintsResponse };
@@ -339,6 +427,11 @@ export default function Prints() {
     onSuccess: ({ code, data }) => {
       setOwnerCode(code);
       setCodeDraft("");
+      setIncludeAttached(true);
+      if (data.lastAttachedDealId) {
+        setDealId(data.lastAttachedDealId);
+        setDidAutoSelect(true);
+      }
       toast({
         title: "Print files unlocked",
         description: `${data.candidates.length} active order${data.candidates.length === 1 ? "" : "s"} can receive plate data.`,
@@ -413,6 +506,54 @@ export default function Prints() {
     },
   });
 
+  const detach = useMutation({
+    mutationFn: async (recordId: number) => {
+      const response = await apiRequest("POST", "/api/prints/detach", { recordId }, { headers });
+      return (await response.json()) as {
+        ok: true;
+        message: string;
+        remainingPlateCount: number;
+      };
+    },
+    onSuccess: ({ message }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      toast({ title: "Plate detached", description: message });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "The plate was not detached",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const seedMaterialCost = useMutation({
+    mutationFn: async (overwriteExisting: boolean) => {
+      const response = await apiRequest(
+        "POST",
+        "/api/prints/seed-material-cost",
+        { dealId, confirm: true, overwriteExisting },
+        { headers },
+      );
+      return (await response.json()) as {
+        ok: true;
+        message: string;
+        writtenValue: number;
+      };
+    },
+    onSuccess: ({ message }) => {
+      toast({ title: "Material cost seeded", description: message });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Material cost was not seeded",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
     setStaged(null);
@@ -420,7 +561,10 @@ export default function Prints() {
   };
 
   const candidates = prints.data?.candidates ?? [];
+  const boards = prints.data?.boards ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+  const selectedBoard = boards.find((board) => board.dealId === dealId);
+  const attachPreview = prints.data?.attachPreview;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -483,7 +627,7 @@ export default function Prints() {
                 <div>
                   <p className="text-sm font-semibold tracking-tight">Multi-plate jobs stay under one order</p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Attach each `.ctb` plate to the same Print Order. Print Operations keeps a plate-by-plate history, while HubSpot shows running totals for plate count, time, resin volume, resin mass, and slicer resin cost.
+                    Attach each `.ctb` plate to the same Print Order. Print Operations keeps a plate-by-plate board; HubSpot shows running totals for plate count, time, resin volume, resin mass, and estimated resin cost.
                   </p>
                 </div>
               </div>
@@ -546,11 +690,17 @@ export default function Prints() {
                     : "Save a bottle price or refresh Amazon to estimate plate cost when Chitubox leaves resin cost blank."}
                 {" "}
                 Amazon live price is best-effort and may be blocked; manual price always works.
+                {resin?.canRefreshAmazon === false
+                  ? " Amazon refresh is currently unavailable in this environment."
+                  : ""}
               </p>
             </Panel>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb file. The raw file is read in memory and then discarded.">
+              <Panel
+                title="1. Analyze one sliced plate"
+                description="Upload a Chitubox .ctb file. Large Mega 8K plates use a temporary disk upload; only header ranges are parsed, then the temp file is deleted."
+              >
                 <input
                   ref={fileInputRef}
                   id="print-file-input"
@@ -591,7 +741,7 @@ export default function Prints() {
                     {analyze.isPending ? "Reading slice data…" : "Drop a .ctb file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer settings. Mega 8K plates can be large; only header data is read.
+                    Extracts time, resin use, cost estimate, exposure, build volume, and printer settings.
                   </span>
                 </button>
                 <Button
@@ -607,7 +757,7 @@ export default function Prints() {
                 </Button>
               </Panel>
 
-              <Panel title="2. Choose the Print Order" description="Only active orders without a local plate record are listed by default.">
+              <Panel title="2. Choose the Print Order" description="Orders with plates are listed first so you can continue the last multi-plate job.">
                 <div className="space-y-4">
                   <div className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3">
                     <input
@@ -619,7 +769,7 @@ export default function Prints() {
                       data-testid="checkbox-include-attached"
                     />
                     <Label htmlFor="include-attached-orders" className="cursor-pointer text-xs leading-5 text-muted-foreground">
-                      Include orders that already have plate data. Use this for plate 2, plate 3, re-slices, or a revision.
+                      Include orders that already have plate data (default on). Turn off to see only orders waiting for a first plate.
                     </Label>
                   </div>
                   <div className="space-y-1.5">
@@ -634,20 +784,89 @@ export default function Prints() {
                       <option value="">{candidates.length ? "Choose an outstanding order" : "No matching active orders"}</option>
                       {candidates.map((candidate) => (
                         <option key={candidate.dealId} value={candidate.dealId}>
-                          {candidate.dealName} · {candidate.stage}{candidate.hasPrintFile ? " · has plates" : ""}
+                          {candidate.dealName} · {candidate.stage}
+                          {candidate.plateCount > 0 ? ` · ${candidate.plateCount} plate${candidate.plateCount === 1 ? "" : "s"}` : ""}
                         </option>
                       ))}
                     </select>
                   </div>
                   {selected ? (
-                    <div className="rounded-md border border-border bg-muted/30 p-3" data-testid="text-selected-print-order">
-                      <p className="text-sm font-medium">{selected.dealName}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{selected.stage}{selected.hasPrintFile ? " · previous plates will be retained and totals will increase" : " · first attached plate"}</p>
+                    <div className="space-y-3" data-testid="text-selected-print-order">
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <p className="text-sm font-medium">{selected.dealName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {selected.stage}
+                          {selected.plateCount > 0
+                            ? ` · ${selected.plateCount} plate${selected.plateCount === 1 ? "" : "s"} already attached`
+                            : " · first attached plate"}
+                        </p>
+                      </div>
+                      {selectedBoard ? (
+                        <OrderTotalsPreview
+                          title="Current HubSpot totals"
+                          summary={{
+                            plateCount: selectedBoard.plateCount,
+                            totalPrintTimeSeconds: selectedBoard.totalPrintTimeSeconds,
+                            totalResinVolumeMl: selectedBoard.totalResinVolumeMl,
+                            totalResinMassG: selectedBoard.totalResinMassG,
+                            totalResinCost: selectedBoard.totalResinCost,
+                          }}
+                          testId="panel-current-order-totals"
+                        />
+                      ) : null}
+                      {attachPreview && staged ? (
+                        <OrderTotalsPreview
+                          title="After attaching this plate"
+                          summary={attachPreview}
+                          testId="panel-attach-preview-totals"
+                        />
+                      ) : null}
+                      {selectedBoard && selectedBoard.totalResinCost != null && selectedBoard.totalResinCost > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={seedMaterialCost.isPending}
+                            onClick={() => {
+                              const confirmed = window.confirm(
+                                `Copy the estimated resin cost ($${formatMoney(selectedBoard.totalResinCost)}) into HubSpot print_material_cost for “${selected.dealName}”? This is an explicit write of the actual material cost field.`,
+                              );
+                              if (!confirmed) return;
+                              seedMaterialCost.mutate(false);
+                            }}
+                            data-testid="button-seed-material-cost"
+                          >
+                            {seedMaterialCost.isPending ? (
+                              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CircleDollarSign className="mr-2 h-3.5 w-3.5" />
+                            )}
+                            Seed print_material_cost
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={seedMaterialCost.isPending}
+                            onClick={() => {
+                              const confirmed = window.confirm(
+                                `Overwrite any existing print_material_cost with $${formatMoney(selectedBoard.totalResinCost)} for “${selected.dealName}”?`,
+                              );
+                              if (!confirmed) return;
+                              seedMaterialCost.mutate(true);
+                            }}
+                            data-testid="button-seed-material-cost-overwrite"
+                          >
+                            Overwrite existing
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   <div className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
                     <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                    Only the explicit attach action writes to HubSpot. Analysis alone changes nothing. Slicer resin cost never overwrites actual material cost.
+                    Only the explicit attach action writes planning fields. Seeding material cost is a separate confirm. Estimated resin cost never overwrites actual material cost automatically.
                   </div>
                 </div>
               </Panel>
@@ -657,7 +876,7 @@ export default function Prints() {
               <section className="space-y-4" data-testid="panel-staged-print-file">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="rule-label">2. Review extracted plate data</p>
+                    <p className="rule-label">3. Review extracted plate data</p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Analysis expires at {localDate(staged.expiresAt)}. Verify the plate belongs to the selected order before attaching it.
                     </p>
@@ -666,7 +885,7 @@ export default function Prints() {
                 </div>
                 {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ? (
                   <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
-                    Encrypted Chitubox settings were decrypted in memory for this plate ({staged.metrics.formatRevision}).
+                    Encrypted Chitubox settings were decrypted for this plate ({staged.metrics.formatRevision}). The binary was not kept.
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />
@@ -689,59 +908,117 @@ export default function Prints() {
                 <FileUp className="mx-auto h-5 w-5 text-muted-foreground" />
                 <p className="mt-2 text-sm font-medium">Analyze a plate to continue</p>
                 <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                  The file’s estimated time, resin use, slicer cost, exposure, layers, and printer profile will appear here before you attach anything.
+                  Estimated time, resin use, cost source, exposure, build volume, layers, and printer profile appear here before you attach anything.
                 </p>
               </section>
             )}
 
-            <Panel title="Recent plate history" description="A local record of each attached plate. HubSpot receives the matching rolling totals for every order.">
-              {prints.data.records.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-[54rem] text-left text-xs">
-                    <thead className="border-b border-border text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-2 font-medium">Print Order</th>
-                        <th className="px-2 py-2 font-medium">Plate file</th>
-                        <th className="px-2 py-2 font-medium">Time</th>
-                        <th className="px-2 py-2 font-medium">Resin</th>
-                        <th className="px-2 py-2 font-medium">Slicer cost</th>
-                        <th className="px-2 py-2 font-medium">Exposure</th>
-                        <th className="px-2 py-2 font-medium">Synced</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prints.data.records.map((record) => (
-                        <tr key={record.id} className="border-b border-border/70 last:border-b-0" data-testid={`row-print-record-${record.id}`}>
-                          <td className="px-2 py-3">
-                            <p className="font-medium">{record.hubspotDealName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{record.dealStage}</p>
-                          </td>
-                          <td className="max-w-56 px-2 py-3">
-                            <p className="truncate font-medium" title={record.fileName}>{record.fileName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}</p>
-                          </td>
-                          <td className="px-2 py-3 numeric">{formatHours(record.printTimeSeconds)}</td>
-                          <td className="px-2 py-3 numeric">{formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}</td>
-                          <td className="px-2 py-3 numeric">{formatMoney(record.resinCost)}</td>
-                          <td className="px-2 py-3 numeric">
-                            {formatNumber(record.exposureSeconds, " s")}
-                            {record.bottomExposureSeconds ? ` / ${formatNumber(record.bottomExposureSeconds, " s bot")}` : ""}
-                          </td>
-                          <td className="px-2 py-3">
-                            <p className="font-medium text-chart-4">HubSpot synced</p>
-                            <p className="mt-0.5 text-muted-foreground">{localDate(record.hubspotSyncedAt)}</p>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <Panel
+              title="Order plate boards"
+              description="Plates grouped by Print Order. Detach a plate to rebuild HubSpot totals, or clear planning fields when none remain."
+            >
+              {boards.length ? (
+                <div className="space-y-5">
+                  {boards.map((board) => (
+                    <section
+                      key={board.dealId}
+                      className="rounded-lg border border-border/80 bg-muted/15 p-4"
+                      data-testid={`board-print-deal-${board.dealId}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold tracking-tight">{board.dealName}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {board.dealStage} · {board.plateCount} plate{board.plateCount === 1 ? "" : "s"} · updated{" "}
+                            {localDate(board.latestAttachedAt)}
+                          </p>
+                        </div>
+                        <OrderTotalsPreview
+                          title="Running totals"
+                          summary={{
+                            plateCount: board.plateCount,
+                            totalPrintTimeSeconds: board.totalPrintTimeSeconds,
+                            totalResinVolumeMl: board.totalResinVolumeMl,
+                            totalResinMassG: board.totalResinMassG,
+                            totalResinCost: board.totalResinCost,
+                          }}
+                          testId={`board-totals-${board.dealId}`}
+                        />
+                      </div>
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="min-w-[52rem] text-left text-xs">
+                          <thead className="border-b border-border text-muted-foreground">
+                            <tr>
+                              <th className="px-2 py-2 font-medium">Plate file</th>
+                              <th className="px-2 py-2 font-medium">Time</th>
+                              <th className="px-2 py-2 font-medium">Resin</th>
+                              <th className="px-2 py-2 font-medium">Est. cost</th>
+                              <th className="px-2 py-2 font-medium">Build volume</th>
+                              <th className="px-2 py-2 font-medium">Synced</th>
+                              <th className="px-2 py-2 font-medium"> </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {board.records.map((record) => (
+                              <tr key={record.id} className="border-b border-border/70 last:border-b-0" data-testid={`row-print-record-${record.id}`}>
+                                <td className="max-w-56 px-2 py-3">
+                                  <p className="truncate font-medium" title={record.fileName}>
+                                    {record.fileName}
+                                  </p>
+                                  <p className="mt-0.5 text-muted-foreground">
+                                    {fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}
+                                  </p>
+                                </td>
+                                <td className="px-2 py-3 numeric">{formatHours(record.printTimeSeconds)}</td>
+                                <td className="px-2 py-3 numeric">
+                                  {formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}
+                                </td>
+                                <td className="px-2 py-3">
+                                  <p className="numeric font-medium">${formatMoney(record.resinCost)}</p>
+                                  <p className="mt-0.5 text-muted-foreground">
+                                    {costSourceLabel(record.resinCostSource, record.resinCostLabel)}
+                                  </p>
+                                </td>
+                                <td className="px-2 py-3 numeric">
+                                  {buildVolumeLabel(record) || "Not reported"}
+                                </td>
+                                <td className="px-2 py-3">
+                                  <p className="font-medium text-chart-4">HubSpot synced</p>
+                                  <p className="mt-0.5 text-muted-foreground">{localDate(record.hubspotSyncedAt)}</p>
+                                </td>
+                                <td className="px-2 py-3">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={detach.isPending}
+                                    onClick={() => {
+                                      const confirmed = window.confirm(
+                                        `Detach “${record.fileName}” from ${board.dealName}? HubSpot totals will be rebuilt from remaining plates.`,
+                                      );
+                                      if (!confirmed) return;
+                                      detach.mutate(record.id);
+                                    }}
+                                    data-testid={`button-detach-print-${record.id}`}
+                                  >
+                                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                    Detach
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ))}
                 </div>
               ) : (
                 <div className="py-7 text-center">
                   <Layers3 className="mx-auto h-5 w-5 text-muted-foreground" />
                   <p className="mt-2 text-sm font-medium">No plates attached yet</p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                    Your first completed attachment will create the plate history and running totals for that Print Order.
+                    Your first completed attachment will create the plate board and running totals for that Print Order.
                   </p>
                 </div>
               )}

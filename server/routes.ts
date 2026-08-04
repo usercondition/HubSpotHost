@@ -26,7 +26,9 @@ import {
   fetchPrintOrderDeals,
   fetchPrintOrderPipelineStages,
   HubSpotError,
+  clearDealPrintFileMetrics,
   patchDealPrintFileMetrics,
+  seedDealMaterialCostFromEstimate,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
 import { CtbParseError } from "./lib/ctb";
@@ -34,10 +36,15 @@ import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
   attachedPrintFileDealIds,
   buildPrintFileOrderSummary,
+  buildPrintFileOrderSummaryFromRecords,
   createPrintFileRecord,
+  deletePrintFileRecord,
+  getPrintFileRecord,
   getStagedPrintFile,
+  groupPrintFileRecordsByDeal,
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
+  previewAttachSummary,
   stagePrintFileFromPath,
 } from "./lib/print-files";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
@@ -71,6 +78,8 @@ import {
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  detachPrintFileSchema,
+  seedMaterialCostSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
   type PrintFileCandidateDeal,
@@ -575,7 +584,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
    */
   app.get("/api/prints", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
-    const includeAttached = firstQueryValue(req.query?.includeAttached) === "true";
+    // Default true so multi-plate attach continues on the last order without an extra click.
+    const includeAttached = firstQueryValue(req.query?.includeAttached) !== "false";
+    const analysisId = firstQueryValue(req.query?.analysisId);
+    const previewDealId = firstQueryValue(req.query?.previewDealId);
 
     try {
       const [deals, stages] = await Promise.all([
@@ -583,6 +595,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fetchPrintOrderPipelineStages(),
       ]);
       const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+      const boards = groupPrintFileRecordsByDeal();
+      const boardByDealId = new Map(boards.map((board) => [board.dealId, board]));
       const attachedDealIds = attachedPrintFileDealIds();
       const candidates: PrintFileCandidateDeal[] = deals
         .filter((deal) => {
@@ -593,21 +607,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .map((deal) => {
           const stageId = deal.properties.dealstage ?? "";
           const stage = stageById.get(stageId);
+          const board = boardByDealId.get(deal.id);
           return {
             dealId: deal.id,
             dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
             stage: stage?.label || stageId || "No stage",
             hasPrintFile: attachedDealIds.has(deal.id),
+            plateCount: board?.plateCount ?? 0,
+            totalPrintTimeSeconds: board?.totalPrintTimeSeconds ?? null,
+            totalResinVolumeMl: board?.totalResinVolumeMl ?? null,
+            totalResinCost: board?.totalResinCost ?? null,
           };
         })
         .filter((deal) => includeAttached || !deal.hasPrintFile)
-        .sort((a, b) => a.stage.localeCompare(b.stage) || a.dealName.localeCompare(b.dealName));
+        .sort((a, b) => {
+          if (a.hasPrintFile !== b.hasPrintFile) return a.hasPrintFile ? -1 : 1;
+          return a.stage.localeCompare(b.stage) || a.dealName.localeCompare(b.dealName);
+        });
+
+      const staged = analysisId ? getStagedPrintFile(analysisId) : null;
+      const attachPreview =
+        previewDealId && /^[0-9]{1,20}$/.test(previewDealId)
+          ? previewAttachSummary(previewDealId, staged?.metrics ?? null)
+          : null;
 
       return res.json({
         ok: true,
         candidates,
+        boards,
         records: listPrintFileRecords(),
         includeAttached,
+        lastAttachedDealId: boards[0]?.dealId ?? null,
+        attachPreview,
         resin: resinProfileView(),
       });
     } catch (error) {
@@ -723,6 +754,99 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           error instanceof Error
             ? error.message
             : "Could not attach CTB production metrics to the Print Order",
+      });
+    }
+  });
+
+  /** Detach one plate and rebuild (or clear) HubSpot rolling totals. */
+  app.post("/api/prints/detach", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = detachPrintFileSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+
+    const existing = getPrintFileRecord(parsed.data.recordId);
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: "That plate record was not found" });
+    }
+
+    try {
+      const remaining = buildPrintFileOrderSummaryFromRecords(existing.hubspotDealId, {
+        excludeRecordId: existing.id,
+      });
+      if (remaining) {
+        await patchDealPrintFileMetrics(
+          existing.hubspotDealId,
+          remaining,
+          new Date().toISOString(),
+        );
+      } else {
+        await clearDealPrintFileMetrics(existing.hubspotDealId);
+      }
+
+      const removed = deletePrintFileRecord(existing.id);
+      return res.json({
+        ok: true,
+        removed: removed ?? existing,
+        summary: remaining,
+        remainingPlateCount: remaining?.plateCount ?? 0,
+        message: remaining
+          ? `Plate detached. HubSpot totals rebuilt for ${remaining.plateCount} remaining plate${remaining.plateCount === 1 ? "" : "s"}.`
+          : "Last plate detached. HubSpot print planning fields were cleared.",
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not update HubSpot after detaching the plate",
+      });
+    }
+  });
+
+  /**
+   * Explicit confirm required. Copies the estimated resin cost into
+   * print_material_cost. Never runs from attach/analyze.
+   */
+  app.post("/api/prints/seed-material-cost", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = seedMaterialCostSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+
+    const summary = buildPrintFileOrderSummaryFromRecords(parsed.data.dealId);
+    if (!summary || summary.totalResinCost === null || summary.totalResinCost <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "This order has no estimated resin cost to seed. Attach CTB plates with a cost estimate first.",
+      });
+    }
+
+    try {
+      const result = await seedDealMaterialCostFromEstimate(
+        parsed.data.dealId,
+        summary.totalResinCost,
+        { overwrite: parsed.data.overwriteExisting },
+      );
+      return res.json({
+        ok: true,
+        ...result,
+        estimatedCost: summary.totalResinCost,
+        plateCount: summary.plateCount,
+        message: `print_material_cost set to $${result.writtenValue.toFixed(2)} from the CTB estimate (${summary.plateCount} plate${summary.plateCount === 1 ? "" : "s"}).`,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not seed print_material_cost on the Print Order",
       });
     }
   });

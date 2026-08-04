@@ -4,6 +4,7 @@ import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
 export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
+export const PERFORMANCE_COST_VARIANCE_PERCENT = 25;
 const ATTENTION_LIMIT = 8;
 
 type QueueCounts = {
@@ -155,6 +156,22 @@ export function buildPerformanceSnapshot(input: {
     if (closed) continue;
     activeOrders += 1;
 
+    const plateCountRaw = props.print_plate_count;
+    const plateCount =
+      plateCountRaw != null && String(plateCountRaw).trim() !== ""
+        ? Number(plateCountRaw)
+        : null;
+    const hasPlates = plateCount != null && Number.isFinite(plateCount) && plateCount > 0;
+    const estimatedResin =
+      props.print_estimated_resin_cost != null &&
+      String(props.print_estimated_resin_cost).trim() !== ""
+        ? Number(props.print_estimated_resin_cost)
+        : null;
+    const materialCost =
+      props.print_material_cost != null && String(props.print_material_cost).trim() !== ""
+        ? Number(props.print_material_cost)
+        : null;
+
     if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
       attention.push({
         priority: calculation.marginPercentage < 20 ? 1 : 2,
@@ -166,6 +183,29 @@ export function buildPerformanceSnapshot(input: {
         severity: calculation.marginPercentage < 20 ? "bad" : "warn",
       });
       continue;
+    }
+
+    if (
+      estimatedResin != null &&
+      Number.isFinite(estimatedResin) &&
+      estimatedResin > 0 &&
+      materialCost != null &&
+      Number.isFinite(materialCost) &&
+      materialCost > 0
+    ) {
+      const variancePct = (Math.abs(materialCost - estimatedResin) / estimatedResin) * 100;
+      if (variancePct >= PERFORMANCE_COST_VARIANCE_PERCENT) {
+        attention.push({
+          priority: 2.5,
+          dealId: deal.id,
+          dealName,
+          stage: displayStage,
+          issue: "Material cost vs CTB estimate",
+          detail: `${formatMoney(materialCost)} actual vs ${formatMoney(estimatedResin)} estimate (${variancePct.toFixed(0)}% apart)`,
+          severity: variancePct >= 50 ? "bad" : "warn",
+        });
+        continue;
+      }
     }
 
     if (modifiedAt && modifiedAt < staleBefore) {
@@ -190,6 +230,19 @@ export function buildPerformanceSnapshot(input: {
         issue: "Cost details incomplete",
         detail: "Add material, labor, packaging, and shipping costs as they become known",
         severity: "neutral",
+      });
+      continue;
+    }
+
+    if (!hasPlates && calculation.amount > 0) {
+      attention.push({
+        priority: 5,
+        dealId: deal.id,
+        dealName,
+        stage: displayStage,
+        issue: "No CTB plates attached",
+        detail: "Attach sliced plates in Print files so HubSpot has time and resin estimates",
+        severity: "warn",
       });
     }
   }

@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS print_file_records (
   retract_speed_mm_per_min TEXT,
   resolution_x INTEGER,
   resolution_y INTEGER,
+  build_volume_x_mm TEXT,
+  build_volume_y_mm TEXT,
+  build_volume_z_mm TEXT,
   printer_profile TEXT,
   hubspot_synced_at TEXT NOT NULL,
   attached_at TEXT NOT NULL
@@ -164,6 +167,9 @@ const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["bottom_lift_distance_mm", "TEXT"],
   ["bottom_lift_speed_mm_per_min", "TEXT"],
   ["retract_speed_mm_per_min", "TEXT"],
+  ["build_volume_x_mm", "TEXT"],
+  ["build_volume_y_mm", "TEXT"],
+  ["build_volume_z_mm", "TEXT"],
 ];
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
