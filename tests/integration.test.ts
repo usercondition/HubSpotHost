@@ -23,6 +23,8 @@ let mockCalls: MockCall[] = [];
 let mockBase = "";
 let app: http.Server;
 let appBase = "";
+const initialNodeEnv = process.env.NODE_ENV;
+const initialInternalAdmin = process.env.ENABLE_INTERNAL_ADMIN;
 
 const DEAL_PROPS: Record<string, string> = {
   amount: "150",
@@ -41,6 +43,8 @@ function listen(server: http.Server): Promise<number> {
 }
 
 before(async () => {
+  process.env.NODE_ENV = "test";
+  process.env.ENABLE_INTERNAL_ADMIN = "true";
   mock = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -79,6 +83,10 @@ before(async () => {
 after(() => {
   mock.close();
   app.close();
+  if (initialNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = initialNodeEnv;
+  if (initialInternalAdmin === undefined) delete process.env.ENABLE_INTERNAL_ADMIN;
+  else process.env.ENABLE_INTERNAL_ADMIN = initialInternalAdmin;
 });
 
 function reset() {
@@ -291,7 +299,9 @@ test("health reports dry-run readiness and unconfigured signing", async () => {
 
 test("public production mode fails closed and protects control endpoints", async () => {
   const prior = process.env.NODE_ENV;
+  const priorAdmin = process.env.ENABLE_INTERNAL_ADMIN;
   process.env.NODE_ENV = "production";
+  process.env.ENABLE_INTERNAL_ADMIN = "true";
   delete process.env.HUBSPOT_WEBHOOK_SECRET;
   try {
     const webhook = await fetch(`${appBase}/api/webhooks/hubspot`, {
@@ -309,9 +319,11 @@ test("public production mode fails closed and protects control endpoints", async
 
     const health = await fetch(`${appBase}/api/health`);
     const healthBody = await health.json();
-    assert.equal(healthBody.admin.publicControlsEnabled, false);
+    assert.equal(healthBody.admin.internalControlsEnabled, false);
   } finally {
     if (prior === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = prior;
+    if (priorAdmin === undefined) delete process.env.ENABLE_INTERNAL_ADMIN;
+    else process.env.ENABLE_INTERNAL_ADMIN = priorAdmin;
   }
 });

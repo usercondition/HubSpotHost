@@ -66,6 +66,38 @@ Queue tabs: **Awaiting client details**, **Pending review**, **Approved / create
 
 Order links live in a SQLite file (`data.db` in the project root, overridable with `ORDER_LINKS_DB_FILE`). It is created on first use, is git-ignored, and is local to whichever host runs the process. It is not replicated or backed up: a fresh deployment starts with an empty queue, and a host that loses its filesystem loses pending intakes. Copy or back up `data.db` before redeploying if a queue is in flight, and move to managed storage if this becomes business-critical.
 
+### Railway deployment: durable pilot
+
+The repository includes `railway.toml` so Railway can build the app with `npm ci && npm run build`, start it with `npm run start`, and use `/api/health` as the deployment health check.
+
+For the initial single-service setup:
+
+1. Connect the GitHub repository to a Railway service and deploy the `main` branch.
+2. Add one Railway Volume mounted at `/data`.
+3. Set these Railway service variables:
+
+   ```text
+   NODE_ENV=production
+   DRY_RUN=false
+   ALLOW_HUBSPOT_WRITES=true
+   ORDER_LINKS_DB_FILE=/data/data.db
+   AUDIT_LOG_FILE=/data/audit-log.json
+   PAID_ORDER_INTAKE_ACCESS_CODE_HASH=<SHA-256 hash of your owner code>
+   HUBSPOT_API_BASE=https://api.hubapi.com
+   HUBSPOT_ACCESS_TOKEN=<HubSpot private-app token>
+   HUBSPOT_WEBHOOK_SECRET=<HubSpot private-app client secret>
+   PUBLIC_BASE_URL=https://<your-railway-domain>
+   ```
+
+4. Keep `ENABLE_INTERNAL_ADMIN` unset. It deliberately leaves manual recalculation and local audit endpoints unavailable to public visitors.
+5. Add the Railway HTTPS URL plus `/api/webhooks/hubspot` as the HubSpot webhook target, then send a dry-run test before relying on automatic updates.
+
+This works well for a single service and keeps the current SQLite queue across routine deployments when the `/data` volume is mounted. Railway Volumes are persistent but a service with a volume cannot scale through replicas and has a brief deployment interruption, so the longer-term production design is to migrate the intake queue and customer records to Railway PostgreSQL.
+
+### Durable production direction
+
+Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. The app can then use a returning customer's verified email or Marketplace username to prefill the next private order link, asking them to confirm rather than retype their shipping information. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.
+
 ## Paid Order Intake (conversation route)
 
 The **Conversation intake** screen (nav: *Conversation intake*) is the earlier payment-confirmed, review-first route for Facebook Marketplace orders. It is deliberately not a lead-capture tool:
@@ -85,7 +117,7 @@ The pasted conversation is processed to produce the draft and is not written int
 The public route is protected by a dedicated **Paid Order Intake access code**. It is required for both analysis and creation:
 
 - The server stores only a SHA-256 hash of the code, never its plain value.
-- Set `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` only when replacing the application’s default code.
+- Set `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` as a protected deployment variable. The server has no default owner code and fails closed when the hash is missing.
 - The browser does not retain the access code.
 - The server requires an explicit `paymentConfirmed: true` value, a customer name or Marketplace username, an item description, and a paid amount greater than zero before it can call HubSpot.
 - A final browser confirmation is required immediately before the write request.
@@ -129,7 +161,9 @@ Copy `.env.example` and keep `.env` out of source control.
 | `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
-| `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Optional override | SHA-256 hash of the owner access code used by both intake routes and all Order links owner APIs. The server never stores the plain code. |
+| `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Required in any live deployment | SHA-256 hash of the owner access code used by both intake routes and all Order links owner APIs. The server never stores the plain code and the app fails closed when this is absent. |
+| `HUBSPOT_CALLBACK_TOKEN_SHA256` | Optional | SHA-256 hash of a high-entropy URL callback token when using that optional webhook fallback. If omitted, unsigned webhook deliveries are rejected; HubSpot signature validation remains available through the webhook secret. |
+| `ENABLE_INTERNAL_ADMIN` | Local development only | Set to `true` only alongside `NODE_ENV=development` or `NODE_ENV=test` to enable manual recalculation and local audit endpoints. These endpoints stay disabled otherwise. |
 | `ORDER_LINKS_DB_FILE` | Optional | Path to the SQLite file holding order links. Defaults to `data.db` in the working directory. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
 

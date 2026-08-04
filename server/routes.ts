@@ -47,11 +47,17 @@ import {
 } from "../shared/schema";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
-const DEFAULT_INTAKE_ACCESS_CODE_HASH = "9c8d6cb9a08c8026d4009c956faac43be8eff7b959b5cc13e7eda5d475b0e47b";
-const INTAKE_BUILD_ID = "intake-auth-v5-20260803";
+const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
 
 function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === "production";
+}
+
+function internalAdminEnabled(): boolean {
+  return (
+    (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") &&
+    process.env.ENABLE_INTERNAL_ADMIN === "true"
+  );
 }
 
 /** `?dryRun=false` is the only way to ask for a live write. Default: dry run. */
@@ -95,7 +101,7 @@ function firstQueryValue(value: unknown): string | undefined {
 }
 
 function intakeAccessCodeHash(): string {
-  return process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim() || DEFAULT_INTAKE_ACCESS_CODE_HASH;
+  return process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim() || "";
 }
 
 function normalizedAccessCode(value: string): string {
@@ -342,12 +348,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
+        callbackToken: process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim()
+          ? "configured"
+          : "not-configured",
         supportedVersions: ["v1", "v3"],
         path: WEBHOOK_PATH,
         latestDelivery: getLatestWebhookDiagnostic(),
       },
       admin: {
-        publicControlsEnabled: !isProductionDeployment(),
+        internalControlsEnabled: internalAdminEnabled(),
       },
       properties: {
         inputs: [...INPUT_PROPERTIES],
@@ -651,10 +660,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/recalculate/:dealId", async (req: Request, res: Response) => {
-    if (isProductionDeployment()) {
+    if (!internalAdminEnabled()) {
       return res.status(403).json({
         ok: false,
-        error: "manual recalculation is disabled on the public service",
+        error: "manual recalculation is disabled outside explicitly enabled local development",
       });
     }
     const dealId = String(req.params.dealId || "").trim();
@@ -676,10 +685,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/calculations", (req: Request, res: Response) => {
-    if (isProductionDeployment()) {
+    if (!internalAdminEnabled()) {
       return res.status(403).json({
         ok: false,
-        error: "audit entries are not exposed by the public service",
+        error: "audit entries are disabled outside explicitly enabled local development",
       });
     }
     const limitParam = Number(req.query.limit);
