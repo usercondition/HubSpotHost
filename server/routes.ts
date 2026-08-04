@@ -30,6 +30,7 @@ import {
   patchDealPrintFileMetrics,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import { answerTrackerQuestion } from "./lib/tracker-assistant";
 import { CtbParseError } from "./lib/ctb";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
@@ -601,6 +602,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(status).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
+      });
+    }
+  });
+
+  /**
+   * Owner-only, read-only tracker assistant. Uses the same live snapshot as
+   * Performance / Today’s work. Never writes to HubSpot.
+   */
+  app.post("/api/tracker-assistant", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const question =
+      req.body && typeof req.body === "object" && typeof (req.body as { question?: unknown }).question === "string"
+        ? String((req.body as { question: string }).question)
+        : "";
+
+    try {
+      const [deals, stages, hubspotPortalId] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
+      ]);
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        attachedPrintDealIds: attachedPrintFileDealIds(),
+        hubspotPortalId,
+      });
+      const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({
+        id: link.id,
+        internalLabel: link.internalLabel,
+        itemDescription: link.itemDescription,
+        agreedAmount: link.agreedAmount,
+        expiresAt: link.expiresAt,
+        status: link.status,
+      }));
+      const pendingLinks = listOrderLinks("pending_review").map((link) => ({
+        id: link.id,
+        internalLabel: link.internalLabel,
+        itemDescription: link.itemDescription,
+        agreedAmount: link.agreedAmount,
+        clientFullName: link.clientFullName,
+        status: link.status,
+      }));
+      const answer = await answerTrackerQuestion(question, {
+        snapshot,
+        awaitingLinks,
+        pendingLinks,
+      });
+      return res.json(answer);
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not ask the tracker",
       });
     }
   });
