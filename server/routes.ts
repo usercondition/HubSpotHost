@@ -81,6 +81,15 @@ function intakeAccessCode(): string | null {
   );
 }
 
+function normalizedAccessCode(value: string): string {
+  const withoutBearer = value.trim().replace(/^Bearer\s+/i, "");
+  const hasMatchingQuotes =
+    withoutBearer.length >= 2 &&
+    ((withoutBearer.startsWith("\"") && withoutBearer.endsWith("\"")) ||
+      (withoutBearer.startsWith("'") && withoutBearer.endsWith("'")));
+  return hasMatchingQuotes ? withoutBearer.slice(1, -1).trim() : withoutBearer;
+}
+
 function timingSafeMatch(actual: string, expected: string): boolean {
   const a = Buffer.from(actual, "utf8");
   const b = Buffer.from(expected, "utf8");
@@ -90,8 +99,9 @@ function timingSafeMatch(actual: string, expected: string): boolean {
 function intakeAuthorized(req: Request): boolean {
   const expected = intakeAccessCode();
   if (!expected) return false;
-  const provided = req.get("x-paid-order-access-code")?.trim() ?? "";
-  return provided.length > 0 && timingSafeMatch(provided, expected);
+  const provided = normalizedAccessCode(req.get("x-paid-order-access-code") ?? "");
+  const normalizedExpected = normalizedAccessCode(expected);
+  return provided.length > 0 && timingSafeMatch(provided, normalizedExpected);
 }
 
 function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
