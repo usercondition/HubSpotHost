@@ -27,6 +27,7 @@ import {
 import { createPaidOrder } from "./lib/paid-orders";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
+const DEFAULT_INTAKE_ACCESS_CODE_HASH = "9c8d6cb9a08c8026d4009c956faac43be8eff7b959b5cc13e7eda5d475b0e47b";
 
 function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === "production";
@@ -72,15 +73,8 @@ function firstQueryValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function intakeAccessCode(): string | null {
-  return (
-    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V4_LOCAL_TOKEN?.trim() ||
-    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V3_LOCAL_TOKEN?.trim() ||
-    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V2_LOCAL_TOKEN?.trim() ||
-    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN?.trim() ||
-    process.env.PAID_ORDER_INTAKE_ACCESS_CODE?.trim() ||
-    null
-  );
+function intakeAccessCodeHash(): string {
+  return process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim() || DEFAULT_INTAKE_ACCESS_CODE_HASH;
 }
 
 function normalizedAccessCode(value: string): string {
@@ -98,6 +92,10 @@ function timingSafeMatch(actual: string, expected: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function hashAccessCode(value: string): string {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 function providedIntakeAccessCode(req: Request): string {
   const headerValue = req.get("x-paid-order-access-code") ?? "";
   const bodyValue =
@@ -108,12 +106,11 @@ function providedIntakeAccessCode(req: Request): string {
 }
 
 function intakeAuthorizationStatus(req: Request): "authorized" | "not-configured" | "missing" | "mismatch" {
-  const expected = intakeAccessCode();
+  const expected = intakeAccessCodeHash();
   if (!expected) return "not-configured";
   const provided = providedIntakeAccessCode(req);
   if (!provided) return "missing";
-  const normalizedExpected = normalizedAccessCode(expected);
-  return timingSafeMatch(provided, normalizedExpected) ? "authorized" : "mismatch";
+  return timingSafeMatch(hashAccessCode(provided), expected) ? "authorized" : "mismatch";
 }
 
 function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
@@ -239,7 +236,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         tokenSource: config.tokenSource,
       },
       paidOrderIntake: {
-        accessCodeConfigured: Boolean(intakeAccessCode()),
+        accessCodeConfigured: Boolean(intakeAccessCodeHash()),
       },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
