@@ -591,7 +591,7 @@ export default function Prints() {
                     {analyze.isPending ? "Reading slice data…" : "Drop a .ctb file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer settings. Larger files may take a moment.
+                    Extracts time, resin use, cost estimate, exposure, and printer settings. Mega 8K plates can be large; only header data is read.
                   </span>
                 </button>
                 <Button

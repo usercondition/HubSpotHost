@@ -1,6 +1,9 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import multer from "multer";
 import {
   INPUT_PROPERTIES,
@@ -35,7 +38,7 @@ import {
   getStagedPrintFile,
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
-  stagePrintFile,
+  stagePrintFileFromPath,
 } from "./lib/print-files";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import {
@@ -78,9 +81,22 @@ import {
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
 const printFileUpload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => {
+      const extension = path.extname(file.originalname || "").toLowerCase() || ".ctb";
+      cb(null, `ctb-upload-${crypto.randomUUID()}${extension}`);
+    },
+  }),
   limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
 });
+
+function removeTempUpload(filePath: string | undefined): void {
+  if (!filePath) return;
+  fs.unlink(filePath, () => {
+    /* best-effort cleanup */
+  });
+}
 
 function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === "production";
@@ -617,15 +633,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     printFileUpload.single("file"),
     (req: Request, res: Response) => {
       const file = req.file;
-      if (!file) {
+      if (!file?.path) {
         return res.status(400).json({ ok: false, error: "Choose one Chitubox .ctb slice file to analyze" });
       }
       if (!/\.ctb$/i.test(file.originalname)) {
+        removeTempUpload(file.path);
         return res.status(400).json({ ok: false, error: "Only Chitubox .ctb slice files can be analyzed here" });
       }
 
       try {
-        const staged = stagePrintFile(file.originalname, file.buffer);
+        const staged = stagePrintFileFromPath(file.originalname, file.path);
         return res.status(201).json({ ok: true, ...staged });
       } catch (error) {
         const message =
@@ -633,6 +650,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             ? error.message
             : "The CTB file could not be read. Re-export the slice file from Chitubox and try again.";
         return res.status(400).json({ ok: false, error: message });
+      } finally {
+        removeTempUpload(file.path);
       }
     },
   );

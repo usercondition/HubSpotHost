@@ -16,7 +16,7 @@ import {
   type PrintFileRecord,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
-import { parseCtbFile } from "./ctb";
+import { parseCtbFile, parseCtbFileFromPath } from "./ctb";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
 export const PRINT_FILE_ANALYSIS_TTL_MINUTES = 20;
@@ -55,7 +55,29 @@ export function stagePrintFile(fileName: string, buffer: Buffer): {
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFile(fileName, buffer));
+  return stageParsedPrintFile(fileName, enrichPrintFileMetricsWithResinCost(parseCtbFile(fileName, buffer)));
+}
+
+/** Stage a CTB that was uploaded to a temporary disk path (preferred for large plates). */
+export function stagePrintFileFromPath(fileName: string, filePath: string): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
+  return stageParsedPrintFile(
+    fileName,
+    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPath(fileName, filePath)),
+  );
+}
+
+function stageParsedPrintFile(
+  _fileName: string,
+  metrics: PrintFileMetrics,
+): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
   const id = crypto.randomUUID();
   const expiry = expiresAt();
   getDb()

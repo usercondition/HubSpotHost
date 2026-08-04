@@ -1,11 +1,13 @@
 const MEBIBYTE = 1024 * 1024;
 
-export const DEFAULT_PRINT_FILE_MAX_MB = 512;
+/** Default allows Mega/Mighty 8K plates without a custom Railway variable. */
+export const DEFAULT_PRINT_FILE_MAX_MB = 2048;
 export const MIN_PRINT_FILE_MAX_MB = 64;
-export const MAX_PRINT_FILE_MAX_MB = 1024;
+/** Hard ceiling. Uploads are stored on disk temporarily and only header ranges are read. */
+export const MAX_PRINT_FILE_MAX_MB = 4096;
 
 /**
- * CTB uploads are held in memory only while their metadata is read. Keep the
+ * CTB uploads land on disk temporarily while metadata ranges are read. Keep the
  * upper bound configurable without allowing a malformed Railway variable to
  * unexpectedly make the service accept an unsafe upload size.
  */

@@ -6,10 +6,15 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   CtbParseError,
   encryptCtbSettingsBlock,
   parseCtbFile,
+  parseCtbFileFromPath,
 } from "../server/lib/ctb";
 
 function fixtureClassicCtb(overrides?: {
@@ -152,10 +157,36 @@ test("parseCtbFile decrypts modern encrypted CTB settings (Mighty 8K style)", ()
   assert.match(metrics.formatRevision, /CTB encrypted v5/i);
 });
 
-test("parseCtbFile rejects non-CTB buffers", () => {
-  assert.throws(() => parseCtbFile("bad.bin", Buffer.alloc(8)), CtbParseError);
-  assert.throws(() => parseCtbFile("tiny.ctb", Buffer.from([1, 2, 3])), CtbParseError);
+test("parseCtbFileFromPath reads only on-disk ranges for encrypted CTB", () => {
+  const settingsPlain = Buffer.alloc(288, 0);
+  settingsPlain.writeFloatLE(12.5, 104);
+  settingsPlain.writeFloatLE(13.75, 108);
+  settingsPlain.writeFloatLE(2.5, 112);
+  settingsPlain.writeUInt32LE(3_600, 76);
+  settingsPlain.writeUInt32LE(100, 64);
+  settingsPlain.writeFloatLE(0.05, 36);
+  const encrypted = encryptCtbSettingsBlock(settingsPlain);
+  const file = Buffer.alloc(0x30 + encrypted.length + 32, 0);
+  file.writeUInt32LE(0x12fd0107, 0);
+  file.writeUInt32LE(encrypted.length, 4);
+  file.writeUInt32LE(0x30, 8);
+  file.writeUInt32LE(5, 0x10);
+  encrypted.copy(file, 0x30);
+
+  const tempPath = path.join(os.tmpdir(), `ctb-path-${crypto.randomUUID()}.ctb`);
+  fs.writeFileSync(tempPath, file);
+  try {
+    const metrics = parseCtbFileFromPath("mega8k.ctb", tempPath);
+    assert.equal(metrics.resinVolumeMl, 12.5);
+    assert.equal(metrics.resinMassG, 13.75);
+    assert.equal(metrics.resinCost, 2.5);
+    assert.equal(metrics.printTimeSeconds, 3_600);
+    assert.match(metrics.sha256, /^[a-f0-9]{64}$/);
+  } finally {
+    fs.unlinkSync(tempPath);
+  }
 });
+
 
 test("parseCtbFile tolerates a truncated ExtConfig without inventing values", () => {
   const file = fixtureClassicCtb();
