@@ -38,6 +38,11 @@ import {
   stagePrintFile,
 } from "./lib/print-files";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
+import {
+  refreshResinPriceFromAmazon,
+  resinProfileView,
+  upsertActiveResinProfile,
+} from "./lib/resin-pricing";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 import {
   analyzeMarketplaceConversation,
@@ -63,6 +68,7 @@ import {
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  upsertResinProfileSchema,
   reviewEditSchema,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
@@ -471,6 +477,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
+   * Active resin used to estimate plate cost when a CTB has no slicer price.
+   * Amazon refresh is best-effort and never required for manual pricing.
+   */
+  app.get("/api/resin-profile", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, ...resinProfileView() });
+  });
+
+  app.put("/api/resin-profile", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = upsertResinProfileSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    try {
+      const profile = upsertActiveResinProfile(parsed.data);
+      return res.json({ ok: true, ...resinProfileView(profile) });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not save the resin profile",
+      });
+    }
+  });
+
+  app.post("/api/resin-profile/refresh-amazon", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const refreshed = await refreshResinPriceFromAmazon();
+      return res.json({
+        ok: true,
+        cached: refreshed.cached,
+        price: refreshed.price,
+        ...resinProfileView(refreshed.profile),
+      });
+    } catch (error) {
+      return res.status(502).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Amazon live price could not be refreshed. Enter the bottle price manually.",
+        ...resinProfileView(),
+      });
+    }
+  });
+
+  /**
    * Owner-only, read-only performance summary. The API token remains server
    * side and this route deliberately performs no HubSpot writes.
    */
@@ -538,6 +592,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         candidates,
         records: listPrintFileRecords(),
         includeAttached,
+        resin: resinProfileView(),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;

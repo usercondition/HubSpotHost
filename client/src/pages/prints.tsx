@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -31,13 +31,33 @@ import type {
   PrintFileMetrics,
   PrintFileOrderSummary,
   PrintFileRecord,
+  ResinProfile,
 } from "@shared/schema";
+
+interface ResinRateView {
+  source: "amazon" | "supplies" | "manual";
+  bottlePriceUsd: number;
+  bottleMassG: number;
+  bottleVolumeMl: number | null;
+  label: string;
+  usdPerGram: number | null;
+  usdPerMl: number | null;
+}
+
+interface ResinProfileResponse {
+  profile: ResinProfile;
+  rate: ResinRateView | null;
+  suppliesRate: ResinRateView | null;
+  amazonUrl: string;
+  canRefreshAmazon: boolean;
+}
 
 interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
   records: PrintFileRecord[];
   includeAttached: boolean;
+  resin?: ResinProfileResponse;
 }
 
 interface StagedPrintFile {
@@ -136,6 +156,12 @@ function UnlockPrints({
   );
 }
 
+function resinCostHint(metrics: PrintFileMetrics): string {
+  if (metrics.resinCostLabel) return metrics.resinCostLabel;
+  if (metrics.resinCostSource === "ctb") return "From Chitubox resin price setting — not actual deal cost";
+  return "No resin price in the CTB and no active bottle rate yet";
+}
+
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   return (
     <div className="space-y-4">
@@ -146,7 +172,7 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
         <StatCard
           label="Estimated resin cost"
           value={formatMoney(metrics.resinCost)}
-          hint="From Chitubox resin price setting — not actual deal cost"
+          hint={resinCostHint(metrics)}
           icon={CircleDollarSign}
           testId="metric-resin-cost"
         />
@@ -221,6 +247,10 @@ export default function Prints() {
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
   const [dealId, setDealId] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
+  const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
+  const [resinMassG, setResinMassG] = useState("1000");
+  const [resinPrice, setResinPrice] = useState("");
   const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
 
   const prints = useQuery<PrintsResponse>({
@@ -234,6 +264,68 @@ export default function Prints() {
         { headers },
       );
       return (await response.json()) as PrintsResponse;
+    },
+  });
+
+  const resin = prints.data?.resin;
+  useEffect(() => {
+    if (!resin?.profile) return;
+    setResinName(resin.profile.name);
+    setResinAsin(resin.profile.amazonAsin || "B0D6Y6JV42");
+    setResinMassG(resin.profile.bottleMassG || "1000");
+    setResinPrice(resin.profile.bottlePriceUsd === "0" ? "" : resin.profile.bottlePriceUsd);
+  }, [resin?.profile?.id, resin?.profile?.updatedAt, resin?.profile?.bottlePriceUsd, resin?.profile?.name, resin?.profile?.amazonAsin, resin?.profile?.bottleMassG]);
+
+  const saveResin = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest(
+        "PUT",
+        "/api/resin-profile",
+        {
+          name: resinName,
+          amazonAsin: resinAsin,
+          amazonUrl: resinAsin ? `https://www.amazon.com/dp/${resinAsin.trim()}` : "",
+          bottleMassG: Number(resinMassG) || 1000,
+          bottleVolumeMl: null,
+          bottlePriceUsd: resinPrice || "0",
+          notes: "",
+        },
+        { headers },
+      );
+      return (await response.json()) as { ok: true } & ResinProfileResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      toast({ title: "Resin profile saved", description: "New plate estimates will use this bottle rate when the CTB has no slicer price." });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Resin profile was not saved",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const refreshAmazon = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/resin-profile/refresh-amazon", {}, { headers });
+      return (await response.json()) as { ok: true; cached: boolean; price: number } & ResinProfileResponse;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      setResinPrice(String(data.price));
+      toast({
+        title: data.cached ? "Using recent Amazon price" : "Amazon price refreshed",
+        description: `Bottle price set to $${Number(data.price).toFixed(2)}. Live Amazon prices can change or fail; verify before relying on them.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Amazon price could not be refreshed",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 220),
+        variant: "destructive",
+      });
     },
   });
 
@@ -396,6 +488,66 @@ export default function Prints() {
                 </div>
               </div>
             </section>
+
+            <Panel
+              title="Default resin rate"
+              description="Used only when a CTB has no Chitubox resin price. Prefers your bottle profile, then recent Supplies resin purchases."
+            >
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="resin-name">Resin</Label>
+                  <Input id="resin-name" value={resinName} onChange={(event) => setResinName(event.target.value)} data-testid="input-resin-name" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resin-asin">Amazon ASIN</Label>
+                  <Input id="resin-asin" value={resinAsin} onChange={(event) => setResinAsin(event.target.value)} data-testid="input-resin-asin" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resin-mass">Bottle mass (g)</Label>
+                  <Input id="resin-mass" inputMode="decimal" value={resinMassG} onChange={(event) => setResinMassG(event.target.value)} data-testid="input-resin-mass" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resin-price">Bottle price (USD)</Label>
+                  <Input id="resin-price" inputMode="decimal" value={resinPrice} onChange={(event) => setResinPrice(event.target.value)} placeholder="35.99" data-testid="input-resin-price" />
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button type="button" onClick={() => saveResin.mutate()} disabled={saveResin.isPending} data-testid="button-save-resin-profile">
+                  {saveResin.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}
+                  Save resin rate
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => refreshAmazon.mutate()}
+                  disabled={refreshAmazon.isPending || !resinAsin.trim()}
+                  data-testid="button-refresh-amazon-resin"
+                >
+                  {refreshAmazon.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Refresh Amazon price
+                </Button>
+                {resin?.amazonUrl ? (
+                  <a
+                    href={resin.amazonUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary underline-offset-2 hover:underline"
+                    data-testid="link-amazon-resin"
+                  >
+                    Open Amazon listing
+                  </a>
+                ) : null}
+              </div>
+              <p className="mt-3 text-xs leading-5 text-muted-foreground" data-testid="text-resin-rate-status">
+                {resin?.rate
+                  ? `Active estimate rate: ${resin.rate.label}`
+                  : resin?.suppliesRate
+                    ? `No bottle price yet. Supplies fallback ready: ${resin.suppliesRate.label}`
+                    : "Save a bottle price or refresh Amazon to estimate plate cost when Chitubox leaves resin cost blank."}
+                {" "}
+                Amazon live price is best-effort and may be blocked; manual price always works.
+              </p>
+            </Panel>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
               <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb file. The raw file is read in memory and then discarded.">
