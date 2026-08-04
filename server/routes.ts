@@ -55,8 +55,8 @@ import {
 } from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import {
-  isPdfInvoiceFileName,
-  parseSupplyInvoicePdf,
+  isSupportedSupplyReceiptFileName,
+  parseSupplyReceipt,
   SUPPLY_INVOICE_MAX_BYTES,
   SUPPLY_INVOICE_MAX_LABEL,
 } from "./lib/supply-invoice";
@@ -572,8 +572,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
-   * Prefill the supply form from a PDF invoice. Does not create a purchase —
-   * the owner still reviews and saves.
+   * Prefill the supply form from a receipt/invoice file (PDF, CSV, Excel,
+   * text, HTML, or photo). Does not create a purchase — the owner still reviews
+   * and saves.
    */
   app.post(
     "/api/supplies/parse-invoice",
@@ -587,24 +588,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!file?.path) {
         return res.status(400).json({
           ok: false,
-          error: "Drop one PDF invoice to extract receipt fields",
+          error: "Drop one receipt or invoice file to extract purchase fields",
         });
       }
-      if (!isPdfInvoiceFileName(file.originalname)) {
+      if (!isSupportedSupplyReceiptFileName(file.originalname)) {
         removeTempUpload(file.path);
         return res.status(400).json({
           ok: false,
-          error: "Only PDF invoices can be extracted here",
+          error:
+            "Use a PDF, CSV, Excel, text, HTML, or photo receipt so nomenclature, cost, and vendor can be extracted",
         });
       }
 
       try {
-        const parsed = await parseSupplyInvoicePdf(file.path, file.originalname);
+        const parsed = await parseSupplyReceipt(file.path, file.originalname);
         return res.json({
           ok: true,
           fields: parsed.fields,
           warnings: parsed.warnings,
           pageCount: parsed.pageCount,
+          format: parsed.format,
           maxUploadLabel: SUPPLY_INVOICE_MAX_LABEL,
         });
       } catch (error) {
@@ -613,7 +616,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           error:
             error instanceof Error
               ? error.message
-              : "The invoice PDF could not be read. Enter the receipt manually.",
+              : "The receipt could not be read. Enter the purchase manually.",
         });
       } finally {
         removeTempUpload(file.path);

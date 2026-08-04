@@ -100,7 +100,7 @@ export function createSupplyPurchase(input: CreateSupplyPurchaseInput): SupplyPu
   return getDb()
     .insert(supplyPurchases)
     .values({
-      source: input.source || "Amazon",
+      source: input.source?.trim() || "Other",
       orderReference: input.orderReference ?? "",
       itemName: summary.itemName || input.itemName,
       category: input.category ?? summary.category,

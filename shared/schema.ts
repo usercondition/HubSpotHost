@@ -965,7 +965,7 @@ const supplyLineItemSchema = z.object({
 
 export const createSupplyPurchaseSchema = z
   .object({
-    source: trimmed(80).default("Amazon"),
+    source: trimmed(80).default(""),
     orderReference: trimmed(120).default(""),
     itemName: trimmed(400).default(""),
     category: z.enum(SUPPLY_CATEGORIES).optional(),
