@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import {
   AlertTriangle,
   CalendarClock,
@@ -28,6 +29,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useOwnerSession } from "@/hooks/use-owner-session";
+import { printsDealHref } from "@/lib/workflow";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
@@ -85,6 +88,29 @@ function formatDate(value: string | null): string {
   });
 }
 
+
+function expiryCue(expiresAt: string): { label: string; urgent: boolean } {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return { label: `expires ${formatDate(expiresAt)}`, urgent: false };
+  if (ms < 0) return { label: "Expired", urgent: true };
+  const hours = Math.ceil(ms / 3_600_000);
+  if (hours <= 48) {
+    const label = hours <= 24 ? (hours <= 1 ? "Expires within an hour" : `Expires in ${hours}h`) : "Expires within 2 days";
+    return { label, urgent: true };
+  }
+  return { label: `expires ${formatDate(expiresAt)}`, urgent: false };
+}
+
+function marketplaceReminderText(link: {
+  confirmedItem?: string | null;
+  itemDescription: string;
+  agreedAmount: string;
+  expiresAt: string;
+}): string {
+  const item = (link.confirmedItem || link.itemDescription || "your order").trim();
+  return `Hi — quick reminder to finish your order details for ${item} ($${link.agreedAmount}). Please use the secure link I sent earlier before it expires (${formatDate(link.expiresAt)}). Thanks!`;
+}
+
 /** Builds the buyer URL from the page's own location — no secrets in source. */
 function absoluteClientUrl(path: string): string {
   const { origin, pathname } = window.location;
@@ -102,8 +128,8 @@ function absoluteClientUrl(path: string): string {
  */
 export default function OrderLinks() {
   const { toast } = useToast();
-  const [codeDraft, setCodeDraft] = useState("");
-  const [ownerCode, setOwnerCode] = useState("");
+  const [, setLocation] = useLocation();
+  const { ownerCode, codeDraft, setCodeDraft, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
   const [tab, setTab] = useState<OrderIntakeStatus>("pending_review");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [newLinkUrl, setNewLinkUrl] = useState<string | null>(null);
@@ -111,11 +137,9 @@ export default function OrderLinks() {
   const [copied, setCopied] = useState(false);
   const [reviewId, setReviewId] = useState<number | null>(null);
 
-  const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
-
   const queue = useQuery<QueueResponse>({
     queryKey: ["/api/order-links", tab],
-    enabled: ownerCode.length > 0,
+    enabled: isUnlocked,
     // Buyers submit from their own browser, so poll to keep the queue current.
     refetchInterval: 15000,
     queryFn: async () => {
@@ -134,8 +158,7 @@ export default function OrderLinks() {
       return code;
     },
     onSuccess: (code) => {
-      setOwnerCode(code);
-      setCodeDraft("");
+      setSessionUnlocked(code);
       toast({ title: "Owner tools unlocked", description: "Create links and review submitted details." });
     },
     onError: (error: Error) => {
@@ -243,9 +266,9 @@ export default function OrderLinks() {
         actions={
           <>
             <StatusPill
-              tone={ownerCode ? "good" : "neutral"}
-              icon={ownerCode ? Unlock : KeyRound}
-              label={ownerCode ? "Owner tools unlocked" : "Locked"}
+              tone={isUnlocked ? "good" : "neutral"}
+              icon={isUnlocked ? Unlock : KeyRound}
+              label={isUnlocked ? "Owner tools unlocked" : "Locked"}
               testId="status-owner-lock"
             />
             <ThemeToggle />
@@ -254,7 +277,7 @@ export default function OrderLinks() {
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
-        {!ownerCode ? (
+        {!isUnlocked ? (
           <Panel
             title="Unlock owner tools"
             description="The owner code protects link creation and the review queue. Buyers never need it."
@@ -288,8 +311,7 @@ export default function OrderLinks() {
               </Button>
             </form>
             <p className="mt-3 text-xs text-muted-foreground">
-              The code is held in this page's memory only. It is not saved in the browser and is
-              never written to logs.
+              Unlock once for this browser tab — Order links, Print files, Supplies, and Performance share the same session until you reload. The code is never written to storage or logs.
             </p>
           </Panel>
         ) : (
@@ -534,9 +556,9 @@ export default function OrderLinks() {
                             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                               {link.confirmedItem || link.itemDescription}
                             </p>
-                            <p className="numeric mt-1.5 text-xs text-muted-foreground">
+                            <p className={`numeric mt-1.5 text-xs ${!link.submittedAt && expiryCue(link.expiresAt).urgent ? "text-primary" : "text-muted-foreground"}`}>
                               ${link.agreedAmount} · created {formatDate(link.createdAt)} ·{" "}
-                              {link.submittedAt ? `submitted ${formatDate(link.submittedAt)}` : `expires ${formatDate(link.expiresAt)}`}
+                              {link.submittedAt ? `submitted ${formatDate(link.submittedAt)}` : expiryCue(link.expiresAt).label}
                             </p>
                             {link.clientFullName && (
                               <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-client-${link.id}`}>
@@ -551,6 +573,24 @@ export default function OrderLinks() {
                             )}
                           </div>
                           <div className="flex shrink-0 flex-wrap gap-2">
+                            {link.status === "awaiting_client" && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(marketplaceReminderText(link));
+                                    toast({ title: "Reminder copied", description: "Paste it into Marketplace to nudge the buyer." });
+                                  } catch {
+                                    toast({ title: "Could not copy", description: "Select and copy the reminder manually if needed.", variant: "destructive" });
+                                  }
+                                }}
+                                data-testid={`button-reminder-${link.id}`}
+                              >
+                                Copy reminder
+                              </Button>
+                            )}
                             {link.status === "pending_review" && (
                               <Button
                                 type="button"
@@ -561,6 +601,16 @@ export default function OrderLinks() {
                                 Review
                               </Button>
                             )}
+                            {link.status === "created" && link.hubspotDealId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => setLocation(printsDealHref(link.hubspotDealId!))}
+                                data-testid={`button-attach-plates-${link.id}`}
+                              >
+                                Attach plates
+                              </Button>
+                            ) : null}
                             {link.status === "created" && (
                               <Button
                                 type="button"
@@ -620,8 +670,16 @@ function ReviewDialog({
   onClose: () => void;
 }) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [paymentVerified, setPaymentVerified] = useState(false);
   const [edits, setEdits] = useState<Record<string, string | boolean | number>>({});
+  const [createdDeal, setCreatedDeal] = useState<{ dealId: string; dealName: string } | null>(null);
+
+  useEffect(() => {
+    setCreatedDeal(null);
+    setPaymentVerified(false);
+    setEdits({});
+  }, [id]);
 
   const value = (key: keyof QueueLink): string => {
     const edited = edits[key as string];
@@ -664,11 +722,11 @@ function ReviewDialog({
     },
     onSuccess: ({ result }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
+      setCreatedDeal({ dealId: result.dealId, dealName: result.dealName });
       toast({
         title: "Created in HubSpot",
-        description: `${result.dealName} is in Deposit Received (deal ${result.dealId}).`,
+        description: `${result.dealName} is in Deposit Received. Attach the first plate next.`,
       });
-      onClose();
     },
     onError: (error: Error) =>
       toast({
@@ -830,10 +888,33 @@ function ReviewDialog({
               </div>
             </div>
 
-            {link.hubspotDealId ? (
-              <p className="numeric rounded-md border border-chart-4/40 bg-chart-4/10 p-3 text-xs text-chart-4" data-testid="text-review-hubspot-ids">
-                HubSpot contact {link.hubspotContactId} · deal {link.hubspotDealId}
-              </p>
+            {createdDeal || link.hubspotDealId ? (
+              <div className="space-y-3" data-testid="panel-review-created-handoff">
+                <p className="numeric rounded-md border border-chart-4/40 bg-chart-4/10 p-3 text-xs text-chart-4" data-testid="text-review-hubspot-ids">
+                  HubSpot contact {link.hubspotContactId || "created"} · deal{" "}
+                  {createdDeal?.dealId || link.hubspotDealId}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Next: attach the first Chitubox plate so time and resin estimates land on this Print Order.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      const dealId = createdDeal?.dealId || link.hubspotDealId;
+                      if (!dealId) return;
+                      onClose();
+                      setLocation(printsDealHref(dealId));
+                    }}
+                    data-testid="button-review-attach-plates"
+                  >
+                    Attach first plate
+                  </Button>
+                  <Button type="button" variant="outline" onClick={onClose} data-testid="button-review-done">
+                    Done
+                  </Button>
+                </div>
+              </div>
             ) : (
               <>
                 <div className="flex flex-wrap gap-2">

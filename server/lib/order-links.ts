@@ -186,6 +186,34 @@ function databaseFile(): string {
   return path.resolve(process.cwd(), "data.db");
 }
 
+/** Public readiness info for intakes, print boards, resin profiles, and supplies. */
+export function describeOrderLinksStorage(): {
+  configured: boolean;
+  ephemeral: boolean;
+  durableVolumeLikely: boolean;
+  warning: string | null;
+} {
+  const configuredRaw = process.env.ORDER_LINKS_DB_FILE?.trim() ?? "";
+  const configured = configuredRaw.length > 0;
+  const file = databaseFile();
+  const ephemeral = file === ":memory:" || !configured;
+  const normalized = file.replace(/\\/g, "/");
+  const durableVolumeLikely =
+    configured && file !== ":memory:" && (normalized === "/data" || normalized.startsWith("/data/"));
+  let warning: string | null = null;
+  if (file === ":memory:") {
+    warning =
+      "SQLite is in-memory — intakes, plate boards, resin profiles, and supply history reset on restart.";
+  } else if (!configured) {
+    warning =
+      "ORDER_LINKS_DB_FILE is unset — data.db under the app directory may be wiped on redeploy. Point it at a mounted volume such as /data/hubspot.db.";
+  } else if (!durableVolumeLikely) {
+    warning =
+      "ORDER_LINKS_DB_FILE is set outside /data — confirm this path is on a persistent volume before relying on it.";
+  }
+  return { configured, ephemeral, durableVolumeLikely, warning };
+}
+
 export function getDb(): BetterSQLite3Database {
   if (db) return db;
   const file = databaseFile();

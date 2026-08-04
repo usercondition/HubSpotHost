@@ -34,6 +34,16 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     note: "Set to true as the second write unlock",
   },
   {
+    name: "PAID_ORDER_INTAKE_ACCESS_CODE_HASH",
+    required: "Required for Daily work",
+    note: "SHA-256 hex of the owner access code used by Orders, Prints, Supplies, and Performance",
+  },
+  {
+    name: "ORDER_LINKS_DB_FILE",
+    required: "Strongly recommended",
+    note: "Absolute SQLite path on a persistent volume (e.g. /data/hubspot.db). Without this, intakes/plates/supplies can vanish on redeploy",
+  },
+  {
     name: "PUBLIC_BASE_URL",
     required: "Optional",
     note: "Signed URI base for v3 when running behind a proxy",
@@ -51,10 +61,22 @@ const WEBHOOK_STEPS = [
 ];
 
 const ENDPOINTS = [
-  { method: "GET", path: "/api/health", note: "Safety gates, credential presence, signing status" },
+  { method: "GET", path: "/api/health", note: "Safety gates, credential presence, storage durability, signing status" },
   { method: "POST", path: "/api/webhooks/hubspot", note: "HubSpot event receiver, accepts ?dryRun=" },
   { method: "POST", path: "/api/recalculate/:dealId", note: "Manual recalculation, accepts ?dryRun=" },
   { method: "GET", path: "/api/calculations", note: "Last 100 audited attempts" },
+  { method: "GET", path: "/api/order-links", note: "Owner intake queue (owner code)" },
+  { method: "GET", path: "/api/prints", note: "Print-file candidates and plate history (owner code)" },
+  { method: "GET", path: "/api/supplies", note: "Supply ledger (owner code)" },
+  { method: "GET", path: "/api/performance", note: "Daily performance snapshot (owner code)" },
+];
+
+const DAILY_ROUTES = [
+  { path: "/#/", note: "Command center — today’s work strip and daily path" },
+  { path: "/#/orders", note: "Paid order intake links and review queue" },
+  { path: "/#/prints", note: "Attach Chitubox plates; deep-link with ?dealId=" },
+  { path: "/#/supplies", note: "Amazon/receipt supply ledger" },
+  { path: "/#/performance", note: "Margins, workload, and attention with next-step links" },
 ];
 
 export default function Setup() {
@@ -69,6 +91,39 @@ export default function Setup() {
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
+        {health.data?.storage?.warning ? (
+          <Panel
+            title="Production data durability"
+            description="Intakes, print-plate boards, resin profiles, and supply history share one SQLite file."
+          >
+            <p className="text-sm text-muted-foreground" data-testid="text-storage-warning">
+              {health.data.storage.warning}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              On Railway, mount a volume at <CodeLine>/data</CodeLine> and set{" "}
+              <CodeLine>ORDER_LINKS_DB_FILE=/data/hubspot.db</CodeLine>.
+            </p>
+          </Panel>
+        ) : null}
+
+        <Panel
+          title="Daily production routes"
+          description="Owner tools share one unlock session in this browser tab. Seed print_material_cost only from Print files with an explicit confirm."
+        >
+          <div className="space-y-2">
+            {DAILY_ROUTES.map((route) => (
+              <div
+                key={route.path}
+                className="flex flex-wrap items-center gap-2 border-b border-border/70 pb-2 text-xs last:border-0 last:pb-0"
+                data-testid={`row-daily-route-${route.path}`}
+              >
+                <CodeLine>{route.path}</CodeLine>
+                <span className="text-muted-foreground">{route.note}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
         <Panel
           title="Environment variables"
           description="Credentials are read from the environment only — never stored in code or shown here."
@@ -163,7 +218,7 @@ export default function Setup() {
           )}
         </Panel>
 
-        <Panel title="Endpoints" description="Four routes, no authentication layer of its own.">
+        <Panel title="Endpoints" description="Webhook and owner Daily work routes.">
           <div className="space-y-2">
             {ENDPOINTS.map((e) => (
               <div

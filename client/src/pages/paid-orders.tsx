@@ -486,7 +486,7 @@ export default function PaidOrders() {
                 >
                   <div className="flex items-start gap-2.5">
                     <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold">Paid order created in HubSpot</p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {created.dealName} was created in <strong>Deposit Received</strong> and associated
@@ -495,6 +495,13 @@ export default function PaidOrders() {
                       <p className="mt-2 numeric text-xs text-muted-foreground">
                         Deal ID {created.dealId} · Contact ID {created.contactId}
                       </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button asChild size="sm" data-testid="button-paid-order-attach-plates">
+                          <a href={`/#/prints?dealId=${encodeURIComponent(created.dealId)}`}>
+                            Attach first plate
+                          </a>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>

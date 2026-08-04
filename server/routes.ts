@@ -63,6 +63,7 @@ import {
   lookupClientOrder,
   markOrderLinkCreated,
   orderLinkCounts,
+  describeOrderLinksStorage,
   submitClientOrder,
 } from "./lib/order-links";
 import {
@@ -400,6 +401,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         buildId: INTAKE_BUILD_ID,
         clientLinkWorkflow: "enabled",
       },
+      storage: describeOrderLinksStorage(),
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         callbackToken: process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim()
@@ -557,6 +559,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           stages,
           intakeCounts: orderLinkCounts(),
           supplySpend: buildSupplySpendSummary(),
+          attachedPrintDealIds: attachedPrintFileDealIds(),
         }),
       );
     } catch (error) {

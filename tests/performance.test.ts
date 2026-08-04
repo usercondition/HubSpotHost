@@ -13,6 +13,7 @@ test("performance summarizes recent deals and ranks low margins before incomplet
       purchases: 2,
       byCategory: [{ category: "materials", label: "Materials", total: 62.5, count: 2 }],
     },
+    attachedPrintDealIds: [],
     stages: [
       { id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } },
       { id: "closed", label: "Completed", displayOrder: 1, metadata: { isClosed: true } },
@@ -71,7 +72,49 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
   assert.equal(snapshot.attention[0]?.dealName, "Low-margin Knight");
   assert.match(snapshot.attention[0]?.issue ?? "", /Margin below/);
-  assert.equal(snapshot.attention[1]?.dealName, "Needs costs");
+  assert.ok(
+    snapshot.attention.some(
+      (item) => item.dealName === "Needs costs" && item.issue === "Cost details incomplete",
+    ),
+  );
+  assert.ok(
+    snapshot.attention.some(
+      (item) => item.dealName === "Low-margin Knight" && item.issue === "No CTB plates attached",
+    ),
+  );
+  assert.ok(
+    snapshot.attention.some(
+      (item) => item.dealName === "Needs costs" && item.issue === "No CTB plates attached",
+    ),
+  );
   assert.equal(snapshot.supplySpend.total, 62.5);
   assert.equal(snapshot.intake.pendingReview, 1);
+});
+
+test("attached print plates suppress the missing-plate attention item", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["plated"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "plated",
+        properties: {
+          dealname: "Plated order",
+          dealstage: "deposit",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "200",
+          print_material_cost: "40",
+          print_labor_cost: "30",
+          print_packaging_cost: "5",
+          print_actual_shipping_cost: "5",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.summary.activeOrders, 1);
+  assert.equal(snapshot.attention.length, 0);
 });

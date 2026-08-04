@@ -5,6 +5,7 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, ThemeProvider } from "@/components/shell";
+import { OwnerSessionProvider } from "@/hooks/use-owner-session";
 import Dashboard from "@/pages/dashboard";
 import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
@@ -19,19 +20,21 @@ import NotFound from "@/pages/not-found";
 /** Owner-facing routes live inside the operations shell. */
 function ShellRoutes() {
   return (
-    <AppShell>
-      <Switch>
-        <Route path="/" component={Dashboard} />
-        <Route path="/orders" component={OrderLinks} />
-        <Route path="/operations" component={Operations} />
-        <Route path="/paid-orders" component={PaidOrders} />
-        <Route path="/supplies" component={Supplies} />
-        <Route path="/prints" component={Prints} />
-        <Route path="/performance" component={Performance} />
-        <Route path="/setup" component={Setup} />
-        <Route component={NotFound} />
-      </Switch>
-    </AppShell>
+    <OwnerSessionProvider>
+      <AppShell>
+        <Switch>
+          <Route path="/" component={Dashboard} />
+          <Route path="/orders" component={OrderLinks} />
+          <Route path="/operations" component={Operations} />
+          <Route path="/paid-orders" component={PaidOrders} />
+          <Route path="/supplies" component={Supplies} />
+          <Route path="/prints" component={Prints} />
+          <Route path="/performance" component={Performance} />
+          <Route path="/setup" component={Setup} />
+          <Route component={NotFound} />
+        </Switch>
+      </AppShell>
+    </OwnerSessionProvider>
   );
 }
 

@@ -109,6 +109,8 @@ export function buildPerformanceSnapshot(input: {
   stages: HubSpotPipelineStage[];
   intakeCounts: QueueCounts;
   supplySpend?: SupplySpend;
+  /** Local Print-files deal IDs that already have at least one attached CTB plate. */
+  attachedPrintDealIds?: Iterable<string>;
   now?: Date;
 }): PerformanceSnapshot {
   const now = input.now ?? new Date();
@@ -118,6 +120,7 @@ export function buildPerformanceSnapshot(input: {
   staleBefore.setUTCDate(staleBefore.getUTCDate() - PERFORMANCE_STALE_DAYS);
   const stageMap = new Map(input.stages.map((stage) => [stage.id, stage]));
   const stageCounts = new Map(input.stages.map((stage) => [stage.id, 0]));
+  const attachedPrintDealIds = new Set(input.attachedPrintDealIds ?? []);
 
   let revenue = 0;
   let grossProfit = 0;
@@ -155,6 +158,9 @@ export function buildPerformanceSnapshot(input: {
     if (closed) continue;
     activeOrders += 1;
 
+    const hasPlates = attachedPrintDealIds.has(deal.id);
+
+    // Collect every open issue for the deal so one alert does not hide another.
     if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
       attention.push({
         priority: calculation.marginPercentage < 20 ? 1 : 2,
@@ -165,7 +171,6 @@ export function buildPerformanceSnapshot(input: {
         detail: `${calculation.marginPercentage.toFixed(1)}% margin · ${formatMoney(calculation.grossProfit)} gross profit`,
         severity: calculation.marginPercentage < 20 ? "bad" : "warn",
       });
-      continue;
     }
 
     if (modifiedAt && modifiedAt < staleBefore) {
@@ -178,7 +183,6 @@ export function buildPerformanceSnapshot(input: {
         detail: `No HubSpot update in ${daysSince(modifiedAt, now)} days`,
         severity: "warn",
       });
-      continue;
     }
 
     if (missingCosts) {
@@ -190,6 +194,18 @@ export function buildPerformanceSnapshot(input: {
         issue: "Cost details incomplete",
         detail: "Add material, labor, packaging, and shipping costs as they become known",
         severity: "neutral",
+      });
+    }
+
+    if (!hasPlates && calculation.amount > 0) {
+      attention.push({
+        priority: 5,
+        dealId: deal.id,
+        dealName,
+        stage: displayStage,
+        issue: "No CTB plates attached",
+        detail: "Attach sliced plates in Print files so production time and resin estimates are on this order",
+        severity: "warn",
       });
     }
   }

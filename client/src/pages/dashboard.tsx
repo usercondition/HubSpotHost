@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckCircle2,
@@ -14,12 +15,18 @@ import {
   ShipWheel,
   SlidersHorizontal,
   Store,
+  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { attentionNextStep } from "@/lib/workflow";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
-import type { HealthResponse } from "@shared/schema";
+import { cn } from "@/lib/utils";
+import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
 const HUBSPOT_URL = "https://app.hubspot.com/";
 const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
@@ -27,6 +34,7 @@ const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
 function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   const live = health?.safety.liveWriteReady === true;
   const signing = health?.webhook.verification === "configured";
+  const storageWarn = health?.storage?.warning;
 
   if (!health) {
     return <Skeleton className="h-24 w-full rounded-lg" data-testid="skeleton-system-status" />;
@@ -46,9 +54,9 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
           </h2>
         </div>
         <StatusPill
-          tone={live && signing ? "good" : "warn"}
-          icon={live && signing ? CheckCircle2 : SlidersHorizontal}
-          label={live && signing ? "Ready for orders" : "Needs review"}
+          tone={live && signing && !storageWarn ? "good" : "warn"}
+          icon={live && signing && !storageWarn ? CheckCircle2 : SlidersHorizontal}
+          label={live && signing && !storageWarn ? "Ready for orders" : "Needs review"}
           testId="status-command-center"
         />
       </div>
@@ -72,6 +80,18 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
           </p>
         </div>
       </div>
+      {storageWarn ? (
+        <div
+          className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-3"
+          data-testid="panel-storage-warning"
+        >
+          <p className="text-sm font-medium">Production data may not persist</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{storageWarn}</p>
+          <Link href="/setup" className="mt-2 inline-flex text-xs font-medium text-primary hover:underline">
+            Review System setup
+          </Link>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -111,18 +131,198 @@ function WorkflowStep({
   );
 }
 
+const ISSUE_TONE = {
+  neutral: "border-border bg-muted/45",
+  warn: "border-primary/35 bg-primary/5",
+  bad: "border-destructive/35 bg-destructive/5",
+} as const;
+
+function TodaysWork() {
+  const { toast } = useToast();
+  const { ownerCode, isUnlocked, headers, unlock } = useOwnerSession();
+
+  const performance = useQuery<PerformanceResponse>({
+    queryKey: ["/api/performance", ownerCode, "dashboard"],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/performance", undefined, { headers });
+      return (await response.json()) as PerformanceResponse;
+    },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: async (code: string) => {
+      await apiRequest("GET", "/api/performance", undefined, {
+        headers: { "x-paid-order-access-code": code },
+      });
+      return code;
+    },
+    onSuccess: (code) => {
+      unlock(code);
+      toast({ title: "Daily work unlocked", description: "Order links, Print files, Supplies, and Performance share this session." });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "That owner code was not accepted",
+        description: error.message.startsWith("401")
+          ? "Check the code and try again."
+          : "Could not reach the performance service.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!isUnlocked) {
+    return (
+      <OwnerUnlockPanel
+        title="Unlock today’s work"
+        description="See pending reviews and orders that need plates or costs — then jump straight to the next action."
+        buttonLabel="Unlock today’s work"
+        testIdPrefix="dashboard"
+        pending={unlockMutation.isPending}
+        onUnlock={(code) => unlockMutation.mutate(code)}
+      />
+    );
+  }
+
+  if (performance.isLoading) {
+    return <Skeleton className="h-48 rounded-lg" data-testid="skeleton-todays-work" />;
+  }
+
+  if (performance.isError || !performance.data) {
+    return (
+      <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-todays-work-error">
+        <p className="text-sm font-medium">Today’s work could not be loaded</p>
+        <Button className="mt-3" size="sm" onClick={() => performance.refetch()}>
+          Try again
+        </Button>
+      </section>
+    );
+  }
+
+  const snapshot = performance.data;
+  const attention = snapshot.attention.slice(0, 4);
+
+  return (
+    <section
+      className="rounded-lg border border-card-border bg-card"
+      aria-labelledby="todays-work-title"
+      data-testid="panel-todays-work"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div>
+          <p className="rule-label">Today’s work</p>
+          <h2 id="todays-work-title" className="mt-1 text-base font-semibold tracking-tight">
+            What needs you right now
+          </h2>
+        </div>
+        <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
+          <Link href="/performance">
+            <BarChart3 className="mr-2 h-3.5 w-3.5" />
+            Full performance
+          </Link>
+        </Button>
+      </div>
+
+      <div className="grid gap-3 p-5 sm:grid-cols-3">
+        <Link
+          href="/orders"
+          className="rounded-md border border-border bg-muted/35 p-3 transition-colors hover:bg-muted/60"
+          data-testid="card-todays-pending-review"
+        >
+          <p className="rule-label">Pending review</p>
+          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.intake.pendingReview}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Buyer forms waiting for your approval</p>
+        </Link>
+        <Link
+          href="/orders"
+          className="rounded-md border border-border bg-muted/35 p-3 transition-colors hover:bg-muted/60"
+          data-testid="card-todays-awaiting-client"
+        >
+          <p className="rule-label">Awaiting client</p>
+          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.intake.awaitingClient}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Links still open for buyer details</p>
+        </Link>
+        <div className="rounded-md border border-border bg-muted/35 p-3" data-testid="card-todays-attention">
+          <p className="rule-label">Needs attention</p>
+          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.summary.attentionCount}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Active orders with plates, costs, or margin gaps</p>
+        </div>
+      </div>
+
+      {attention.length > 0 ? (
+        <div className="space-y-2 border-t border-border px-5 py-4">
+          {attention.map((item) => {
+            const next = attentionNextStep(item);
+            return (
+              <article
+                key={`${item.dealId}-${item.issue}`}
+                className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
+                data-testid={`row-todays-attention-${item.dealId}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-medium">{item.dealName}</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {item.stage} · {item.issue}
+                    </p>
+                  </div>
+                  {next.external ? (
+                    <a
+                      href={next.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      {next.label}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <Link href={next.href} className="text-xs font-medium text-primary hover:underline">
+                      {next.label}
+                    </Link>
+                  )}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="border-t border-border px-5 py-4" data-testid="empty-todays-attention">
+          <p className="text-sm font-medium">No attention items right now</p>
+          <p className="mt-1 text-xs text-muted-foreground">Clear queue — keep attaching plates and logging costs as work moves.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
+  const { isUnlocked, lock } = useOwnerSession();
 
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Command center"
         subtitle="Run paid orders from buyer details to shipping without losing the thread."
-        actions={<ThemeToggle />}
+        actions={
+          <>
+            {isUnlocked ? (
+              <Button size="sm" variant="ghost" onClick={lock} data-testid="button-lock-owner-session">
+                <Unlock className="mr-2 h-3.5 w-3.5" />
+                Lock session
+              </Button>
+            ) : null}
+            <ThemeToggle />
+          </>
+        }
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
+        <TodaysWork />
+
         <section
           className="overflow-hidden rounded-lg border border-card-border bg-card"
           aria-labelledby="start-order-title"
@@ -191,11 +391,11 @@ export default function Dashboard() {
             />
             <WorkflowStep
               number="02"
-              title="Manage production"
-              body="Track the approved order, stage, and real production costs in HubSpot."
-              href="/operations"
-              action="View profit automation"
-              icon={PackageCheck}
+              title="Attach production data"
+              body="After approval, attach each Chitubox plate so time and resin estimates land on the deal."
+              href="/prints"
+              action="Open Print files"
+              icon={FileUp}
             />
             <WorkflowStep
               number="03"
@@ -262,6 +462,21 @@ export default function Dashboard() {
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   See pipeline workload, recent revenue, margins, supply spend, and orders that need attention.
+                </span>
+              </span>
+            </Link>
+            <Link
+              href="/operations"
+              data-testid="link-control-loop-operations"
+              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+            >
+              <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  Profit automation <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Confirm webhook health when HubSpot cost fields change.
                 </span>
               </span>
             </Link>

@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Boxes,
   CheckCircle2,
-  KeyRound,
   Loader2,
   PackagePlus,
   ReceiptText,
   RefreshCw,
   ShoppingBag,
-  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
@@ -89,71 +88,14 @@ function displayDate(value: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function UnlockSupplies({
-  codeDraft,
-  setCodeDraft,
-  onUnlock,
-  pending,
-}: {
-  codeDraft: string;
-  setCodeDraft: (value: string) => void;
-  onUnlock: () => void;
-  pending: boolean;
-}) {
-  return (
-    <section
-      className="mx-auto max-w-lg rounded-lg border border-card-border bg-card p-5 md:p-6"
-      aria-labelledby="supplies-unlock-title"
-      data-testid="panel-supplies-unlock"
-    >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <KeyRound className="h-4 w-4" />
-      </div>
-      <p className="mt-4 rule-label">Owner access</p>
-      <h2 id="supplies-unlock-title" className="mt-1 text-lg font-semibold tracking-tight">
-        Unlock the supply ledger
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        This is your private record of resin, gloves, packaging, and equipment purchases. Your access code remains only in this open page.
-      </p>
-      <form
-        className="mt-5 space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onUnlock();
-        }}
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor="supplies-owner-code">Owner access code</Label>
-          <Input
-            id="supplies-owner-code"
-            type="password"
-            autoComplete="off"
-            value={codeDraft}
-            onChange={(event) => setCodeDraft(event.target.value)}
-            placeholder="Enter your code"
-            data-testid="input-supplies-owner-code"
-          />
-        </div>
-        <Button type="submit" className="w-full" disabled={pending || codeDraft.trim().length === 0} data-testid="button-unlock-supplies">
-          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
-          Unlock supply spend
-        </Button>
-      </form>
-    </section>
-  );
-}
-
 export default function Supplies() {
   const { toast } = useToast();
-  const [codeDraft, setCodeDraft] = useState("");
-  const [ownerCode, setOwnerCode] = useState("");
+  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
   const [form, setForm] = useState<SupplyForm>(emptyForm);
-  const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
 
   const supplies = useQuery<SupplyResponse>({
     queryKey: ["/api/supplies", ownerCode],
-    enabled: ownerCode.length > 0,
+    enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/supplies", undefined, { headers });
       return (await response.json()) as SupplyResponse;
@@ -168,8 +110,7 @@ export default function Supplies() {
       return { code, data: (await response.json()) as SupplyResponse };
     },
     onSuccess: ({ code, data }) => {
-      setOwnerCode(code);
-      setCodeDraft("");
+      setSessionUnlocked(code);
       toast({
         title: "Supply ledger unlocked",
         description: `${data.summary.purchases} purchase${data.summary.purchases === 1 ? "" : "s"} logged in the last ${data.summary.periodDays} days.`,
@@ -257,12 +198,14 @@ export default function Supplies() {
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
-        {!ownerCode ? (
-          <UnlockSupplies
-            codeDraft={codeDraft}
-            setCodeDraft={setCodeDraft}
-            onUnlock={() => unlock.mutate(codeDraft.trim())}
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock supply tracking"
+            description="Log Amazon and other purchases against your print operations. The owner code stays only in this browser tab."
+            buttonLabel="Unlock supplies"
+            testIdPrefix="supplies"
             pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
           />
         ) : supplies.isLoading ? (
           <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]" data-testid="skeleton-supplies">
