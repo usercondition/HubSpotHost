@@ -223,7 +223,7 @@ export default function PaidOrders() {
         }
       />
 
-      <div className="space-y-5 px-4 py-5 md:px-6">
+      <div className="page-stack">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
           <Panel
             title="1. Paste the paid Marketplace conversation"

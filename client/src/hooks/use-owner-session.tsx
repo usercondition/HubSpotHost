@@ -84,20 +84,25 @@ export function OwnerUnlockPanel({
 
   return (
     <section
-      className="mx-auto max-w-lg rounded-lg border border-card-border bg-card p-5 md:p-6"
+      className="rounded-lg border border-card-border bg-card p-5 md:grid md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] md:items-end md:gap-8 md:p-6"
       aria-labelledby={`${testIdPrefix}-unlock-title`}
       data-testid={`panel-${testIdPrefix}-unlock`}
     >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <KeyRound className="h-4 w-4" />
+      <div>
+        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <KeyRound className="h-4 w-4" />
+        </div>
+        <p className="mt-4 rule-label">Owner access</p>
+        <h2 id={`${testIdPrefix}-unlock-title`} className="mt-1 text-lg font-semibold tracking-tight">
+          {title}
+        </h2>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground md:mt-4">
+          Unlock once for this browser tab — Order links, Print files, Supplies, and Performance share the same session until you reload.
+        </p>
       </div>
-      <p className="mt-4 rule-label">Owner access</p>
-      <h2 id={`${testIdPrefix}-unlock-title`} className="mt-1 text-lg font-semibold tracking-tight">
-        {title}
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
       <form
-        className="mt-5 space-y-3"
+        className="mt-5 space-y-3 md:mt-0"
         onSubmit={(event) => {
           event.preventDefault();
           const code = codeDraft.trim();
@@ -126,9 +131,6 @@ export function OwnerUnlockPanel({
           {buttonLabel}
         </Button>
       </form>
-      <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        Unlock once for this browser tab — Order links, Print files, Supplies, and Performance share the same session until you reload.
-      </p>
     </section>
   );
 }

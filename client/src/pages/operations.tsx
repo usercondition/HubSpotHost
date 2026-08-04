@@ -118,7 +118,7 @@ export default function Operations() {
         }
       />
 
-      <div className="space-y-5 px-4 py-5 md:px-6">
+      <div className="page-stack">
         {/* KPI row */}
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {health.isLoading ? (

@@ -386,7 +386,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="space-y-5 px-4 py-5 md:px-6">
+      <div className="page-stack">
         <TodaysWork />
 
         <section
@@ -414,12 +414,6 @@ export default function Dashboard() {
                   <Link href="/paid-orders">
                     <ClipboardCheck className="mr-2 h-4 w-4" />
                     Enter one manually
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" data-testid="button-view-performance">
-                  <Link href="/performance">
-                    <BarChart3 className="mr-2 h-4 w-4" />
-                    View performance
                   </Link>
                 </Button>
               </div>

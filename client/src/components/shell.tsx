@@ -54,7 +54,7 @@ export function ThemeToggle() {
       onClick={toggle}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       data-testid="button-theme-toggle"
-      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
@@ -125,16 +125,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[15.5rem_1fr] md:grid-rows-1">
-      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-5 md:border-b-0 md:border-r md:px-3 md:py-4">
+      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar/95 px-4 py-3 backdrop-blur-sm md:h-full md:flex-col md:items-stretch md:gap-5 md:border-b-0 md:border-r md:px-3 md:py-4">
         <Link
           href="/"
           className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1"
           data-testid="link-home"
         >
           <Mark className="h-7 w-7 text-primary" />
-          <span className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight">Print Operations</span>
-            <span className="rule-label">Business command center</span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-sm font-semibold tracking-tight">Print Operations</span>
+            <span className="rule-label">Owner hub</span>
           </span>
         </Link>
 
@@ -156,7 +156,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     className={cn(
                       "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm transition-colors md:mb-0.5",
                       active
-                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
                         : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
                     )}
                   >
@@ -169,7 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="hidden space-y-2 md:block">
+        <div className="mt-auto hidden space-y-2 border-t border-sidebar-border pt-3 md:block">
           <p className="rule-label px-2.5">Open tools</p>
           <a
             href="https://app.hubspot.com/"
@@ -194,7 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="scroll-pane min-w-0">{children}</main>
+      <main className="scroll-pane min-w-0 bg-transparent">{children}</main>
     </div>
   );
 }
@@ -209,15 +209,15 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="amber-wash sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-6">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border bg-background/90 px-4 py-3.5 backdrop-blur-md md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-semibold tracking-tight" data-testid="text-page-title">
             {title}
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
+          <p className="mt-0.5 max-w-2xl text-sm leading-5 text-muted-foreground">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">{actions}</div>
+        <div className="flex shrink-0 items-center gap-2">{actions}</div>
       </div>
     </header>
   );
