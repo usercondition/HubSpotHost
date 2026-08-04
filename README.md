@@ -55,7 +55,7 @@ The pasted conversation is processed to produce the draft and is not written int
 
 The public route is protected by a dedicated **Paid Order Intake access code**. It is required for both analysis and creation:
 
-- Prefer secure credential injection through `CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN`.
+- Prefer secure credential injection through `CUSTOM_CRED_PAID_ORDER_INTAKE_V2_LOCAL_TOKEN`.
 - Use `PAID_ORDER_INTAKE_ACCESS_CODE` only for local development.
 - The browser does not retain the access code.
 - The server requires an explicit `paymentConfirmed: true` value, a customer name or Marketplace username, an item description, and a paid amount greater than zero before it can call HubSpot.
@@ -100,7 +100,7 @@ Copy `.env.example` and keep `.env` out of source control.
 | `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
-| `CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN` | Preferred for Paid Order Intake | Securely injected access code required to analyze or create a paid Marketplace order. |
+| `CUSTOM_CRED_PAID_ORDER_INTAKE_V2_LOCAL_TOKEN` | Preferred for Paid Order Intake | Securely injected replacement access code required to analyze or create a paid Marketplace order. |
 | `PAID_ORDER_INTAKE_ACCESS_CODE` | Local fallback | Access code for local-only Paid Order Intake development. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
 
