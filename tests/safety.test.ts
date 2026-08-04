@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getConfig, liveWriteReady, resolveWriteDecision } from "../server/lib/config";
+import {
+  getConfig,
+  getWebhookSecret,
+  liveWriteReady,
+  resolveWriteDecision,
+} from "../server/lib/config";
 
 const base = { hasToken: true };
 
@@ -80,5 +85,16 @@ test("webhook secret presence is reported as a boolean", () => {
   assert.equal(
     getConfig({ HUBSPOT_WEBHOOK_SECRET: "s" } as NodeJS.ProcessEnv).webhookSecretConfigured,
     true,
+  );
+});
+
+test("the dedicated injected client-secret credential takes priority", () => {
+  assert.equal(
+    getWebhookSecret({
+      CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN: "correct-client-secret",
+      CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN: "previous-secret",
+      HUBSPOT_WEBHOOK_SECRET: "fallback-secret",
+    } as NodeJS.ProcessEnv),
+    "correct-client-secret",
   );
 });

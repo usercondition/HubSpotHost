@@ -87,6 +87,7 @@ export function getToken(env: NodeJS.ProcessEnv = process.env): string {
 
 export function getWebhookSecret(env: NodeJS.ProcessEnv = process.env): string {
   return (
+    env.CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN?.trim() ||
     env.CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN?.trim() ||
     env.HUBSPOT_WEBHOOK_SECRET?.trim() ||
     ""

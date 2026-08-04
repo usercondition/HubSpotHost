@@ -70,7 +70,7 @@ Copy `.env.example` and keep `.env` out of source control.
 | `HUBSPOT_API_BASE` | Fallback | API base URL if the custom credential variables are not injected. |
 | `HUBSPOT_ACCESS_TOKEN` | Fallback | Private-app token if the custom credential variable is not injected. |
 | `HUBSPOT_WEBHOOK_SECRET` | Recommended | Private-app client secret used to validate webhook signatures. |
-| `CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
+| `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
 | `PUBLIC_BASE_URL` | Sometimes | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
@@ -93,7 +93,7 @@ The service needs a publicly reachable HTTPS URL before HubSpot can call it. A p
    - `print_packaging_cost`
    - `print_actual_shipping_cost`
 5. Save with **Commit changes**. HubSpot lets you use **View details** > **Test** on the subscription to deliver a sample event.
-6. In the private app’s **Auth** tab, store the client secret in the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable, or inject it through the secure credential mapped to `CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN`. Never put it in browser code or source control.
+6. In the private app’s **Auth** tab, store the client secret in the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable, or inject it through the secure credential mapped to `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN`. Never put it in browser code or source control.
 7. Use a non-customer test deal to send a manual dry run. Confirm the audit row and figures.
 8. Enable updates only after that test:
    ```text
