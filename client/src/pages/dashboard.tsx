@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { attentionNextStep } from "@/lib/workflow";
+import { attentionNextStep, hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
@@ -202,6 +202,10 @@ function TodaysWork() {
 
   const snapshot = performance.data;
   const attention = snapshot.attention.slice(0, 4);
+  const activeDeals = snapshot.activeDeals ?? [];
+  const portalId = snapshot.hubspotPortalId;
+  const money = (value: number) =>
+    value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   return (
     <section
@@ -216,12 +220,20 @@ function TodaysWork() {
             What needs you right now
           </h2>
         </div>
-        <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
-          <Link href="/performance">
-            <BarChart3 className="mr-2 h-3.5 w-3.5" />
-            Full performance
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline" data-testid="button-todays-work-hubspot">
+            <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="mr-2 h-3.5 w-3.5" />
+              HubSpot deals
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
+            <Link href="/performance">
+              <BarChart3 className="mr-2 h-3.5 w-3.5" />
+              Full performance
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-3">
@@ -250,10 +262,62 @@ function TodaysWork() {
         </div>
       </div>
 
+      {activeDeals.length > 0 ? (
+        <div className="border-t border-border px-5 py-4" data-testid="panel-todays-active-deals">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <p className="rule-label">Active Print Orders</p>
+            <p className="text-xs text-muted-foreground numeric">
+              {snapshot.summary.activeOrders} open
+              {snapshot.summary.activeOrders > activeDeals.length
+                ? ` · showing ${activeDeals.length}`
+                : ""}
+            </p>
+          </div>
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {activeDeals.map((deal) => (
+              <li
+                key={deal.dealId}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5"
+                data-testid={`row-todays-active-deal-${deal.dealId}`}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{deal.dealName}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {deal.stage}
+                    {deal.amount > 0 ? ` · ${money(deal.amount)}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-3">
+                  {!deal.hasPlates ? (
+                    <Link
+                      href={printsDealHref(deal.dealId)}
+                      className="text-xs font-medium text-primary hover:underline"
+                      data-testid={`link-todays-attach-${deal.dealId}`}
+                    >
+                      Attach plates
+                    </Link>
+                  ) : null}
+                  <a
+                    href={hubspotDealHref(deal.dealId, portalId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                    data-testid={`link-todays-hubspot-${deal.dealId}`}
+                  >
+                    HubSpot
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {attention.length > 0 ? (
         <div className="space-y-2 border-t border-border px-5 py-4">
           {attention.map((item) => {
-            const next = attentionNextStep(item);
+            const next = attentionNextStep({ ...item, portalId });
             return (
               <article
                 key={`${item.dealId}-${item.issue}`}
@@ -291,7 +355,9 @@ function TodaysWork() {
       ) : (
         <div className="border-t border-border px-5 py-4" data-testid="empty-todays-attention">
           <p className="text-sm font-medium">No attention items right now</p>
-          <p className="mt-1 text-xs text-muted-foreground">Clear queue — keep attaching plates and logging costs as work moves.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Clear queue — keep attaching plates and logging costs as work moves.
+          </p>
         </div>
       )}
     </section>

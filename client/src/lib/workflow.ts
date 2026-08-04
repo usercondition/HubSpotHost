@@ -19,8 +19,31 @@ export function hubspotAppHref(): string {
   return "https://app.hubspot.com/";
 }
 
+/** Deal record deep link when portal id is known; otherwise HubSpot home. */
+export function hubspotDealHref(dealId: string, portalId?: string | null): string {
+  const id = String(dealId ?? "").trim();
+  const portal = String(portalId ?? "").trim();
+  if (id && portal) {
+    return `https://app.hubspot.com/contacts/${encodeURIComponent(portal)}/record/0-3/${encodeURIComponent(id)}`;
+  }
+  return hubspotAppHref();
+}
+
+/** Print Orders object list when portal id is known; otherwise HubSpot home. */
+export function hubspotDealsListHref(portalId?: string | null): string {
+  const portal = String(portalId ?? "").trim();
+  if (portal) {
+    return `https://app.hubspot.com/contacts/${encodeURIComponent(portal)}/objects/0-3/views/all/list`;
+  }
+  return hubspotAppHref();
+}
+
 /** Map a Performance attention row to the next daily-work action. */
-export function attentionNextStep(item: { dealId: string; issue: string }): {
+export function attentionNextStep(item: {
+  dealId: string;
+  issue: string;
+  portalId?: string | null;
+}): {
   href: string;
   label: string;
   external: boolean;
@@ -35,13 +58,13 @@ export function attentionNextStep(item: { dealId: string; issue: string }): {
   }
   if (issue.includes("cost")) {
     return {
-      href: hubspotAppHref(),
+      href: hubspotDealHref(item.dealId, item.portalId),
       label: "Update costs in HubSpot",
       external: true,
     };
   }
   return {
-    href: hubspotAppHref(),
+    href: hubspotDealHref(item.dealId, item.portalId),
     label: "Open in HubSpot",
     external: true,
   };

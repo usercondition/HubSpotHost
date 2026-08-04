@@ -5,6 +5,7 @@ export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
 export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
 const ATTENTION_LIMIT = 8;
+const ACTIVE_DEALS_LIMIT = 6;
 
 type QueueCounts = {
   awaiting_client: number;
@@ -71,6 +72,16 @@ export interface PerformanceSnapshot {
     detail: string;
     severity: "neutral" | "warn" | "bad";
   }>;
+  /** Compact open Print Orders for the command-center glance. */
+  activeDeals: Array<{
+    dealId: string;
+    dealName: string;
+    stage: string;
+    amount: number;
+    hasPlates: boolean;
+  }>;
+  /** HubSpot portal id for deal deep links; null when account info is unavailable. */
+  hubspotPortalId: string | null;
 }
 
 function asDate(value: string | null | undefined): Date | null {
@@ -111,6 +122,7 @@ export function buildPerformanceSnapshot(input: {
   supplySpend?: SupplySpend;
   /** Local Print-files deal IDs that already have at least one attached CTB plate. */
   attachedPrintDealIds?: Iterable<string>;
+  hubspotPortalId?: string | null;
   now?: Date;
 }): PerformanceSnapshot {
   const now = input.now ?? new Date();
@@ -127,6 +139,7 @@ export function buildPerformanceSnapshot(input: {
   let orders = 0;
   let activeOrders = 0;
   const attention: Array<PerformanceSnapshot["attention"][number] & { priority: number }> = [];
+  const openDeals: Array<PerformanceSnapshot["activeDeals"][number] & { sortAt: number }> = [];
 
   for (const deal of input.deals) {
     const props = deal.properties;
@@ -159,6 +172,14 @@ export function buildPerformanceSnapshot(input: {
     activeOrders += 1;
 
     const hasPlates = attachedPrintDealIds.has(deal.id);
+    openDeals.push({
+      dealId: deal.id,
+      dealName,
+      stage: displayStage,
+      amount: round2(calculation.amount),
+      hasPlates,
+      sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
+    });
 
     // Collect every open issue for the deal so one alert does not hide another.
     if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
@@ -214,6 +235,10 @@ export function buildPerformanceSnapshot(input: {
   const sortedAttention = attention
     .sort((a, b) => a.priority - b.priority || a.dealName.localeCompare(b.dealName))
     .map(({ priority: _priority, ...item }) => item);
+  const activeDeals = openDeals
+    .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
+    .slice(0, ACTIVE_DEALS_LIMIT)
+    .map(({ sortAt: _sortAt, ...item }) => item);
 
   return {
     generatedAt: now.toISOString(),
@@ -247,5 +272,7 @@ export function buildPerformanceSnapshot(input: {
       closed: stageClosed(stage),
     })),
     attention: sortedAttention.slice(0, ATTENTION_LIMIT),
+    activeDeals,
+    hubspotPortalId: input.hubspotPortalId ?? null,
   };
 }

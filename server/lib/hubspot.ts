@@ -371,6 +371,30 @@ export async function fetchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
   return deals;
 }
 
+let cachedPortalId: { value: string; fetchedAt: number } | null = null;
+const PORTAL_ID_CACHE_MS = 60 * 60 * 1000;
+
+/**
+ * Resolve the HubSpot portal/account id for deep links into CRM records.
+ * Cached for an hour — the id does not change for a given access token.
+ */
+export async function fetchHubSpotPortalId(): Promise<string | null> {
+  if (cachedPortalId && Date.now() - cachedPortalId.fetchedAt < PORTAL_ID_CACHE_MS) {
+    return cachedPortalId.value;
+  }
+  try {
+    const data = await request("/account-info/v3/details", { method: "GET" });
+    const raw = data?.portalId;
+    const portalId =
+      typeof raw === "number" || typeof raw === "string" ? String(raw).trim() : "";
+    if (!portalId) return cachedPortalId?.value ?? null;
+    cachedPortalId = { value: portalId, fetchedAt: Date.now() };
+    return portalId;
+  } catch {
+    return cachedPortalId?.value ?? null;
+  }
+}
+
 /** Read the stage labels and closure metadata used to make the workload readable. */
 export async function fetchPrintOrderPipelineStages(): Promise<HubSpotPipelineStage[]> {
   const data = await request(`/crm/v3/pipelines/deals/${encodeURIComponent(PRINT_ORDERS_PIPELINE)}`, {

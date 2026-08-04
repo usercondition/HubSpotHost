@@ -23,6 +23,7 @@ import {
   verifyWebhookRequest,
 } from "./lib/signature";
 import {
+  fetchHubSpotPortalId,
   fetchPrintOrderDeals,
   fetchPrintOrderPipelineStages,
   HubSpotError,
@@ -580,9 +581,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/performance", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     try {
-      const [deals, stages] = await Promise.all([
+      const [deals, stages, hubspotPortalId] = await Promise.all([
         fetchPrintOrderDeals(),
         fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
       ]);
       return res.json(
         buildPerformanceSnapshot({
@@ -591,6 +593,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           intakeCounts: orderLinkCounts(),
           supplySpend: buildSupplySpendSummary(),
           attachedPrintDealIds: attachedPrintFileDealIds(),
+          hubspotPortalId,
         }),
       );
     } catch (error) {
