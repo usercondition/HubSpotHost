@@ -465,6 +465,9 @@ export function lineItemsForIntake(
  * A manual record of a supply purchase, usually copied from a regular Amazon
  * order confirmation. These records remain separate from per-deal actual
  * costs until the owner allocates an actual cost on the HubSpot deal.
+ *
+ * `lineItemsJson` holds the per-SKU breakdown when an order has more than one
+ * item. Empty / missing means a legacy single-item row using itemName + quantity.
  */
 export const supplyPurchases = sqliteTable("supply_purchases", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -477,9 +480,153 @@ export const supplyPurchases = sqliteTable("supply_purchases", {
   purchasedAt: text("purchased_at").notNull(),
   notes: text("notes").notNull().default(""),
   createdAt: text("created_at").notNull(),
+  lineItemsJson: text("line_items_json").notNull().default("[]"),
 });
 
 export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
+
+export interface SupplyPurchaseLineItem {
+  itemName: string;
+  quantity: number;
+  /** Optional line subtotal before tax/shipping. Empty when unknown. */
+  lineAmount: string;
+  category: SupplyCategory;
+}
+
+/** Prefer explicit lineItems; otherwise treat legacy scalar fields as one line. */
+export function normalizeSupplyLineItems(input: {
+  lineItems?: Array<{
+    itemName?: string;
+    quantity?: unknown;
+    lineAmount?: string;
+    category?: string;
+  }> | null;
+  itemName?: string;
+  quantity?: unknown;
+  totalAmount?: string;
+  category?: SupplyCategory;
+}): SupplyPurchaseLineItem[] {
+  const fromArray = Array.isArray(input.lineItems)
+    ? input.lineItems
+        .map((item) => {
+          const itemName = String(item?.itemName ?? "").trim();
+          const quantity = Math.max(1, Math.min(100_000, Number(item?.quantity) || 1));
+          const lineAmount = String(item?.lineAmount ?? "").trim();
+          const categoryRaw = String(item?.category ?? "").trim();
+          const category = (SUPPLY_CATEGORIES as readonly string[]).includes(categoryRaw)
+            ? (categoryRaw as SupplyCategory)
+            : suggestCategoryFromName(itemName);
+          return { itemName, quantity, lineAmount, category };
+        })
+        .filter((item) => item.itemName.length >= 2)
+    : [];
+  if (fromArray.length > 0) return fromArray.slice(0, 40);
+
+  const itemName = String(input.itemName ?? "").trim();
+  if (itemName.length < 2) return [];
+  return [
+    {
+      itemName,
+      quantity: Math.max(1, Math.min(100_000, Number(input.quantity) || 1)),
+      lineAmount: String(input.totalAmount ?? "").trim(),
+      category: input.category ?? suggestCategoryFromName(itemName),
+    },
+  ];
+}
+
+function suggestCategoryFromName(itemName: string): SupplyCategory {
+  const normalized = itemName.toLowerCase();
+  if (/\b(resin|filament|primer|paint|epoxy|silicone|pigment)\b/.test(normalized)) return "materials";
+  if (/\b(box|mailer|bubble|tape|label|packing|shipping|envelope|foam)\b/.test(normalized)) {
+    return "packaging_shipping";
+  }
+  if (/\b(fep|nfep|screen|vat|printer|build plate|motor|bearing|replacement|repair|tool)\b/.test(normalized)) {
+    return "equipment_maintenance";
+  }
+  if (/\b(glove|nitrile|isopropyl|ipa|alcohol|paper towel|mask|filter|funnel|rag|wipe)\b/.test(normalized)) {
+    return "consumables";
+  }
+  return "other";
+}
+
+export function summarizeSupplyLineItems(lines: SupplyPurchaseLineItem[]): {
+  itemName: string;
+  quantity: number;
+  category: SupplyCategory;
+  lineTotal: number | null;
+} {
+  if (lines.length === 0) {
+    return { itemName: "", quantity: 1, category: "other", lineTotal: null };
+  }
+  const quantity = lines.reduce((sum, line) => sum + Math.max(1, line.quantity || 1), 0);
+  const amounts = lines
+    .map((line) => parseAmountNumber(line.lineAmount))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const lineTotal = amounts.length > 0 ? amounts.reduce((sum, value) => sum + value, 0) : null;
+
+  let category = lines[0]!.category;
+  if (lines.length > 1 && amounts.length === lines.length) {
+    const byCategory = new Map<SupplyCategory, number>();
+    lines.forEach((line, index) => {
+      byCategory.set(line.category, (byCategory.get(line.category) ?? 0) + (amounts[index] ?? 0));
+    });
+    let best: SupplyCategory = category;
+    let bestTotal = -1;
+    Array.from(byCategory.entries()).forEach(([key, total]) => {
+      if (total > bestTotal) {
+        best = key;
+        bestTotal = total;
+      }
+    });
+    category = best;
+  } else if (lines.length > 1) {
+    const counts = new Map<SupplyCategory, number>();
+    for (const line of lines) {
+      counts.set(line.category, (counts.get(line.category) ?? 0) + 1);
+    }
+    let best: SupplyCategory = category;
+    let bestCount = -1;
+    Array.from(counts.entries()).forEach(([key, count]) => {
+      if (count > bestCount) {
+        best = key;
+        bestCount = count;
+      }
+    });
+    category = best;
+  }
+
+  const itemName =
+    lines.length === 1
+      ? lines[0]!.itemName
+      : `${lines.length} items: ${lines.map((line) => line.itemName).join("; ")}`.slice(0, 400);
+
+  return { itemName, quantity, category, lineTotal };
+}
+
+export function parseSupplyLineItemsJson(raw: string | null | undefined): SupplyPurchaseLineItem[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return normalizeSupplyLineItems({ lineItems: parsed as SupplyPurchaseLineItem[] });
+  } catch {
+    return [];
+  }
+}
+
+/** Prefer stored breakdown; fall back to legacy scalar columns. */
+export function lineItemsForSupplyPurchase(
+  purchase: Pick<SupplyPurchase, "lineItemsJson" | "itemName" | "quantity" | "totalAmount" | "category">,
+): SupplyPurchaseLineItem[] {
+  const stored = parseSupplyLineItemsJson(purchase.lineItemsJson);
+  if (stored.length > 0) return stored;
+  return normalizeSupplyLineItems({
+    itemName: purchase.itemName,
+    quantity: purchase.quantity,
+    totalAmount: purchase.totalAmount,
+    category: purchase.category,
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Sliced print files                                                  */
@@ -779,16 +926,35 @@ export const assignPrinterProfileSchema = z.object({
 
 export type AssignPrinterProfileInput = z.infer<typeof assignPrinterProfileSchema>;
 
-export const createSupplyPurchaseSchema = z.object({
-  source: trimmed(80).default("Amazon"),
-  orderReference: trimmed(120).default(""),
-  itemName: trimmed(300).min(2, "Enter the item you purchased"),
-  category: z.enum(SUPPLY_CATEGORIES).optional(),
+const supplyLineItemSchema = z.object({
+  itemName: trimmed(300).min(2, "Describe each purchased item"),
   quantity: z.coerce.number().int().min(1).max(100_000).default(1),
-  totalAmount: amountLike,
-  purchasedAt: supplyPurchaseDate,
-  notes: trimmed(1_000).default(""),
+  lineAmount: trimmed(40).default(""),
+  category: z.enum(SUPPLY_CATEGORIES).optional(),
 });
+
+export const createSupplyPurchaseSchema = z
+  .object({
+    source: trimmed(80).default("Amazon"),
+    orderReference: trimmed(120).default(""),
+    itemName: trimmed(400).default(""),
+    category: z.enum(SUPPLY_CATEGORIES).optional(),
+    quantity: z.coerce.number().int().min(1).max(100_000).default(1),
+    totalAmount: amountLike,
+    purchasedAt: supplyPurchaseDate,
+    notes: trimmed(1_000).default(""),
+    lineItems: z.array(supplyLineItemSchema).max(40).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const lines = normalizeSupplyLineItems(value);
+    if (lines.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Add at least one item you purchased",
+        path: ["lineItems"],
+      });
+    }
+  });
 
 export type CreateSupplyPurchaseInput = z.infer<typeof createSupplyPurchaseSchema>;
 

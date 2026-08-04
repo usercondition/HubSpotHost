@@ -10,6 +10,7 @@
  */
 import { desc, eq } from "drizzle-orm";
 import {
+  lineItemsForSupplyPurchase,
   resinProfiles,
   type PrintFileMetrics,
   type ResinCostSource,
@@ -251,19 +252,40 @@ function parseSupplyBottleMassG(itemName: string): number | null {
 }
 
 export function resinRateFromSupplies(): ResinRate | null {
-  const purchases = listSupplyPurchases(200).filter((purchase) => {
-    const name = purchase.itemName.toLowerCase();
-    return purchase.category === "materials" && name.includes("resin");
-  });
-  if (!purchases.length) return null;
+  const resinLines: Array<{
+    itemName: string;
+    quantity: number;
+    lineAmount: string;
+    purchaseTotal: string;
+    soleResinLine: boolean;
+  }> = [];
+
+  for (const purchase of listSupplyPurchases(200)) {
+    const allLines = lineItemsForSupplyPurchase(purchase);
+    const lines = allLines.filter((line) => {
+      const name = line.itemName.toLowerCase();
+      return (line.category === "materials" || purchase.category === "materials") && name.includes("resin");
+    });
+    if (lines.length === 0) continue;
+    for (const line of lines) {
+      resinLines.push({
+        itemName: line.itemName,
+        quantity: line.quantity,
+        lineAmount: line.lineAmount,
+        purchaseTotal: purchase.totalAmount,
+        soleResinLine: allLines.length === 1,
+      });
+    }
+  }
+  if (!resinLines.length) return null;
 
   let totalPrice = 0;
   let totalMass = 0;
   let samples = 0;
-  for (const purchase of purchases.slice(0, 12)) {
-    const price = positive(purchase.totalAmount);
-    const mass = parseSupplyBottleMassG(purchase.itemName);
-    const qty = Math.max(1, purchase.quantity || 1);
+  for (const line of resinLines.slice(0, 12)) {
+    const price = positive(line.lineAmount) ?? (line.soleResinLine ? positive(line.purchaseTotal) : null);
+    const mass = parseSupplyBottleMassG(line.itemName);
+    const qty = Math.max(1, line.quantity || 1);
     if (price === null || mass === null || mass <= 0) continue;
     totalPrice += price;
     totalMass += mass * qty;
