@@ -3,24 +3,30 @@
  *
  * Supports:
  * - Classic unencrypted CTB/CBDDLP headers (catibo layout)
- * - Encrypted CTB v4/v5 used by modern printers (e.g. Elegoo Mighty 8K),
+ * - Encrypted CTB v4/v5 used by modern printers (e.g. Elegoo Mighty/Mega 8K),
  *   where the slicer settings block is AES-CBC encrypted
  *
- * Only header/settings fields are inspected. Layer images are never decoded
- * or retained, so large uploads stay in memory briefly and are discarded.
+ * Only header/settings byte ranges are inspected. Layer images are never
+ * decoded. Large Mega 8K uploads can stay on disk and be sampled by offset
+ * instead of loading the whole plate into RAM.
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
 import type { PrintFileMetrics } from "../../shared/schema";
 
 const CTB_MAGIC_PREFIX = 0x12fd;
 const CTB_ENCRYPTED_MAGIC = 0x12fd0107;
 const HEADER_MIN_BYTES = 0x50;
+const CLASSIC_HEADER_READ = 0x80;
 const EXT_CONFIG_OFFSET = 0x54;
 const EXT_CONFIG_SIZE_OFFSET = 0x58;
 const EXT_CONFIG_2_OFFSET = 0x6c;
+const EXT_CONFIG_2_SIZE_OFFSET = 0x70;
 const MAX_MACHINE_TYPE_BYTES = 200;
+const MAX_EXT_CONFIG_BYTES = 4_096;
 const ENCRYPTED_HEADER_SIZE = 48;
 const ENCRYPTED_SETTINGS_MIN = 168;
+const HASH_CHUNK_BYTES = 1024 * 1024;
 
 /**
  * Publicly documented CTB encrypted-settings AES material (community RE /
@@ -42,16 +48,99 @@ function xorWithToken(data: Buffer, token: string): Buffer {
 const CTB_AES_KEY = xorWithToken(Buffer.from(CTB_AES_KEY_SECRET, "base64"), CTB_AES_SOFTWARE_TOKEN);
 const CTB_AES_IV = xorWithToken(Buffer.from(CTB_AES_IV_SECRET, "base64"), CTB_AES_SOFTWARE_TOKEN);
 
-function hasRange(buffer: Buffer, offset: number, length: number): boolean {
-  return Number.isInteger(offset) && offset >= 0 && length >= 0 && offset + length <= buffer.length;
+/** Random-access CTB reader: only requested ranges are loaded. */
+export interface CtbReader {
+  readonly size: number;
+  read(offset: number, length: number): Buffer | null;
+  sha256(): string;
+  close(): void;
+}
+
+export function createBufferCtbReader(buffer: Buffer): CtbReader {
+  return {
+    size: buffer.length,
+    read(offset, length) {
+      if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length < 0) return null;
+      if (offset + length > buffer.length) return null;
+      return buffer.subarray(offset, offset + length);
+    },
+    sha256() {
+      return crypto.createHash("sha256").update(buffer).digest("hex");
+    },
+    close() {
+      /* in-memory reader */
+    },
+  };
+}
+
+export function createFileCtbReader(filePath: string): CtbReader {
+  const stat = fs.statSync(filePath);
+  const fd = fs.openSync(filePath, "r");
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    fs.closeSync(fd);
+  };
+
+  return {
+    size: stat.size,
+    read(offset, length) {
+      if (closed) return null;
+      if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length < 0) return null;
+      if (offset + length > stat.size) return null;
+      const out = Buffer.allocUnsafe(length);
+      let read = 0;
+      while (read < length) {
+        const n = fs.readSync(fd, out, read, length - read, offset + read);
+        if (n <= 0) return null;
+        read += n;
+      }
+      return out;
+    },
+    sha256() {
+      if (closed) return crypto.createHash("sha256").update("").digest("hex");
+      // Large Mega 8K plates can be multi-GB. Fingerprint size + a 1 MiB prefix
+      // so analysis stays responsive without hashing the entire layer payload.
+      const hash = crypto.createHash("sha256");
+      const sizeBuf = Buffer.alloc(8);
+      sizeBuf.writeBigUInt64LE(BigInt(stat.size));
+      hash.update(sizeBuf);
+      const prefixLen = Math.min(stat.size, HASH_CHUNK_BYTES);
+      if (prefixLen > 0) {
+        const prefix = Buffer.allocUnsafe(prefixLen);
+        let read = 0;
+        while (read < prefixLen) {
+          const n = fs.readSync(fd, prefix, read, prefixLen - read, read);
+          if (n <= 0) break;
+          read += n;
+        }
+        hash.update(prefix.subarray(0, read));
+      }
+      return hash.digest("hex");
+    },
+    close,
+  };
+}
+
+function u32At(reader: CtbReader, offset: number): number | null {
+  const bytes = reader.read(offset, 4);
+  return bytes ? bytes.readUInt32LE(0) : null;
+}
+
+function f32At(reader: CtbReader, offset: number): number | null {
+  const bytes = reader.read(offset, 4);
+  if (!bytes) return null;
+  const value = bytes.readFloatLE(0);
+  return Number.isFinite(value) ? value : null;
 }
 
 function u32(buffer: Buffer, offset: number): number | null {
-  return hasRange(buffer, offset, 4) ? buffer.readUInt32LE(offset) : null;
+  return offset >= 0 && offset + 4 <= buffer.length ? buffer.readUInt32LE(offset) : null;
 }
 
 function f32(buffer: Buffer, offset: number): number | null {
-  if (!hasRange(buffer, offset, 4)) return null;
+  if (offset < 0 || offset + 4 > buffer.length) return null;
   const value = buffer.readFloatLE(offset);
   return Number.isFinite(value) ? value : null;
 }
@@ -78,7 +167,7 @@ function extFloat(
 ): number | null {
   if (extOffset === null) return null;
   if (extSize !== null && extSize > 0 && fieldOffset + 4 > extSize) return null;
-  return reasonable(f32(buffer, extOffset + fieldOffset), min, max, digits);
+  return reasonable(f32(buffer, fieldOffset), min, max, digits);
 }
 
 function extUInt(
@@ -91,21 +180,12 @@ function extUInt(
 ): number | null {
   if (extOffset === null) return null;
   if (extSize !== null && extSize > 0 && fieldOffset + 4 > extSize) return null;
-  return reasonableUInt(u32(buffer, extOffset + fieldOffset), min, max);
+  return reasonableUInt(u32(buffer, fieldOffset), min, max);
 }
 
-function safeAscii(buffer: Buffer, offset: number | null, length: number | null): string | null {
-  if (
-    offset === null ||
-    length === null ||
-    length < 1 ||
-    length > MAX_MACHINE_TYPE_BYTES ||
-    !hasRange(buffer, offset, length)
-  ) {
-    return null;
-  }
+function safeAscii(buffer: Buffer | null): string | null {
+  if (!buffer || buffer.length < 1 || buffer.length > MAX_MACHINE_TYPE_BYTES) return null;
   const value = buffer
-    .subarray(offset, offset + length)
     .toString("ascii")
     .replace(/[^\x20-\x7e]/g, "")
     .replace(/\s+/g, " ")
@@ -133,14 +213,14 @@ function layerCountOrNull(value: number | null): number | null {
   return value !== null && value > 0 && value <= 2_000_000 ? value : null;
 }
 
-function baseMetrics(fileName: string, buffer: Buffer): Pick<
+function baseMetrics(fileName: string, reader: CtbReader): Pick<
   PrintFileMetrics,
   "fileName" | "fileSizeBytes" | "sha256" | "format"
 > {
   return {
     fileName: fileName.slice(0, 260),
-    fileSizeBytes: buffer.length,
-    sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+    fileSizeBytes: reader.size,
+    sha256: reader.sha256(),
     format: "CTB",
   };
 }
@@ -168,28 +248,34 @@ export function encryptCtbSettingsBlock(plain: Buffer): Buffer {
   return Buffer.concat([cipher.update(padded), cipher.final()]);
 }
 
-function parseEncryptedCtb(fileName: string, buffer: Buffer, magic: number): PrintFileMetrics {
-  if (buffer.length < ENCRYPTED_HEADER_SIZE) {
+function parseEncryptedCtb(fileName: string, reader: CtbReader, magic: number): PrintFileMetrics {
+  const header = reader.read(0, ENCRYPTED_HEADER_SIZE);
+  if (!header) {
     throw new CtbParseError("This encrypted CTB header is incomplete");
   }
 
-  const settingsSize = u32(buffer, 0x04);
-  const settingsOffset = u32(buffer, 0x08);
-  const version = u32(buffer, 0x10);
+  const settingsSize = u32(header, 0x04);
+  const settingsOffset = u32(header, 0x08);
+  const version = u32(header, 0x10);
 
   if (
     settingsSize === null ||
     settingsOffset === null ||
     settingsSize < ENCRYPTED_SETTINGS_MIN ||
-    settingsSize > 4_096 ||
-    !hasRange(buffer, settingsOffset, settingsSize)
+    settingsSize > MAX_EXT_CONFIG_BYTES ||
+    settingsOffset + settingsSize > reader.size
   ) {
     throw new CtbParseError("That encrypted CTB file has an unreadable settings block");
   }
 
+  const encryptedSettings = reader.read(settingsOffset, settingsSize);
+  if (!encryptedSettings) {
+    throw new CtbParseError("That encrypted CTB settings block could not be read");
+  }
+
   let settings: Buffer;
   try {
-    settings = decryptCtbSettingsBlock(buffer.subarray(settingsOffset, settingsOffset + settingsSize));
+    settings = decryptCtbSettingsBlock(encryptedSettings);
   } catch {
     throw new CtbParseError("That encrypted CTB settings block could not be decrypted");
   }
@@ -198,15 +284,21 @@ function parseEncryptedCtb(fileName: string, buffer: Buffer, magic: number): Pri
     throw new CtbParseError("Decrypted CTB settings were shorter than expected");
   }
 
-  // Offsets into the decrypted SlicerSettings structure (UVtools / community layout).
   const resinVolumeMl = reasonable(f32(settings, 104), 0.001, 100_000);
   const resinMassG = reasonable(f32(settings, 108), 0.001, 100_000);
   const resinCost = reasonable(f32(settings, 112), 0, 1_000_000, 2);
   const machineNameOffset = u32(settings, 160);
   const machineNameSize = u32(settings, 164);
+  const machineName =
+    machineNameOffset !== null &&
+    machineNameSize !== null &&
+    machineNameSize > 0 &&
+    machineNameSize <= MAX_MACHINE_TYPE_BYTES
+      ? safeAscii(reader.read(machineNameOffset, machineNameSize))
+      : null;
 
   return {
-    ...baseMetrics(fileName, buffer),
+    ...baseMetrics(fileName, reader),
     formatRevision: `CTB encrypted v${version ?? "unknown"} · 0x${magic.toString(16)}`,
     printTimeSeconds: printTimeOrNull(u32(settings, 76)),
     resinVolumeMl,
@@ -233,67 +325,106 @@ function parseEncryptedCtb(fileName: string, buffer: Buffer, magic: number): Pri
     buildVolumeXmm: reasonable(f32(settings, 12), 1, 2_000),
     buildVolumeYmm: reasonable(f32(settings, 16), 1, 2_000),
     buildVolumeZmm: reasonable(f32(settings, 20), 1, 2_000),
-    printerProfile: safeAscii(buffer, machineNameOffset, machineNameSize),
+    printerProfile: machineName,
   };
 }
 
-function parseClassicCtb(fileName: string, buffer: Buffer, magic: number): PrintFileMetrics {
-  const version = u32(buffer, 0x04);
-  const layerCount = u32(buffer, 0x44);
-  const printTimeSeconds = u32(buffer, 0x4c);
-  const extConfigOffset = u32(buffer, EXT_CONFIG_OFFSET);
-  const extConfigSize = u32(buffer, EXT_CONFIG_SIZE_OFFSET);
-  const extConfig2Offset = u32(buffer, EXT_CONFIG_2_OFFSET);
+function parseClassicCtb(fileName: string, reader: CtbReader, magic: number): PrintFileMetrics {
+  const header = reader.read(0, Math.min(CLASSIC_HEADER_READ, reader.size));
+  if (!header || header.length < HEADER_MIN_BYTES) {
+    throw new CtbParseError("This file is too small to be a Chitubox CTB slice file");
+  }
 
-  const headerBottomLayerCount = reasonableUInt(u32(buffer, 0x30), 0, 10_000);
-  const resinVolumeMl = extFloat(buffer, extConfigOffset, extConfigSize, 0x14, 0.001, 100_000);
-  const resinMassG = extFloat(buffer, extConfigOffset, extConfigSize, 0x18, 0.001, 100_000);
-  const resinCost = extFloat(buffer, extConfigOffset, extConfigSize, 0x1c, 0, 1_000_000, 2);
-  const extBottomLayerCount = extUInt(buffer, extConfigOffset, extConfigSize, 0x28, 0, 10_000);
+  const version = u32(header, 0x04);
+  const layerCount = u32(header, 0x44);
+  const printTimeSeconds = u32(header, 0x4c);
+  const extConfigOffset = u32(header, EXT_CONFIG_OFFSET);
+  const extConfigSizeRaw = u32(header, EXT_CONFIG_SIZE_OFFSET);
+  const extConfig2Offset = u32(header, EXT_CONFIG_2_OFFSET);
+  const extConfig2SizeRaw = u32(header, EXT_CONFIG_2_SIZE_OFFSET);
 
+  const extConfigSize =
+    extConfigSizeRaw !== null && extConfigSizeRaw > 0 && extConfigSizeRaw <= MAX_EXT_CONFIG_BYTES
+      ? extConfigSizeRaw
+      : 0x40;
+  const extConfig =
+    extConfigOffset !== null ? reader.read(extConfigOffset, extConfigSize) : null;
+
+  const headerBottomLayerCount = reasonableUInt(u32(header, 0x30), 0, 10_000);
+  const resinVolumeMl = extFloat(extConfig ?? Buffer.alloc(0), extConfigOffset, extConfigSize, 0x14, 0.001, 100_000);
+  const resinMassG = extFloat(extConfig ?? Buffer.alloc(0), extConfigOffset, extConfigSize, 0x18, 0.001, 100_000);
+  const resinCost = extFloat(extConfig ?? Buffer.alloc(0), extConfigOffset, extConfigSize, 0x1c, 0, 1_000_000, 2);
+  const extBottomLayerCount = extUInt(extConfig ?? Buffer.alloc(0), extConfigOffset, extConfigSize, 0x28, 0, 10_000);
+
+  const extConfig2Size =
+    extConfig2SizeRaw !== null && extConfig2SizeRaw > 0 && extConfig2SizeRaw <= MAX_EXT_CONFIG_BYTES
+      ? extConfig2SizeRaw
+      : 0x40;
+  const extConfig2 =
+    extConfig2Offset !== null ? reader.read(extConfig2Offset, extConfig2Size) : null;
   const machineTypeOffset =
-    extConfig2Offset !== null && hasRange(buffer, extConfig2Offset + 0x1c, 4)
-      ? u32(buffer, extConfig2Offset + 0x1c)
-      : null;
+    extConfig2 && extConfig2.length >= 0x20 ? u32(extConfig2, 0x1c) : null;
   const machineTypeLength =
-    extConfig2Offset !== null && hasRange(buffer, extConfig2Offset + 0x20, 4)
-      ? u32(buffer, extConfig2Offset + 0x20)
+    extConfig2 && extConfig2.length >= 0x24 ? u32(extConfig2, 0x20) : null;
+  const printerProfile =
+    machineTypeOffset !== null &&
+    machineTypeLength !== null &&
+    machineTypeLength > 0 &&
+    machineTypeLength <= MAX_MACHINE_TYPE_BYTES
+      ? safeAscii(reader.read(machineTypeOffset, machineTypeLength))
       : null;
 
   return {
-    ...baseMetrics(fileName, buffer),
+    ...baseMetrics(fileName, reader),
     formatRevision: `CTB header ${version ?? "unknown"} · 0x${magic.toString(16)}`,
     printTimeSeconds: printTimeOrNull(printTimeSeconds),
-    resinVolumeMl,
-    resinMassG,
-    resinCost: costOrNull(resinCost),
+    resinVolumeMl: extConfig ? resinVolumeMl : null,
+    resinMassG: extConfig ? resinMassG : null,
+    resinCost: extConfig ? costOrNull(resinCost) : null,
     resinCostSource: null,
     resinCostLabel: null,
-    resinDensityGPerMl: densityFromMassVolume(resinMassG, resinVolumeMl),
+    resinDensityGPerMl: densityFromMassVolume(
+      extConfig ? resinMassG : null,
+      extConfig ? resinVolumeMl : null,
+    ),
     layerCount: layerCountOrNull(layerCount),
-    layerHeightMm: reasonable(f32(buffer, 0x20), 0.001, 1, 4),
-    modelHeightMm: reasonable(f32(buffer, 0x1c), 0.001, 2_000, 3),
-    exposureSeconds: reasonable(f32(buffer, 0x24), 0.05, 600, 3),
-    bottomExposureSeconds: reasonable(f32(buffer, 0x28), 0.05, 600, 3),
+    layerHeightMm: reasonable(f32(header, 0x20), 0.001, 1, 4),
+    modelHeightMm: reasonable(f32(header, 0x1c), 0.001, 2_000, 3),
+    exposureSeconds: reasonable(f32(header, 0x24), 0.05, 600, 3),
+    bottomExposureSeconds: reasonable(f32(header, 0x28), 0.05, 600, 3),
     lightOffSeconds: reasonable(
-      extFloat(buffer, extConfigOffset, extConfigSize, 0x24, 0, 600, 3) ?? f32(buffer, 0x2c),
+      (extConfig
+        ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x24, 0, 600, 3)
+        : null) ?? f32(header, 0x2c),
       0,
       600,
       3,
     ),
-    bottomLightOffSeconds: extFloat(buffer, extConfigOffset, extConfigSize, 0x20, 0, 600, 3),
-    bottomLayerCount: extBottomLayerCount ?? headerBottomLayerCount,
-    liftDistanceMm: extFloat(buffer, extConfigOffset, extConfigSize, 0x08, 0, 500, 3),
-    liftSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x0c, 0, 1_000, 2),
-    bottomLiftDistanceMm: extFloat(buffer, extConfigOffset, extConfigSize, 0x00, 0, 500, 3),
-    bottomLiftSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x04, 0, 1_000, 2),
-    retractSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x10, 0, 1_000, 2),
-    resolutionX: reasonableUInt(u32(buffer, 0x34), 1, 65_536),
-    resolutionY: reasonableUInt(u32(buffer, 0x38), 1, 65_536),
-    buildVolumeXmm: reasonable(f32(buffer, 0x08), 1, 2_000),
-    buildVolumeYmm: reasonable(f32(buffer, 0x0c), 1, 2_000),
-    buildVolumeZmm: reasonable(f32(buffer, 0x10), 1, 2_000),
-    printerProfile: safeAscii(buffer, machineTypeOffset, machineTypeLength),
+    bottomLightOffSeconds: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x20, 0, 600, 3)
+      : null,
+    bottomLayerCount: (extConfig ? extBottomLayerCount : null) ?? headerBottomLayerCount,
+    liftDistanceMm: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x08, 0, 500, 3)
+      : null,
+    liftSpeedMmPerMin: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x0c, 0, 1_000, 2)
+      : null,
+    bottomLiftDistanceMm: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x00, 0, 500, 3)
+      : null,
+    bottomLiftSpeedMmPerMin: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x04, 0, 1_000, 2)
+      : null,
+    retractSpeedMmPerMin: extConfig
+      ? extFloat(extConfig, extConfigOffset, extConfigSize, 0x10, 0, 1_000, 2)
+      : null,
+    resolutionX: reasonableUInt(u32(header, 0x34), 1, 65_536),
+    resolutionY: reasonableUInt(u32(header, 0x38), 1, 65_536),
+    buildVolumeXmm: reasonable(f32(header, 0x08), 1, 2_000),
+    buildVolumeYmm: reasonable(f32(header, 0x0c), 1, 2_000),
+    buildVolumeZmm: reasonable(f32(header, 0x10), 1, 2_000),
+    printerProfile,
   };
 }
 
@@ -304,23 +435,43 @@ export class CtbParseError extends Error {
   }
 }
 
-/**
- * Parse one CTB file's planning metadata. The values describe the whole plate,
- * so the caller should attach a file only to an order that owns that plate.
- */
-export function parseCtbFile(fileName: string, buffer: Buffer): PrintFileMetrics {
-  if (buffer.length < HEADER_MIN_BYTES) {
+function parseCtbReader(fileName: string, reader: CtbReader): PrintFileMetrics {
+  if (reader.size < HEADER_MIN_BYTES) {
     throw new CtbParseError("This file is too small to be a Chitubox CTB slice file");
   }
 
-  const magic = u32(buffer, 0);
+  const magic = u32At(reader, 0);
   if (magic === null || (magic >>> 16) !== CTB_MAGIC_PREFIX) {
     throw new CtbParseError("That file does not have a recognized Chitubox CTB header");
   }
 
   if (magic === CTB_ENCRYPTED_MAGIC) {
-    return parseEncryptedCtb(fileName, buffer, magic);
+    return parseEncryptedCtb(fileName, reader, magic);
   }
 
-  return parseClassicCtb(fileName, buffer, magic);
+  return parseClassicCtb(fileName, reader, magic);
+}
+
+/**
+ * Parse one CTB file's planning metadata from an in-memory buffer.
+ * Prefer `parseCtbFileFromPath` for large Mega 8K uploads.
+ */
+export function parseCtbFile(fileName: string, buffer: Buffer): PrintFileMetrics {
+  return parseCtbReader(fileName, createBufferCtbReader(buffer));
+}
+
+/**
+ * Parse CTB metadata by reading only the needed header/settings ranges from
+ * disk. The raw plate file is never fully loaded into memory.
+ */
+export function parseCtbFileFromPath(fileName: string, filePath: string): PrintFileMetrics {
+  const reader = createFileCtbReader(filePath);
+  try {
+    return parseCtbReader(fileName, reader);
+  } catch (error) {
+    if (error instanceof CtbParseError) throw error;
+    throw new CtbParseError("That CTB file could not be read from disk");
+  } finally {
+    reader.close();
+  }
 }
