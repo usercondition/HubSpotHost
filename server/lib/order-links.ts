@@ -184,6 +184,19 @@ CREATE INDEX IF NOT EXISTS printer_lifecycle_events_printer_idx
   ON printer_lifecycle_events (printer_id, occurred_at DESC);
 `;
 
+const CREATE_PRINTER_PROFILE_MAPS_SQL = `
+CREATE TABLE IF NOT EXISTS printer_profile_maps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_key TEXT NOT NULL UNIQUE,
+  profile_label TEXT NOT NULL,
+  printer_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS printer_profile_maps_printer_idx
+  ON printer_profile_maps (printer_id, profile_key);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -281,6 +294,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   sqlite.exec(CREATE_PRINTERS_SQL);
   sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);
+  sqlite.exec(CREATE_PRINTER_PROFILE_MAPS_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   db = drizzle(sqlite);

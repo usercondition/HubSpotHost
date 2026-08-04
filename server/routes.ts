@@ -47,6 +47,7 @@ import {
 } from "./lib/print-files";
 import {
   addPrinterLifecycleEvent,
+  assignPrinterProfile,
   buildPrinterFleetSnapshot,
   ensureDefaultPrinters,
   getPrinter,
@@ -84,6 +85,7 @@ import {
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  assignPrinterProfileSchema,
   createPrinterLifecycleEventSchema,
   updatePrinterSchema,
   upsertResinProfileSchema,
@@ -816,6 +818,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const event = addPrinterLifecycleEvent(printerId, parsed.data);
     if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
     return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
+  });
+
+  /**
+   * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
+   * Historical and future plates with that label then roll into that machine.
+   */
+  app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = assignPrinterProfileSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = assignPrinterProfile(parsed.data);
+    if (!result) {
+      return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
+    }
+    return res.json({
+      ok: true,
+      map: result.map,
+      fleet: result.fleet,
+      message: `Assigned “${result.map.profileLabel}” to that printer. Matching plates now count toward its usage.`,
+    });
   });
 
   /**

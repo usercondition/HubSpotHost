@@ -8,14 +8,17 @@
 import { and, asc, desc, eq, gte } from "drizzle-orm";
 import {
   printerLifecycleEvents,
+  printerProfileMaps,
   printers,
   printFileRecords,
+  type AssignPrinterProfileInput,
   type CreatePrinterLifecycleEventInput,
   type Printer,
   type PrinterFleetSnapshot,
   type PrinterJobSummary,
   type PrinterLifecycleEvent,
   type PrinterLifecycleEventType,
+  type PrinterProfileMap,
   type PrinterStatus,
   type PrinterUsageBreakdown,
   type PrintFileRecord,
@@ -84,7 +87,21 @@ export const DEFAULT_FLEET_PRINTERS: SeedPrinter[] = [
     name: "MEGA 8K",
     brand: "ELEGOO",
     model: "Mega 8K",
-    aliases: ["MEGA 8K", "Mega 8K", "ELEGOO MEGA 8K", "ELEGOO Mega 8K"],
+    aliases: [
+      "MEGA 8K",
+      "Mega 8K",
+      "ELEGOO MEGA 8K",
+      "ELEGOO Mega 8K",
+      // Chitubox often labels this machine with the Phrozen profile name.
+      "Phrozen Sonic Mega 8K S",
+      "Phrozen Sonic Mega 8K",
+      "Phrozen Mega 8K",
+      "Phrozen Mega",
+      "Sonic Mega 8K S",
+      "Sonic Mega 8K",
+      "PhrozenSonicMega8KS",
+      "PhrozenSonicMega8K",
+    ],
     sortOrder: 60,
     recommendedFepHours: 80,
     recommendedFepLayers: 25_000,
@@ -93,13 +110,7 @@ export const DEFAULT_FLEET_PRINTERS: SeedPrinter[] = [
     name: "Phrozen Mega",
     brand: "Phrozen",
     model: "Mega 8K",
-    aliases: [
-      "Phrozen Mega",
-      "Phrozen Mega 8K",
-      "Phrozen Sonic Mega 8K",
-      "Sonic Mega 8K",
-      "PhrozenSonicMega8K",
-    ],
+    aliases: ["Phrozen Mega (dedicated)", "Phrozen Mega fleet spare"],
     sortOrder: 65,
     recommendedFepHours: 80,
     recommendedFepLayers: 25_000,
@@ -167,6 +178,21 @@ export function parseAliases(raw: string | null | undefined): string[] {
   }
 }
 
+function mergeAliasLists(existing: string[], seed: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const alias of [...existing, ...seed]) {
+    const trimmed = alias.trim();
+    if (!trimmed) continue;
+    const key = normalizePrinterKey(trimmed);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(trimmed);
+    if (merged.length >= 40) break;
+  }
+  return merged;
+}
+
 export function ensureDefaultPrinters(): Printer[] {
   const db = getDb();
   const existing = db.select().from(printers).all();
@@ -175,25 +201,95 @@ export function ensureDefaultPrinters(): Printer[] {
 
   for (const seed of DEFAULT_FLEET_PRINTERS) {
     const key = normalizePrinterKey(seed.name);
-    if (byName.has(key)) continue;
-    db.insert(printers)
-      .values({
-        name: seed.name,
-        brand: seed.brand,
-        model: seed.model,
-        status: "active",
-        aliasesJson: JSON.stringify(seed.aliases),
-        notes: "",
-        recommendedFepHours: String(seed.recommendedFepHours),
-        recommendedFepLayers: String(seed.recommendedFepLayers),
-        sortOrder: seed.sortOrder,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
+    const current = byName.get(key);
+    if (!current) {
+      db.insert(printers)
+        .values({
+          name: seed.name,
+          brand: seed.brand,
+          model: seed.model,
+          status: "active",
+          aliasesJson: JSON.stringify(seed.aliases),
+          notes: "",
+          recommendedFepHours: String(seed.recommendedFepHours),
+          recommendedFepLayers: String(seed.recommendedFepLayers),
+          sortOrder: seed.sortOrder,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      continue;
+    }
+
+    // Keep Railway fleets up to date when we learn new Chitubox machine labels.
+    const merged = mergeAliasLists(parseAliases(current.aliasesJson), seed.aliases);
+    if (JSON.stringify(merged) !== JSON.stringify(parseAliases(current.aliasesJson))) {
+      db.update(printers)
+        .set({ aliasesJson: JSON.stringify(merged), updatedAt: now })
+        .where(eq(printers.id, current.id))
+        .run();
+    }
   }
 
   return db.select().from(printers).orderBy(asc(printers.sortOrder), asc(printers.name)).all();
+}
+
+export function listPrinterProfileMaps(): PrinterProfileMap[] {
+  return getDb().select().from(printerProfileMaps).all();
+}
+
+export function assignPrinterProfile(input: AssignPrinterProfileInput): {
+  map: PrinterProfileMap;
+  fleet: PrinterFleetSnapshot;
+} | null {
+  const fleetRows = ensureDefaultPrinters();
+  const printer = fleetRows.find((row) => row.id === input.printerId);
+  if (!printer) return null;
+
+  const profileLabel = input.profile.trim() || "(blank machine name)";
+  const profileKey = normalizePrinterKey(profileLabel) || "(blank)";
+  const now = nowIso();
+  const existing = getDb()
+    .select()
+    .from(printerProfileMaps)
+    .where(eq(printerProfileMaps.profileKey, profileKey))
+    .get();
+
+  let map: PrinterProfileMap;
+  if (existing) {
+    map = getDb()
+      .update(printerProfileMaps)
+      .set({
+        profileLabel,
+        printerId: input.printerId,
+        updatedAt: now,
+      })
+      .where(eq(printerProfileMaps.id, existing.id))
+      .returning()
+      .get();
+  } else {
+    map = getDb()
+      .insert(printerProfileMaps)
+      .values({
+        profileKey,
+        profileLabel,
+        printerId: input.printerId,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+  }
+
+  // Also keep the chosen machine's alias list aware of this label for visibility.
+  const merged = mergeAliasLists(parseAliases(printer.aliasesJson), [profileLabel]);
+  getDb()
+    .update(printers)
+    .set({ aliasesJson: JSON.stringify(merged), updatedAt: now })
+    .where(eq(printers.id, printer.id))
+    .run();
+
+  return { map, fleet: buildPrinterFleetSnapshot() };
 }
 
 export function matchTokens(profile: string, candidate: string): boolean {
@@ -220,9 +316,16 @@ export function matchTokens(profile: string, candidate: string): boolean {
 export function matchPrinterId(
   printerProfile: string | null | undefined,
   fleet: Printer[],
+  profileMaps: PrinterProfileMap[] = listPrinterProfileMaps(),
 ): number | null {
-  const profile = String(printerProfile ?? "").trim();
-  if (!profile) return null;
+  const profile = String(printerProfile ?? "").trim() || "(blank machine name)";
+  const profileKey = normalizePrinterKey(profile) || "(blank)";
+
+  // Manual assignments always win — used for odd Chitubox labels like Phrozen Sonic Mega 8K S.
+  const mapped = profileMaps.find((row) => row.profileKey === profileKey);
+  if (mapped && fleet.some((printer) => printer.id === mapped.printerId)) {
+    return mapped.printerId;
+  }
 
   // Prefer longer / more specific aliases so NEWX1 beats generic Mighty 8K.
   const ranked = fleet
@@ -372,10 +475,11 @@ export function buildPrinterFleetSnapshot(): PrinterFleetSnapshot {
     eventsByPrinter.set(event.printerId, list);
   }
 
+  const profileMaps = listPrinterProfileMaps();
   const jobsByPrinter = new Map<number, PrintFileRecord[]>();
   const unassigned: PrintFileRecord[] = [];
   for (const record of records) {
-    const printerId = matchPrinterId(record.printerProfile, fleet);
+    const printerId = matchPrinterId(record.printerProfile, fleet, profileMaps);
     if (printerId == null) {
       unassigned.push(record);
       continue;
