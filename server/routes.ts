@@ -11,6 +11,7 @@ import { AUDIT_LIMIT, auditCount, listAttempts } from "./lib/audit";
 import { summarizeEvents } from "./lib/events";
 import { recalculateDeal } from "./lib/service";
 import { buildRequestUri, verifyWebhookRequest } from "./lib/signature";
+import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 
@@ -79,6 +80,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         supportedVersions: ["v1", "v3"],
         path: WEBHOOK_PATH,
+        latestDelivery: getLatestWebhookDiagnostic(),
       },
       admin: {
         publicControlsEnabled: !isProductionDeployment(),
@@ -95,6 +97,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
     const secret = getWebhookSecret();
     if (isProductionDeployment() && !secret) {
+      recordWebhookDiagnostic({
+        result: "rejected",
+        version: null,
+        reason: "webhook validation secret is required in production",
+      });
       return res.status(503).json({
         ok: false,
         error: "webhook validation secret is required in production",
@@ -117,6 +124,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     if (!verification.valid) {
+      recordWebhookDiagnostic({
+        result: "rejected",
+        version: verification.version,
+        reason: verification.reason,
+      });
       return res.status(401).json({
         ok: false,
         error: "signature rejected",
@@ -125,6 +137,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const summary = summarizeEvents(req.body);
+    recordWebhookDiagnostic({
+      result: "accepted",
+      version: verification.version,
+      reason: verification.reason,
+    });
     const wantsLiveWrite = webhookWantsLiveWrite(req);
 
     const results = [];

@@ -195,6 +195,27 @@ test("webhook rejects a bad v1 signature and accepts a good one", async () => {
   }
 });
 
+test("health exposes only non-sensitive details about the latest rejected webhook", async () => {
+  reset();
+  process.env.HUBSPOT_WEBHOOK_SECRET = "diagnostic-secret";
+  try {
+    const rejected = await fetch(`${appBase}/api/webhooks/hubspot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ objectId: 901, objectTypeId: "0-3", propertyName: "amount" }]),
+    });
+    assert.equal(rejected.status, 401);
+
+    const health = await fetch(`${appBase}/api/health`);
+    const body = await health.json();
+    assert.equal(body.webhook.latestDelivery.result, "rejected");
+    assert.equal(body.webhook.latestDelivery.reason, "no HubSpot signature header present");
+    assert.equal(JSON.stringify(body).includes("diagnostic-secret"), false);
+  } finally {
+    delete process.env.HUBSPOT_WEBHOOK_SECRET;
+  }
+});
+
 test("webhook accepts a valid v3 signature", async () => {
   reset();
   process.env.HUBSPOT_WEBHOOK_SECRET = "shh";

@@ -62,6 +62,12 @@ export interface HealthResponse {
     verification: "configured" | "not-configured";
     supportedVersions: string[];
     path: string;
+    latestDelivery: {
+      receivedAt: string;
+      result: "accepted" | "rejected";
+      version: "v1" | "v3" | null;
+      reason: string;
+    } | null;
   };
   admin: {
     /** Public deployments expose only the webhook and safe readiness status. */
