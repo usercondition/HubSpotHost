@@ -185,11 +185,25 @@ export default function ClientOrder() {
               data-testid="panel-agreed-order"
             >
               <p className="rule-label">What you agreed with the seller</p>
-              <p className="mt-1.5 text-sm font-medium" data-testid="text-agreed-item">
-                {state.view.itemDescription}
-              </p>
-              <p className="numeric mt-1 text-sm text-muted-foreground" data-testid="text-agreed-amount">
-                Amount paid: ${state.view.agreedAmount}
+              {(state.view.lineItems?.length ?? 0) > 1 ? (
+                <ul className="mt-2 space-y-2" data-testid="list-agreed-line-items">
+                  {state.view.lineItems.map((line, index) => (
+                    <li key={`${line.description}-${index}`} className="text-sm">
+                      <span className="font-medium">{line.description}</span>
+                      {line.quantity > 1 ? (
+                        <span className="text-muted-foreground"> · qty {line.quantity}</span>
+                      ) : null}
+                      <span className="numeric mt-0.5 block text-muted-foreground">${line.amount}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-sm font-medium" data-testid="text-agreed-item">
+                  {state.view.itemDescription}
+                </p>
+              )}
+              <p className="numeric mt-2 text-sm text-muted-foreground" data-testid="text-agreed-amount">
+                Total amount paid: ${state.view.agreedAmount}
               </p>
               {(state.view.buyerNameHint || state.view.buyerUsernameHint) && (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -301,7 +315,8 @@ export default function ClientOrder() {
                 <legend className="text-sm font-semibold">Confirm what you ordered</legend>
                 <div className="space-y-1.5">
                   <Label htmlFor="confirmed-item">
-                    Item or model<span className="text-primary"> *</span>
+                    {(state.view.lineItems?.length ?? 0) > 1 ? "Notes or corrections" : "Item or model"}
+                    <span className="text-primary"> *</span>
                   </Label>
                   <Textarea
                     id="confirmed-item"
@@ -311,19 +326,22 @@ export default function ClientOrder() {
                     data-testid="input-confirmed-item"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Pre-filled from your conversation. Edit it if anything looks wrong and the seller
-                    will check before confirming.
+                    {(state.view.lineItems?.length ?? 0) > 1
+                      ? "Confirm the list above looks right, or note anything the seller should double-check."
+                      : "Pre-filled from your conversation. Edit it if anything looks wrong and the seller will check before confirming."}
                   </p>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <ClientField
-                    id="quantity"
-                    label="Quantity"
-                    value={form.quantity}
-                    onChange={(v) => set("quantity", v)}
-                    inputMode="numeric"
-                  />
-                </div>
+                {(state.view.lineItems?.length ?? 0) <= 1 ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ClientField
+                      id="quantity"
+                      label="Quantity"
+                      value={form.quantity}
+                      onChange={(v) => set("quantity", v)}
+                      inputMode="numeric"
+                    />
+                  </div>
+                ) : null}
                 <div className="space-y-1.5">
                   <Label htmlFor="client-notes">Notes or special instructions</Label>
                   <Textarea

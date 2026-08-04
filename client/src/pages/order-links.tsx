@@ -29,18 +29,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useOwnerSession } from "@/hooks/use-owner-session";
-import { printsDealHref } from "@/lib/workflow";
+import {
+  ORDER_INTAKE_STATUSES,
+  ORDER_INTAKE_STATUS_LABELS,
+  lineItemsForIntake,
+  parseHubSpotDealsJson,
+  summarizeIntakeLineItems,
+  type OrderIntakeLink,
+  type OrderIntakeStatus,
+} from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import {
-  ORDER_INTAKE_STATUSES,
-  ORDER_INTAKE_STATUS_LABELS,
-  type OrderIntakeLink,
-  type OrderIntakeStatus,
-} from "@shared/schema";
+import { useOwnerSession } from "@/hooks/use-owner-session";
+import { printsDealHref } from "@/lib/workflow";
 
 /** Owner-side rows never carry the token hash. */
 type QueueLink = Omit<OrderIntakeLink, "tokenHash">;
@@ -66,8 +69,6 @@ const STATUS_ICON = {
 } as const;
 
 const EMPTY_FORM = {
-  itemDescription: "",
-  agreedAmount: "",
   paymentMethod: "",
   paymentReference: "",
   buyerNameHint: "",
@@ -75,6 +76,12 @@ const EMPTY_FORM = {
   ownerNotes: "",
   expiryDays: "14",
 };
+
+type LineDraft = { description: string; amount: string; quantity: string };
+
+function emptyLine(): LineDraft {
+  return { description: "", amount: "", quantity: "1" };
+}
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -132,6 +139,7 @@ export default function OrderLinks() {
   const { ownerCode, codeDraft, setCodeDraft, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
   const [tab, setTab] = useState<OrderIntakeStatus>("pending_review");
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [lineItems, setLineItems] = useState<LineDraft[]>([emptyLine()]);
   const [newLinkUrl, setNewLinkUrl] = useState<string | null>(null);
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [copied, setCopied] = useState(false);
@@ -173,13 +181,16 @@ export default function OrderLinks() {
   });
 
   const createLink = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest(
-        "POST",
-        "/api/order-links",
-        { ...form, expiryDays: Number(form.expiryDays) || 14 },
-        { headers },
-      );
+    mutationFn: async (payload: {
+      lineItems: Array<{ description: string; amount: string; quantity: number }>;
+      paymentMethod: string;
+      paymentReference: string;
+      buyerNameHint: string;
+      buyerUsernameHint: string;
+      ownerNotes: string;
+      expiryDays: number;
+    }) => {
+      const res = await apiRequest("POST", "/api/order-links", payload, { headers });
       return (await res.json()) as { ok: true; path: string; link: QueueLink };
     },
     onSuccess: ({ path, link }) => {
@@ -187,6 +198,7 @@ export default function OrderLinks() {
       setNewLinkLabel(link.internalLabel);
       setCopied(false);
       setForm({ ...EMPTY_FORM });
+      setLineItems([emptyLine()]);
       setTab("awaiting_client");
       queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
       toast({
@@ -235,28 +247,57 @@ export default function OrderLinks() {
   };
 
   const submitCreate = () => {
-    if (form.itemDescription.trim().length < 2) {
+    const cleaned = lineItems
+      .map((line) => ({
+        description: line.description.trim(),
+        amount: line.amount.trim(),
+        quantity: Math.max(1, Math.min(999, Number(line.quantity) || 1)),
+      }))
+      .filter((line) => line.description.length >= 2 || line.amount.length > 0);
+
+    if (cleaned.length === 0 || cleaned.some((line) => line.description.length < 2)) {
       toast({
-        title: "Add the order basics",
-        description: "Add the agreed item or model before creating the client link.",
+        title: "Add at least one item",
+        description: "Each Print Order needs a short item description.",
         variant: "destructive",
       });
       return;
     }
-    const amount = Number(form.agreedAmount.replace(/[$,\s]/g, ""));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast({
-        title: "Check the agreed amount",
-        description: "Enter the amount the buyer already paid, greater than zero.",
-        variant: "destructive",
-      });
-      return;
+    for (const line of cleaned) {
+      const amount = Number(line.amount.replace(/[$,\s]/g, ""));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast({
+          title: "Check each item amount",
+          description: "Every line needs an amount greater than zero.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
-    createLink.mutate();
+
+    createLink.mutate({
+      lineItems: cleaned,
+      paymentMethod: form.paymentMethod,
+      paymentReference: form.paymentReference,
+      buyerNameHint: form.buyerNameHint,
+      buyerUsernameHint: form.buyerUsernameHint,
+      ownerNotes: form.ownerNotes,
+      expiryDays: Number(form.expiryDays) || 14,
+    });
   };
 
   const set = (key: keyof typeof EMPTY_FORM, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
+
+  const lineTotal = summarizeIntakeLineItems(
+    lineItems
+      .filter((line) => line.description.trim().length >= 2 && Number(line.amount.replace(/[$,\s]/g, "")) > 0)
+      .map((line) => ({
+        description: line.description.trim(),
+        amount: line.amount.trim(),
+        quantity: Math.max(1, Number(line.quantity) || 1),
+      })),
+  ).agreedAmount;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -319,33 +360,104 @@ export default function OrderLinks() {
             <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.85fr)]">
               <Panel
                 title="Create a client details link"
-                description="Use this after you have agreed the order and received payment."
+                description="Add one or more items. Approval creates one HubSpot Contact and one Print Order deal per item."
               >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <TextField
-                    id="agreed-amount"
-                    label="Agreed amount already paid"
-                    value={form.agreedAmount}
-                    onChange={(v) => set("agreedAmount", v)}
-                    inputMode="decimal"
-                    required
-                  />
-                  <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">Order reference: </span>
-                    generated automatically when you create the link.
+                <div className="space-y-3" data-testid="panel-intake-line-items">
+                  {lineItems.map((line, index) => (
+                    <div
+                      key={index}
+                      className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.4fr)_7rem_5rem_auto]"
+                      data-testid={`row-line-item-${index}`}
+                    >
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`line-desc-${index}`}>
+                          Item {index + 1}
+                          <span className="text-primary"> *</span>
+                        </Label>
+                        <Input
+                          id={`line-desc-${index}`}
+                          value={line.description}
+                          onChange={(event) =>
+                            setLineItems((current) =>
+                              current.map((row, i) =>
+                                i === index ? { ...row, description: event.target.value } : row,
+                              ),
+                            )
+                          }
+                          placeholder="Acastus Knight Porphyrion"
+                          data-testid={`input-line-description-${index}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`line-amount-${index}`}>Amount *</Label>
+                        <Input
+                          id={`line-amount-${index}`}
+                          inputMode="decimal"
+                          value={line.amount}
+                          onChange={(event) =>
+                            setLineItems((current) =>
+                              current.map((row, i) =>
+                                i === index ? { ...row, amount: event.target.value } : row,
+                              ),
+                            )
+                          }
+                          placeholder="150"
+                          data-testid={`input-line-amount-${index}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`line-qty-${index}`}>Qty</Label>
+                        <Input
+                          id={`line-qty-${index}`}
+                          inputMode="numeric"
+                          value={line.quantity}
+                          onChange={(event) =>
+                            setLineItems((current) =>
+                              current.map((row, i) =>
+                                i === index ? { ...row, quantity: event.target.value } : row,
+                              ),
+                            )
+                          }
+                          data-testid={`input-line-quantity-${index}`}
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={lineItems.length <= 1}
+                          onClick={() =>
+                            setLineItems((current) => current.filter((_, i) => i !== index))
+                          }
+                          data-testid={`button-remove-line-${index}`}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setLineItems((current) => [...current, emptyLine()])}
+                      data-testid="button-add-line-item"
+                    >
+                      <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                      Add another item
+                    </Button>
+                    <p className="text-sm text-muted-foreground" data-testid="text-line-items-total">
+                      Order total: <span className="font-medium text-foreground numeric">${lineTotal}</span>
+                    </p>
                   </div>
-                  <div className="sm:col-span-2 space-y-1.5">
-                    <Label htmlFor="item-description">
-                      Agreed item or model<span className="text-primary"> *</span>
-                    </Label>
-                    <Textarea
-                      id="item-description"
-                      className="min-h-20 resize-y text-sm"
-                      value={form.itemDescription}
-                      onChange={(event) => set("itemDescription", event.target.value)}
-                      placeholder="Acastus Knight Porphyrion, resin, 32mm, primed grey"
-                      data-testid="input-item-description"
-                    />
+                </div>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground sm:col-span-2">
+                    <span className="font-medium text-foreground">Order reference: </span>
+                    generated automatically when you create the link. Same client email keeps one Contact across every item deal.
                   </div>
                   <TextField
                     id="payment-method"
@@ -556,6 +668,11 @@ export default function OrderLinks() {
                             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                               {link.confirmedItem || link.itemDescription}
                             </p>
+                            {lineItemsForIntake(link).length > 1 ? (
+                              <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-line-count-${link.id}`}>
+                                {lineItemsForIntake(link).length} HubSpot Print Orders on approve
+                              </p>
+                            ) : null}
                             <p className={`numeric mt-1.5 text-xs ${!link.submittedAt && expiryCue(link.expiresAt).urgent ? "text-primary" : "text-muted-foreground"}`}>
                               ${link.agreedAmount} · created {formatDate(link.createdAt)} ·{" "}
                               {link.submittedAt ? `submitted ${formatDate(link.submittedAt)}` : expiryCue(link.expiresAt).label}
@@ -601,16 +718,30 @@ export default function OrderLinks() {
                                 Review
                               </Button>
                             )}
-                            {link.status === "created" && link.hubspotDealId ? (
+                            {link.status === "created" &&
+                            (parseHubSpotDealsJson(link.hubspotDealsJson).length > 0
+                              ? parseHubSpotDealsJson(link.hubspotDealsJson)
+                              : link.hubspotDealId
+                                ? [
+                                    {
+                                      dealId: link.hubspotDealId,
+                                      dealName: link.hubspotDealName || link.hubspotDealId,
+                                      amount: "",
+                                      productName: "",
+                                    },
+                                  ]
+                                : []
+                            ).map((deal) => (
                               <Button
+                                key={deal.dealId}
                                 type="button"
                                 size="sm"
-                                onClick={() => setLocation(printsDealHref(link.hubspotDealId!))}
-                                data-testid={`button-attach-plates-${link.id}`}
+                                onClick={() => setLocation(printsDealHref(deal.dealId))}
+                                data-testid={`button-attach-plates-${link.id}-${deal.dealId}`}
                               >
-                                Attach plates
+                                Attach{parseHubSpotDealsJson(link.hubspotDealsJson).length > 1 ? ` · ${deal.productName || deal.dealName}` : " plates"}
                               </Button>
-                            ) : null}
+                            ))}
                             {link.status === "created" && (
                               <Button
                                 type="button"
@@ -673,7 +804,11 @@ function ReviewDialog({
   const [, setLocation] = useLocation();
   const [paymentVerified, setPaymentVerified] = useState(false);
   const [edits, setEdits] = useState<Record<string, string | boolean | number>>({});
-  const [createdDeal, setCreatedDeal] = useState<{ dealId: string; dealName: string } | null>(null);
+  const [createdDeal, setCreatedDeal] = useState<{
+    dealId: string;
+    dealName: string;
+    deals: Array<{ dealId: string; dealName: string; amount: string; productName: string }>;
+  } | null>(null);
 
   useEffect(() => {
     setCreatedDeal(null);
@@ -718,14 +853,29 @@ function ReviewDialog({
         { paymentVerified: true },
         { headers },
       );
-      return (await res.json()) as { ok: true; result: { dealName: string; dealId: string } };
+      return (await res.json()) as {
+        ok: true;
+        result: {
+          dealName: string;
+          dealId: string;
+          contactId: string;
+          deals: Array<{ dealId: string; dealName: string; amount: string; productName: string }>;
+        };
+      };
     },
     onSuccess: ({ result }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
-      setCreatedDeal({ dealId: result.dealId, dealName: result.dealName });
+      setCreatedDeal({
+        dealId: result.dealId,
+        dealName: result.dealName,
+        deals: result.deals?.length ? result.deals : [{ dealId: result.dealId, dealName: result.dealName, amount: "", productName: result.dealName }],
+      });
       toast({
         title: "Created in HubSpot",
-        description: `${result.dealName} is in Deposit Received. Attach the first plate next.`,
+        description:
+          (result.deals?.length ?? 1) > 1
+            ? `${result.deals.length} Print Orders created on one Contact. Attach plates per item next.`
+            : `${result.dealName} is in Deposit Received. Attach the first plate next.`,
       });
     },
     onError: (error: Error) =>
@@ -738,10 +888,15 @@ function ReviewDialog({
 
   const runCreate = () => {
     const dirty = Object.keys(edits).length > 0;
+    const lineCount = link ? lineItemsForIntake(link).length : 1;
     const proceed = window.confirm(
-      `Create a HubSpot Contact and a Print Orders deal in Deposit Received for ${value("clientFullName") || "this buyer"} at $${value("agreedAmount")}?${
-        dirty ? "\n\nUnsaved corrections will not be included — save them first if needed." : ""
-      }`,
+      lineCount > 1
+        ? `Create one HubSpot Contact and ${lineCount} Print Orders (Deposit Received) for ${value("clientFullName") || "this buyer"} totaling $${value("agreedAmount")}?${
+            dirty ? "\n\nUnsaved corrections will not be included — save them first if needed." : ""
+          }`
+        : `Create a HubSpot Contact and a Print Orders deal in Deposit Received for ${value("clientFullName") || "this buyer"} at $${value("agreedAmount")}?${
+            dirty ? "\n\nUnsaved corrections will not be included — save them first if needed." : ""
+          }`,
     );
     if (proceed) create.mutate();
   };
@@ -776,6 +931,32 @@ function ReviewDialog({
               />
             </div>
 
+            {lineItemsForIntake(link).length > 1 ? (
+              <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3" data-testid="panel-review-line-items">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Items → one Print Order each
+                </p>
+                <ul className="space-y-1.5">
+                  {lineItemsForIntake(link).map((line, index) => (
+                    <li
+                      key={`${line.description}-${index}`}
+                      className="flex items-baseline justify-between gap-3 text-sm"
+                      data-testid={`text-review-line-${index}`}
+                    >
+                      <span className="min-w-0 truncate">
+                        {line.description}
+                        {line.quantity > 1 ? ` ×${line.quantity}` : ""}
+                      </span>
+                      <span className="numeric shrink-0 text-muted-foreground">${line.amount}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="numeric text-xs text-muted-foreground">
+                  Total ${value("agreedAmount")} · {lineItemsForIntake(link).length} HubSpot deals on approve
+                </p>
+              </div>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <ReviewField
                 id="review-client-name"
@@ -808,22 +989,24 @@ function ReviewDialog({
               <div className="sm:col-span-2">
                 <ReviewField
                   id="review-item"
-                  label="Item confirmed by buyer"
+                  label={lineItemsForIntake(link).length > 1 ? "Buyer confirmation notes" : "Item confirmed by buyer"}
                   value={value("confirmedItem") || value("itemDescription")}
                   disabled={alreadyCreated}
                   onChange={(v) => setEdits((c) => ({ ...c, confirmedItem: v }))}
                 />
               </div>
-              <ReviewField
-                id="review-quantity"
-                label="Quantity"
-                value={value("quantity")}
-                disabled={alreadyCreated}
-                onChange={(v) => setEdits((c) => ({ ...c, quantity: v }))}
-              />
+              {lineItemsForIntake(link).length <= 1 ? (
+                <ReviewField
+                  id="review-quantity"
+                  label="Quantity"
+                  value={value("quantity")}
+                  disabled={alreadyCreated}
+                  onChange={(v) => setEdits((c) => ({ ...c, quantity: v }))}
+                />
+              ) : null}
               <ReviewField
                 id="review-amount"
-                label="Agreed amount paid"
+                label={lineItemsForIntake(link).length > 1 ? "Total agreed amount" : "Agreed amount paid"}
                 value={value("agreedAmount")}
                 disabled={alreadyCreated}
                 onChange={(v) => setEdits((c) => ({ ...c, agreedAmount: v }))}
@@ -891,29 +1074,56 @@ function ReviewDialog({
             {createdDeal || link.hubspotDealId ? (
               <div className="space-y-3" data-testid="panel-review-created-handoff">
                 <p className="numeric rounded-md border border-chart-4/40 bg-chart-4/10 p-3 text-xs text-chart-4" data-testid="text-review-hubspot-ids">
-                  HubSpot contact {link.hubspotContactId || "created"} · deal{" "}
-                  {createdDeal?.dealId || link.hubspotDealId}
+                  HubSpot contact {link.hubspotContactId || "created"}
+                  {(createdDeal?.deals?.length ?? parseHubSpotDealsJson(link.hubspotDealsJson).length) > 1
+                    ? ` · ${createdDeal?.deals?.length ?? parseHubSpotDealsJson(link.hubspotDealsJson).length} Print Orders`
+                    : ` · deal ${createdDeal?.dealId || link.hubspotDealId}`}
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  Next: attach the first Chitubox plate so time and resin estimates land on this Print Order.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      const dealId = createdDeal?.dealId || link.hubspotDealId;
-                      if (!dealId) return;
-                      onClose();
-                      setLocation(printsDealHref(dealId));
-                    }}
-                    data-testid="button-review-attach-plates"
-                  >
-                    Attach first plate
-                  </Button>
-                  <Button type="button" variant="outline" onClick={onClose} data-testid="button-review-done">
-                    Done
-                  </Button>
+                <div className="space-y-2">
+                  {(createdDeal?.deals?.length
+                    ? createdDeal.deals
+                    : parseHubSpotDealsJson(link.hubspotDealsJson).length
+                      ? parseHubSpotDealsJson(link.hubspotDealsJson)
+                      : link.hubspotDealId
+                        ? [
+                            {
+                              dealId: link.hubspotDealId,
+                              dealName: link.hubspotDealName || link.hubspotDealId,
+                              amount: "",
+                              productName: link.itemDescription,
+                            },
+                          ]
+                        : []
+                  ).map((deal) => (
+                    <div
+                      key={deal.dealId}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/25 px-3 py-2"
+                      data-testid={`row-created-deal-${deal.dealId}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{deal.productName || deal.dealName}</p>
+                        <p className="numeric mt-0.5 text-xs text-muted-foreground">
+                          Deal {deal.dealId}
+                          {deal.amount ? ` · $${deal.amount}` : ""}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          onClose();
+                          setLocation(printsDealHref(deal.dealId));
+                        }}
+                        data-testid={`button-review-attach-${deal.dealId}`}
+                      >
+                        Attach plates
+                      </Button>
+                    </div>
+                  ))}
                 </div>
+                <Button type="button" variant="outline" onClick={onClose} data-testid="button-review-done">
+                  Done
+                </Button>
               </div>
             ) : (
               <>

@@ -109,13 +109,20 @@ test("the server automatically assigns a readable order reference when none is s
 });
 
 before(async () => {
+  let hubspotSeq = 900;
   mock = http.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       mockCalls.push({ method: req.method || "", url: req.url || "" });
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ id: "901", properties: { firstname: "Jane", lastname: "Smith" } }));
+      hubspotSeq += 1;
+      res.end(
+        JSON.stringify({
+          id: String(hubspotSeq),
+          properties: { firstname: "Jane", lastname: "Smith" },
+        }),
+      );
     });
   });
   const mockPort = await listen(mock);
@@ -179,7 +186,10 @@ test("a valid token exposes only client-safe order details", () => {
     "buyerUsernameHint",
     "expiresAt",
     "itemDescription",
+    "lineItems",
   ]);
+  assert.equal(lookup.view.lineItems.length, 1);
+  assert.equal(lookup.view.lineItems[0].description, "Acastus Knight Porphyrion");
   assert.equal(JSON.stringify(lookup.view).includes("MIG-1001"), false);
   assert.equal(JSON.stringify(lookup.view).includes("ZL-88213"), false);
 });
@@ -231,14 +241,26 @@ test("queue state transitions follow awaiting -> pending -> created", () => {
 
   const approved = store.markOrderLinkCreated(created.link.id, {
     contactId: "5001",
-    dealId: "9001",
-    dealName: "Acastus Knight Porphyrion - Jane A. Smith",
+    deals: [
+      {
+        dealId: "9001",
+        dealName: "Acastus Knight Porphyrion - Jane A. Smith",
+        amount: "450",
+        productName: "Acastus Knight Porphyrion",
+      },
+    ],
   });
   assert.equal(approved?.status, "created");
   assert.equal(approved?.hubspotDealId, "9001");
 
   // Creation cannot happen twice, edits stop, and the link cannot be expired.
-  assert.equal(store.markOrderLinkCreated(created.link.id, { contactId: "1", dealId: "2", dealName: "x" }), null);
+  assert.equal(
+    store.markOrderLinkCreated(created.link.id, {
+      contactId: "1",
+      deals: [{ dealId: "2", dealName: "x", amount: "1", productName: "x" }],
+    }),
+    null,
+  );
   assert.equal(store.applyReviewEdits(created.link.id, { clientFullName: "Someone Else" })?.clientFullName, "Jane A. Smith");
   assert.equal(store.expireOrderLink(created.link.id)?.status, "created");
   assert.deepEqual(store.lookupClientOrder(created.token), {
@@ -348,7 +370,8 @@ test("approval requires verified payment and creates HubSpot records once", asyn
   assert.equal(approved.body.result.dealStage, "4096856781");
   assert.equal(approved.body.result.pipeline, "default");
   assert.equal(approved.body.link.status, "created");
-  assert.equal(approved.body.link.hubspotDealId, "901");
+  assert.equal(approved.body.result.deals.length, 1);
+  assert.equal(approved.body.link.hubspotDealId, approved.body.result.dealId);
   assert.ok(mockCalls.length >= 2, "approval performs the HubSpot writes");
 
   const repeat = await ownerRequest("POST", `/api/order-links/${id}/create-order`, {
@@ -356,6 +379,48 @@ test("approval requires verified payment and creates HubSpot records once", asyn
   });
   assert.equal(repeat.status, 409);
   assert.match(repeat.body.error, /already created/);
+});
+
+test("multi-item intake creates one Contact and one Deal per line item", async () => {
+  const create = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MULTI",
+    lineItems: [
+      { description: "Knight bust", amount: "200", quantity: 1 },
+      { description: "Display base", amount: "45", quantity: 1 },
+    ],
+  });
+  assert.equal(create.status, 201);
+  assert.equal(create.body.link.agreedAmount, "245.00");
+  assert.match(create.body.link.itemDescription, /2 items/);
+  assert.equal(JSON.parse(create.body.link.lineItemsJson).length, 2);
+
+  const token: string = create.body.token;
+  const id: number = create.body.link.id;
+  const lookup = await publicRequest("/api/client-order/lookup", { token });
+  assert.equal(lookup.status, 200);
+  assert.equal(lookup.body.view.lineItems.length, 2);
+  assert.equal(lookup.body.view.agreedAmount, "245.00");
+
+  await publicRequest("/api/client-order/submit", {
+    token,
+    ...submission,
+    confirmedItem: "Both items look correct",
+    quantity: 1,
+  });
+
+  mockCalls = [];
+  const approved = await ownerRequest("POST", `/api/order-links/${id}/create-order`, {
+    paymentVerified: true,
+  });
+  assert.equal(approved.status, 201);
+  assert.equal(approved.body.result.deals.length, 2);
+  assert.equal(approved.body.result.deals[0].productName, "Knight bust");
+  assert.equal(approved.body.result.deals[1].productName, "Display base");
+  assert.equal(approved.body.result.deals[0].dealId, approved.body.link.hubspotDealId);
+  assert.equal(JSON.parse(approved.body.link.hubspotDealsJson).length, 2);
+  assert.ok(
+    mockCalls.filter((call) => call.method === "POST" && call.url.includes("/crm/v3/objects/deals")).length >= 2,
+  );
 });
 
 test("owner review edits and manual expiry work over the API", async () => {
