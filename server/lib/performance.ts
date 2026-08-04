@@ -1,5 +1,7 @@
 import { calculateProfit, round2 } from "./calc";
+import { buildSupplyBooksBalance } from "./books";
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
+import type { SupplyBooksBalance } from "../../shared/schema";
 
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
@@ -58,6 +60,7 @@ export interface PerformanceSnapshot {
     approved: number;
   };
   supplySpend: SupplySpend;
+  books: SupplyBooksBalance;
   pipeline: Array<{
     id: string;
     label: string;
@@ -239,6 +242,14 @@ export function buildPerformanceSnapshot(input: {
     .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
     .slice(0, ACTIVE_DEALS_LIMIT)
     .map(({ sortAt: _sortAt, ...item }) => item);
+  const supplySpend = input.supplySpend ?? EMPTY_SUPPLY_SPEND;
+  const books = buildSupplyBooksBalance({
+    periodDays: PERFORMANCE_WINDOW_DAYS,
+    revenue: round2(revenue),
+    grossProfit: round2(grossProfit),
+    orders,
+    supplySpend,
+  });
 
   return {
     generatedAt: now.toISOString(),
@@ -264,7 +275,8 @@ export function buildPerformanceSnapshot(input: {
       pendingReview: input.intakeCounts.pending_review,
       approved: input.intakeCounts.created,
     },
-    supplySpend: input.supplySpend ?? EMPTY_SUPPLY_SPEND,
+    supplySpend,
+    books,
     pipeline: input.stages.map((stage) => ({
       id: stage.id,
       label: stage.label,

@@ -19,6 +19,19 @@ function sampleContext(overrides?: Partial<TrackerAssistantContext>): TrackerAss
     },
     intake: { awaitingClient: 1, pendingReview: 1, approved: 4 },
     supplySpend: { periodDays: 30, total: 40, purchases: 1, byCategory: [] },
+    books: {
+      periodDays: 30,
+      revenue: 900,
+      orderCosts: 620,
+      grossProfit: 280,
+      orders: 3,
+      supplySpend: 40,
+      supplyPurchases: 1,
+      afterSupplySpend: 240,
+      supplyShareOfRevenuePercent: 4.4,
+      supplyShareOfGrossProfitPercent: 14.3,
+      byCategory: [],
+    },
     pipeline: [{ id: "deposit", label: "Deposit received", count: 2, closed: false }],
     attention: [
       {

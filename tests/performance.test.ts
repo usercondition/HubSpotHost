@@ -67,6 +67,12 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.summary.orders, 3);
   assert.equal(snapshot.summary.revenue, 500);
   assert.equal(snapshot.summary.grossProfit, 210);
+  assert.equal(snapshot.books.revenue, 500);
+  assert.equal(snapshot.books.orderCosts, 290);
+  assert.equal(snapshot.books.grossProfit, 210);
+  assert.equal(snapshot.books.supplySpend, 62.5);
+  assert.equal(snapshot.books.afterSupplySpend, 147.5);
+  assert.equal(snapshot.books.byCategory[0]?.category, "materials");
   assert.equal(snapshot.summary.activeOrders, 2);
   assert.equal(snapshot.activeDeals.length, 2);
   assert.equal(snapshot.activeDeals[0]?.dealName, "Low-margin Knight");
