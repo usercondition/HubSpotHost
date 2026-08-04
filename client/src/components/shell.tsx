@@ -1,7 +1,17 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, ClipboardCheck, Link2, Moon, Settings2, Sun } from "lucide-react";
+import {
+  Activity,
+  ClipboardCheck,
+  ExternalLink,
+  Home,
+  Link2,
+  Moon,
+  Settings2,
+  ShipWheel,
+  Sun,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -59,7 +69,7 @@ export function Mark({ className }: { className?: string }) {
     <svg
       viewBox="0 0 32 32"
       fill="none"
-      aria-label="Print Orders Margin Service"
+      aria-label="Print Operations"
       role="img"
       className={className}
     >
@@ -86,62 +96,91 @@ export function Mark({ className }: { className?: string }) {
 /* ---------------------------------------------------------------- shell --- */
 
 const NAV = [
-  { href: "/", label: "Order links", icon: Link2, testId: "link-nav-order-links" },
-  { href: "/operations", label: "Operations", icon: Activity, testId: "link-nav-operations" },
-  { href: "/paid-orders", label: "Conversation intake", icon: ClipboardCheck, testId: "link-nav-paid-orders" },
-  { href: "/setup", label: "Setup", icon: Settings2, testId: "link-nav-setup" },
+  { href: "/", label: "Command center", icon: Home, testId: "link-nav-home", group: "Home" },
+  { href: "/orders", label: "Paid order intake", icon: Link2, testId: "link-nav-order-links", group: "Daily work" },
+  {
+    href: "/paid-orders",
+    label: "Manual order entry",
+    icon: ClipboardCheck,
+    testId: "link-nav-paid-orders",
+    group: "Daily work",
+  },
+  { href: "/operations", label: "Profit automation", icon: Activity, testId: "link-nav-operations", group: "Control" },
+  { href: "/setup", label: "System setup", icon: Settings2, testId: "link-nav-setup", group: "Control" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const groups = Array.from(new Set(NAV.map((item) => item.group)));
 
   return (
-    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[13.5rem_1fr] md:grid-rows-1">
-      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-6 md:border-b-0 md:border-r md:px-3 md:py-4">
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[15.5rem_1fr] md:grid-rows-1">
+      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-5 md:border-b-0 md:border-r md:px-3 md:py-4">
         <Link
           href="/"
-          className="flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md md:px-1"
+          className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1"
           data-testid="link-home"
         >
           <Mark className="h-7 w-7 text-primary" />
           <span className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight">Margin Service</span>
-            <span className="rule-label">Print Orders</span>
+            <span className="text-sm font-semibold tracking-tight">Print Operations</span>
+            <span className="rule-label">Business command center</span>
           </span>
         </Link>
 
-        {/* On phones the nav becomes a horizontally scrollable strip so it cannot widen the grid. */}
-        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:flex-col md:items-stretch md:gap-0.5 md:overflow-visible">
-          {NAV.map((item) => {
-            const active = location === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                data-testid={item.testId}
-                className={cn(
-                  "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm transition-colors",
-                  active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {item.label}
-              </Link>
-            );
-          })}
+        {/* On phones the nav remains a compact horizontal strip. */}
+        <nav
+          aria-label="Primary navigation"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:block md:overflow-visible"
+        >
+          {groups.map((group) => (
+            <div key={group} className="flex shrink-0 items-center gap-1 md:mb-4 md:block">
+              <p className="hidden px-2.5 pb-1.5 pt-1 rule-label md:block">{group}</p>
+              {NAV.filter((item) => item.group === group).map((item) => {
+                const active = location === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-testid={item.testId}
+                    className={cn(
+                      "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm transition-colors md:mb-0.5",
+                      active
+                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
-        <div className="hidden md:block">
-          <p className="rule-label px-2.5">Deal fields</p>
-          <ul className="mt-2 space-y-1 px-2.5 numeric text-[0.6875rem] text-muted-foreground">
-            <li>amount</li>
-            <li>print_material_cost</li>
-            <li>print_labor_cost</li>
-            <li>print_packaging_cost</li>
-            <li>print_actual_shipping_cost</li>
-          </ul>
+        <div className="hidden space-y-2 md:block">
+          <p className="rule-label px-2.5">Open tools</p>
+          <a
+            href="https://app.hubspot.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="link-sidebar-hubspot"
+            className="flex items-center justify-between rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            HubSpot CRM
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="https://ship.pirateship.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="link-sidebar-pirateship"
+            className="flex items-center justify-between rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            Pirate Ship
+            <ShipWheel className="h-3.5 w-3.5" />
+          </a>
         </div>
       </aside>
 

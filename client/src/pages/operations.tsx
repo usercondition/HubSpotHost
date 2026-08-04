@@ -91,8 +91,8 @@ export default function Operations() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Print Orders margin operations"
-        subtitle="Recalculate deal profitability, review attempts, confirm write readiness."
+        title="Profit automation"
+        subtitle="Use HubSpot for costs and stages. This page shows how Gross Profit and Margin stay current."
         actions={
           <>
             <StatusPill

@@ -238,8 +238,8 @@ export default function OrderLinks() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Order links"
-        subtitle="Send one buyer one link. Their details land in your private review queue — HubSpot only after you approve."
+        title="Paid order intake"
+        subtitle="Create one buyer link, review their details, then approve the order into HubSpot."
         actions={
           <>
             <StatusPill

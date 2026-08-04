@@ -5,6 +5,7 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, ThemeProvider } from "@/components/shell";
+import Dashboard from "@/pages/dashboard";
 import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
@@ -17,7 +18,8 @@ function ShellRoutes() {
   return (
     <AppShell>
       <Switch>
-        <Route path="/" component={OrderLinks} />
+        <Route path="/" component={Dashboard} />
+        <Route path="/orders" component={OrderLinks} />
         <Route path="/operations" component={Operations} />
         <Route path="/paid-orders" component={PaidOrders} />
         <Route path="/setup" component={Setup} />

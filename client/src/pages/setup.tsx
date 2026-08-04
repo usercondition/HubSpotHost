@@ -63,8 +63,8 @@ export default function Setup() {
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
-        title="Setup and webhook wiring"
-        subtitle="Environment variables, HubSpot private app subscriptions, signature handling."
+        title="System setup"
+        subtitle="Connection details, webhook setup, and technical reference for this order system."
         actions={<ThemeToggle />}
       />
 

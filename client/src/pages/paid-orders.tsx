@@ -79,9 +79,7 @@ export default function PaidOrders() {
       const health = (await res.json()) as {
         paidOrderIntake?: { accessCodeConfigured?: boolean; buildId?: string };
       };
-      const ready =
-        health.paidOrderIntake?.accessCodeConfigured === true &&
-        health.paidOrderIntake?.buildId === "intake-auth-v5-20260803";
+      const ready = health.paidOrderIntake?.accessCodeConfigured === true;
       setConnectionStatus(ready ? "ready" : "stale");
       toast({
         title: ready ? "Connected to the current live intake service" : "This page is not on the current live intake service",
@@ -210,8 +208,8 @@ export default function PaidOrders() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Paid order intake"
-        subtitle="Turn confirmed Facebook Marketplace sales into organized Print Orders. No leads are created."
+        title="Manual order entry"
+        subtitle="Use this when you already have a paid buyer's details and do not need to send an order form."
         actions={
           <>
             <StatusPill

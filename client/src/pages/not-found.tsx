@@ -9,10 +9,10 @@ export default function NotFound() {
         <Compass className="mx-auto h-8 w-8 text-primary" />
         <h1 className="mt-3 text-lg font-semibold tracking-tight">Route not found</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          This console has two views: operations and setup.
+          Return to the command center to choose your next business task.
         </p>
         <Button asChild variant="outline" size="sm" className="mt-4" data-testid="link-back-home">
-          <Link href="/">Back to operations</Link>
+          <Link href="/">Back to command center</Link>
         </Button>
       </div>
     </div>
