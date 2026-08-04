@@ -655,6 +655,21 @@ export const printerLifecycleEvents = sqliteTable("printer_lifecycle_events", {
 
 export type PrinterLifecycleEvent = typeof printerLifecycleEvents.$inferSelect;
 
+/**
+ * Manual mapping from a slicer machine-name string onto a fleet printer.
+ * Takes precedence over automatic alias matching.
+ */
+export const printerProfileMaps = sqliteTable("printer_profile_maps", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  profileKey: text("profile_key").notNull().unique(),
+  profileLabel: text("profile_label").notNull(),
+  printerId: integer("printer_id").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PrinterProfileMap = typeof printerProfileMaps.$inferSelect;
+
 export interface PrinterJobSummary {
   recordId: number;
   dealId: string;
@@ -756,6 +771,13 @@ export const updatePrinterSchema = z.object({
 });
 
 export type UpdatePrinterInput = z.infer<typeof updatePrinterSchema>;
+
+export const assignPrinterProfileSchema = z.object({
+  profile: trimmed(200).min(1, "Choose an unassigned machine name"),
+  printerId: z.coerce.number().int().positive("Choose a fleet printer"),
+});
+
+export type AssignPrinterProfileInput = z.infer<typeof assignPrinterProfileSchema>;
 
 export const createSupplyPurchaseSchema = z.object({
   source: trimmed(80).default("Amazon"),

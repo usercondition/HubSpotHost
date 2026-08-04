@@ -26,6 +26,7 @@ const {
   normalizePrinterKey,
   buildPrinterFleetSnapshot,
   addPrinterLifecycleEvent,
+  assignPrinterProfile,
 } = await import("../server/lib/printers");
 const { parseUltxFile, extractZipTextMembers } = await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
@@ -169,21 +170,29 @@ test("machine-name matching prefers distinctive aliases like NEWX1", () => {
   const fleet = ensureDefaultPrinters();
   const newx1 = fleet.find((printer) => printer.name === "Mighty 8K NEWX1")!;
   const mega = fleet.find((printer) => printer.name === "MEGA 8K")!;
-  const phrozen = fleet.find((printer) => printer.name === "Phrozen Mega")!;
   const heygears = fleet.find((printer) => printer.name === "HeyGears Reflex Turbo")!;
 
   assert.equal(matchPrinterId("Mighty 8K NEWX1", fleet), newx1.id);
   assert.equal(matchPrinterId("ELEGOO Mega 8K", fleet), mega.id);
-  assert.equal(matchPrinterId("Phrozen Mega", fleet), phrozen.id);
-  assert.equal(matchPrinterId("Phrozen Sonic Mega 8K", fleet), phrozen.id);
+  assert.equal(matchPrinterId("Phrozen Sonic Mega 8K S", fleet), mega.id);
+  assert.equal(matchPrinterId("Phrozen Sonic Mega 8K", fleet), mega.id);
   assert.equal(matchPrinterId("Reflex RS Turbo", fleet), heygears.id);
   assert.equal(matchPrinterId("totally unknown box", fleet), null);
   assert.equal(normalizePrinterKey("Mighty  8K!!! NEWX1"), "mighty 8k newx1");
 });
 
-test("default fleet includes Phrozen Mega", () => {
-  const names = ensureDefaultPrinters().map((printer) => printer.name);
-  assert.ok(names.includes("Phrozen Mega"));
+test("manual profile assignment maps odd labels onto a fleet printer", () => {
+  const fleet = ensureDefaultPrinters();
+  const mega = fleet.find((printer) => printer.name === "MEGA 8K")!;
+  assert.equal(matchPrinterId("Custom Booth Label XYZ", fleet), null);
+
+  const assigned = assignPrinterProfile({
+    profile: "Custom Booth Label XYZ",
+    printerId: mega.id,
+  });
+  assert.ok(assigned);
+  assert.equal(matchPrinterId("Custom Booth Label XYZ", ensureDefaultPrinters()), mega.id);
+  assert.ok(!assigned!.fleet.unassigned.profiles.some((row) => row.profile === "Custom Booth Label XYZ"));
 });
 
 test("ULTX zip metadata is harvested into print metrics", () => {
@@ -240,6 +249,24 @@ test("owner API returns the fleet and accepts a FEP lifecycle event", async () =
   const updated = after.body.printers.find((printer: any) => printer.printerId === target.printerId);
   assert.ok(updated.fepInstalledAt);
   assert.ok(updated.lifecycleEvents.some((item: any) => item.notes.includes("nFEP")));
+});
+
+test("owner API can assign an unassigned profile to MEGA 8K", async () => {
+  const listed = await jsonOwnerRequest("GET", "/api/printers");
+  const mega = listed.body.printers.find((printer: any) => printer.name === "MEGA 8K");
+  assert.ok(mega);
+
+  const assigned = await jsonOwnerRequest("POST", "/api/printers/assign-profile", {
+    profile: "Workshop Label Mega S",
+    printerId: mega.printerId,
+  });
+  assert.equal(assigned.status, 200);
+  assert.equal(assigned.body.map.printerId, mega.printerId);
+
+  const refreshed = await jsonOwnerRequest("GET", "/api/printers");
+  assert.ok(
+    !refreshed.body.unassigned.profiles.some((row: any) => row.profile === "Workshop Label Mega S"),
+  );
 });
 
 test("addPrinterLifecycleEvent can retire and reactivate a machine", () => {

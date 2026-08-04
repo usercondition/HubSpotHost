@@ -341,6 +341,105 @@ function PrinterDetail({
   );
 }
 
+function UnassignedProfilesPanel({
+  profiles,
+  printers,
+  headers,
+  onAssigned,
+}: {
+  profiles: Array<{ profile: string; plateCount: number; totalPrintHours: number }>;
+  printers: PrinterUsageBreakdown[];
+  headers: Record<string, string>;
+  onAssigned: () => void;
+}) {
+  const { toast } = useToast();
+  const [pendingProfile, setPendingProfile] = useState<string | null>(null);
+  const [choices, setChoices] = useState<Record<string, string>>({});
+
+  const assign = useMutation({
+    mutationFn: async ({ profile, printerId }: { profile: string; printerId: number }) => {
+      setPendingProfile(profile);
+      const response = await apiRequest(
+        "POST",
+        "/api/printers/assign-profile",
+        { profile, printerId },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; message: string };
+    },
+    onSuccess: (data) => {
+      setPendingProfile(null);
+      onAssigned();
+      toast({ title: "Machine name assigned", description: data.message });
+    },
+    onError: (error: Error) => {
+      setPendingProfile(null);
+      toast({
+        title: "Could not assign machine name",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 220),
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Panel
+      title="Unassigned plate profiles"
+      description="These CTB/ULTX machine names did not match automatically. Assign each one to a fleet printer — historical and future plates with that label will count toward it."
+    >
+      <ul className="space-y-3 text-sm" data-testid="list-unassigned-profiles">
+        {profiles.map((profile) => {
+          const selected = choices[profile.profile] ?? "";
+          const busy = pendingProfile === profile.profile && assign.isPending;
+          return (
+            <li
+              key={profile.profile}
+              className="flex flex-col gap-2 border-b border-border/60 pb-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
+              data-testid={`row-unassigned-profile-${profile.profile}`}
+            >
+              <div className="min-w-0">
+                <p className="font-medium">{profile.profile}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {profile.plateCount} plate{profile.plateCount === 1 ? "" : "s"} · {formatHours(profile.totalPrintHours)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={selected}
+                  onChange={(event) =>
+                    setChoices((current) => ({ ...current, [profile.profile]: event.target.value }))
+                  }
+                  className="flex h-9 min-w-[12rem] rounded-md border border-input bg-background px-2 text-xs"
+                  data-testid={`select-assign-profile-${profile.profile}`}
+                >
+                  <option value="">Assign to printer…</option>
+                  {printers.map((printer) => (
+                    <option key={printer.printerId} value={String(printer.printerId)}>
+                      {printer.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!selected || busy}
+                  onClick={() =>
+                    assign.mutate({ profile: profile.profile, printerId: Number(selected) })
+                  }
+                  data-testid={`button-assign-profile-${profile.profile}`}
+                >
+                  {busy ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  Assign
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
+  );
+}
+
 export default function PrintersPage() {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
@@ -498,21 +597,12 @@ export default function PrintersPage() {
             </div>
 
             {fleet.data.unassigned.plateCount > 0 ? (
-              <Panel
-                title="Unassigned plate profiles"
-                description="Plate history shows every attached job. Fleet totals only count plates whose CTB/ULTX machine name matches a printer name or alias — unmatched names (and their hours) stay here until you add an alias or a new machine."
-              >
-                <ul className="space-y-2 text-sm" data-testid="list-unassigned-profiles">
-                  {fleet.data.unassigned.profiles.map((profile) => (
-                    <li key={profile.profile} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-2 last:border-b-0">
-                      <span className="font-medium">{profile.profile}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {profile.plateCount} plate{profile.plateCount === 1 ? "" : "s"} · {formatHours(profile.totalPrintHours)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
+              <UnassignedProfilesPanel
+                profiles={fleet.data.unassigned.profiles}
+                printers={printers}
+                headers={headers}
+                onAssigned={() => queryClient.invalidateQueries({ queryKey: ["/api/printers"] })}
+              />
             ) : null}
           </>
         )}
