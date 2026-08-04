@@ -444,7 +444,7 @@ export default function Prints() {
                 <div>
                   <p className="text-sm font-semibold tracking-tight">Multi-plate jobs stay under one order</p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Attach each `.ctb` plate to the same Print Order. Print Operations keeps a plate-by-plate history, while HubSpot shows running totals for plate count, time, resin volume, resin mass, and slicer resin cost.
+                    Attach each `.ctb` or `.ultx` plate to the same Print Order. Print Operations keeps a plate-by-plate history, while HubSpot shows running totals for plate count, time, resin volume, resin mass, and slicer resin cost. Machine names also feed the Printer fleet page.
                   </p>
                 </div>
               </div>
@@ -511,12 +511,12 @@ export default function Prints() {
             </Panel>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb file. The raw file is read in memory and then discarded.">
+              <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb or HeyGears .ultx file. The raw file is read in memory and then discarded.">
                 <input
                   ref={fileInputRef}
                   id="print-file-input"
                   type="file"
-                  accept=".ctb,application/octet-stream"
+                  accept=".ctb,.ultx,application/octet-stream"
                   className="sr-only"
                   onChange={(event) => {
                     acceptFile(event.target.files?.[0]);
@@ -549,10 +549,10 @@ export default function Prints() {
                     <FileUp className="h-5 w-5 text-primary" />
                   )}
                   <span className="mt-3 text-sm font-medium">
-                    {analyze.isPending ? "Reading slice data…" : "Drop a .ctb file here"}
+                    {analyze.isPending ? "Reading slice data…" : "Drop a .ctb or .ultx file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer settings. Mega 8K plates can be large; only header data is read.
+                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX uses a best-effort reader.
                   </span>
                 </button>
                 <Button
@@ -564,7 +564,7 @@ export default function Prints() {
                   data-testid="button-browse-print-file"
                 >
                   <FilePlus2 className="mr-2 h-4 w-4" />
-                  Browse for a CTB file
+                  Browse for a slice file
                 </Button>
               </Panel>
 
