@@ -284,7 +284,7 @@ function draftsFromIntake(link: OrderIntakeLink): {
 } {
   const lines = lineItemsForIntake(link);
   const summary = [
-    "Source: Facebook Marketplace one-time client details link.",
+    "Source: Facebook Marketplace one-time order form link.",
     `Internal reference: ${link.internalLabel}.`,
     lines.length > 1
       ? `Line items:\n${lines

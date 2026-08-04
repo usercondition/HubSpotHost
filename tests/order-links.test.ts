@@ -172,7 +172,7 @@ test("link tokens are high entropy and only their SHA-256 hash is stored", () =>
   // The raw token appears nowhere in the persisted row.
   assert.equal(JSON.stringify(row).includes(created.token), false);
   assert.equal(store.hashLinkToken(created.token), row.tokenHash);
-  assert.equal(created.url, `/#/client-order/${created.token}`);
+  assert.equal(created.url, `/#/order-form/${created.token}`);
 });
 
 test("a valid token exposes only client-safe order details", () => {

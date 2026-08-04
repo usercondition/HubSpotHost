@@ -119,6 +119,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const groups = Array.from(new Set(NAV.map((item) => item.group)));
 
+  useEffect(() => {
+    document.title = "Print Operations";
+  }, [location]);
+
   return (
     <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[15.5rem_1fr] md:grid-rows-1">
       <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-4 py-3 md:h-full md:flex-col md:items-stretch md:gap-5 md:border-b-0 md:border-r md:px-3 md:py-4">

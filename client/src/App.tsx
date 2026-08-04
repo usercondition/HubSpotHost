@@ -46,7 +46,8 @@ function App() {
           <Toaster />
           <Router hook={useHashLocation}>
             <Switch>
-              {/* Public, buyer-facing. Deliberately outside the owner shell. */}
+              {/* Public buyer form. Legacy /client-order path still works. */}
+              <Route path="/order-form/:token" component={ClientOrder} />
               <Route path="/client-order/:token" component={ClientOrder} />
               <Route component={ShellRoutes} />
             </Switch>
