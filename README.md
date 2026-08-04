@@ -37,6 +37,32 @@ The service starts in safe mode:
 
 Do not enable both live-write environment settings until a test deal produces the expected dry-run values.
 
+## Paid Order Intake
+
+The **Paid order intake** screen is a payment-confirmed, review-first route for Facebook Marketplace orders. It is deliberately not a lead-capture tool:
+
+1. Paste the relevant part of a paid Marketplace conversation.
+2. The screen creates editable suggestions for the customer, Marketplace username, model, paid amount, shipping details, and a brief order summary.
+3. Correct any missing or inaccurate details.
+4. Check **Payment has been confirmed**.
+5. Confirm the final prompt to create a HubSpot Contact and one associated Deal.
+
+The service creates the Deal in the **Print Orders** pipeline at **Deposit Received**. It uses the existing `amount` field for revenue, so the live gross-profit and margin automation takes over as production costs are recorded.
+
+The pasted conversation is processed to produce the draft and is not written into the HubSpot record. The HubSpot Deal receives only the edited order summary and normal operational fields. The raw conversation is also not written to the service audit file.
+
+### Intake protection
+
+The public route is protected by a dedicated **Paid Order Intake access code**. It is required for both analysis and creation:
+
+- Prefer secure credential injection through `CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN`.
+- Use `PAID_ORDER_INTAKE_ACCESS_CODE` only for local development.
+- The browser does not retain the access code.
+- The server requires an explicit `paymentConfirmed: true` value, a customer name or Marketplace username, an item description, and a paid amount greater than zero before it can call HubSpot.
+- A final browser confirmation is required immediately before the write request.
+
+The intake creates a Contact only after payment is confirmed. If the buyer supplied an email that matches an existing HubSpot Contact, that Contact is reused; otherwise, a new Contact is created and associated with the new Deal.
+
 ## Local setup
 
 ```bash
@@ -74,6 +100,8 @@ Copy `.env.example` and keep `.env` out of source control.
 | `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
+| `CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN` | Preferred for Paid Order Intake | Securely injected access code required to analyze or create a paid Marketplace order. |
+| `PAID_ORDER_INTAKE_ACCESS_CODE` | Local fallback | Access code for local-only Paid Order Intake development. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
 
 ## HubSpot private-app webhook setup
@@ -111,6 +139,8 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `POST /api/recalculate/:dealId` | Manual read/calculate attempt in local/private mode. Disabled on a public production deployment. |
 | `POST /api/webhooks/hubspot` | Receives HubSpot property-change event batches. |
 | `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
+| `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions. |
+| `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Orders Deal. |
 
 ## Production notes
 
@@ -118,6 +148,7 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 - Inject the token and client secret through the host’s secret manager, never through the frontend or a committed `.env` file.
 - The local audit file is a small operational trail, not a long-term accounting system. Route logs to managed storage if durable historical audit retention is required.
 - The HubSpot credential must retain permission to read and update deal properties.
+- The Paid Order Intake creation endpoint needs permission to create contacts, create deals, search contacts by email, and associate contacts with deals.
 
 ## References
 

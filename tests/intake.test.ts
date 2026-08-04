@@ -1,0 +1,71 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  analyzeMarketplaceConversation,
+  splitName,
+  validatePaidOrderDraft,
+  type PaidOrderDraft,
+} from "../server/lib/intake";
+
+const validDraft: PaidOrderDraft = {
+  paymentConfirmed: true,
+  fullName: "Jane Smith",
+  marketplaceUsername: "jane.prints",
+  email: "jane@example.com",
+  phone: "619-555-0199",
+  address: "123 Resin Way",
+  city: "San Diego",
+  state: "CA",
+  postalCode: "92101",
+  country: "United States",
+  productName: "Acastus Knight Porphyrion",
+  amount: "350",
+  conversationSummary: "Confirmed paid Marketplace order.",
+};
+
+test("Marketplace intake extracts editable paid-order suggestions", () => {
+  const analysis = analyzeMarketplaceConversation(`
+Buyer: Jane Smith
+Marketplace username: jane.prints
+Model: Acastus Knight Porphyrion
+I paid $350. Payment sent this afternoon.
+Shipping address: 123 Resin Way, San Diego, CA 92101
+Email: jane@example.com
+Phone: 619-555-0199
+`);
+
+  assert.equal(analysis.fullName, "Jane Smith");
+  assert.equal(analysis.marketplaceUsername, "jane.prints");
+  assert.equal(analysis.productName, "Acastus Knight Porphyrion");
+  assert.equal(analysis.amount, "350");
+  assert.equal(analysis.email, "jane@example.com");
+  assert.equal(analysis.paymentLanguageDetected, true);
+  assert.match(analysis.conversationSummary, /Facebook Marketplace paid-order intake/);
+});
+
+test("Marketplace intake marks a conversation with no payment confirmation for review", () => {
+  const analysis = analyzeMarketplaceConversation(`
+Hi, I'm Alex.
+I want to order a printed knight. Can you send the price and payment information?
+`);
+  assert.equal(analysis.paymentLanguageDetected, false);
+  assert.ok(analysis.missing.includes("Clear payment confirmation"));
+});
+
+test("Paid-order validation requires payment, an identifiable client, product, and amount", () => {
+  assert.equal(validatePaidOrderDraft(validDraft), null);
+  assert.match(
+    validatePaidOrderDraft({ ...validDraft, paymentConfirmed: false }) ?? "",
+    /Payment must be confirmed/,
+  );
+  assert.match(validatePaidOrderDraft({ ...validDraft, amount: "0" }) ?? "", /greater than zero/);
+  assert.match(
+    validatePaidOrderDraft({ ...validDraft, fullName: "", marketplaceUsername: "" }) ?? "",
+    /client's name or Marketplace username/,
+  );
+});
+
+test("Contact names split predictably without requiring an email", () => {
+  assert.deepEqual(splitName("Jane A. Smith", ""), { firstName: "Jane", lastName: "A. Smith" });
+  assert.deepEqual(splitName("", "jane.prints"), { firstName: "jane.prints", lastName: "" });
+});

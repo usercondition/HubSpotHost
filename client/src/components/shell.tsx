@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, Moon, Settings2, Sun } from "lucide-react";
+import { Activity, ClipboardCheck, Moon, Settings2, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -87,6 +87,7 @@ export function Mark({ className }: { className?: string }) {
 
 const NAV = [
   { href: "/", label: "Operations", icon: Activity, testId: "link-nav-operations" },
+  { href: "/paid-orders", label: "Paid order intake", icon: ClipboardCheck, testId: "link-nav-paid-orders" },
   { href: "/setup", label: "Setup", icon: Settings2, testId: "link-nav-setup" },
 ];
 

@@ -7,12 +7,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, ThemeProvider } from "@/components/shell";
 import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
+import PaidOrders from "@/pages/paid-orders";
 import NotFound from "@/pages/not-found";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Operations} />
+      <Route path="/paid-orders" component={PaidOrders} />
       <Route path="/setup" component={Setup} />
       <Route component={NotFound} />
     </Switch>

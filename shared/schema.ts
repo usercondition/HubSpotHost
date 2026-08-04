@@ -113,3 +113,45 @@ export interface WebhookSummary {
   errors: number;
   results: RecalcOutcome[];
 }
+
+export interface PaidOrderAnalysis {
+  fullName: string;
+  marketplaceUsername: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  productName: string;
+  amount: string;
+  conversationSummary: string;
+  missing: string[];
+  paymentLanguageDetected: boolean;
+}
+
+export interface PaidOrderDraft {
+  paymentConfirmed: boolean;
+  fullName: string;
+  marketplaceUsername: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  productName: string;
+  amount: string;
+  conversationSummary: string;
+}
+
+export interface PaidOrderCreateResult {
+  contactId: string;
+  contactStatus: "existing" | "created";
+  dealId: string;
+  dealName: string;
+  pipeline: string;
+  dealStage: string;
+}

@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "node:http";
+import crypto from "node:crypto";
 import {
   INPUT_PROPERTIES,
   OUTPUT_PROPERTIES,
@@ -18,6 +19,12 @@ import {
   verifyWebhookRequest,
 } from "./lib/signature";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
+import {
+  analyzeMarketplaceConversation,
+  type PaidOrderDraft,
+  validatePaidOrderDraft,
+} from "./lib/intake";
+import { createPaidOrder } from "./lib/paid-orders";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 
@@ -63,6 +70,59 @@ function rawBodyString(req: Request): string {
 function firstQueryValue(value: unknown): string | undefined {
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
   return typeof value === "string" ? value : undefined;
+}
+
+function intakeAccessCode(): string | null {
+  return (
+    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN?.trim() ||
+    process.env.PAID_ORDER_INTAKE_ACCESS_CODE?.trim() ||
+    null
+  );
+}
+
+function timingSafeMatch(actual: string, expected: string): boolean {
+  const a = Buffer.from(actual, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function intakeAuthorized(req: Request): boolean {
+  const expected = intakeAccessCode();
+  if (!expected) return false;
+  const provided = req.get("x-paid-order-access-code")?.trim() ?? "";
+  return provided.length > 0 && timingSafeMatch(provided, expected);
+}
+
+function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const value = (key: keyof PaidOrderDraft) =>
+    typeof record[key] === "string" ? record[key].slice(0, 20_000) : "";
+  return {
+    paymentConfirmed: record.paymentConfirmed === true,
+    fullName: value("fullName"),
+    marketplaceUsername: value("marketplaceUsername"),
+    email: value("email"),
+    phone: value("phone"),
+    address: value("address"),
+    city: value("city"),
+    state: value("state"),
+    postalCode: value("postalCode"),
+    country: value("country"),
+    productName: value("productName"),
+    amount: value("amount"),
+    conversationSummary: value("conversationSummary"),
+  };
+}
+
+function rejectUnsecuredIntake(req: Request, res: Response): boolean {
+  if (intakeAccessCode() && intakeAuthorized(req)) return false;
+  res.status(intakeAccessCode() ? 401 : 503).json({
+    ok: false,
+    error: intakeAccessCode()
+      ? "Paid Order Intake access code is invalid or missing"
+      : "Paid Order Intake access code is not configured",
+  });
+  return true;
 }
 
 /**
@@ -167,6 +227,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       audit: { retained: auditCount(), limit: AUDIT_LIMIT },
       serverTime: new Date().toISOString(),
     });
+  });
+
+  app.post("/api/paid-orders/analyze", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const conversation =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>).conversation
+        : "";
+    if (typeof conversation !== "string" || conversation.trim().length < 20) {
+      return res.status(400).json({
+        ok: false,
+        error: "Paste at least a few lines of the paid Marketplace conversation",
+      });
+    }
+    return res.json({ ok: true, analysis: analyzeMarketplaceConversation(conversation) });
+  });
+
+  app.post("/api/paid-orders", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const draft = paidOrderDraftFrom(req.body);
+    const validationError = validatePaidOrderDraft(draft);
+    if (validationError) return res.status(400).json({ ok: false, error: validationError });
+
+    try {
+      const result = await createPaidOrder(draft);
+      return res.status(201).json({ ok: true, result });
+    } catch (error) {
+      const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;
+      return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not create the paid HubSpot order",
+      });
+    }
   });
 
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
