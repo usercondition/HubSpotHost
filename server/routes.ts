@@ -31,6 +31,7 @@ import {
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
 import { answerTrackerQuestion } from "./lib/tracker-assistant";
+import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
@@ -928,6 +929,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const result = lookupClientOrder(token);
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.json(result);
+  });
+
+  /**
+   * Public address suggestions for the buyer order form. Proxies Photon so the
+   * browser never needs a maps API key. Throttled with the other client routes.
+   */
+  app.post("/api/address-suggest", async (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const query =
+      req.body && typeof req.body === "object" && typeof (req.body as { query?: unknown }).query === "string"
+        ? String((req.body as { query: string }).query)
+        : "";
+    try {
+      const suggestions = await suggestAddresses(query);
+      return res.json({ ok: true, suggestions });
+    } catch {
+      return res.json({ ok: true, suggestions: [] });
+    }
   });
 
   /**

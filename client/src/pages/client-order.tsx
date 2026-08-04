@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { Mark } from "@/components/shell";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { cn } from "@/lib/utils";
 import type { ClientOrderView } from "@shared/schema";
 
@@ -230,6 +231,7 @@ export default function ClientOrder() {
                     value={form.clientFullName}
                     onChange={(v) => set("clientFullName", v)}
                     required
+                    autoComplete="name"
                   />
                   <ClientField
                     id="client-username"
@@ -244,6 +246,7 @@ export default function ClientOrder() {
                     value={form.clientEmail}
                     onChange={(v) => set("clientEmail", v)}
                     required
+                    autoComplete="email"
                   />
                   <ClientField
                     id="client-phone"
@@ -251,6 +254,7 @@ export default function ClientOrder() {
                     type="tel"
                     value={form.clientPhone}
                     onChange={(v) => set("clientPhone", v)}
+                    autoComplete="tel"
                   />
                 </div>
               </fieldset>
@@ -282,38 +286,47 @@ export default function ClientOrder() {
 
                 {shippingRequired && (
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <ClientField
-                        id="shipping-street"
-                        label="Street address"
-                        value={form.shippingStreet}
-                        onChange={(v) => set("shippingStreet", v)}
-                        required
-                      />
-                    </div>
+                    <AddressAutocomplete
+                      street={form.shippingStreet}
+                      onStreetChange={(v) => set("shippingStreet", v)}
+                      onSelect={(address) => {
+                        setForm((current) => ({
+                          ...current,
+                          shippingStreet: address.street,
+                          shippingCity: address.city || current.shippingCity,
+                          shippingState: address.state || current.shippingState,
+                          shippingPostalCode: address.postalCode || current.shippingPostalCode,
+                          shippingCountry: address.country || current.shippingCountry,
+                        }));
+                      }}
+                    />
                     <ClientField
                       id="shipping-city"
                       label="City"
                       value={form.shippingCity}
                       onChange={(v) => set("shippingCity", v)}
+                      autoComplete="address-level2"
                     />
                     <ClientField
                       id="shipping-state"
                       label="State / province"
                       value={form.shippingState}
                       onChange={(v) => set("shippingState", v)}
+                      autoComplete="address-level1"
                     />
                     <ClientField
                       id="shipping-postal-code"
                       label="Postal code"
                       value={form.shippingPostalCode}
                       onChange={(v) => set("shippingPostalCode", v)}
+                      autoComplete="postal-code"
                     />
                     <ClientField
                       id="shipping-country"
                       label="Country"
                       value={form.shippingCountry}
                       onChange={(v) => set("shippingCountry", v)}
+                      autoComplete="country-name"
                     />
                   </div>
                 )}
@@ -445,6 +458,7 @@ function ClientField({
   required,
   type = "text",
   inputMode,
+  autoComplete,
 }: {
   id: string;
   label: string;
@@ -453,6 +467,7 @@ function ClientField({
   required?: boolean;
   type?: string;
   inputMode?: "numeric" | "text" | "tel" | "email";
+  autoComplete?: string;
 }) {
   return (
     <div className="space-y-1.5">
@@ -464,6 +479,7 @@ function ClientField({
         id={id}
         type={type}
         inputMode={inputMode}
+        autoComplete={autoComplete}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         data-testid={`input-${id}`}
