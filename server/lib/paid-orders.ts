@@ -1,6 +1,7 @@
 import { HubSpotError, PRINT_ORDERS_PIPELINE } from "./hubspot";
 import { getConfig, getToken } from "./config";
 import { type PaidOrderDraft, splitName } from "./intake";
+import type { HubSpotIntakeDealRef, PaidOrderCreateResult } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
@@ -10,14 +11,7 @@ interface HubSpotRecord {
   properties?: Record<string, string | null>;
 }
 
-export interface PaidOrderCreateResult {
-  contactId: string;
-  contactStatus: "existing" | "created";
-  dealId: string;
-  dealName: string;
-  pipeline: string;
-  dealStage: string;
-}
+export type { PaidOrderCreateResult };
 
 function authHeaders(token: string): Record<string, string> {
   return {
@@ -115,15 +109,31 @@ async function createContact(draft: PaidOrderDraft): Promise<HubSpotRecord> {
   });
 }
 
-async function createDeal(draft: PaidOrderDraft, contactName: string): Promise<HubSpotRecord> {
-  const product = clean(draft.productName, 180);
-  const name = clean(contactName || draft.marketplaceUsername || "Marketplace customer", 100);
+async function createDeal(input: {
+  productName: string;
+  amount: string;
+  contactName: string;
+  marketplaceUsername: string;
+  conversationSummary: string;
+  orderGroup?: string;
+  lineIndex?: number;
+  lineCount?: number;
+}): Promise<HubSpotRecord> {
+  const product = clean(input.productName, 180);
+  const name = clean(input.contactName || input.marketplaceUsername || "Marketplace customer", 100);
   const dealName = `${product} - ${name}`.slice(0, 250);
   const detailLines = [
     "Source: Facebook Marketplace",
     "Payment status: Confirmed before HubSpot creation",
-    draft.marketplaceUsername ? `Marketplace username: ${clean(draft.marketplaceUsername, 100)}` : "",
-    clean(draft.conversationSummary, 1500),
+    input.marketplaceUsername ? `Marketplace username: ${clean(input.marketplaceUsername, 100)}` : "",
+    input.orderGroup
+      ? `Order group: ${clean(input.orderGroup, 80)}${
+          input.lineCount && input.lineCount > 1
+            ? ` (item ${Number(input.lineIndex ?? 0) + 1} of ${input.lineCount})`
+            : ""
+        }`
+      : "",
+    clean(input.conversationSummary, 1500),
   ].filter(Boolean);
 
   return hubspotRequest("/crm/v3/objects/deals", {
@@ -131,7 +141,7 @@ async function createDeal(draft: PaidOrderDraft, contactName: string): Promise<H
     body: JSON.stringify({
       properties: {
         dealname: dealName,
-        amount: normalizedAmount(draft.amount),
+        amount: normalizedAmount(input.amount),
         pipeline: PRINT_ORDERS_PIPELINE,
         dealstage: DEPOSIT_RECEIVED_STAGE,
         description: detailLines.join("\n"),
@@ -147,7 +157,22 @@ async function associateDealToContact(dealId: string, contactId: string): Promis
   );
 }
 
-export async function createPaidOrder(draft: PaidOrderDraft): Promise<PaidOrderCreateResult> {
+/**
+ * Create one Contact (reuse by email) and one Deal per commercial line.
+ * A single-item order still produces exactly one deal — same as before.
+ */
+export async function createPaidOrder(
+  draft: PaidOrderDraft,
+  options?: {
+    lineItems?: Array<{ productName: string; amount: string }>;
+    orderGroup?: string;
+  },
+): Promise<PaidOrderCreateResult> {
+  const lines =
+    options?.lineItems && options.lineItems.length > 0
+      ? options.lineItems
+      : [{ productName: draft.productName, amount: draft.amount }];
+
   const existing = await findContactByEmail(clean(draft.email));
   const contact = existing ?? (await createContact(draft));
   const contactStatus: "existing" | "created" = existing ? "existing" : "created";
@@ -156,15 +181,38 @@ export async function createPaidOrder(draft: PaidOrderDraft): Promise<PaidOrderC
       draft.fullName ||
       draft.marketplaceUsername,
   );
-  const deal = await createDeal(draft, contactName);
-  await associateDealToContact(deal.id, contact.id);
 
+  const deals: HubSpotIntakeDealRef[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const deal = await createDeal({
+      productName: line.productName,
+      amount: line.amount,
+      contactName,
+      marketplaceUsername: draft.marketplaceUsername,
+      conversationSummary: draft.conversationSummary,
+      orderGroup: options?.orderGroup,
+      lineIndex: index,
+      lineCount: lines.length,
+    });
+    await associateDealToContact(deal.id, contact.id);
+    const dealName = `${clean(line.productName, 180)} - ${clean(contactName, 100)}`.slice(0, 250);
+    deals.push({
+      dealId: deal.id,
+      dealName,
+      amount: normalizedAmount(line.amount),
+      productName: clean(line.productName, 180),
+    });
+  }
+
+  const primary = deals[0]!;
   return {
     contactId: contact.id,
     contactStatus,
-    dealId: deal.id,
-    dealName: `${clean(draft.productName, 180)} - ${clean(contactName, 100)}`.slice(0, 250),
+    dealId: primary.dealId,
+    dealName: primary.dealName,
     pipeline: PRINT_ORDERS_PIPELINE,
     dealStage: DEPOSIT_RECEIVED_STAGE,
+    deals,
   };
 }

@@ -74,6 +74,7 @@ import {
   attachPrintFileSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
+  lineItemsForIntake,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
@@ -272,16 +273,30 @@ function tooManyClientAttempts(req: Request, res: Response): boolean {
 }
 
 /**
- * Maps a reviewed intake onto the existing paid-order draft shape so the
- * approval path reuses `createPaidOrder` unchanged. Only structured fields and
- * a short summary are sent — never a raw conversation.
+ * Maps a reviewed intake onto the paid-order draft plus one HubSpot deal per
+ * commercial line item. Same Contact; N Deals for individual tracking.
  */
-function draftFromIntake(link: OrderIntakeLink): PaidOrderDraft {
-  const item = link.confirmedItem || link.itemDescription;
+function draftsFromIntake(link: OrderIntakeLink): {
+  draft: PaidOrderDraft;
+  lineItems: Array<{ productName: string; amount: string }>;
+  orderGroup: string;
+} {
+  const lines = lineItemsForIntake(link);
   const summary = [
     "Source: Facebook Marketplace one-time client details link.",
     `Internal reference: ${link.internalLabel}.`,
-    `Agreed item: ${item}${link.quantity > 1 ? ` (qty ${link.quantity})` : ""}.`,
+    lines.length > 1
+      ? `Line items:\n${lines
+          .map(
+            (line, index) =>
+              `  ${index + 1}. ${line.description}${line.quantity > 1 ? ` (qty ${line.quantity})` : ""} — $${line.amount}`,
+          )
+          .join("\n")}`
+      : `Agreed item: ${link.confirmedItem || lines[0]?.description || link.itemDescription}${
+          (lines[0]?.quantity ?? link.quantity) > 1
+            ? ` (qty ${lines[0]?.quantity ?? link.quantity})`
+            : ""
+        }.`,
     link.paymentMethod ? `Payment method: ${link.paymentMethod}.` : "",
     link.paymentReference ? `Payment reference: ${link.paymentReference}.` : "",
     link.clientPaymentConfirmed ? "Buyer confirmed payment on the client form." : "",
@@ -289,24 +304,40 @@ function draftFromIntake(link: OrderIntakeLink): PaidOrderDraft {
     link.shippingRequired ? "Shipping required." : "Local pickup / no shipping required.",
     link.clientNotes ? `Buyer notes: ${link.clientNotes}` : "",
     link.ownerNotes ? `Owner notes: ${link.ownerNotes}` : "",
+    link.confirmedItem && lines.length > 1 ? `Buyer confirmation notes: ${link.confirmedItem}` : "",
   ]
     .filter(Boolean)
     .join("\n");
 
-  return {
-    paymentConfirmed: true,
-    fullName: link.clientFullName,
-    marketplaceUsername: link.clientUsername || link.buyerUsernameHint,
-    email: link.clientEmail,
-    phone: link.clientPhone,
-    address: link.shippingRequired ? link.shippingStreet : "",
-    city: link.shippingRequired ? link.shippingCity : "",
-    state: link.shippingRequired ? link.shippingState : "",
-    postalCode: link.shippingRequired ? link.shippingPostalCode : "",
-    country: link.shippingRequired ? link.shippingCountry : "",
-    productName: link.quantity > 1 ? `${item} (x${link.quantity})` : item,
+  const lineItems = lines.map((line) => ({
+    productName:
+      line.quantity > 1 ? `${line.description} (x${line.quantity})` : line.description,
+    amount: line.amount,
+  }));
+
+  const primary = lineItems[0] ?? {
+    productName: link.confirmedItem || link.itemDescription,
     amount: link.agreedAmount,
-    conversationSummary: summary,
+  };
+
+  return {
+    draft: {
+      paymentConfirmed: true,
+      fullName: link.clientFullName,
+      marketplaceUsername: link.clientUsername || link.buyerUsernameHint,
+      email: link.clientEmail,
+      phone: link.clientPhone,
+      address: link.shippingRequired ? link.shippingStreet : "",
+      city: link.shippingRequired ? link.shippingCity : "",
+      state: link.shippingRequired ? link.shippingState : "",
+      postalCode: link.shippingRequired ? link.shippingPostalCode : "",
+      country: link.shippingRequired ? link.shippingCountry : "",
+      productName: primary.productName,
+      amount: primary.amount,
+      conversationSummary: summary,
+    },
+    lineItems,
+    orderGroup: link.internalLabel,
   };
 }
 
@@ -800,18 +831,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     }
 
-    const draft = draftFromIntake(link);
+    const { draft, lineItems, orderGroup } = draftsFromIntake(link);
     const validationError = validatePaidOrderDraft(draft);
     if (validationError) return res.status(400).json({ ok: false, error: validationError });
 
     try {
-      const result = await createPaidOrder(draft);
+      const result = await createPaidOrder(draft, { lineItems, orderGroup });
       const updated = markOrderLinkCreated(link.id, {
         contactId: result.contactId,
-        dealId: result.dealId,
-        dealName: result.dealName,
+        deals: result.deals,
       });
-      return res.status(201).json({ ok: true, result, link: updated ? ownerLinkView(updated) : null });
+      return res.status(201).json({
+        ok: true,
+        result,
+        link: updated ? ownerLinkView(updated) : null,
+        message:
+          result.deals.length > 1
+            ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
+            : `Created Contact and Print Order — attach the first plate next.`,
+      });
     } catch (error) {
       const status =
         error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;

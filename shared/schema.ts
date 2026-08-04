@@ -232,13 +232,23 @@ export interface PaidOrderDraft {
   conversationSummary: string;
 }
 
+export interface HubSpotIntakeDealRef {
+  dealId: string;
+  dealName: string;
+  amount: string;
+  productName: string;
+}
+
 export interface PaidOrderCreateResult {
   contactId: string;
   contactStatus: "existing" | "created";
+  /** Primary deal (first line item) — kept for older callers. */
   dealId: string;
   dealName: string;
   pipeline: string;
   dealStage: string;
+  /** Every deal created for this approval (one per line item). */
+  deals: HubSpotIntakeDealRef[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -292,10 +302,18 @@ export const orderIntakeLinks = sqliteTable("order_intake_links", {
     .notNull()
     .default(false),
 
+  /**
+   * JSON array of commercial line items for this intake.
+   * Empty / missing means a legacy single-item row using itemDescription + agreedAmount.
+   */
+  lineItemsJson: text("line_items_json").notNull().default("[]"),
+
   /* Set only after the owner approves and HubSpot accepts the write */
   hubspotContactId: text("hubspot_contact_id"),
   hubspotDealId: text("hubspot_deal_id"),
   hubspotDealName: text("hubspot_deal_name"),
+  /** JSON array of { dealId, dealName, amount, productName } created on approve. */
+  hubspotDealsJson: text("hubspot_deals_json").notNull().default("[]"),
 });
 
 export type OrderIntakeStatus = "awaiting_client" | "pending_review" | "created" | "expired";
@@ -315,6 +333,111 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
 };
 
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
+
+/** One commercial item on an intake. Each becomes its own HubSpot deal on approve. */
+export interface OrderIntakeLineItem {
+  description: string;
+  amount: string;
+  quantity: number;
+}
+
+export type ResinCostSource = "ctb" | "amazon" | "supplies" | "manual";
+
+export function parseAmountNumber(value: string): number {
+  return Number(String(value).replace(/[$,\s]/g, ""));
+}
+
+/** Prefer explicit lineItems; otherwise treat legacy scalar fields as one line. */
+export function normalizeIntakeLineItems(input: {
+  lineItems?: Array<{ description?: string; amount?: string; quantity?: unknown }> | null;
+  itemDescription?: string;
+  agreedAmount?: string;
+}): OrderIntakeLineItem[] {
+  const fromArray = Array.isArray(input.lineItems)
+    ? input.lineItems
+        .map((item) => ({
+          description: String(item?.description ?? "").trim(),
+          amount: String(item?.amount ?? "").trim(),
+          quantity: Math.max(1, Math.min(999, Number(item?.quantity) || 1)),
+        }))
+        .filter((item) => item.description.length >= 2 && parseAmountNumber(item.amount) > 0)
+    : [];
+  if (fromArray.length > 0) return fromArray.slice(0, 20);
+
+  const description = String(input.itemDescription ?? "").trim();
+  const amount = String(input.agreedAmount ?? "").trim();
+  if (description.length >= 2 && parseAmountNumber(amount) > 0) {
+    return [{ description, amount, quantity: 1 }];
+  }
+  return [];
+}
+
+export function summarizeIntakeLineItems(lines: OrderIntakeLineItem[]): {
+  itemDescription: string;
+  agreedAmount: string;
+} {
+  if (lines.length === 0) return { itemDescription: "", agreedAmount: "0" };
+  const total = lines.reduce((sum, line) => sum + parseAmountNumber(line.amount), 0);
+  const itemDescription =
+    lines.length === 1
+      ? lines[0]!.description
+      : `${lines.length} items: ${lines.map((line) => line.description).join("; ")}`.slice(0, 400);
+  return {
+    itemDescription,
+    agreedAmount: total.toFixed(2),
+  };
+}
+
+export function parseIntakeLineItemsJson(raw: string | null | undefined): OrderIntakeLineItem[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return normalizeIntakeLineItems({ lineItems: parsed as OrderIntakeLineItem[] });
+  } catch {
+    return [];
+  }
+}
+
+export function parseHubSpotDealsJson(raw: string | null | undefined): HubSpotIntakeDealRef[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const dealId = String(row.dealId ?? "").trim();
+        const dealName = String(row.dealName ?? "").trim();
+        if (!dealId) return null;
+        return {
+          dealId,
+          dealName: dealName || `Deal ${dealId}`,
+          amount: String(row.amount ?? "").trim(),
+          productName: String(row.productName ?? "").trim(),
+        };
+      })
+      .filter((item): item is HubSpotIntakeDealRef => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve line items for a stored intake, including legacy single-item rows. */
+export function lineItemsForIntake(
+  link: Pick<OrderIntakeLink, "lineItemsJson" | "itemDescription" | "agreedAmount" | "quantity">,
+): OrderIntakeLineItem[] {
+  const stored = parseIntakeLineItemsJson(link.lineItemsJson);
+  if (stored.length > 0) return stored;
+  return normalizeIntakeLineItems({
+    itemDescription: link.itemDescription,
+    agreedAmount: link.agreedAmount,
+  }).map((item) => ({
+    ...item,
+    quantity: link.quantity > 1 ? link.quantity : item.quantity,
+  }));
+}
 
 /**
  * A manual record of a supply purchase, usually copied from a regular Amazon
@@ -339,13 +462,6 @@ export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
 /* ------------------------------------------------------------------ */
 /* Sliced print files                                                  */
 /* ------------------------------------------------------------------ */
-
-/**
- * Where an estimated resin cost came from. CTB is preferred when the slicer
- * embedded a price; otherwise Print Operations may estimate from the active
- * resin profile or Supplies purchases. Never confused with actual deal material cost.
- */
-export type ResinCostSource = "ctb" | "amazon" | "supplies" | "manual";
 
 /**
  * The production metadata extracted from a Chitubox CTB slice file. These
@@ -535,18 +651,36 @@ export const resinProfiles = sqliteTable("resin_profiles", {
 
 export type ResinProfile = typeof resinProfiles.$inferSelect;
 
-/** Owner form that mints a new one-time client link. */
-export const createOrderLinkSchema = z.object({
-  internalLabel: trimmed(120).default(""),
-  itemDescription: trimmed(400).min(2, "Describe the agreed item or model"),
-  agreedAmount: amountLike,
-  paymentMethod: trimmed(80).default(""),
-  paymentReference: trimmed(120).default(""),
-  buyerNameHint: trimmed(120).default(""),
-  buyerUsernameHint: trimmed(120).default(""),
-  ownerNotes: trimmed(2000).default(""),
-  expiryDays: z.coerce.number().int().min(1).max(90).default(14),
+/** Owner form that mints a new one-time client link. Supports one or many line items. */
+const intakeLineItemSchema = z.object({
+  description: trimmed(400).min(2, "Describe each agreed item"),
+  amount: amountLike,
+  quantity: z.coerce.number().int().min(1).max(999).default(1),
 });
+
+export const createOrderLinkSchema = z
+  .object({
+    internalLabel: trimmed(120).default(""),
+    itemDescription: trimmed(400).default(""),
+    agreedAmount: trimmed(40).default(""),
+    lineItems: z.array(intakeLineItemSchema).max(20).optional(),
+    paymentMethod: trimmed(80).default(""),
+    paymentReference: trimmed(120).default(""),
+    buyerNameHint: trimmed(120).default(""),
+    buyerUsernameHint: trimmed(120).default(""),
+    ownerNotes: trimmed(2000).default(""),
+    expiryDays: z.coerce.number().int().min(1).max(90).default(14),
+  })
+  .superRefine((value, ctx) => {
+    const lines = normalizeIntakeLineItems(value);
+    if (lines.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Add at least one item with a description and amount",
+        path: ["lineItems"],
+      });
+    }
+  });
 export type CreateOrderLinkInput = z.input<typeof createOrderLinkSchema>;
 
 /** The public buyer form. Deliberately contains no internal cost fields. */
@@ -602,6 +736,7 @@ export type ReviewEditInput = z.infer<typeof reviewEditSchema>;
 export interface ClientOrderView {
   itemDescription: string;
   agreedAmount: string;
+  lineItems: OrderIntakeLineItem[];
   expiresAt: string;
   buyerNameHint: string;
   buyerUsernameHint: string;

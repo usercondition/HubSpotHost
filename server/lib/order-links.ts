@@ -19,10 +19,14 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   orderIntakeLinks,
+  lineItemsForIntake,
+  normalizeIntakeLineItems,
+  summarizeIntakeLineItems,
   type ClientOrderSubmission,
   type ClientOrderView,
   type CreateOrderLinkInput,
   type CreatedOrderLink,
+  type HubSpotIntakeDealRef,
   type OrderIntakeLink,
   type OrderIntakeStatus,
   type ReviewEditInput,
@@ -61,7 +65,9 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
   client_payment_confirmed INTEGER NOT NULL DEFAULT 0,
   hubspot_contact_id TEXT,
   hubspot_deal_id TEXT,
-  hubspot_deal_name TEXT
+  hubspot_deal_name TEXT,
+  line_items_json TEXT NOT NULL DEFAULT '[]',
+  hubspot_deals_json TEXT NOT NULL DEFAULT '[]'
 );
 `;
 
@@ -178,6 +184,23 @@ function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
   }
 }
 
+const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
+  ["line_items_json", "TEXT NOT NULL DEFAULT '[]'"],
+  ["hubspot_deals_json", "TEXT NOT NULL DEFAULT '[]'"],
+];
+
+function ensureOrderIntakeColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (
+      sqlite.prepare("PRAGMA table_info(order_intake_links)").all() as Array<{ name: string }>
+    ).map((row) => row.name),
+  );
+  for (const [name, type] of ORDER_INTAKE_COLUMN_MIGRATIONS) {
+    if (existing.has(name)) continue;
+    sqlite.exec(`ALTER TABLE order_intake_links ADD COLUMN ${name} ${type}`);
+  }
+}
+
 let db: BetterSQLite3Database | null = null;
 
 function databaseFile(): string {
@@ -226,6 +249,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   ensurePrintFileRecordColumns(sqlite);
+  ensureOrderIntakeColumns(sqlite);
   db = drizzle(sqlite);
   return db;
 }
@@ -286,20 +310,22 @@ function settleExpiry(link: OrderIntakeLink): OrderIntakeLink {
 /* ------------------------------------------------------------------ owner */
 
 export function createOrderLink(
-  input: Required<Pick<CreateOrderLinkInput, "itemDescription" | "agreedAmount">> &
-    Omit<CreateOrderLinkInput, "itemDescription" | "agreedAmount">,
+  input: CreateOrderLinkInput,
   baseUrl = "",
 ): CreatedOrderLink {
   const token = generateLinkToken();
   const expiryDays = Number(input.expiryDays ?? 14);
+  const lines = normalizeIntakeLineItems(input);
+  const summary = summarizeIntakeLineItems(lines);
   const initial = getDb()
     .insert(orderIntakeLinks)
     .values({
       tokenHash: hashLinkToken(token),
       status: "awaiting_client",
       internalLabel: input.internalLabel || "Generating reference",
-      itemDescription: input.itemDescription,
-      agreedAmount: input.agreedAmount,
+      itemDescription: summary.itemDescription,
+      agreedAmount: summary.agreedAmount,
+      lineItemsJson: JSON.stringify(lines),
       paymentMethod: input.paymentMethod ?? "",
       paymentReference: input.paymentReference ?? "",
       buyerNameHint: input.buyerNameHint ?? "",
@@ -308,6 +334,7 @@ export function createOrderLink(
       createdAt: nowIso(),
       expiresAt: addDays(Number.isFinite(expiryDays) && expiryDays > 0 ? expiryDays : 14),
       confirmedItem: "",
+      hubspotDealsJson: "[]",
     })
     .returning()
     .get();
@@ -382,16 +409,22 @@ export function applyReviewEdits(id: number, edits: ReviewEditInput): OrderIntak
 
 export function markOrderLinkCreated(
   id: number,
-  hubspot: { contactId: string; dealId: string; dealName: string },
+  hubspot: {
+    contactId: string;
+    deals: HubSpotIntakeDealRef[];
+  },
 ): OrderIntakeLink | null {
+  const primary = hubspot.deals[0];
+  if (!primary) return null;
   const changed = getDb()
     .update(orderIntakeLinks)
     .set({
       status: "created",
       decidedAt: nowIso(),
       hubspotContactId: hubspot.contactId,
-      hubspotDealId: hubspot.dealId,
-      hubspotDealName: hubspot.dealName,
+      hubspotDealId: primary.dealId,
+      hubspotDealName: primary.dealName,
+      hubspotDealsJson: JSON.stringify(hubspot.deals),
     })
     .where(and(eq(orderIntakeLinks.id, id), eq(orderIntakeLinks.status, "pending_review")))
     .run();
@@ -426,6 +459,7 @@ export function lookupClientOrder(token: string): ClientLookupResult {
     view: {
       itemDescription: link.itemDescription,
       agreedAmount: link.agreedAmount,
+      lineItems: lineItemsForIntake(link),
       expiresAt: link.expiresAt,
       buyerNameHint: link.buyerNameHint,
       buyerUsernameHint: link.buyerUsernameHint,
