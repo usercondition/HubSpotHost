@@ -22,6 +22,8 @@ export const PERFORMANCE_PROPERTIES = [
   "closedate",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
+  "print_plate_count",
+  "print_estimated_resin_cost",
 ] as const;
 
 /**
@@ -67,9 +69,9 @@ const PRINT_FILE_DEAL_PROPERTIES = [
   },
   {
     name: "print_estimated_resin_cost",
-    label: "Estimated resin cost (slicer)",
+    label: "Estimated resin cost",
     description:
-      "Total Chitubox-configured resin cost estimate across attached CTB plates. Separate from actual print_material_cost.",
+      "Planning resin cost estimate across attached CTB plates (from Chitubox price, bottle profile, or Supplies). Separate from actual print_material_cost.",
     type: "number",
     fieldType: "number",
   },
@@ -326,6 +328,79 @@ export async function patchDealPrintFileMetrics(
     method: "PATCH",
     body: JSON.stringify({ properties: printFileProperties(summary, attachedAt) }),
   });
+}
+
+/** Clear CTB planning fields when the last local plate is detached. */
+export async function clearDealPrintFileMetrics(dealId: string): Promise<void> {
+  await ensurePrintFileDealProperties();
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        print_slice_file_name: "",
+        print_slice_format: "",
+        print_slice_attached_at: "",
+        print_plate_count: "0",
+        print_estimated_time_hours: "",
+        print_resin_volume_ml: "",
+        print_resin_mass_g: "",
+        print_estimated_resin_cost: "",
+        print_layer_count: "",
+        print_bottom_layer_count: "",
+        print_exposure_seconds: "",
+        print_bottom_exposure_seconds: "",
+        print_model_height_mm: "",
+        print_layer_height_mm: "",
+        print_printer_profile: "",
+      },
+    }),
+  });
+}
+
+/**
+ * Explicitly seed HubSpot print_material_cost from the CTB resin estimate.
+ * Never called automatically — the owner must confirm via API/UI.
+ */
+export async function seedDealMaterialCostFromEstimate(
+  dealId: string,
+  estimatedCost: number,
+  options?: { overwrite?: boolean },
+): Promise<{ previousValue: number | null; writtenValue: number }> {
+  if (!Number.isFinite(estimatedCost) || estimatedCost <= 0) {
+    throw new HubSpotError("Estimated resin cost must be greater than zero", 400);
+  }
+
+  const deal = await request(
+    `/crm/v3/objects/deals/${encodeURIComponent(dealId)}?properties=print_material_cost,dealname`,
+    { method: "GET" },
+  );
+  const existingRaw = deal?.properties?.print_material_cost;
+  const existing =
+    existingRaw != null && String(existingRaw).trim() !== ""
+      ? Number(existingRaw)
+      : null;
+  const hasExisting = existing != null && Number.isFinite(existing) && existing > 0;
+
+  if (hasExisting && !options?.overwrite) {
+    throw new HubSpotError(
+      `Deal already has print_material_cost = ${existing}. Confirm overwrite to replace it.`,
+      409,
+    );
+  }
+
+  const writtenValue = Math.round(estimatedCost * 100) / 100;
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        print_material_cost: String(writtenValue),
+      },
+    }),
+  });
+  return {
+    previousValue: hasExisting ? existing : null,
+    writtenValue,
+  };
 }
 
 /**

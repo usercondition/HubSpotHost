@@ -137,6 +137,14 @@ before(async () => {
       if (call.url === "/crm/v3/properties/deals" && call.method === "GET") {
         return res.end(JSON.stringify({ results: [] }));
       }
+      if (call.url?.startsWith("/crm/v3/objects/deals/701") && call.method === "GET") {
+        return res.end(
+          JSON.stringify({
+            id: "701",
+            properties: { dealname: "Five plate Knight", print_material_cost: "" },
+          }),
+        );
+      }
       return res.end(JSON.stringify({ id: "ok" }));
     });
   });
@@ -233,5 +241,83 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   const listed = await jsonOwnerRequest("GET", "/api/prints?includeAttached=true");
   assert.equal(listed.status, 200);
   assert.equal(listed.body.records.length, 2);
+  assert.equal(listed.body.boards.length, 1);
+  assert.equal(listed.body.boards[0].plateCount, 2);
+  assert.equal(listed.body.boards[0].totalResinCost, 9.5);
+  assert.equal(listed.body.lastAttachedDealId, "701");
   assert.equal(listed.body.candidates[0].hasPrintFile, true);
+  assert.equal(listed.body.candidates[0].plateCount, 2);
+});
+
+test("detach rebuilds HubSpot totals and seed writes print_material_cost only when confirmed", async () => {
+  // Isolate from plates left by earlier tests in this file.
+  const { getDb } = await import("../server/lib/order-links");
+  const { printFileRecords } = await import("../shared/schema");
+  getDb().delete(printFileRecords).run();
+
+  mockCalls = [];
+  const first = await analyzePlate("detach-plate-01.ctb");
+  await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: first.body.analysisId,
+    dealId: "701",
+  });
+  const second = await analyzePlate("detach-plate-02.ctb");
+  const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: second.body.analysisId,
+    dealId: "701",
+  });
+  assert.equal(secondAttach.body.summary.plateCount, 2);
+  const recordId = secondAttach.body.record.id;
+
+  const deniedSeed = await jsonOwnerRequest("POST", "/api/prints/seed-material-cost", {
+    dealId: "701",
+    confirm: false,
+  });
+  assert.equal(deniedSeed.status, 400);
+
+  const seeded = await jsonOwnerRequest("POST", "/api/prints/seed-material-cost", {
+    dealId: "701",
+    confirm: true,
+    overwriteExisting: false,
+  });
+  assert.equal(seeded.status, 200);
+  assert.equal(seeded.body.writtenValue, 9.5);
+  const seedPatch = mockCalls.find(
+    (call) =>
+      call.method === "PATCH" &&
+      call.url === "/crm/v3/objects/deals/701" &&
+      call.body.includes("print_material_cost"),
+  );
+  assert.ok(seedPatch);
+  assert.equal(JSON.parse(seedPatch!.body).properties.print_material_cost, "9.5");
+
+  mockCalls = [];
+  const detached = await jsonOwnerRequest("POST", "/api/prints/detach", { recordId });
+  assert.equal(detached.status, 200);
+  assert.equal(detached.body.remainingPlateCount, 1);
+  assert.equal(detached.body.summary.plateCount, 1);
+
+  const rebuildPatch = mockCalls.find(
+    (call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701",
+  );
+  assert.ok(rebuildPatch);
+  const rebuildBody = JSON.parse(rebuildPatch!.body);
+  assert.equal(rebuildBody.properties.print_plate_count, "1");
+  assert.equal(rebuildBody.properties.print_estimated_resin_cost, "4.75");
+  assert.equal(Object.prototype.hasOwnProperty.call(rebuildBody.properties, "print_material_cost"), false);
+
+  const listed = await jsonOwnerRequest("GET", "/api/prints");
+  assert.equal(listed.body.boards[0].plateCount, 1);
+  assert.equal(listed.body.includeAttached, true);
+
+  const lastId = listed.body.boards[0].records[0].id;
+  mockCalls = [];
+  const cleared = await jsonOwnerRequest("POST", "/api/prints/detach", { recordId: lastId });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.remainingPlateCount, 0);
+  const clearPatch = mockCalls.find(
+    (call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701",
+  );
+  assert.ok(clearPatch);
+  assert.equal(JSON.parse(clearPatch!.body).properties.print_plate_count, "0");
 });

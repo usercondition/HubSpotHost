@@ -437,6 +437,9 @@ export const printFileRecords = sqliteTable("print_file_records", {
   retractSpeedMmPerMin: text("retract_speed_mm_per_min"),
   resolutionX: integer("resolution_x"),
   resolutionY: integer("resolution_y"),
+  buildVolumeXmm: text("build_volume_x_mm"),
+  buildVolumeYmm: text("build_volume_y_mm"),
+  buildVolumeZmm: text("build_volume_z_mm"),
   printerProfile: text("printer_profile"),
   hubspotSyncedAt: text("hubspot_synced_at").notNull(),
   attachedAt: text("attached_at").notNull(),
@@ -449,6 +452,23 @@ export interface PrintFileCandidateDeal {
   dealName: string;
   stage: string;
   hasPrintFile: boolean;
+  plateCount: number;
+  totalPrintTimeSeconds: number | null;
+  totalResinVolumeMl: number | null;
+  totalResinCost: number | null;
+}
+
+export interface PrintFileDealBoard {
+  dealId: string;
+  dealName: string;
+  dealStage: string;
+  plateCount: number;
+  totalPrintTimeSeconds: number | null;
+  totalResinVolumeMl: number | null;
+  totalResinMassG: number | null;
+  totalResinCost: number | null;
+  latestAttachedAt: string;
+  records: PrintFileRecord[];
 }
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -489,6 +509,25 @@ export const attachPrintFileSchema = z.object({
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
+
+export const detachPrintFileSchema = z.object({
+  recordId: z.coerce.number().int().positive("Select a plate to detach"),
+});
+
+export type DetachPrintFileInput = z.infer<typeof detachPrintFileSchema>;
+
+export const seedMaterialCostSchema = z.object({
+  dealId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{1,20}$/, "Select a valid Print Order"),
+  confirm: z
+    .boolean()
+    .refine((value) => value === true, "Confirm before seeding the actual material cost"),
+  overwriteExisting: z.boolean().default(false),
+});
+
+export type SeedMaterialCostInput = z.infer<typeof seedMaterialCostSchema>;
 
 export const upsertResinProfileSchema = z.object({
   name: trimmed(200).min(2, "Enter the resin name"),
