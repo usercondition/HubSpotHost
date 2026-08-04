@@ -10,7 +10,11 @@ import {
 import { AUDIT_LIMIT, auditCount, listAttempts } from "./lib/audit";
 import { summarizeEvents } from "./lib/events";
 import { recalculateDeal } from "./lib/service";
-import { buildRequestUri, verifyWebhookRequest } from "./lib/signature";
+import {
+  buildRequestUri,
+  findMatchingV3UriProfile,
+  verifyWebhookRequest,
+} from "./lib/signature";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
@@ -52,6 +56,55 @@ function rawBodyString(req: Request): string {
   if (Buffer.isBuffer(raw)) return raw.toString("utf8");
   if (typeof raw === "string") return raw;
   return "";
+}
+
+/**
+ * v3 signs HubSpot's public target URL. The canonical value is configured
+ * through PUBLIC_BASE_URL, while these alternatives exist solely to pinpoint
+ * reverse-proxy path issues during setup. They are never accepted as valid.
+ */
+function v3UriDiagnosticCandidates(req: Request): Array<{ label: string; uri: string }> {
+  const headers = req.headers;
+  const originalUrl = req.originalUrl;
+  const configuredBase = (process.env.PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+  const forwardedProto = (headers["x-forwarded-proto"] as string | undefined)
+    ?.split(",")[0]
+    .trim() || "https";
+  const forwardedHost =
+    (headers["x-forwarded-host"] as string | undefined)?.split(",")[0].trim() ||
+    req.get("host") ||
+    "localhost";
+  const publicOrigin = `${forwardedProto}://${forwardedHost}`;
+  const candidates = [
+    {
+      label: "configured-public-base",
+      uri: buildRequestUri({
+        protocol: req.protocol,
+        originalUrl,
+        overrideBase: configuredBase,
+      }),
+    },
+    {
+      label: "direct-public-path",
+      uri: buildRequestUri({
+        protocol: req.protocol,
+        originalUrl,
+        overrideBase: publicOrigin,
+      }),
+    },
+    {
+      label: "port-5000-public-path",
+      uri: buildRequestUri({
+        protocol: req.protocol,
+        originalUrl,
+        overrideBase: `${publicOrigin}/port/5000`,
+      }),
+    },
+  ];
+
+  return candidates.filter(
+    (candidate, index, all) => all.findIndex((item) => item.uri === candidate.uri) === index,
+  );
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -108,15 +161,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     }
     const headers = req.headers;
+    const requestUri = buildRequestUri({
+      forwardedProto: headers["x-forwarded-proto"] as string | undefined,
+      protocol: req.protocol,
+      host: (headers["x-forwarded-host"] as string | undefined) || req.get("host"),
+      originalUrl: req.originalUrl,
+      overrideBase: process.env.PUBLIC_BASE_URL,
+    });
     const verification = verifyWebhookRequest(secret, {
       method: req.method,
-      uri: buildRequestUri({
-        forwardedProto: headers["x-forwarded-proto"] as string | undefined,
-        protocol: req.protocol,
-        host: (headers["x-forwarded-host"] as string | undefined) || req.get("host"),
-        originalUrl: req.originalUrl,
-        overrideBase: process.env.PUBLIC_BASE_URL,
-      }),
+      uri: requestUri,
       rawBody: rawBodyString(req),
       signatureV1: headers["x-hubspot-signature"] as string | undefined,
       signatureV3: headers["x-hubspot-signature-v3"] as string | undefined,
@@ -124,15 +178,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     if (!verification.valid) {
+      const matchingUriProfile =
+        verification.version === "v3"
+          ? findMatchingV3UriProfile({
+              clientSecret: secret,
+              method: req.method,
+              rawBody: rawBodyString(req),
+              timestamp: headers["x-hubspot-request-timestamp"] as string | undefined,
+              signature: headers["x-hubspot-signature-v3"] as string | undefined,
+              candidates: v3UriDiagnosticCandidates(req),
+            })
+          : null;
+      const diagnosticReason =
+        verification.reason === "v3 signature mismatch"
+          ? matchingUriProfile
+            ? `v3 signature matches alternate URI profile: ${matchingUriProfile}`
+            : "v3 signature mismatch; no known public URI profile matched"
+          : verification.reason;
       recordWebhookDiagnostic({
         result: "rejected",
         version: verification.version,
-        reason: verification.reason,
+        reason: diagnosticReason,
       });
       return res.status(401).json({
         ok: false,
         error: "signature rejected",
-        detail: verification.reason,
+        detail: diagnosticReason,
       });
     }
 

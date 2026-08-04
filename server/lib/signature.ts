@@ -99,6 +99,32 @@ export function verifyV3(params: {
     : { valid: false, version: "v3", reason: "v3 signature mismatch" };
 }
 
+/**
+ * Classify a v3 mismatch against a small caller-supplied set of legitimate
+ * deployment URI shapes. This is diagnostic-only: callers must continue to
+ * accept requests solely against their configured canonical URI.
+ *
+ * The return value is a non-sensitive label, never the URI, signature, body,
+ * timestamp, or client secret.
+ */
+export function findMatchingV3UriProfile(params: {
+  clientSecret: string;
+  method: string;
+  rawBody: string;
+  timestamp: string | undefined;
+  signature: string | undefined;
+  candidates: Array<{ label: string; uri: string }>;
+}): string | null {
+  const { clientSecret, method, rawBody, timestamp, signature, candidates } = params;
+  if (!clientSecret || !timestamp || !signature) return null;
+
+  for (const candidate of candidates) {
+    const expected = computeV3Signature(clientSecret, method, candidate.uri, rawBody, timestamp);
+    if (safeEqual(expected, signature.trim())) return candidate.label;
+  }
+  return null;
+}
+
 export interface RequestFacts {
   method: string;
   /** Fully-qualified, URL-decoded request URI including query string. */

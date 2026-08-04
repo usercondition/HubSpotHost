@@ -5,6 +5,7 @@ import {
   buildRequestUri,
   computeV1Signature,
   computeV3Signature,
+  findMatchingV3UriProfile,
   verifyV1,
   verifyV3,
   verifyWebhookRequest,
@@ -94,6 +95,37 @@ test("v3 accepts a timestamp just inside the window and rejects bad signatures",
   assert.equal(
     verifyV3({ clientSecret: secret, method: "POST", uri, rawBody, timestamp: undefined, signature: sig }).valid,
     false,
+  );
+});
+
+test("v3 URI diagnostic identifies a matching legitimate proxy profile", () => {
+  const ts = String(Date.now());
+  const directUri = "https://calc.example.com/api/webhooks/hubspot";
+  const expected = computeV3Signature(secret, "POST", directUri, rawBody, ts);
+  assert.equal(
+    findMatchingV3UriProfile({
+      clientSecret: secret,
+      method: "POST",
+      rawBody,
+      timestamp: ts,
+      signature: expected,
+      candidates: [
+        { label: "configured-public-base", uri: "https://calc.example.com/port/5000/api/webhooks/hubspot" },
+        { label: "direct-public-path", uri: directUri },
+      ],
+    }),
+    "direct-public-path",
+  );
+  assert.equal(
+    findMatchingV3UriProfile({
+      clientSecret: secret,
+      method: "POST",
+      rawBody,
+      timestamp: ts,
+      signature: expected,
+      candidates: [{ label: "other", uri: "https://other.example.com/api/webhooks/hubspot" }],
+    }),
+    null,
   );
 });
 
