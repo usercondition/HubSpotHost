@@ -153,6 +153,37 @@ CREATE TABLE IF NOT EXISTS resin_profiles (
 );
 `;
 
+const CREATE_PRINTERS_SQL = `
+CREATE TABLE IF NOT EXISTS printers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  brand TEXT NOT NULL DEFAULT 'ELEGOO',
+  model TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  aliases_json TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '',
+  recommended_fep_hours TEXT NOT NULL DEFAULT '80',
+  recommended_fep_layers TEXT NOT NULL DEFAULT '25000',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS printers_status_idx ON printers (status, sort_order);
+`;
+
+const CREATE_PRINTER_LIFECYCLE_EVENTS_SQL = `
+CREATE TABLE IF NOT EXISTS printer_lifecycle_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  printer_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS printer_lifecycle_events_printer_idx
+  ON printer_lifecycle_events (printer_id, occurred_at DESC);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -248,6 +279,8 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
+  sqlite.exec(CREATE_PRINTERS_SQL);
+  sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   db = drizzle(sqlite);

@@ -33,16 +33,25 @@ import { buildPerformanceSnapshot } from "./lib/performance";
 import { answerTrackerQuestion } from "./lib/tracker-assistant";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
+import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
   attachedPrintFileDealIds,
   buildPrintFileOrderSummary,
   createPrintFileRecord,
   getStagedPrintFile,
+  isSupportedSliceFileName,
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
   stagePrintFileFromPath,
 } from "./lib/print-files";
+import {
+  addPrinterLifecycleEvent,
+  buildPrinterFleetSnapshot,
+  ensureDefaultPrinters,
+  getPrinter,
+  updatePrinter,
+} from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import {
   refreshResinPriceFromAmazon,
@@ -75,6 +84,8 @@ import {
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  createPrinterLifecycleEventSchema,
+  updatePrinterSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
   lineItemsForIntake,
@@ -729,11 +740,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     (req: Request, res: Response) => {
       const file = req.file;
       if (!file?.path) {
-        return res.status(400).json({ ok: false, error: "Choose one Chitubox .ctb slice file to analyze" });
+        return res.status(400).json({
+          ok: false,
+          error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
+        });
       }
-      if (!/\.ctb$/i.test(file.originalname)) {
+      if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
-        return res.status(400).json({ ok: false, error: "Only Chitubox .ctb slice files can be analyzed here" });
+        return res.status(400).json({
+          ok: false,
+          error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
+        });
       }
 
       try {
@@ -741,15 +758,65 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(201).json({ ok: true, ...staged });
       } catch (error) {
         const message =
-          error instanceof CtbParseError
+          error instanceof CtbParseError || error instanceof UltxParseError
             ? error.message
-            : "The CTB file could not be read. Re-export the slice file from Chitubox and try again.";
+            : "The slice file could not be read. Re-export it from Chitubox or Blueprint Studio and try again.";
         return res.status(400).json({ ok: false, error: message });
       } finally {
         removeTempUpload(file.path);
       }
     },
   );
+
+  /**
+   * Fleet usage + lifecycle for each named printer. Plate hours/layers/resin
+   * roll up from attached CTB/ULTX metrics matched by machine name aliases.
+   */
+  app.get("/api/printers", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      ensureDefaultPrinters();
+      return res.json({ ok: true, ...buildPrinterFleetSnapshot() });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load printer fleet",
+      });
+    }
+  });
+
+  app.patch("/api/printers/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const printerId = Number(req.params.id);
+    if (!Number.isInteger(printerId) || printerId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
+    }
+    const parsed = updatePrinterSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const printer = updatePrinter(printerId, parsed.data);
+    if (!printer) return res.status(404).json({ ok: false, error: "That printer was not found" });
+    return res.json({ ok: true, printer, fleet: buildPrinterFleetSnapshot() });
+  });
+
+  app.post("/api/printers/:id/events", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const printerId = Number(req.params.id);
+    if (!Number.isInteger(printerId) || printerId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
+    }
+    if (!getPrinter(printerId)) {
+      return res.status(404).json({ ok: false, error: "That printer was not found" });
+    }
+    const parsed = createPrinterLifecycleEventSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const event = addPrinterLifecycleEvent(printerId, parsed.data);
+    if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
+    return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
+  });
 
   /**
    * This is the only CTB route that writes to HubSpot. It requires the owner

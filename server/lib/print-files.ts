@@ -16,8 +16,21 @@ import {
   type PrintFileRecord,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
-import { parseCtbFile, parseCtbFileFromPath } from "./ctb";
+import { CtbParseError, parseCtbFile, parseCtbFileFromPath } from "./ctb";
+import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
+
+export { CtbParseError, UltxParseError };
+
+function extensionOf(fileName: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(fileName.trim());
+  return match?.[1]?.toLowerCase() ?? "";
+}
+
+export function isSupportedSliceFileName(fileName: string): boolean {
+  const ext = extensionOf(fileName);
+  return ext === "ctb" || ext === "ultx";
+}
 
 export const PRINT_FILE_ANALYSIS_TTL_MINUTES = 20;
 
@@ -37,7 +50,7 @@ function parseMetrics(value: string): PrintFileMetrics | null {
   try {
     const parsed = JSON.parse(value) as Partial<PrintFileMetrics>;
     if (
-      parsed.format !== "CTB" ||
+      (parsed.format !== "CTB" && parsed.format !== "ULTX") ||
       typeof parsed.fileName !== "string" ||
       typeof parsed.fileSizeBytes !== "number" ||
       typeof parsed.sha256 !== "string"
@@ -50,15 +63,29 @@ function parseMetrics(value: string): PrintFileMetrics | null {
   }
 }
 
+function parseSliceBuffer(fileName: string, buffer: Buffer): PrintFileMetrics {
+  const ext = extensionOf(fileName);
+  if (ext === "ultx") return parseUltxFile(fileName, buffer);
+  if (ext === "ctb") return parseCtbFile(fileName, buffer);
+  throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
+}
+
+function parseSlicePath(fileName: string, filePath: string): PrintFileMetrics {
+  const ext = extensionOf(fileName);
+  if (ext === "ultx") return parseUltxFileFromPath(fileName, filePath);
+  if (ext === "ctb") return parseCtbFileFromPath(fileName, filePath);
+  throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
+}
+
 export function stagePrintFile(fileName: string, buffer: Buffer): {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  return stageParsedPrintFile(fileName, enrichPrintFileMetricsWithResinCost(parseCtbFile(fileName, buffer)));
+  return stageParsedPrintFile(fileName, enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer)));
 }
 
-/** Stage a CTB that was uploaded to a temporary disk path (preferred for large plates). */
+/** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
 export function stagePrintFileFromPath(fileName: string, filePath: string): {
   analysisId: string;
   metrics: PrintFileMetrics;
@@ -66,7 +93,7 @@ export function stagePrintFileFromPath(fileName: string, filePath: string): {
 } {
   return stageParsedPrintFile(
     fileName,
-    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPath(fileName, filePath)),
+    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath)),
   );
 }
 

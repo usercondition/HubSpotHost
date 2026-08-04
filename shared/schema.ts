@@ -363,7 +363,7 @@ export interface OrderIntakeLineItem {
   quantity: number;
 }
 
-export type ResinCostSource = "ctb" | "amazon" | "supplies" | "manual";
+export type ResinCostSource = "ctb" | "ultx" | "amazon" | "supplies" | "manual";
 
 export function parseAmountNumber(value: string): number {
   return Number(String(value).replace(/[$,\s]/g, ""));
@@ -492,11 +492,13 @@ export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
  * `resinCost` is a planning estimate only — not the deal's actual
  * `print_material_cost`.
  */
+export type PrintSliceFormat = "CTB" | "ULTX";
+
 export interface PrintFileMetrics {
   fileName: string;
   fileSizeBytes: number;
   sha256: string;
-  format: "CTB";
+  format: PrintSliceFormat;
   formatRevision: string;
   printTimeSeconds: number | null;
   resinVolumeMl: number | null;
@@ -602,6 +604,121 @@ export interface PrintFileCandidateDeal {
   hasPrintFile: boolean;
 }
 
+export const PRINTER_STATUSES = ["active", "retired"] as const;
+export type PrinterStatus = (typeof PRINTER_STATUSES)[number];
+
+export const PRINTER_LIFECYCLE_EVENT_TYPES = [
+  "fep_replaced",
+  "screen_replaced",
+  "maintenance",
+  "note",
+  "retired",
+  "reactivated",
+] as const;
+export type PrinterLifecycleEventType = (typeof PRINTER_LIFECYCLE_EVENT_TYPES)[number];
+
+export const PRINTER_LIFECYCLE_EVENT_LABELS: Record<PrinterLifecycleEventType, string> = {
+  fep_replaced: "FEP / release film replaced",
+  screen_replaced: "LCD screen replaced",
+  maintenance: "Maintenance",
+  note: "Note",
+  retired: "Retired",
+  reactivated: "Reactivated",
+};
+
+/** Fleet machine registry. Plate metrics match via name + aliases. */
+export const printers = sqliteTable("printers", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  brand: text("brand").notNull().default("ELEGOO"),
+  model: text("model").notNull().default(""),
+  status: text("status").notNull().default("active"),
+  aliasesJson: text("aliases_json").notNull().default("[]"),
+  notes: text("notes").notNull().default(""),
+  recommendedFepHours: text("recommended_fep_hours").notNull().default("80"),
+  recommendedFepLayers: text("recommended_fep_layers").notNull().default("25000"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type Printer = typeof printers.$inferSelect;
+
+export const printerLifecycleEvents = sqliteTable("printer_lifecycle_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  printerId: integer("printer_id").notNull(),
+  eventType: text("event_type").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+export type PrinterLifecycleEvent = typeof printerLifecycleEvents.$inferSelect;
+
+export interface PrinterJobSummary {
+  recordId: number;
+  dealId: string;
+  dealName: string;
+  fileName: string;
+  formatRevision: string;
+  printerProfile: string | null;
+  printTimeSeconds: number | null;
+  layerCount: number | null;
+  resinVolumeMl: number | null;
+  resinMassG: number | null;
+  attachedAt: string;
+}
+
+export interface PrinterUsageBreakdown {
+  printerId: number;
+  name: string;
+  brand: string;
+  model: string;
+  status: PrinterStatus;
+  aliases: string[];
+  notes: string;
+  recommendedFepHours: number;
+  recommendedFepLayers: number;
+  plateCount: number;
+  totalPrintTimeSeconds: number;
+  totalPrintHours: number;
+  totalLayers: number;
+  totalResinVolumeMl: number;
+  totalResinMassG: number;
+  distinctOrders: number;
+  firstJobAt: string | null;
+  lastJobAt: string | null;
+  matchedProfiles: string[];
+  fepInstalledAt: string | null;
+  hoursSinceFep: number;
+  layersSinceFep: number;
+  fepHoursUsedPercent: number | null;
+  fepLayersUsedPercent: number | null;
+  screenInstalledAt: string | null;
+  hoursSinceScreen: number;
+  layersSinceScreen: number;
+  recentJobs: PrinterJobSummary[];
+  lifecycleEvents: PrinterLifecycleEvent[];
+}
+
+export interface PrinterFleetSnapshot {
+  printers: PrinterUsageBreakdown[];
+  unassigned: {
+    plateCount: number;
+    totalPrintTimeSeconds: number;
+    totalPrintHours: number;
+    totalLayers: number;
+    profiles: Array<{ profile: string; plateCount: number; totalPrintHours: number }>;
+    recentJobs: PrinterJobSummary[];
+  };
+  fleetTotals: {
+    plateCount: number;
+    totalPrintHours: number;
+    totalLayers: number;
+    activePrinters: number;
+  };
+}
+
 const trimmed = (max: number) => z.string().trim().max(max);
 const amountLike = z
   .string()
@@ -617,6 +734,28 @@ const supplyPurchaseDate = z
   .trim()
   .min(1, "Enter the purchase date")
   .refine((value) => Number.isFinite(new Date(value).getTime()), "Enter a valid purchase date");
+
+export const createPrinterLifecycleEventSchema = z.object({
+  eventType: z.enum(PRINTER_LIFECYCLE_EVENT_TYPES),
+  occurredAt: z
+    .string()
+    .trim()
+    .min(1, "Enter when this happened")
+    .refine((value) => Number.isFinite(new Date(value).getTime()), "Enter a valid date/time"),
+  notes: trimmed(2_000).default(""),
+});
+
+export type CreatePrinterLifecycleEventInput = z.infer<typeof createPrinterLifecycleEventSchema>;
+
+export const updatePrinterSchema = z.object({
+  notes: trimmed(2_000).optional(),
+  status: z.enum(PRINTER_STATUSES).optional(),
+  aliases: z.array(trimmed(120)).max(40).optional(),
+  recommendedFepHours: z.coerce.number().positive().max(10_000).optional(),
+  recommendedFepLayers: z.coerce.number().int().positive().max(10_000_000).optional(),
+});
+
+export type UpdatePrinterInput = z.infer<typeof updatePrinterSchema>;
 
 export const createSupplyPurchaseSchema = z.object({
   source: trimmed(80).default("Amazon"),
