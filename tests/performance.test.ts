@@ -68,6 +68,11 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.summary.revenue, 500);
   assert.equal(snapshot.summary.grossProfit, 210);
   assert.equal(snapshot.summary.activeOrders, 2);
+  assert.equal(snapshot.activeDeals.length, 2);
+  assert.equal(snapshot.activeDeals[0]?.dealName, "Low-margin Knight");
+  assert.equal(snapshot.activeDeals[1]?.dealName, "Needs costs");
+  assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
+  assert.equal(snapshot.hubspotPortalId, null);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "deposit")?.count, 2);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
   assert.equal(snapshot.attention[0]?.dealName, "Low-margin Knight");
@@ -96,6 +101,7 @@ test("attached print plates suppress the missing-plate attention item", () => {
     now: new Date("2026-08-04T12:00:00.000Z"),
     intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
     attachedPrintDealIds: ["plated"],
+    hubspotPortalId: "12345",
     stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
     deals: [
       {
@@ -117,4 +123,6 @@ test("attached print plates suppress the missing-plate attention item", () => {
 
   assert.equal(snapshot.summary.activeOrders, 1);
   assert.equal(snapshot.attention.length, 0);
+  assert.equal(snapshot.activeDeals[0]?.hasPlates, true);
+  assert.equal(snapshot.hubspotPortalId, "12345");
 });

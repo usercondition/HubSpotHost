@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { attentionNextStep } from "@/lib/workflow";
+import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
@@ -230,7 +230,7 @@ export default function Performance() {
                 description="The highest-impact active orders to check first."
                 actions={
                   <a
-                    href="https://app.hubspot.com/"
+                    href={hubspotDealsListHref(snapshot.hubspotPortalId)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-medium text-primary hover:underline"
@@ -243,7 +243,10 @@ export default function Performance() {
                 {snapshot.attention.length > 0 ? (
                   <div className="space-y-2">
                     {snapshot.attention.map((item) => {
-                      const next = attentionNextStep(item);
+                      const next = attentionNextStep({
+                        ...item,
+                        portalId: snapshot.hubspotPortalId,
+                      });
                       return (
                         <article
                           key={`${item.dealId}-${item.issue}`}

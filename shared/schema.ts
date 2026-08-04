@@ -184,6 +184,14 @@ export interface PerformanceResponse {
     detail: string;
     severity: "neutral" | "warn" | "bad";
   }>;
+  activeDeals: Array<{
+    dealId: string;
+    dealName: string;
+    stage: string;
+    amount: number;
+    hasPlates: boolean;
+  }>;
+  hubspotPortalId: string | null;
 }
 
 export interface WebhookSummary {
