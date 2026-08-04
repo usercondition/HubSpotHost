@@ -1370,7 +1370,8 @@ export const costDefaultsPreviewSchema = z.object({
   packagingAmount: optionalNonNegativeAmount,
   shippingAmount: optionalNonNegativeAmount,
   includeMaterial: z.boolean().optional().default(true),
-  includeLabor: z.boolean().optional().default(true),
+  /** Off by default — quotes usually already include labor in the order amount. */
+  includeLabor: z.boolean().optional().default(false),
   includePackaging: z.boolean().optional().default(true),
   includeShipping: z.boolean().optional().default(false),
   overwriteExisting: z.boolean().optional().default(false),

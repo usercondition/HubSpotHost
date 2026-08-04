@@ -1217,12 +1217,12 @@ export default function Prints() {
             {dealId ? (
               <Panel
                 title="3. Apply cost defaults"
-                description="Revenue is the quoted order amount. Fill cash-cost fields from plates and simple defaults; labor stays off by default because it is usually already in the quote."
+                description="Revenue is the quoted order amount. Fill blank cash-cost fields (material, packaging, shipping). Labor stays out by default because it is usually already in your quote."
               >
                 <div className="space-y-4" data-testid="panel-cost-defaults">
                   {!selectedHasPlates ? (
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Attach at least one plate first so material can be estimated from its resin data.
+                      Attach at least one CTB plate to this order first so material can be estimated from plate resin data.
                     </p>
                   ) : null}
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -1235,21 +1235,43 @@ export default function Prints() {
                       <Input id="cost-shipping" inputMode="decimal" value={shippingAmount} placeholder="Paste from Pirate Ship" disabled={!includeShipping} onChange={(event) => { setShippingAmount(event.target.value); setCostPreview(null); }} data-testid="input-cost-shipping" />
                     </div>
                   </div>
-                  {([
-                    ["material", includeMaterial, setIncludeMaterial, "Material from plate resin estimates"],
-                    ["packaging", includePackaging, setIncludePackaging, "Packaging flat default"],
-                    ["shipping", includeShipping, setIncludeShipping, "Shipping (paste postage)"],
-                    ["labor", includeLabor, setIncludeLabor, "Optional labor as hours × rate (off by default)"],
-                  ] as const).map(([key, checked, setChecked, label]) => (
-                    <label key={key} className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
-                      <input type="checkbox" checked={checked} onChange={(event) => { setChecked(event.target.checked); setCostPreview(null); }} className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring" data-testid={`checkbox-cost-${key}`} />
-                      <span className="text-muted-foreground">{label}</span>
-                    </label>
-                  ))}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        ["material", includeMaterial, setIncludeMaterial, "Material from plate resin estimates"],
+                        ["packaging", includePackaging, setIncludePackaging, "Packaging flat default"],
+                        ["shipping", includeShipping, setIncludeShipping, "Shipping (paste postage)"],
+                        ["labor", includeLabor, setIncludeLabor, "Optional: labor as hours × rate (off — usually in quote)"],
+                      ] as const
+                    ).map(([key, checked, setChecked, label]) => (
+                      <label key={key} className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            setChecked(event.target.checked);
+                            setCostPreview(null);
+                          }}
+                          className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring"
+                          data-testid={`checkbox-cost-${key}`}
+                        />
+                        <span className="text-muted-foreground">{label}</span>
+                      </label>
+                    ))}
+                  </div>
                   {includeLabor ? (
                     <div className="space-y-1.5">
-                      <Label htmlFor="cost-labor-rate">Labor rate ($/hr)</Label>
-                      <Input id="cost-labor-rate" inputMode="decimal" value={laborRate} onChange={(event) => { setLaborRate(event.target.value); setCostPreview(null); }} data-testid="input-cost-labor-rate" />
+                      <Label htmlFor="cost-labor-rate">Labor rate ($/hr) — only if you want labor as a separate cost</Label>
+                      <Input
+                        id="cost-labor-rate"
+                        inputMode="decimal"
+                        value={laborRate}
+                        onChange={(event) => {
+                          setLaborRate(event.target.value);
+                          setCostPreview(null);
+                        }}
+                        data-testid="input-cost-labor-rate"
+                      />
                     </div>
                   ) : null}
                   <label className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">

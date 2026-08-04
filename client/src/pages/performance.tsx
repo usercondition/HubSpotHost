@@ -178,14 +178,14 @@ export default function Performance() {
               <StatCard
                 label="Revenue"
                 value={money(snapshot.summary.revenue)}
-                hint={`New orders in the last ${snapshot.period.days} days`}
+                hint={`Sum of quoted order amounts · last ${snapshot.period.days} days`}
                 icon={CircleDollarSign}
                 testId="metric-revenue"
               />
               <StatCard
                 label="Gross profit"
                 value={money(snapshot.summary.grossProfit)}
-                hint="From actual cost fields on your HubSpot deals"
+                hint="Order amount minus material, packaging, and shipping (labor stays in the quote)"
                 icon={WalletCards}
                 tone={snapshot.summary.grossProfit >= 0 ? "good" : "bad"}
                 testId="metric-gross-profit"
@@ -315,6 +315,9 @@ export default function Performance() {
                     </p>
                   </div>
                 )}
+                <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                  Do not subtract this total from gross profit here. Add material, packaging, or shipping on the individual HubSpot deal when it belongs to that order. Labor is usually already in the quoted order amount.
+                </p>
               </Panel>
             </section>
           </>

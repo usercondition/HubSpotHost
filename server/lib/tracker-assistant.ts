@@ -174,7 +174,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         ok: true,
         mode: "rules",
         reply:
-          "No open orders are currently flagged for incomplete cost details. When plates are attached, use Print files → Apply cost defaults to fill blanks with a confirm step.",
+          "No open orders are currently flagged for incomplete cost details. When plates are attached, use Print files → Apply cost defaults to fill material/packaging (and paste shipping) with a confirm step. Labor stays in the quoted order amount.",
         actions: [
           { label: "Print files", href: "/prints" },
           { label: "Open HubSpot deals", href: "/performance" },
@@ -188,7 +188,9 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       actions.push({ label: `Cost defaults · ${item.dealName.slice(0, 20)}`, href: printsHref(item.dealId) });
     }
     lines.push("");
-    lines.push("On Print files, preview proposed material/labor/packaging (and paste shipping), then confirm before any HubSpot write.");
+    lines.push(
+      "Revenue is the quoted order amount. On Print files, preview material/packaging (and paste shipping), then confirm — labor is left out by default because it is usually already in the quote.",
+    );
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 4), usedFacts };
   }
 

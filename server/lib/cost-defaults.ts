@@ -1,6 +1,10 @@
 /**
  * Propose and apply deal cost defaults from attached plate data.
  * Every HubSpot write requires an explicit confirm — never automatic.
+ *
+ * Revenue / order amount is the quoted price (HubSpot `amount`). Labor is
+ * usually already baked into that quote, so hourly-rate labor is opt-in only.
+ * Default proposals cover cash outlays: material, packaging, and optional shipping.
  */
 
 import { getConfig, resolveWriteDecision } from "./config";
@@ -187,11 +191,12 @@ export function assembleCostDefaultsPreview(input: {
       label: "Labor cost",
       proposed: laborProposed,
       current: input.currentLabor,
-      source:
-        hours != null
+      source: input.includeLabor
+        ? hours != null
           ? `${hours.toFixed(2)} print hours × $${input.laborRatePerHour.toFixed(2)}/hr`
-          : "No print time on attached plates",
-      include: input.includeLabor !== false,
+          : "No print time on attached plates"
+        : "Skipped — labor is usually included in the quoted order amount",
+      include: Boolean(input.includeLabor),
       overwrite,
     }),
     buildCostFieldProposal({

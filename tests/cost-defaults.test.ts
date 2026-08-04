@@ -231,7 +231,7 @@ test("existing cost fields are skipped unless overwrite is enabled", () => {
   assert.equal(overwritten.proposed, 9.5);
 });
 
-test("assemble preview computes labor from print hours and rate", () => {
+test("labor is skipped by default because the quote includes it", () => {
   const preview = assembleCostDefaultsPreview({
     dealId: "801",
     dealName: "Cost Defaults Order",
@@ -249,10 +249,25 @@ test("assemble preview computes labor from print hours and rate", () => {
   assert.equal(preview.totalPrintHours, 8);
   const labor = preview.fields.find((field) => field.field === "labor");
   assert.equal(labor?.proposed, 200);
-  assert.equal(labor?.willWrite, true);
-  const shipping = preview.fields.find((field) => field.field === "shipping");
-  assert.equal(shipping?.willWrite, false);
-  assert.equal(shipping?.skipReason, "Not selected");
+  assert.equal(labor?.willWrite, false);
+  assert.match(labor?.skipReason || "", /Not selected|quote/i);
+  assert.match(labor?.source || "", /included in the quoted order amount/i);
+
+  const withLabor = assembleCostDefaultsPreview({
+    dealId: "801",
+    dealName: "Cost Defaults Order",
+    plateCount: 2,
+    totalPrintTimeSeconds: 28_800,
+    totalResinCost: 9.5,
+    currentMaterial: null,
+    currentLabor: null,
+    currentPackaging: null,
+    currentShipping: null,
+    laborRatePerHour: 25,
+    packagingAmount: 5,
+    includeLabor: true,
+  });
+  assert.equal(withLabor.fields.find((field) => field.field === "labor")?.willWrite, true);
 });
 
 test("preview and confirm-apply write cost fields then recalculate", async () => {
@@ -277,9 +292,6 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
 
   const noConfirm = await jsonOwnerRequest("POST", "/api/prints/cost-defaults/apply", {
     dealId: "801",
-    includeMaterial: true,
-    includeLabor: true,
-    includePackaging: true,
     includeShipping: true,
     shippingAmount: 8.4,
   });
@@ -287,9 +299,6 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
 
   const preview = await jsonOwnerRequest("POST", "/api/prints/cost-defaults/preview", {
     dealId: "801",
-    includeMaterial: true,
-    includeLabor: true,
-    includePackaging: true,
     includeShipping: true,
     shippingAmount: 8.4,
   });
@@ -300,7 +309,7 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
   const packaging = preview.body.preview.fields.find((field: any) => field.field === "packaging");
   const shipping = preview.body.preview.fields.find((field: any) => field.field === "shipping");
   assert.equal(material.proposed, 4.75);
-  assert.equal(labor.proposed, 100);
+  assert.equal(labor.willWrite, false);
   assert.equal(packaging.proposed, 5);
   assert.equal(shipping.proposed, 8.4);
   assert.equal(material.willWrite, true);
@@ -308,9 +317,6 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
   const dryBlocked = await jsonOwnerRequest("POST", "/api/prints/cost-defaults/apply", {
     dealId: "801",
     confirm: true,
-    includeMaterial: true,
-    includeLabor: true,
-    includePackaging: true,
     includeShipping: true,
     shippingAmount: 8.4,
   });
@@ -323,16 +329,13 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
     const applied = await jsonOwnerRequest("POST", "/api/prints/cost-defaults/apply", {
       dealId: "801",
       confirm: true,
-      includeMaterial: true,
-      includeLabor: true,
-      includePackaging: true,
       includeShipping: true,
       shippingAmount: 8.4,
     });
     assert.equal(applied.status, 200);
-    assert.equal(applied.body.written.length, 4);
+    assert.equal(applied.body.written.length, 3);
     assert.equal(dealCosts.print_material_cost, "4.75");
-    assert.equal(dealCosts.print_labor_cost, "100");
+    assert.equal(dealCosts.print_labor_cost, null);
     assert.equal(dealCosts.print_packaging_cost, "5");
     assert.equal(dealCosts.print_actual_shipping_cost, "8.4");
     assert.equal(applied.body.recalculated, true);
