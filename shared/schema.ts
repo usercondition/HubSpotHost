@@ -79,8 +79,20 @@ export interface HealthResponse {
     tokenConfigured: boolean;
     tokenSource: "custom_cred" | "hubspot_access_token" | null;
   };
+  paidOrderIntake?: {
+    accessCodeConfigured: boolean;
+    buildId?: string;
+    clientLinkWorkflow?: string;
+  };
+  storage?: {
+    configured: boolean;
+    ephemeral: boolean;
+    durableVolumeLikely: boolean;
+    warning: string | null;
+  };
   webhook: {
     verification: "configured" | "not-configured";
+    callbackToken?: "configured" | "not-configured";
     supportedVersions: string[];
     path: string;
     latestDelivery: {
@@ -92,7 +104,8 @@ export interface HealthResponse {
   };
   admin: {
     /** Public deployments expose only the webhook and safe readiness status. */
-    publicControlsEnabled: boolean;
+    publicControlsEnabled?: boolean;
+    internalControlsEnabled?: boolean;
   };
   properties: {
     inputs: string[];

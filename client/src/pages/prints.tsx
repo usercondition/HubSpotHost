@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -7,7 +7,6 @@ import {
   CircleDollarSign,
   FilePlus2,
   FileUp,
-  KeyRound,
   Layers3,
   Loader2,
   PackageCheck,
@@ -16,7 +15,6 @@ import {
   Scale,
   ShieldCheck,
   Timer,
-  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { readHashQueryParam } from "@/lib/workflow";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import type {
@@ -99,61 +99,6 @@ function localDate(value: string): string {
   return Number.isFinite(date.getTime())
     ? date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "Unknown time";
-}
-
-function UnlockPrints({
-  codeDraft,
-  setCodeDraft,
-  onUnlock,
-  pending,
-}: {
-  codeDraft: string;
-  setCodeDraft: (value: string) => void;
-  onUnlock: () => void;
-  pending: boolean;
-}) {
-  return (
-    <section
-      className="mx-auto max-w-lg rounded-lg border border-card-border bg-card p-5 md:p-6"
-      aria-labelledby="prints-unlock-title"
-      data-testid="panel-prints-unlock"
-    >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <KeyRound className="h-4 w-4" />
-      </div>
-      <p className="mt-4 rule-label">Owner access</p>
-      <h2 id="prints-unlock-title" className="mt-1 text-lg font-semibold tracking-tight">
-        Unlock print-file tracking
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        Analyze a Chitubox slice file, attach its production data to a Print Order, and keep your owner code only in this open page.
-      </p>
-      <form
-        className="mt-5 space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onUnlock();
-        }}
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor="prints-owner-code">Owner access code</Label>
-          <Input
-            id="prints-owner-code"
-            type="password"
-            autoComplete="off"
-            value={codeDraft}
-            onChange={(event) => setCodeDraft(event.target.value)}
-            placeholder="Enter your code"
-            data-testid="input-prints-owner-code"
-          />
-        </div>
-        <Button type="submit" className="w-full" disabled={pending || codeDraft.trim().length === 0} data-testid="button-unlock-prints">
-          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
-          Unlock print files
-        </Button>
-      </form>
-    </section>
-  );
 }
 
 function resinCostHint(metrics: PrintFileMetrics): string {
@@ -241,21 +186,36 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
 export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [codeDraft, setCodeDraft] = useState("");
-  const [ownerCode, setOwnerCode] = useState("");
-  const [includeAttached, setIncludeAttached] = useState(false);
+  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const [includeAttached, setIncludeAttached] = useState(true);
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
-  const [dealId, setDealId] = useState("");
+  const [dealId, setDealId] = useState(() => readHashQueryParam("dealId") ?? "");
   const [dragging, setDragging] = useState(false);
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
-  const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
+
+  useEffect(() => {
+    const fromHash = readHashQueryParam("dealId");
+    if (fromHash) {
+      setDealId(fromHash);
+      setIncludeAttached(true);
+    }
+    const onHash = () => {
+      const next = readHashQueryParam("dealId");
+      if (next) {
+        setDealId(next);
+        setIncludeAttached(true);
+      }
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   const prints = useQuery<PrintsResponse>({
     queryKey: ["/api/prints", ownerCode, includeAttached],
-    enabled: ownerCode.length > 0,
+    enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest(
         "GET",
@@ -331,14 +291,13 @@ export default function Prints() {
 
   const unlock = useMutation({
     mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/prints?includeAttached=false", undefined, {
+      const response = await apiRequest("GET", "/api/prints?includeAttached=true", undefined, {
         headers: { "x-paid-order-access-code": code },
       });
       return { code, data: (await response.json()) as PrintsResponse };
     },
     onSuccess: ({ code, data }) => {
-      setOwnerCode(code);
-      setCodeDraft("");
+      setSessionUnlocked(code);
       toast({
         title: "Print files unlocked",
         description: `${data.candidates.length} active order${data.candidates.length === 1 ? "" : "s"} can receive plate data.`,
@@ -447,12 +406,14 @@ export default function Prints() {
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
-        {!ownerCode ? (
-          <UnlockPrints
-            codeDraft={codeDraft}
-            setCodeDraft={setCodeDraft}
-            onUnlock={() => unlock.mutate(codeDraft.trim())}
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock print-file tracking"
+            description="Analyze a Chitubox slice file, attach its production data to a Print Order, and keep your owner code only in this open tab."
+            buttonLabel="Unlock print files"
+            testIdPrefix="prints"
             pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
           />
         ) : prints.isLoading ? (
           <div className="space-y-5" data-testid="skeleton-prints">

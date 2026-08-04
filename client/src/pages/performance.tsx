@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -7,21 +6,20 @@ import {
   Boxes,
   CircleDollarSign,
   ClipboardList,
-  KeyRound,
+  ExternalLink,
   Loader2,
   Package,
   RefreshCw,
   ShieldCheck,
   TrendingUp,
-  Unlock,
   WalletCards,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { attentionNextStep } from "@/lib/workflow";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -52,61 +50,6 @@ const ISSUE_TONE = {
   bad: "border-destructive/35 bg-destructive/5",
 } as const;
 
-function LockedPanel({
-  codeDraft,
-  setCodeDraft,
-  onUnlock,
-  pending,
-}: {
-  codeDraft: string;
-  setCodeDraft: (value: string) => void;
-  onUnlock: () => void;
-  pending: boolean;
-}) {
-  return (
-    <section
-      className="mx-auto max-w-lg rounded-lg border border-card-border bg-card p-5 md:p-6"
-      aria-labelledby="performance-unlock-title"
-      data-testid="panel-performance-unlock"
-    >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <KeyRound className="h-4 w-4" />
-      </div>
-      <p className="mt-4 rule-label">Owner access</p>
-      <h2 id="performance-unlock-title" className="mt-1 text-lg font-semibold tracking-tight">
-        Unlock your live business metrics
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        Enter your owner access code to pull read-only order, pipeline, margin, and supply-spend data. The code stays only in this page while it is open.
-      </p>
-      <form
-        className="mt-5 space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onUnlock();
-        }}
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor="performance-owner-code">Owner access code</Label>
-          <Input
-            id="performance-owner-code"
-            type="password"
-            autoComplete="off"
-            value={codeDraft}
-            onChange={(event) => setCodeDraft(event.target.value)}
-            placeholder="Enter your code"
-            data-testid="input-performance-owner-code"
-          />
-        </div>
-        <Button type="submit" className="w-full" disabled={pending || codeDraft.trim().length === 0} data-testid="button-unlock-performance">
-          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
-          Unlock performance
-        </Button>
-      </form>
-    </section>
-  );
-}
-
 function LoadingMetrics() {
   return (
     <div className="space-y-5" data-testid="skeleton-performance">
@@ -125,13 +68,11 @@ function LoadingMetrics() {
 
 export default function Performance() {
   const { toast } = useToast();
-  const [codeDraft, setCodeDraft] = useState("");
-  const [ownerCode, setOwnerCode] = useState("");
-  const headers = useMemo(() => ({ "x-paid-order-access-code": ownerCode }), [ownerCode]);
+  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
-    enabled: ownerCode.length > 0,
+    enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
@@ -146,8 +87,7 @@ export default function Performance() {
       return { code, snapshot: (await response.json()) as PerformanceResponse };
     },
     onSuccess: ({ code, snapshot }) => {
-      setOwnerCode(code);
-      setCodeDraft("");
+      setSessionUnlocked(code);
       toast({
         title: "Performance unlocked",
         description: `${snapshot.summary.activeOrders} active print order${snapshot.summary.activeOrders === 1 ? "" : "s"} are in view.`,
@@ -192,12 +132,14 @@ export default function Performance() {
       />
 
       <div className="space-y-5 px-4 py-5 md:px-6">
-        {!ownerCode ? (
-          <LockedPanel
-            codeDraft={codeDraft}
-            setCodeDraft={setCodeDraft}
-            onUnlock={() => unlock.mutate(codeDraft.trim())}
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock your live business metrics"
+            description="Enter your owner access code to pull read-only order, pipeline, margin, and supply-spend data."
+            buttonLabel="Unlock performance"
+            testIdPrefix="performance"
             pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
           />
         ) : performance.isLoading ? (
           <LoadingMetrics />
@@ -300,32 +242,57 @@ export default function Performance() {
               >
                 {snapshot.attention.length > 0 ? (
                   <div className="space-y-2">
-                    {snapshot.attention.map((item) => (
-                      <article
-                        key={`${item.dealId}-${item.issue}`}
-                        className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
-                        data-testid={`row-attention-${item.dealId}`}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <h3 className="text-sm font-medium">{item.dealName}</h3>
-                            <p className="mt-0.5 text-xs text-muted-foreground">{item.stage}</p>
+                    {snapshot.attention.map((item) => {
+                      const next = attentionNextStep(item);
+                      return (
+                        <article
+                          key={`${item.dealId}-${item.issue}`}
+                          className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
+                          data-testid={`row-attention-${item.dealId}`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <h3 className="text-sm font-medium">{item.dealName}</h3>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{item.stage}</p>
+                            </div>
+                            <StatusPill
+                              tone={item.severity}
+                              icon={item.severity === "bad" ? AlertTriangle : ClipboardList}
+                              label={item.issue}
+                            />
                           </div>
-                          <StatusPill
-                            tone={item.severity}
-                            icon={item.severity === "bad" ? AlertTriangle : ClipboardList}
-                            label={item.issue}
-                          />
-                        </div>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
-                      </article>
-                    ))}
+                          <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                          <div className="mt-2">
+                            {next.external ? (
+                              <a
+                                href={next.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                                data-testid={`link-attention-action-${item.dealId}`}
+                              >
+                                {next.label}
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <Link
+                                href={next.href}
+                                className="text-xs font-medium text-primary hover:underline"
+                                data-testid={`link-attention-action-${item.dealId}`}
+                              >
+                                {next.label}
+                              </Link>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="rounded-md bg-muted/50 p-4" data-testid="empty-performance-attention">
                     <p className="text-sm font-medium">Your active orders look clear.</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      This panel will highlight low margins, stale deals, or incomplete cost details as they appear.
+                      This panel will highlight low margins, missing plates, stale deals, or incomplete cost details as they appear.
                     </p>
                   </div>
                 )}
