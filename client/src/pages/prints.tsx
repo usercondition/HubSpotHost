@@ -405,7 +405,7 @@ export default function Prints() {
         }
       />
 
-      <div className="space-y-5 px-4 py-5 md:px-6">
+      <div className="page-stack">
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock print-file tracking"

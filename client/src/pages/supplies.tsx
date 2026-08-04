@@ -197,7 +197,7 @@ export default function Supplies() {
         }
       />
 
-      <div className="space-y-5 px-4 py-5 md:px-6">
+      <div className="page-stack">
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock supply tracking"
