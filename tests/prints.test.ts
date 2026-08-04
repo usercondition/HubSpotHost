@@ -311,6 +311,70 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(listed.status, 200);
   assert.ok(listed.body.records.length >= 2);
   assert.equal(listed.body.candidates[0].hasPrintFile, true);
+  assert.equal(listed.body.boards.length, 1);
+  assert.equal(listed.body.boards[0].plateCount, 2);
+  assert.equal(listed.body.boards[0].totalResinCost, 9.5);
+});
+
+test("attach previews and confirmed detach rebuilds only print planning totals", async () => {
+  const { getDb } = await import("../server/lib/order-links");
+  const { printFileRecords } = await import("../shared/schema");
+  getDb().delete(printFileRecords).run();
+
+  const fleet = await jsonOwnerRequest("GET", "/api/printers");
+  const printerId = fleet.body.printers[0]?.printerId as number;
+  assert.ok(printerId);
+  const first = stagePrintFile("detach-plate-01.ctb", fixtureCtb());
+  const preview = await jsonOwnerRequest(
+    "GET",
+    `/api/prints?includeAttached=true&previewDealId=701&previewAnalysisId=${first.analysisId}`,
+  );
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.attachPreview.plateCount, 1);
+  assert.equal(preview.body.attachPreview.totalResinCost, 4.75);
+
+  const firstAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: first.analysisId,
+    dealId: "701",
+    printerId,
+  });
+  assert.equal(firstAttach.status, 201);
+  const second = stagePrintFile("detach-plate-02.ctb", fixtureCtb());
+  const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: second.analysisId,
+    dealId: "701",
+    printerId,
+  });
+  assert.equal(secondAttach.status, 201);
+
+  const denied = await jsonOwnerRequest("POST", "/api/prints/detach", {
+    recordId: secondAttach.body.record.id,
+  });
+  assert.equal(denied.status, 400);
+
+  mockCalls = [];
+  const detached = await jsonOwnerRequest("POST", "/api/prints/detach", {
+    recordId: secondAttach.body.record.id,
+    confirm: true,
+  });
+  assert.equal(detached.status, 200);
+  assert.equal(detached.body.remainingPlateCount, 1);
+  const rebuild = mockCalls.find((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701");
+  assert.ok(rebuild);
+  assert.equal(JSON.parse(rebuild!.body).properties.print_estimated_resin_cost, "4.75");
+  assert.equal(Object.hasOwn(JSON.parse(rebuild!.body).properties, "print_material_cost"), false);
+
+  mockCalls = [];
+  const cleared = await jsonOwnerRequest("POST", "/api/prints/detach", {
+    recordId: firstAttach.body.record.id,
+    confirm: true,
+  });
+  assert.equal(cleared.status, 200);
+  const clear = mockCalls.find((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701");
+  assert.ok(clear);
+  const clearProperties = JSON.parse(clear!.body).properties;
+  assert.equal(clearProperties.print_plate_count, "");
+  assert.equal(Object.hasOwn(clearProperties, "print_material_cost"), false);
 });
 
 test("plate history deal stage refreshes when HubSpot moves the order", async () => {

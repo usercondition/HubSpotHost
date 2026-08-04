@@ -365,6 +365,38 @@ export async function patchDealPrintFileMetrics(
   invalidatePrintOrderDealsCache();
 }
 
+/**
+ * Clear only production-planning values after the final local plate is removed.
+ * Actual material/labor/packaging/shipping costs are intentionally untouched.
+ */
+export async function clearDealPrintFileMetrics(dealId: string): Promise<void> {
+  await ensurePrintFileDealProperties();
+  const properties = Object.fromEntries(
+    [
+      "print_slice_file_name",
+      "print_slice_format",
+      "print_slice_attached_at",
+      "print_plate_count",
+      "print_estimated_time_hours",
+      "print_resin_volume_ml",
+      "print_resin_mass_g",
+      "print_estimated_resin_cost",
+      "print_layer_count",
+      "print_bottom_layer_count",
+      "print_exposure_seconds",
+      "print_bottom_exposure_seconds",
+      "print_model_height_mm",
+      "print_layer_height_mm",
+      "print_printer_profile",
+    ].map((name) => [name, ""]),
+  );
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
+  invalidatePrintOrderDealsCache();
+}
+
 /** Short TTL so Floor / Queue / AttentionBell / Orders share one HubSpot search burst. */
 const PRINT_ORDER_DEALS_CACHE_MS = 20_000;
 const PRINT_ORDER_STAGES_CACHE_MS = 10 * 60 * 1000;

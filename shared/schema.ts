@@ -1064,6 +1064,21 @@ export interface PrintFileCandidateDeal {
   dealName: string;
   stage: string;
   hasPrintFile: boolean;
+  plateCount?: number;
+}
+
+/** Compact per-order view of locally attached production plates. */
+export interface PrintFileDealBoard {
+  dealId: string;
+  dealName: string;
+  dealStage: string;
+  plateCount: number;
+  totalPrintTimeSeconds: number | null;
+  totalResinVolumeMl: number | null;
+  totalResinMassG: number | null;
+  totalResinCost: number | null;
+  latestAttachedAt: string;
+  records: PrintFileRecord[];
 }
 
 export const PRINTER_STATUSES = ["active", "retired"] as const;
@@ -1386,6 +1401,15 @@ export const costDefaultsApplySchema = costDefaultsPreviewSchema.extend({
 });
 
 export type CostDefaultsApplyInput = z.infer<typeof costDefaultsApplySchema>;
+
+export const detachPrintFileSchema = z.object({
+  recordId: z.coerce.number().int().positive("Select a plate to detach"),
+  confirm: z.literal(true, {
+    message: "Confirm before detaching a plate and rebuilding print planning totals",
+  }),
+});
+
+export type DetachPrintFileInput = z.infer<typeof detachPrintFileSchema>;
 
 export const upsertResinProfileSchema = z.object({
   name: trimmed(200).min(2, "Enter the resin name"),

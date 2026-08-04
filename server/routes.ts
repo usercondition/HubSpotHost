@@ -27,6 +27,7 @@ import {
   fetchPrintOrderDeals,
   fetchPrintOrderPipelineStages,
   HubSpotError,
+  clearDealPrintFileMetrics,
   patchDealPrintFileMetrics,
   type HubSpotDealRecord,
   type HubSpotPipelineStage,
@@ -62,12 +63,17 @@ import {
 } from "./lib/kits";
 import {
   attachedPrintFileDealIds,
+  buildPrintFileOrderSummaryFromRecords,
   buildPrintFileOrderSummary,
   createPrintFileRecord,
+  deletePrintFileRecord,
+  getPrintFileRecord,
   getStagedPrintFile,
+  groupPrintFileRecordsByDeal,
   isSupportedSliceFileName,
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
+  previewAttachSummary,
   stagePrintFileFromPath,
   stageCtbFromPrefix,
   syncPrintFileDealStages,
@@ -75,6 +81,7 @@ import {
 import {
   addBitsToRecord,
   deleteBit,
+  listBitsForRecord,
   listBitsForRecords,
   summarizeBits,
   updateBitStatus,
@@ -160,6 +167,7 @@ import {
   ATTENTION_ISSUE_KEYS,
   attachPrintFileSchema,
   addPrintPlateBitsSchema,
+  detachPrintFileSchema,
   updatePrintPlateBitStatusSchema,
   importOrderPartsSchema,
   updateOrderPartStatusSchema,
@@ -1850,6 +1858,8 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   app.get("/api/prints", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const includeAttached = firstQueryValue(req.query?.includeAttached) === "true";
+    const previewDealId = firstQueryValue(req.query?.previewDealId)?.trim() ?? "";
+    const previewAnalysisId = firstQueryValue(req.query?.previewAnalysisId)?.trim() ?? "";
 
     try {
       const [deals, stages] = await Promise.all([
@@ -1858,6 +1868,8 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       ]);
       refreshPrintFileStagesFromHubSpot(deals, stages);
       const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+      const boards = groupPrintFileRecordsByDeal();
+      const boardByDealId = new Map(boards.map((board) => [board.dealId, board]));
       const attachedDealIds = attachedPrintFileDealIds();
       const candidates: PrintFileCandidateDeal[] = deals
         .filter((deal) => {
@@ -1873,6 +1885,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
             dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
             stage: stage?.label || stageId || "No stage",
             hasPrintFile: attachedDealIds.has(deal.id),
+            plateCount: boardByDealId.get(deal.id)?.plateCount ?? 0,
           };
         })
         .filter((deal) => includeAttached || !deal.hasPrintFile)
@@ -1888,12 +1901,20 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
           bitSummary: summarizeBits(bits),
         };
       });
+      const staged = previewAnalysisId ? getStagedPrintFile(previewAnalysisId) : null;
+      const attachPreview =
+        previewDealId && deals.some((deal) => deal.id === previewDealId)
+          ? previewAttachSummary(previewDealId, staged?.metrics ?? null)
+          : null;
 
       return res.json({
         ok: true,
         candidates,
         records: recordsWithBits,
+        boards,
         includeAttached,
+        lastAttachedDealId: boards[0]?.dealId ?? null,
+        attachPreview,
         resin: resinProfileView(),
       });
     } catch (error) {
@@ -2350,6 +2371,52 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
           error instanceof Error
             ? error.message
             : "Could not attach CTB production metrics to the Print Order",
+      });
+    }
+  });
+
+  /**
+   * Explicitly detach one plate, then rebuild (or clear) only HubSpot's
+   * production-planning fields. Actual cost fields remain untouched.
+   */
+  app.post("/api/prints/detach", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = detachPrintFileSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const existing = getPrintFileRecord(parsed.data.recordId);
+    if (!existing) return res.status(404).json({ ok: false, error: "That plate record was not found" });
+
+    try {
+      const remaining = buildPrintFileOrderSummaryFromRecords(existing.hubspotDealId, {
+        excludeRecordId: existing.id,
+      });
+      if (remaining) {
+        await patchDealPrintFileMetrics(existing.hubspotDealId, remaining, new Date().toISOString());
+      } else {
+        await clearDealPrintFileMetrics(existing.hubspotDealId);
+      }
+
+      // Preserve plate-bit/order-part consistency when the plate is removed.
+      for (const bit of listBitsForRecord(existing.id)) {
+        deleteBit(existing.id, bit.id);
+      }
+      deletePrintFileRecord(existing.id);
+      return res.json({
+        ok: true,
+        removed: existing,
+        summary: remaining,
+        remainingPlateCount: remaining?.plateCount ?? 0,
+        message: remaining
+          ? `Plate detached. HubSpot totals rebuilt for ${remaining.plateCount} remaining plate${remaining.plateCount === 1 ? "" : "s"}.`
+          : "Last plate detached. HubSpot print planning fields were cleared.",
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not update HubSpot after detaching the plate",
       });
     }
   });

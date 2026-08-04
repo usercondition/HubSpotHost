@@ -138,6 +138,37 @@ test("blank labor and packaging do not flag incomplete costs when material and s
   );
 });
 
+test("performance alerts when actual resin cost materially varies from the plate estimate", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 0, expired: 0 },
+    attachedPrintDealIds: ["variance"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "variance",
+        properties: {
+          dealname: "Cost drift",
+          dealstage: "deposit",
+          createdate: "2026-08-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "100",
+          print_estimated_resin_cost: "10",
+          print_material_cost: "15",
+          print_labor_cost: "",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "0",
+        },
+      },
+    ],
+  });
+
+  const alert = snapshot.attention.find((item) => item.dealId === "variance");
+  assert.equal(alert?.issue, "Material cost vs CTB estimate");
+  assert.match(alert?.detail ?? "", /\$15\.00 actual vs \$10\.00 estimate \(50% apart\)/);
+  assert.equal(alert?.severity, "bad");
+});
+
 test("dismissed attention keys hide skipped plate reminders for legacy orders", () => {
   const snapshot = buildPerformanceSnapshot({
     now: new Date("2026-08-04T12:00:00.000Z"),

@@ -12,6 +12,7 @@ import {
   printFileAnalyses,
   printFileRecords,
   type PrintFileAnalysis,
+  type PrintFileDealBoard,
   type PrintFileMetrics,
   type PrintFileOrderSummary,
   type PrintFileRecord,
@@ -276,6 +277,21 @@ export function syncPrintFileDealStages(
   return updated;
 }
 
+export function listPrintFileRecordsForDeal(hubspotDealId: string): PrintFileRecord[] {
+  return listPrintFileRecords(500).filter((record) => record.hubspotDealId === hubspotDealId);
+}
+
+export function getPrintFileRecord(recordId: number): PrintFileRecord | null {
+  return getDb().select().from(printFileRecords).where(eq(printFileRecords.id, recordId)).get() ?? null;
+}
+
+export function deletePrintFileRecord(recordId: number): PrintFileRecord | null {
+  const existing = getPrintFileRecord(recordId);
+  if (!existing) return null;
+  getDb().delete(printFileRecords).where(eq(printFileRecords.id, recordId)).run();
+  return existing;
+}
+
 /** Any historical attachment marks a deal as having print-file planning data. */
 export function attachedPrintFileDealIds(): Set<string> {
   return new Set(listPrintFileRecords(500).map((record) => record.hubspotDealId));
@@ -292,6 +308,105 @@ function total(values: Array<number | null>): number | null {
   return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) : null;
 }
 
+function recordToMetrics(record: PrintFileRecord): PrintFileMetrics {
+  return {
+    fileName: record.fileName,
+    fileSizeBytes: record.fileSizeBytes,
+    sha256: record.sha256,
+    format: "CTB",
+    formatRevision: record.formatRevision,
+    printTimeSeconds: record.printTimeSeconds,
+    resinVolumeMl: asNumber(record.resinVolumeMl),
+    resinMassG: asNumber(record.resinMassG),
+    resinCost: asNumber(record.resinCost),
+    resinCostSource: record.resinCostSource as PrintFileMetrics["resinCostSource"],
+    resinCostLabel: record.resinCostLabel,
+    resinDensityGPerMl: asNumber(record.resinDensityGPerMl),
+    layerCount: record.layerCount,
+    layerHeightMm: asNumber(record.layerHeightMm),
+    modelHeightMm: asNumber(record.modelHeightMm),
+    exposureSeconds: asNumber(record.exposureSeconds),
+    bottomExposureSeconds: asNumber(record.bottomExposureSeconds),
+    lightOffSeconds: asNumber(record.lightOffSeconds),
+    bottomLightOffSeconds: asNumber(record.bottomLightOffSeconds),
+    bottomLayerCount: record.bottomLayerCount,
+    liftDistanceMm: asNumber(record.liftDistanceMm),
+    liftSpeedMmPerMin: asNumber(record.liftSpeedMmPerMin),
+    bottomLiftDistanceMm: asNumber(record.bottomLiftDistanceMm),
+    bottomLiftSpeedMmPerMin: asNumber(record.bottomLiftSpeedMmPerMin),
+    retractSpeedMmPerMin: asNumber(record.retractSpeedMmPerMin),
+    resolutionX: record.resolutionX,
+    resolutionY: record.resolutionY,
+    buildVolumeXmm: null,
+    buildVolumeYmm: null,
+    buildVolumeZmm: null,
+    printerProfile: record.printerProfile,
+  };
+}
+
+/** Rebuild a deal's cumulative plan from its remaining local plates. */
+export function buildPrintFileOrderSummaryFromRecords(
+  hubspotDealId: string,
+  options?: { excludeRecordId?: number },
+): PrintFileOrderSummary | null {
+  const records = listPrintFileRecordsForDeal(hubspotDealId).filter(
+    (record) => record.id !== options?.excludeRecordId,
+  );
+  if (!records.length) return null;
+  const ordered = [...records].sort(
+    (a, b) => b.attachedAt.localeCompare(a.attachedAt) || b.id - a.id,
+  );
+  const latest = recordToMetrics(ordered[0]!);
+  return {
+    plateCount: ordered.length,
+    totalPrintTimeSeconds: total(ordered.map((record) => record.printTimeSeconds)),
+    totalResinVolumeMl: total(ordered.map((record) => asNumber(record.resinVolumeMl))),
+    totalResinMassG: total(ordered.map((record) => asNumber(record.resinMassG))),
+    totalResinCost: total(ordered.map((record) => asNumber(record.resinCost))),
+    totalLayerCount: total(ordered.map((record) => record.layerCount)),
+    latest,
+  };
+}
+
+/** Preview the resulting production plan without writing HubSpot. */
+export function previewAttachSummary(
+  hubspotDealId: string,
+  latest: PrintFileMetrics | null,
+): PrintFileOrderSummary | null {
+  return latest
+    ? buildPrintFileOrderSummary(hubspotDealId, latest)
+    : buildPrintFileOrderSummaryFromRecords(hubspotDealId);
+}
+
+export function groupPrintFileRecordsByDeal(limit = 100): PrintFileDealBoard[] {
+  const boards = new Map<string, PrintFileDealBoard>();
+  for (const record of listPrintFileRecords(limit)) {
+    const existing = boards.get(record.hubspotDealId);
+    if (!existing) {
+      boards.set(record.hubspotDealId, {
+        dealId: record.hubspotDealId,
+        dealName: record.hubspotDealName,
+        dealStage: record.dealStage,
+        plateCount: 1,
+        totalPrintTimeSeconds: record.printTimeSeconds,
+        totalResinVolumeMl: asNumber(record.resinVolumeMl),
+        totalResinMassG: asNumber(record.resinMassG),
+        totalResinCost: asNumber(record.resinCost),
+        latestAttachedAt: record.attachedAt,
+        records: [record],
+      });
+      continue;
+    }
+    existing.records.push(record);
+    existing.plateCount += 1;
+    existing.totalPrintTimeSeconds = total([existing.totalPrintTimeSeconds, record.printTimeSeconds]);
+    existing.totalResinVolumeMl = total([existing.totalResinVolumeMl, asNumber(record.resinVolumeMl)]);
+    existing.totalResinMassG = total([existing.totalResinMassG, asNumber(record.resinMassG)]);
+    existing.totalResinCost = total([existing.totalResinCost, asNumber(record.resinCost)]);
+  }
+  return [...boards.values()].sort((a, b) => b.latestAttachedAt.localeCompare(a.latestAttachedAt));
+}
+
 /**
  * Calculate the running plan before the new record is persisted. This lets the
  * HubSpot PATCH happen first while still including the plate the owner is
@@ -301,9 +416,7 @@ export function buildPrintFileOrderSummary(
   hubspotDealId: string,
   latest: PrintFileMetrics,
 ): PrintFileOrderSummary {
-  const existing = listPrintFileRecords(500).filter(
-    (record) => record.hubspotDealId === hubspotDealId,
-  );
+  const existing = listPrintFileRecordsForDeal(hubspotDealId);
   return {
     plateCount: existing.length + 1,
     totalPrintTimeSeconds: total([

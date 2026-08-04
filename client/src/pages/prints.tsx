@@ -18,6 +18,7 @@ import {
   Scale,
   ShieldCheck,
   Timer,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,7 @@ import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { PlateBitsPanel, type PlateBitSummary } from "@/components/plate-bits-panel";
 import type {
   PrintFileCandidateDeal,
+  PrintFileDealBoard,
   PrintFileMetrics,
   PrintFileOrderSummary,
   PrintFileRecord,
@@ -89,7 +91,10 @@ interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
   records: PrintFileRecordWithBits[];
+  boards: PrintFileDealBoard[];
   includeAttached: boolean;
+  lastAttachedDealId: string | null;
+  attachPreview: PrintFileOrderSummary | null;
   resin?: ResinProfileResponse;
 }
 
@@ -305,12 +310,17 @@ export default function Prints() {
   }, []);
 
   const prints = useQuery<PrintsResponse>({
-    queryKey: ["/api/prints", ownerCode, includeAttached],
+    queryKey: ["/api/prints", ownerCode, includeAttached, dealId, staged?.analysisId],
     enabled: isUnlocked,
     queryFn: async () => {
+      const query = new URLSearchParams({
+        includeAttached: includeAttached ? "true" : "false",
+      });
+      if (dealId) query.set("previewDealId", dealId);
+      if (staged?.analysisId) query.set("previewAnalysisId", staged.analysisId);
       const response = await apiRequest(
         "GET",
-        `/api/prints?includeAttached=${includeAttached ? "true" : "false"}`,
+        `/api/prints?${query.toString()}`,
         undefined,
         { headers },
       );
@@ -554,6 +564,30 @@ export default function Prints() {
     },
   });
 
+  const detach = useMutation({
+    mutationFn: async (recordId: number) => {
+      const response = await apiRequest(
+        "POST",
+        "/api/prints/detach",
+        { recordId, confirm: true },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; message: string };
+    },
+    onSuccess: ({ message }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      toast({ title: "Plate detached", description: message });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "The plate was not detached",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
   const saveSliceLogFile = async (file: File) => {
     const text = await file.text();
     if (!text.trim()) {
@@ -666,7 +700,9 @@ export default function Prints() {
   });
 
   const candidates = prints.data?.candidates ?? [];
+  const boards = prints.data?.boards ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+  const attachPreview = prints.data?.attachPreview;
   const selectedHasPlates =
     Boolean(selected?.hasPrintFile) ||
     (prints.data?.records ?? []).some((record) => record.hubspotDealId === dealId);
@@ -1150,6 +1186,17 @@ export default function Prints() {
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />
+                {attachPreview && selected ? (
+                  <div className="rounded-lg border border-primary/25 bg-primary/5 p-4" data-testid="panel-attach-preview">
+                    <p className="text-sm font-semibold">Attach preview for {selected.dealName}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      This attach would make {attachPreview.plateCount} plate{attachPreview.plateCount === 1 ? "" : "s"} ·{" "}
+                      {formatHours(attachPreview.totalPrintTimeSeconds)} ·{" "}
+                      {formatNumber(attachPreview.totalResinVolumeMl, " ml")} ·{" "}
+                      ${formatMoney(attachPreview.totalResinCost)} estimated resin.
+                    </p>
+                  </div>
+                ) : null}
                 {staged.printerMatch ? (
                   <div
                     className="space-y-2 rounded-lg border border-border bg-muted/30 p-4"
@@ -1299,6 +1346,57 @@ export default function Prints() {
                 </div>
               </Panel>
             ) : null}
+
+            <Panel
+              title="Order plate boards"
+              description="Attached plates grouped by Print Order. Detaching is confirmed and updates only the order's HubSpot production-planning totals."
+            >
+              {boards.length ? (
+                <div className="space-y-3" data-testid="list-print-deal-boards">
+                  {boards.map((board) => (
+                    <article key={board.dealId} className="rounded-md border border-card-border bg-card p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{board.dealName}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{board.dealStage}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                          <span>{board.plateCount} plate{board.plateCount === 1 ? "" : "s"}</span>
+                          <span>{formatHours(board.totalPrintTimeSeconds)}</span>
+                          <span>{formatNumber(board.totalResinVolumeMl, " ml")}</span>
+                          <span>${formatMoney(board.totalResinCost)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {board.records.map((record) => (
+                          <div key={record.id} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="min-w-0 truncate text-muted-foreground">{record.fileName}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 shrink-0 text-destructive hover:text-destructive"
+                              disabled={detach.isPending}
+                              onClick={() => {
+                                if (window.confirm(`Detach ${record.fileName}? This rebuilds only HubSpot print planning totals.`)) {
+                                  detach.mutate(record.id);
+                                }
+                              }}
+                              data-testid={`button-detach-print-${record.id}`}
+                            >
+                              <Trash2 className="mr-1 h-3.5 w-3.5" />
+                              Detach
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-3 text-sm text-muted-foreground">No plates are attached to an order yet.</p>
+              )}
+            </Panel>
 
             <Panel
               title="Recent plate history"

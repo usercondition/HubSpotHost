@@ -290,6 +290,28 @@ export function buildPerformanceSnapshot(input: {
       );
     }
 
+    const estimatedResin = Number(props.print_estimated_resin_cost);
+    const materialCost = Number(props.print_material_cost);
+    const hasEstimatedResin =
+      props.print_estimated_resin_cost?.trim() !== "" &&
+      Number.isFinite(estimatedResin) &&
+      estimatedResin > 0;
+    const hasMaterialCost =
+      props.print_material_cost?.trim() !== "" &&
+      Number.isFinite(materialCost) &&
+      materialCost > 0;
+    if (hasEstimatedResin && hasMaterialCost) {
+      const variancePct = (Math.abs(materialCost - estimatedResin) / estimatedResin) * 100;
+      if (variancePct >= PERFORMANCE_COST_VARIANCE_PERCENT) {
+        pushAttention(
+          2.5,
+          "Material cost vs CTB estimate",
+          `${formatMoney(materialCost)} actual vs ${formatMoney(estimatedResin)} estimate (${variancePct.toFixed(0)}% apart)`,
+          variancePct >= 50 ? "bad" : "warn",
+        );
+      }
+    }
+
     if (modifiedAt && modifiedAt < staleBefore) {
       pushAttention(
         3,
