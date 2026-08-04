@@ -56,6 +56,14 @@ export default function ClientOrder() {
     },
   });
 
+  useEffect(() => {
+    const previous = document.title;
+    document.title = "Order form";
+    return () => {
+      document.title = previous;
+    };
+  }, []);
+
   // A different token in the same tab must never show the previous buyer's state.
   useEffect(() => {
     setForm({ ...EMPTY });
@@ -124,9 +132,9 @@ export default function ClientOrder() {
       <header className="border-b border-border bg-card/60">
         <div className="mx-auto flex max-w-2xl items-center gap-2.5 px-5 py-4">
           <Mark className="h-7 w-7 text-primary" />
-          <span className="flex flex-col leading-tight">
+            <span className="flex flex-col leading-tight">
             <span className="text-sm font-semibold tracking-tight">Print Orders</span>
-            <span className="rule-label">Order details form</span>
+            <span className="rule-label">Order form</span>
           </span>
         </div>
       </header>

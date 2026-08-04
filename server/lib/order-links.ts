@@ -271,7 +271,7 @@ export function hashLinkToken(token: string): string {
 }
 
 export function clientLinkPath(token: string): string {
-  return `/#/client-order/${token}`;
+  return `/#/order-form/${encodeURIComponent(token)}`;
 }
 
 /* ------------------------------------------------------------------ helpers */

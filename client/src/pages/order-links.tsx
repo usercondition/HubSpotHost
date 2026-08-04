@@ -115,7 +115,7 @@ function marketplaceReminderText(link: {
   expiresAt: string;
 }): string {
   const item = (link.confirmedItem || link.itemDescription || "your order").trim();
-  return `Hi — quick reminder to finish your order details for ${item} ($${link.agreedAmount}). Please use the secure link I sent earlier before it expires (${formatDate(link.expiresAt)}). Thanks!`;
+  return `Hi — please fill in this short order form for ${item} ($${link.agreedAmount}) before it expires (${formatDate(link.expiresAt)}). Thanks!`;
 }
 
 /** Builds the buyer URL from the page's own location — no secrets in source. */
@@ -359,7 +359,7 @@ export default function OrderLinks() {
           <>
             <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.85fr)]">
               <Panel
-                title="Create a client details link"
+                title="Create an order form link"
                 description="Add one or more items. Approval creates one HubSpot Contact and one Print Order deal per item."
               >
                 <div className="space-y-3" data-testid="panel-intake-line-items">
@@ -515,7 +515,7 @@ export default function OrderLinks() {
                   ) : (
                     <Link2 className="mr-2 h-4 w-4" />
                   )}
-                  Create client details link
+                  Create order form link
                 </Button>
 
                 {newLinkUrl && (
@@ -536,7 +536,7 @@ export default function OrderLinks() {
                         {copied ? "Copied" : "Copy link"}
                       </Button>
                       <span className="text-xs text-muted-foreground">
-                        Shown once. It works for a single buyer submission.
+                        Shown once. Paste this order form link to your buyer.
                       </span>
                     </div>
                   </div>
