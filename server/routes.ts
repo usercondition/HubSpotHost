@@ -212,6 +212,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         tokenConfigured: config.hasToken,
         tokenSource: config.tokenSource,
       },
+      paidOrderIntake: {
+        accessCodeConfigured: Boolean(intakeAccessCode()),
+      },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         supportedVersions: ["v1", "v3"],

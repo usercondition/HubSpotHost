@@ -89,9 +89,17 @@ export default function PaidOrders() {
       });
     },
     onError: (error: Error) => {
+      const message = error.message;
+      const description = message.startsWith("401:")
+        ? "The intake code is missing, expired, or does not match the current code. Re-enter the replacement code you set during rotation."
+        : message.startsWith("503:")
+          ? "The live service does not have an intake code configured yet. Refresh the page and try again in a moment."
+          : message.startsWith("400:")
+            ? "Paste the complete paid Marketplace conversation, including a few lines of buyer and payment details."
+            : message.slice(0, 180);
       toast({
         title: "Could not analyze the conversation",
-        description: error.message.slice(0, 180),
+        description,
         variant: "destructive",
       });
     },
