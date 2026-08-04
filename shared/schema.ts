@@ -834,6 +834,146 @@ export const resinProfiles = sqliteTable("resin_profiles", {
 
 export type ResinProfile = typeof resinProfiles.$inferSelect;
 
+export const RESIN_BOTTLE_STATUSES = ["open", "empty", "archived"] as const;
+export type ResinBottleStatus = (typeof RESIN_BOTTLE_STATUSES)[number];
+
+/** Catalog + sealed on-hand count for a resin SKU. */
+export const resinProducts = sqliteTable("resin_products", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  brand: text("brand").notNull().default("ELEGOO"),
+  bottleMassG: text("bottle_mass_g").notNull().default("1000"),
+  bottleVolumeMl: text("bottle_volume_ml"),
+  unitCostUsd: text("unit_cost_usd").notNull().default("0"),
+  sealedCount: integer("sealed_count").notNull().default(0),
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type ResinProduct = typeof resinProducts.$inferSelect;
+
+/** A physical bottle once opened (or emptied). Sealed stock lives on resin_products. */
+export const resinBottles = sqliteTable("resin_bottles", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  productId: integer("product_id").notNull(),
+  status: text("status").notNull().default("open"),
+  isActive: integer("is_active").notNull().default(0),
+  openedAt: text("opened_at").notNull(),
+  initialMassG: text("initial_mass_g").notNull(),
+  remainingMassG: text("remaining_mass_g").notNull(),
+  unitCostUsd: text("unit_cost_usd").notNull().default("0"),
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type ResinBottle = typeof resinBottles.$inferSelect;
+
+export const resinBottleConsumptions = sqliteTable("resin_bottle_consumptions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  bottleId: integer("bottle_id").notNull(),
+  printFileRecordId: integer("print_file_record_id"),
+  hubspotDealId: text("hubspot_deal_id").notNull().default(""),
+  hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  dealAmount: text("deal_amount").notNull().default(""),
+  resinMassG: text("resin_mass_g").notNull(),
+  resinVolumeMl: text("resin_volume_ml"),
+  resinCostUsd: text("resin_cost_usd"),
+  createdAt: text("created_at").notNull(),
+});
+
+export type ResinBottleConsumption = typeof resinBottleConsumptions.$inferSelect;
+
+export const upsertResinProductSchema = z.object({
+  name: trimmed(200).min(2, "Enter the resin name"),
+  brand: trimmed(80).default("ELEGOO"),
+  bottleMassG: z.coerce.number().positive().max(100_000).default(1000),
+  bottleVolumeMl: z.coerce.number().positive().max(100_000).optional().nullable(),
+  unitCostUsd: z.coerce.number().min(0).max(100_000).default(0),
+  sealedCount: z.coerce.number().int().min(0).max(100_000).optional(),
+  notes: trimmed(2_000).default(""),
+});
+
+export type UpsertResinProductInput = z.infer<typeof upsertResinProductSchema>;
+
+export const adjustResinSealedSchema = z.object({
+  delta: z.coerce.number().int().min(-10_000).max(10_000),
+  unitCostUsd: z.coerce.number().min(0).max(100_000).optional(),
+  notes: trimmed(2_000).default(""),
+});
+
+export type AdjustResinSealedInput = z.infer<typeof adjustResinSealedSchema>;
+
+export const openResinBottleSchema = z.object({
+  productId: z.coerce.number().int().positive(),
+  notes: trimmed(2_000).default(""),
+  makeActive: z.boolean().optional().default(true),
+});
+
+export type OpenResinBottleInput = z.infer<typeof openResinBottleSchema>;
+
+export const setActiveResinBottleSchema = z.object({
+  bottleId: z.coerce.number().int().positive(),
+});
+
+export type SetActiveResinBottleInput = z.infer<typeof setActiveResinBottleSchema>;
+
+export interface ResinBottleEconomics {
+  bottleId: number;
+  productId: number;
+  productName: string;
+  brand: string;
+  status: ResinBottleStatus;
+  isActive: boolean;
+  openedAt: string;
+  initialMassG: number;
+  remainingMassG: number;
+  usedMassG: number;
+  usedPercent: number;
+  unitCostUsd: number;
+  costPerGram: number;
+  materialCostUsedUsd: number;
+  plateCount: number;
+  distinctOrders: number;
+  attributedDealRevenueUsd: number;
+  roughContributionUsd: number;
+  notes: string;
+  recentConsumptions: Array<{
+    id: number;
+    dealId: string;
+    dealName: string;
+    resinMassG: number;
+    dealAmount: number | null;
+    createdAt: string;
+  }>;
+}
+
+export interface ResinInventorySnapshot {
+  products: Array<{
+    id: number;
+    name: string;
+    brand: string;
+    bottleMassG: number;
+    bottleVolumeMl: number | null;
+    unitCostUsd: number;
+    sealedCount: number;
+    sealedValueUsd: number;
+    openBottleCount: number;
+    notes: string;
+  }>;
+  bottles: ResinBottleEconomics[];
+  activeBottle: ResinBottleEconomics | null;
+  totals: {
+    sealedBottles: number;
+    sealedValueUsd: number;
+    openBottles: number;
+    resinUsedGrams: number;
+    materialCostUsedUsd: number;
+    attributedDealRevenueUsd: number;
+  };
+}
+
 /** Owner form that mints a new one-time client link. Supports one or many line items. */
 const intakeLineItemSchema = z.object({
   description: trimmed(400).min(2, "Describe each agreed item"),

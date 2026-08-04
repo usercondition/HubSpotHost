@@ -4,6 +4,7 @@ import { Link, useLocation } from "wouter";
 import {
   Activity,
   BarChart3,
+  Beaker,
   ClipboardCheck,
   ExternalLink,
   Home,
@@ -112,6 +113,7 @@ const NAV = [
   { href: "/supplies", label: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Daily Work" },
   { href: "/prints", label: "Print Files", icon: FileUp, testId: "link-nav-prints", group: "Daily Work" },
   { href: "/printers", label: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Daily Work" },
+  { href: "/resin", label: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Daily Work" },
   { href: "/operations", label: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Control" },
   { href: "/performance", label: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Control" },
   { href: "/setup", label: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Control" },

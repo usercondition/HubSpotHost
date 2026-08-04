@@ -59,6 +59,15 @@ import {
   resinProfileView,
   upsertActiveResinProfile,
 } from "./lib/resin-pricing";
+import {
+  adjustSealedStock,
+  buildResinInventorySnapshot,
+  consumeResinForAttachedPlate,
+  ensureDefaultResinInventory,
+  openResinBottle,
+  setActiveResinBottle,
+  upsertResinProduct,
+} from "./lib/resin-inventory";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
 import {
   analyzeMarketplaceConversation,
@@ -85,9 +94,13 @@ import {
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
   attachPrintFileSchema,
+  adjustResinSealedSchema,
   assignPrinterProfileSchema,
   createPrinterLifecycleEventSchema,
+  openResinBottleSchema,
+  setActiveResinBottleSchema,
   updatePrinterSchema,
+  upsertResinProductSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
   lineItemsForIntake,
@@ -589,6 +602,93 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** Sealed stock + open bottles + per-bottle economics from plate consumption. */
+  app.get("/api/resin-inventory", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      ensureDefaultResinInventory();
+      return res.json({ ok: true, ...buildResinInventorySnapshot() });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load resin inventory",
+      });
+    }
+  });
+
+  app.put("/api/resin-inventory/products", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = upsertResinProductSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    try {
+      const product = upsertResinProduct(parsed.data);
+      return res.json({ ok: true, product, ...buildResinInventorySnapshot() });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not save resin product",
+      });
+    }
+  });
+
+  app.post("/api/resin-inventory/products/:id/adjust-sealed", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId) || productId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid resin product" });
+    }
+    const parsed = adjustResinSealedSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const product = adjustSealedStock(productId, parsed.data);
+    if (!product) return res.status(404).json({ ok: false, error: "That resin product was not found" });
+    return res.json({ ok: true, product, ...buildResinInventorySnapshot() });
+  });
+
+  app.post("/api/resin-inventory/open-bottle", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = openResinBottleSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    try {
+      const opened = openResinBottle(parsed.data);
+      if (!opened) return res.status(404).json({ ok: false, error: "That resin product was not found" });
+      return res.status(201).json({
+        ok: true,
+        ...opened,
+        ...buildResinInventorySnapshot(),
+        message: `Opened one bottle. Sealed stock is now ${opened.product.sealedCount}.`,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not open a bottle",
+      });
+    }
+  });
+
+  app.post("/api/resin-inventory/set-active", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = setActiveResinBottleSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    try {
+      const bottle = setActiveResinBottle(parsed.data.bottleId);
+      if (!bottle) return res.status(404).json({ ok: false, error: "That bottle was not found" });
+      return res.json({ ok: true, bottle, ...buildResinInventorySnapshot() });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not set the active bottle",
+      });
+    }
+  });
+
   /**
    * Owner-only, read-only performance summary. The API token remains server
    * side and this route deliberately performs no HubSpot writes.
@@ -895,10 +995,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       markPrintFileAnalysisUsed(parsed.data.analysisId);
 
+      let resinConsumption: {
+        bottleId: number;
+        consumedMassG: number;
+        remainingMassG: number;
+      } | null = null;
+      try {
+        const consumed = consumeResinForAttachedPlate({
+          record,
+          metrics: staged.metrics,
+          dealAmount: deal.properties.amount ?? null,
+        });
+        if (consumed) {
+          resinConsumption = {
+            bottleId: consumed.bottle.id,
+            consumedMassG: consumed.consumedMassG,
+            remainingMassG: consumed.remainingMassG,
+          };
+        }
+      } catch {
+        /* Inventory should never block plate attach. */
+      }
+
       return res.status(201).json({
         ok: true,
         record,
         summary,
+        resinConsumption,
         message: `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
       });
     } catch (error) {
