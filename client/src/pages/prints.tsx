@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  CircleDollarSign,
   FilePlus2,
   FileUp,
   KeyRound,
@@ -14,6 +15,7 @@ import {
   Ruler,
   Scale,
   ShieldCheck,
+  Timer,
   Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,6 +57,16 @@ function formatNumber(value: number | string | null | undefined, suffix = ""): s
   if (value === null || value === undefined || value === "") return "Not reported";
   const numeric = typeof value === "string" ? Number(value) : value;
   return Number.isFinite(numeric) ? `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}` : "Not reported";
+}
+
+function formatMoney(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "Not reported";
+  const numeric = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(numeric)) return "Not reported";
+  return numeric.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function fileSize(bytes: number): string {
@@ -126,20 +138,77 @@ function UnlockPrints({
 
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted CTB metrics">
-      <StatCard label="Estimated plate time" value={formatHours(metrics.printTimeSeconds)} hint="Whole build plate" icon={Clock3} testId="metric-print-time" />
-      <StatCard label="Resin volume" value={formatNumber(metrics.resinVolumeMl, " ml")} hint="Whole build plate" icon={Scale} testId="metric-resin-volume" />
-      <StatCard label="Resin mass" value={formatNumber(metrics.resinMassG, " g")} hint="Whole build plate" icon={PackageCheck} testId="metric-resin-mass" />
-      <StatCard label="Layers" value={formatNumber(metrics.layerCount)} hint={`${formatNumber(metrics.layerHeightMm, " mm")} layer height`} icon={Layers3} testId="metric-layer-count" />
-      <StatCard
-        label="Build profile"
-        value={metrics.printerProfile || "Not reported"}
-        hint={metrics.resolutionX && metrics.resolutionY ? `${metrics.resolutionX} × ${metrics.resolutionY} px` : "Resolution not reported"}
-        icon={Ruler}
-        testId="metric-printer-profile"
-      />
-      <StatCard label="Slice file" value={fileSize(metrics.fileSizeBytes)} hint={metrics.fileName} icon={FileUp} testId="metric-print-file" />
-    </section>
+    <div className="space-y-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted CTB metrics">
+        <StatCard label="Estimated plate time" value={formatHours(metrics.printTimeSeconds)} hint="Whole build plate" icon={Clock3} testId="metric-print-time" />
+        <StatCard label="Resin volume" value={formatNumber(metrics.resinVolumeMl, " ml")} hint="Whole build plate" icon={Scale} testId="metric-resin-volume" />
+        <StatCard label="Resin mass" value={formatNumber(metrics.resinMassG, " g")} hint={metrics.resinDensityGPerMl ? `${formatNumber(metrics.resinDensityGPerMl)} g/ml density` : "Whole build plate"} icon={PackageCheck} testId="metric-resin-mass" />
+        <StatCard
+          label="Estimated resin cost"
+          value={formatMoney(metrics.resinCost)}
+          hint="From Chitubox resin price setting — not actual deal cost"
+          icon={CircleDollarSign}
+          testId="metric-resin-cost"
+        />
+        <StatCard
+          label="Layers"
+          value={formatNumber(metrics.layerCount)}
+          hint={`${formatNumber(metrics.layerHeightMm, " mm")} layer · ${formatNumber(metrics.bottomLayerCount)} bottom`}
+          icon={Layers3}
+          testId="metric-layer-count"
+        />
+        <StatCard
+          label="Build profile"
+          value={metrics.printerProfile || "Not reported"}
+          hint={
+            metrics.resolutionX && metrics.resolutionY
+              ? `${metrics.resolutionX} × ${metrics.resolutionY} px`
+              : "Resolution not reported"
+          }
+          icon={Ruler}
+          testId="metric-printer-profile"
+        />
+      </section>
+
+      <section
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Slice exposure and motion settings"
+        data-testid="panel-ctb-settings"
+      >
+        <StatCard
+          label="Normal exposure"
+          value={formatNumber(metrics.exposureSeconds, " s")}
+          hint={`Light-off ${formatNumber(metrics.lightOffSeconds, " s")}`}
+          icon={Timer}
+          testId="metric-exposure"
+        />
+        <StatCard
+          label="Bottom exposure"
+          value={formatNumber(metrics.bottomExposureSeconds, " s")}
+          hint={`Bottom light-off ${formatNumber(metrics.bottomLightOffSeconds, " s")}`}
+          icon={Timer}
+          testId="metric-bottom-exposure"
+        />
+        <StatCard
+          label="Lift / retract"
+          value={
+            metrics.liftDistanceMm !== null
+              ? `${formatNumber(metrics.liftDistanceMm, " mm")} · ${formatNumber(metrics.liftSpeedMmPerMin, " mm/min")}`
+              : "Not reported"
+          }
+          hint={`Retract ${formatNumber(metrics.retractSpeedMmPerMin, " mm/min")}`}
+          icon={Ruler}
+          testId="metric-lift"
+        />
+        <StatCard
+          label="Model / file"
+          value={metrics.modelHeightMm !== null ? formatNumber(metrics.modelHeightMm, " mm high") : fileSize(metrics.fileSizeBytes)}
+          hint={`${fileSize(metrics.fileSizeBytes)} · ${metrics.fileName}`}
+          icon={FileUp}
+          testId="metric-print-file"
+        />
+      </section>
+    </div>
   );
 }
 
@@ -322,7 +391,7 @@ export default function Prints() {
                 <div>
                   <p className="text-sm font-semibold tracking-tight">Multi-plate jobs stay under one order</p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Attach each `.ctb` plate to the same Print Order. Print Operations keeps a plate-by-plate history, while HubSpot shows running totals for plate count, time, resin volume, and resin mass.
+                    Attach each `.ctb` plate to the same Print Order. Print Operations keeps a plate-by-plate history, while HubSpot shows running totals for plate count, time, resin volume, resin mass, and slicer resin cost.
                   </p>
                 </div>
               </div>
@@ -370,7 +439,7 @@ export default function Prints() {
                     {analyze.isPending ? "Reading slice data…" : "Drop a .ctb file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    or browse from your slicer export folder. Larger files may take a moment to analyze.
+                    Extracts time, resin use, cost estimate, exposure, and printer settings. Larger files may take a moment.
                   </span>
                 </button>
                 <Button
@@ -426,7 +495,7 @@ export default function Prints() {
                   ) : null}
                   <div className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
                     <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                    Only the explicit attach action writes to HubSpot. Analysis alone changes nothing.
+                    Only the explicit attach action writes to HubSpot. Analysis alone changes nothing. Slicer resin cost never overwrites actual material cost.
                   </div>
                 </div>
               </Panel>
@@ -463,7 +532,7 @@ export default function Prints() {
                 <FileUp className="mx-auto h-5 w-5 text-muted-foreground" />
                 <p className="mt-2 text-sm font-medium">Analyze a plate to continue</p>
                 <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                  The file’s estimated time, resin use, layers, resolution, and printer profile will appear here before you attach anything.
+                  The file’s estimated time, resin use, slicer cost, exposure, layers, and printer profile will appear here before you attach anything.
                 </p>
               </section>
             )}
@@ -471,13 +540,15 @@ export default function Prints() {
             <Panel title="Recent plate history" description="A local record of each attached plate. HubSpot receives the matching rolling totals for every order.">
               {prints.data.records.length ? (
                 <div className="overflow-x-auto">
-                  <table className="min-w-[46rem] text-left text-xs">
+                  <table className="min-w-[54rem] text-left text-xs">
                     <thead className="border-b border-border text-muted-foreground">
                       <tr>
                         <th className="px-2 py-2 font-medium">Print Order</th>
                         <th className="px-2 py-2 font-medium">Plate file</th>
                         <th className="px-2 py-2 font-medium">Time</th>
                         <th className="px-2 py-2 font-medium">Resin</th>
+                        <th className="px-2 py-2 font-medium">Slicer cost</th>
+                        <th className="px-2 py-2 font-medium">Exposure</th>
                         <th className="px-2 py-2 font-medium">Synced</th>
                       </tr>
                     </thead>
@@ -494,6 +565,11 @@ export default function Prints() {
                           </td>
                           <td className="px-2 py-3 numeric">{formatHours(record.printTimeSeconds)}</td>
                           <td className="px-2 py-3 numeric">{formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}</td>
+                          <td className="px-2 py-3 numeric">{formatMoney(record.resinCost)}</td>
+                          <td className="px-2 py-3 numeric">
+                            {formatNumber(record.exposureSeconds, " s")}
+                            {record.bottomExposureSeconds ? ` / ${formatNumber(record.bottomExposureSeconds, " s bot")}` : ""}
+                          </td>
                           <td className="px-2 py-3">
                             <p className="font-medium text-chart-4">HubSpot synced</p>
                             <p className="mt-0.5 text-muted-foreground">{localDate(record.hubspotSyncedAt)}</p>

@@ -66,9 +66,45 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     fieldType: "number",
   },
   {
+    name: "print_estimated_resin_cost",
+    label: "Estimated resin cost (slicer)",
+    description:
+      "Total Chitubox-configured resin cost estimate across attached CTB plates. Separate from actual print_material_cost.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
     name: "print_layer_count",
     label: "Print layer count",
     description: "Total layers across all attached CTB plates.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_bottom_layer_count",
+    label: "Print bottom layer count",
+    description: "Bottom layer count from the most recently attached CTB plate.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_exposure_seconds",
+    label: "Normal exposure (s)",
+    description: "Normal-layer exposure time from the most recently attached CTB plate.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_bottom_exposure_seconds",
+    label: "Bottom exposure (s)",
+    description: "Bottom-layer exposure time from the most recently attached CTB plate.",
+    type: "number",
+    fieldType: "number",
+  },
+  {
+    name: "print_model_height_mm",
+    label: "Model height (mm)",
+    description: "Model height from the most recently attached CTB plate.",
     type: "number",
     fieldType: "number",
   },
@@ -230,7 +266,12 @@ function printFileProperties(summary: PrintFileOrderSummary, attachedAt: string)
   );
   assign("print_resin_volume_ml", numericString(summary.totalResinVolumeMl));
   assign("print_resin_mass_g", numericString(summary.totalResinMassG));
+  assign("print_estimated_resin_cost", numericString(summary.totalResinCost, 2));
   assign("print_layer_count", numericString(summary.totalLayerCount, 0));
+  assign("print_bottom_layer_count", numericString(latest.bottomLayerCount, 0));
+  assign("print_exposure_seconds", numericString(latest.exposureSeconds, 3));
+  assign("print_bottom_exposure_seconds", numericString(latest.bottomExposureSeconds, 3));
+  assign("print_model_height_mm", numericString(latest.modelHeightMm, 3));
   assign("print_layer_height_mm", numericString(latest.layerHeightMm, 4));
   assign("print_printer_profile", compactText(latest.printerProfile, 500));
   return properties;
