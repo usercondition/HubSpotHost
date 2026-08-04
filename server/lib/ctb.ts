@@ -121,6 +121,10 @@ function densityFromMassVolume(
   return reasonable(resinMassG / resinVolumeMl, 0.2, 3, 3);
 }
 
+function costOrNull(value: number | null): number | null {
+  return value !== null && value > 0 ? value : null;
+}
+
 function printTimeOrNull(value: number | null): number | null {
   return value !== null && value > 0 && value <= 7 * 24 * 60 * 60 ? value : null;
 }
@@ -207,7 +211,9 @@ function parseEncryptedCtb(fileName: string, buffer: Buffer, magic: number): Pri
     printTimeSeconds: printTimeOrNull(u32(settings, 76)),
     resinVolumeMl,
     resinMassG,
-    resinCost,
+    resinCost: costOrNull(resinCost),
+    resinCostSource: null,
+    resinCostLabel: null,
     resinDensityGPerMl: densityFromMassVolume(resinMassG, resinVolumeMl),
     layerCount: layerCountOrNull(u32(settings, 64)),
     layerHeightMm: reasonable(f32(settings, 36), 0.001, 1, 4),
@@ -260,7 +266,9 @@ function parseClassicCtb(fileName: string, buffer: Buffer, magic: number): Print
     printTimeSeconds: printTimeOrNull(printTimeSeconds),
     resinVolumeMl,
     resinMassG,
-    resinCost,
+    resinCost: costOrNull(resinCost),
+    resinCostSource: null,
+    resinCostLabel: null,
     resinDensityGPerMl: densityFromMassVolume(resinMassG, resinVolumeMl),
     layerCount: layerCountOrNull(layerCount),
     layerHeightMm: reasonable(f32(buffer, 0x20), 0.001, 1, 4),

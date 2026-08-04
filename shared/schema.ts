@@ -328,11 +328,18 @@ export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
 /* ------------------------------------------------------------------ */
 
 /**
+ * Where an estimated resin cost came from. CTB is preferred when the slicer
+ * embedded a price; otherwise Print Operations may estimate from the active
+ * resin profile or Supplies purchases. Never confused with actual deal material cost.
+ */
+export type ResinCostSource = "ctb" | "amazon" | "supplies" | "manual";
+
+/**
  * The production metadata extracted from a Chitubox CTB slice file. These
  * values describe the entire build plate, not one individual model on it.
  *
- * `resinCost` is the slicer-configured estimate (currency as set in Chitubox),
- * not the deal's actual `print_material_cost`.
+ * `resinCost` is a planning estimate only — not the deal's actual
+ * `print_material_cost`.
  */
 export interface PrintFileMetrics {
   fileName: string;
@@ -344,6 +351,8 @@ export interface PrintFileMetrics {
   resinVolumeMl: number | null;
   resinMassG: number | null;
   resinCost: number | null;
+  resinCostSource: ResinCostSource | null;
+  resinCostLabel: string | null;
   resinDensityGPerMl: number | null;
   layerCount: number | null;
   layerHeightMm: number | null;
@@ -410,6 +419,8 @@ export const printFileRecords = sqliteTable("print_file_records", {
   resinVolumeMl: text("resin_volume_ml"),
   resinMassG: text("resin_mass_g"),
   resinCost: text("resin_cost"),
+  resinCostSource: text("resin_cost_source"),
+  resinCostLabel: text("resin_cost_label"),
   resinDensityGPerMl: text("resin_density_g_per_ml"),
   layerCount: integer("layer_count"),
   layerHeightMm: text("layer_height_mm"),
@@ -478,6 +489,38 @@ export const attachPrintFileSchema = z.object({
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
+
+export const upsertResinProfileSchema = z.object({
+  name: trimmed(200).min(2, "Enter the resin name"),
+  amazonAsin: trimmed(20)
+    .default("")
+    .refine((value) => value === "" || /^[A-Z0-9]{10}$/i.test(value), "Enter a valid Amazon ASIN"),
+  amazonUrl: trimmed(500).default(""),
+  bottleMassG: z.coerce.number().positive().max(100_000).default(1000),
+  bottleVolumeMl: z.coerce.number().positive().max(100_000).optional().nullable(),
+  bottlePriceUsd: amountLike,
+  notes: trimmed(1_000).default(""),
+});
+
+export type UpsertResinProfileInput = z.infer<typeof upsertResinProfileSchema>;
+
+export const resinProfiles = sqliteTable("resin_profiles", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  amazonAsin: text("amazon_asin").notNull().default(""),
+  amazonUrl: text("amazon_url").notNull().default(""),
+  bottleMassG: text("bottle_mass_g").notNull(),
+  bottleVolumeMl: text("bottle_volume_ml"),
+  bottlePriceUsd: text("bottle_price_usd").notNull(),
+  priceSource: text("price_source").notNull().default("manual"),
+  priceFetchedAt: text("price_fetched_at"),
+  notes: text("notes").notNull().default(""),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type ResinProfile = typeof resinProfiles.$inferSelect;
 
 /** Owner form that mints a new one-time client link. */
 export const createOrderLinkSchema = z.object({

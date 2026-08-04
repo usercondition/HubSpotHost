@@ -17,6 +17,7 @@ import {
 } from "../../shared/schema";
 import { getDb } from "./order-links";
 import { parseCtbFile } from "./ctb";
+import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
 export const PRINT_FILE_ANALYSIS_TTL_MINUTES = 20;
 
@@ -54,7 +55,7 @@ export function stagePrintFile(fileName: string, buffer: Buffer): {
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  const metrics = parseCtbFile(fileName, buffer);
+  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFile(fileName, buffer));
   const id = crypto.randomUUID();
   const expiry = expiresAt();
   getDb()
@@ -80,7 +81,7 @@ export function getStagedPrintFile(analysisId: string): {
     .get();
   if (!analysis || analysis.usedAt || analysis.expiresAt <= nowIso()) return null;
   const metrics = parseMetrics(analysis.metricsJson);
-  return metrics ? { analysis, metrics } : null;
+  return metrics ? { analysis, metrics: enrichPrintFileMetricsWithResinCost(metrics) } : null;
 }
 
 export function markPrintFileAnalysisUsed(analysisId: string): void {
@@ -115,6 +116,8 @@ export function createPrintFileRecord(input: {
       resinVolumeMl: decimal(metrics.resinVolumeMl),
       resinMassG: decimal(metrics.resinMassG),
       resinCost: decimal(metrics.resinCost),
+      resinCostSource: metrics.resinCostSource,
+      resinCostLabel: metrics.resinCostLabel,
       resinDensityGPerMl: decimal(metrics.resinDensityGPerMl),
       layerCount: metrics.layerCount,
       layerHeightMm: decimal(metrics.layerHeightMm),

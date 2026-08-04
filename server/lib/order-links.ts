@@ -129,9 +129,29 @@ CREATE INDEX IF NOT EXISTS print_file_records_deal_id_idx
   ON print_file_records (hubspot_deal_id, attached_at DESC);
 `;
 
+const CREATE_RESIN_PROFILES_SQL = `
+CREATE TABLE IF NOT EXISTS resin_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  amazon_asin TEXT NOT NULL DEFAULT '',
+  amazon_url TEXT NOT NULL DEFAULT '',
+  bottle_mass_g TEXT NOT NULL,
+  bottle_volume_ml TEXT,
+  bottle_price_usd TEXT NOT NULL,
+  price_source TEXT NOT NULL DEFAULT 'manual',
+  price_fetched_at TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
+  ["resin_cost_source", "TEXT"],
+  ["resin_cost_label", "TEXT"],
   ["resin_density_g_per_ml", "TEXT"],
   ["model_height_mm", "TEXT"],
   ["exposure_seconds", "TEXT"],
@@ -176,6 +196,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
+  sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   ensurePrintFileRecordColumns(sqlite);
   db = drizzle(sqlite);
   return db;
