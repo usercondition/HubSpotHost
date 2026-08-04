@@ -1,6 +1,6 @@
 /**
  * Shared contracts between the Express API and the React dashboard.
- * No database: the audit log is an in-memory ring buffer on the server.
+ * The audit log is a small local file kept server-side.
  */
 
 export const INPUT_PROPERTY_LABELS: Record<string, string> = {
@@ -62,6 +62,10 @@ export interface HealthResponse {
     verification: "configured" | "not-configured";
     supportedVersions: string[];
     path: string;
+  };
+  admin: {
+    /** Public deployments expose only the webhook and safe readiness status. */
+    publicControlsEnabled: boolean;
   };
   properties: {
     inputs: string[];

@@ -72,7 +72,7 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
         : null,
     dryRun: envFlag(env.DRY_RUN, true),
     allowWrites: envFlag(env.ALLOW_HUBSPOT_WRITES, false),
-    webhookSecretConfigured: (env.HUBSPOT_WEBHOOK_SECRET || "").trim().length > 0,
+    webhookSecretConfigured: getWebhookSecret(env).length > 0,
   };
 }
 
@@ -86,7 +86,11 @@ export function getToken(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function getWebhookSecret(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.HUBSPOT_WEBHOOK_SECRET || "").trim();
+  return (
+    env.CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN?.trim() ||
+    env.HUBSPOT_WEBHOOK_SECRET?.trim() ||
+    ""
+  );
 }
 
 /**

@@ -48,7 +48,11 @@ export default function Operations() {
   const [lastResult, setLastResult] = useState<RecalcOutcome | null>(null);
 
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const calculations = useQuery<CalculationsResponse>({ queryKey: ["/api/calculations"] });
+  const publicControlsLocked = health.data?.admin.publicControlsEnabled === false;
+  const calculations = useQuery<CalculationsResponse>({
+    queryKey: ["/api/calculations"],
+    enabled: health.isSuccess && !publicControlsLocked,
+  });
 
   const form = useForm<{ dealId: string }>({ defaultValues: { dealId: "" } });
 
@@ -103,7 +107,7 @@ export default function Operations() {
               data-testid="button-refresh"
               onClick={() => {
                 health.refetch();
-                calculations.refetch();
+                if (!publicControlsLocked) calculations.refetch();
               }}
             >
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
@@ -173,6 +177,16 @@ export default function Operations() {
             title="Manual recalculation"
             description="Runs the same path as a webhook event, for one deal."
           >
+            {publicControlsLocked && (
+              <div
+                className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground"
+                data-testid="notice-public-controls-locked"
+              >
+                Manual recalculation is intentionally disabled on the public service. Use a
+                local/private test environment for manual checks; this public endpoint accepts
+                only verified HubSpot webhooks.
+              </div>
+            )}
             <form
               className="space-y-4"
               onSubmit={form.handleSubmit(({ dealId }) => recalc.mutate(dealId.trim()))}
@@ -186,6 +200,7 @@ export default function Operations() {
                   autoComplete="off"
                   data-testid="input-deal-id"
                   className="numeric"
+                  disabled={publicControlsLocked}
                   {...form.register("dealId", {
                     required: "Deal ID is required",
                     pattern: { value: /^[0-9]{1,20}$/, message: "Digits only" },
@@ -220,13 +235,14 @@ export default function Operations() {
                   onCheckedChange={setLiveWrite}
                   aria-label="Request a live write"
                   data-testid="switch-live-write"
+                  disabled={publicControlsLocked}
                 />
               </div>
 
               <Button
                 type="submit"
                 className="w-full"
-                disabled={recalc.isPending}
+                disabled={recalc.isPending || publicControlsLocked}
                 data-testid="button-recalculate"
               >
                 {recalc.isPending ? "Calculating…" : "Recalculate deal"}
@@ -333,6 +349,16 @@ export default function Operations() {
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-9 w-full rounded" />
               ))}
+            </div>
+          ) : publicControlsLocked ? (
+            <div
+              className="rounded-md border border-dashed border-border px-4 py-8 text-center"
+              data-testid="notice-audit-protected"
+            >
+              <p className="text-sm font-medium">Audit entries are protected</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The public service does not expose financial audit data over its web endpoint.
+              </p>
             </div>
           ) : entries.length === 0 ? (
             <div

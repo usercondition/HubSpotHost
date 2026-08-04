@@ -14,6 +14,10 @@ import { buildRequestUri, verifyWebhookRequest } from "./lib/signature";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 
+function isProductionDeployment(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
 /** `?dryRun=false` is the only way to ask for a live write. Default: dry run. */
 function requestWantsLiveWrite(req: Request): boolean {
   const q = req.query?.dryRun;
@@ -29,6 +33,17 @@ function requestWantsLiveWrite(req: Request): boolean {
     }
   }
   return false;
+}
+
+/** A webhook is an explicit write request once the server's four live-write
+ * gates are all open. `?dryRun=true` is an intentional test override. */
+function webhookWantsLiveWrite(req: Request): boolean {
+  const q = req.query?.dryRun;
+  const dryRun = Array.isArray(q) ? q[0] : q;
+  if (typeof dryRun === "string" && dryRun.trim().toLowerCase() === "true") {
+    return false;
+  }
+  return true;
 }
 
 function rawBodyString(req: Request): string {
@@ -65,6 +80,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         supportedVersions: ["v1", "v3"],
         path: WEBHOOK_PATH,
       },
+      admin: {
+        publicControlsEnabled: !isProductionDeployment(),
+      },
       properties: {
         inputs: [...INPUT_PROPERTIES],
         outputs: [...OUTPUT_PROPERTIES],
@@ -76,6 +94,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
     const secret = getWebhookSecret();
+    if (isProductionDeployment() && !secret) {
+      return res.status(503).json({
+        ok: false,
+        error: "webhook validation secret is required in production",
+      });
+    }
     const headers = req.headers;
     const verification = verifyWebhookRequest(secret, {
       method: req.method,
@@ -101,7 +125,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const summary = summarizeEvents(req.body);
-    const wantsLiveWrite = requestWantsLiveWrite(req);
+    const wantsLiveWrite = webhookWantsLiveWrite(req);
 
     const results = [];
     for (const dealId of summary.dealIds) {
@@ -126,6 +150,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/recalculate/:dealId", async (req: Request, res: Response) => {
+    if (isProductionDeployment()) {
+      return res.status(403).json({
+        ok: false,
+        error: "manual recalculation is disabled on the public service",
+      });
+    }
     const dealId = String(req.params.dealId || "").trim();
     if (!/^[0-9]{1,20}$/.test(dealId)) {
       return res.status(400).json({
@@ -145,6 +175,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/calculations", (req: Request, res: Response) => {
+    if (isProductionDeployment()) {
+      return res.status(403).json({
+        ok: false,
+        error: "audit entries are not exposed by the public service",
+      });
+    }
     const limitParam = Number(req.query.limit);
     const limit =
       Number.isFinite(limitParam) && limitParam > 0

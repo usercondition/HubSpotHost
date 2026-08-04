@@ -146,6 +146,28 @@ test("webhook batch de-duplicates deals and skips output events", async () => {
   assert.equal(mockCalls.filter((c) => c.method === "GET").length, 1);
 });
 
+test("verified webhook writes automatically once its server gates are opened", async () => {
+  reset();
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const payload = [
+      { objectId: 901, objectTypeId: "0-3", propertyName: "print_material_cost" },
+    ];
+    const res = await fetch(`${appBase}/api/webhooks/hubspot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    assert.equal(body.written, 1);
+    assert.equal(mockCalls.filter((c) => c.method === "PATCH").length, 1);
+  } finally {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
+});
+
 test("webhook rejects a bad v1 signature and accepts a good one", async () => {
   reset();
   process.env.HUBSPOT_WEBHOOK_SECRET = "shh";
@@ -218,4 +240,31 @@ test("health reports dry-run readiness and unconfigured signing", async () => {
   assert.equal(body.webhook.verification, "not-configured");
   assert.equal(body.credentials.tokenConfigured, true);
   assert.equal(JSON.stringify(body).includes("test-token"), false);
+});
+
+test("public production mode fails closed and protects control endpoints", async () => {
+  const prior = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  delete process.env.HUBSPOT_WEBHOOK_SECRET;
+  try {
+    const webhook = await fetch(`${appBase}/api/webhooks/hubspot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ objectId: 901, objectTypeId: "0-3", propertyName: "amount" }]),
+    });
+    assert.equal(webhook.status, 503);
+
+    const manual = await fetch(`${appBase}/api/recalculate/901`, { method: "POST" });
+    assert.equal(manual.status, 403);
+
+    const audit = await fetch(`${appBase}/api/calculations`);
+    assert.equal(audit.status, 403);
+
+    const health = await fetch(`${appBase}/api/health`);
+    const healthBody = await health.json();
+    assert.equal(healthBody.admin.publicControlsEnabled, false);
+  } finally {
+    if (prior === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = prior;
+  }
 });

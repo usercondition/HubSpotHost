@@ -26,11 +26,12 @@ Blank, missing, or non-numeric values are treated as zero. Both outputs are roun
 The service starts in safe mode:
 
 - `DRY_RUN=true` by default.
-- A write only occurs when all four conditions are true:
-  1. The request explicitly asks for a live write with `dryRun=false`.
-  2. `DRY_RUN=false`.
-  3. `ALLOW_HUBSPOT_WRITES=true`.
-  4. A HubSpot token is available.
+- A verified HubSpot webhook write only occurs when all three server gates are true:
+  1. `DRY_RUN=false`.
+  2. `ALLOW_HUBSPOT_WRITES=true`.
+  3. A HubSpot token is available.
+- A production webhook endpoint refuses requests until `HUBSPOT_WEBHOOK_SECRET` is configured.
+- Manual recalculation and audit-log API endpoints are intentionally disabled in a public production deployment, so a visitor cannot invoke writes or read financial data.
 - The console never returns or logs a token.
 - The audit log contains only calculation inputs, outputs, deal ID, timestamp, trigger source, result, and short error message. It keeps the newest 100 entries in `data/audit-log.json`.
 
@@ -69,6 +70,7 @@ Copy `.env.example` and keep `.env` out of source control.
 | `HUBSPOT_API_BASE` | Fallback | API base URL if the custom credential variables are not injected. |
 | `HUBSPOT_ACCESS_TOKEN` | Fallback | Private-app token if the custom credential variable is not injected. |
 | `HUBSPOT_WEBHOOK_SECRET` | Recommended | Private-app client secret used to validate webhook signatures. |
+| `CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
 | `PUBLIC_BASE_URL` | Sometimes | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
@@ -91,7 +93,7 @@ The service needs a publicly reachable HTTPS URL before HubSpot can call it. A p
    - `print_packaging_cost`
    - `print_actual_shipping_cost`
 5. Save with **Commit changes**. HubSpot lets you use **View details** > **Test** on the subscription to deliver a sample event.
-6. In the private app’s **Auth** tab, copy the client secret into the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable. Never put it in browser code or source control.
+6. In the private app’s **Auth** tab, store the client secret in the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable, or inject it through the secure credential mapped to `CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN`. Never put it in browser code or source control.
 7. Use a non-customer test deal to send a manual dry run. Confirm the audit row and figures.
 8. Enable updates only after that test:
    ```text
@@ -106,9 +108,9 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | Endpoint | Use |
 |---|---|
 | `GET /api/health` | Status, safety-gate readiness, credential presence, signing configuration. |
-| `POST /api/recalculate/:dealId` | Manual read/calculate attempt. Use `?dryRun=false` only when the server write gates are enabled. |
+| `POST /api/recalculate/:dealId` | Manual read/calculate attempt in local/private mode. Disabled on a public production deployment. |
 | `POST /api/webhooks/hubspot` | Receives HubSpot property-change event batches. |
-| `GET /api/calculations` | Newest calculation audit entries. |
+| `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
 
 ## Production notes
 
