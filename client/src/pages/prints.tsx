@@ -369,7 +369,9 @@ export default function Prints() {
                   <span className="mt-3 text-sm font-medium">
                     {analyze.isPending ? "Reading slice data…" : "Drop a .ctb file here"}
                   </span>
-                  <span className="mt-1 text-xs text-muted-foreground">or browse from your slicer export folder, up to 64 MB</span>
+                  <span className="mt-1 text-xs text-muted-foreground">
+                    or browse from your slicer export folder. Larger files may take a moment to analyze.
+                  </span>
                 </button>
                 <Button
                   className="mt-3"

@@ -27,6 +27,7 @@ import {
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
 import { CtbParseError } from "./lib/ctb";
+import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
   attachedPrintFileDealIds,
   buildPrintFileOrderSummary,
@@ -70,7 +71,6 @@ import {
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
-const PRINT_FILE_MAX_BYTES = 64 * 1024 * 1024;
 const printFileUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },

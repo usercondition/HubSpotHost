@@ -4,6 +4,7 @@ import type { Request } from 'express';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
+import { PRINT_FILE_MAX_LABEL } from "./lib/print-file-limits";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,7 +63,7 @@ app.use((req, res, next) => {
     const oversizedUpload = err?.code === "LIMIT_FILE_SIZE";
     const status = oversizedUpload ? 413 : err.status || err.statusCode || 500;
     const message = oversizedUpload
-      ? "CTB file must be 64 MB or smaller"
+      ? `CTB file must be ${PRINT_FILE_MAX_LABEL} or smaller`
       : err.message || "Internal Server Error";
 
     console.error("Internal Server Error:", err);
