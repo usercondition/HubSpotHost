@@ -197,6 +197,55 @@ CREATE INDEX IF NOT EXISTS printer_profile_maps_printer_idx
   ON printer_profile_maps (printer_id, profile_key);
 `;
 
+const CREATE_RESIN_PRODUCTS_SQL = `
+CREATE TABLE IF NOT EXISTS resin_products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  brand TEXT NOT NULL DEFAULT 'ELEGOO',
+  bottle_mass_g TEXT NOT NULL DEFAULT '1000',
+  bottle_volume_ml TEXT,
+  unit_cost_usd TEXT NOT NULL DEFAULT '0',
+  sealed_count INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
+const CREATE_RESIN_BOTTLES_SQL = `
+CREATE TABLE IF NOT EXISTS resin_bottles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  opened_at TEXT NOT NULL,
+  initial_mass_g TEXT NOT NULL,
+  remaining_mass_g TEXT NOT NULL,
+  unit_cost_usd TEXT NOT NULL DEFAULT '0',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS resin_bottles_product_idx ON resin_bottles (product_id, status, is_active);
+`;
+
+const CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL = `
+CREATE TABLE IF NOT EXISTS resin_bottle_consumptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bottle_id INTEGER NOT NULL,
+  print_file_record_id INTEGER,
+  hubspot_deal_id TEXT NOT NULL DEFAULT '',
+  hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  deal_amount TEXT NOT NULL DEFAULT '',
+  resin_mass_g TEXT NOT NULL,
+  resin_volume_ml TEXT,
+  resin_cost_usd TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS resin_bottle_consumptions_bottle_idx
+  ON resin_bottle_consumptions (bottle_id, created_at DESC);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -295,6 +344,9 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRINTERS_SQL);
   sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);
   sqlite.exec(CREATE_PRINTER_PROFILE_MAPS_SQL);
+  sqlite.exec(CREATE_RESIN_PRODUCTS_SQL);
+  sqlite.exec(CREATE_RESIN_BOTTLES_SQL);
+  sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   db = drizzle(sqlite);

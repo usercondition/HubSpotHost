@@ -15,6 +15,7 @@ import Performance from "@/pages/performance";
 import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
 import PrintersPage from "@/pages/printers";
+import ResinInventoryPage from "@/pages/resin-inventory";
 import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
 
@@ -31,6 +32,7 @@ function ShellRoutes() {
           <Route path="/supplies" component={Supplies} />
           <Route path="/prints" component={Prints} />
           <Route path="/printers" component={PrintersPage} />
+          <Route path="/resin" component={ResinInventoryPage} />
           <Route path="/performance" component={Performance} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />
