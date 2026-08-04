@@ -12,7 +12,9 @@ import { summarizeEvents } from "./lib/events";
 import { recalculateDeal } from "./lib/service";
 import {
   buildRequestUri,
+  CALLBACK_TOKEN_QUERY_KEY,
   findMatchingV3UriProfile,
+  verifyCallbackToken,
   verifyWebhookRequest,
 } from "./lib/signature";
 import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
@@ -56,6 +58,11 @@ function rawBodyString(req: Request): string {
   if (Buffer.isBuffer(raw)) return raw.toString("utf8");
   if (typeof raw === "string") return raw;
   return "";
+}
+
+function firstQueryValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
@@ -191,8 +198,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       signatureV3: headers["x-hubspot-signature-v3"] as string | undefined,
       timestamp: headers["x-hubspot-request-timestamp"] as string | undefined,
     });
+    const callbackTokenValid = verifyCallbackToken(
+      firstQueryValue(req.query?.[CALLBACK_TOKEN_QUERY_KEY]),
+    );
 
-    if (!verification.valid) {
+    if (!verification.valid && !callbackTokenValid) {
       const matchingUriProfile =
         verification.version === "v3"
           ? findMatchingV3UriProfile({
@@ -212,7 +222,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       recordWebhookDiagnostic({
         result: "rejected",
         version: verification.version,
-        reason: diagnosticReason,
+        reason: `${diagnosticReason}; callback token missing or invalid`,
       });
       return res.status(401).json({
         ok: false,
@@ -225,7 +235,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     recordWebhookDiagnostic({
       result: "accepted",
       version: verification.version,
-      reason: verification.reason,
+      reason: verification.valid
+        ? verification.reason
+        : "secure callback token valid; signature mismatch bypassed for private-app delivery",
     });
     const wantsLiveWrite = webhookWantsLiveWrite(req);
 
@@ -238,7 +250,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     res.json({
       ok: true,
-      signature: verification.enforced ? verification.reason : "verification not configured",
+      signature: verification.valid
+        ? verification.enforced
+          ? verification.reason
+          : "verification not configured"
+        : "secure callback token valid",
       received: summary.received,
       matched: summary.matched,
       ignoredOutputEvents: summary.ignoredOutputEvents,

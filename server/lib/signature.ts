@@ -13,6 +13,14 @@
 import crypto from "node:crypto";
 
 export const V3_MAX_AGE_MS = 5 * 60 * 1000;
+export const CALLBACK_TOKEN_QUERY_KEY = "key";
+
+/**
+ * SHA-256 of the single-use callback token configured in HubSpot's Target URL.
+ * The raw token is never stored in the repository or returned by the service.
+ */
+const DEFAULT_CALLBACK_TOKEN_SHA256 =
+  "3545eaa880da8736fdcec09b849427ce6ebabdb60525b99c5403a3111b7ac724";
 
 export function computeV1Signature(clientSecret: string, rawBody: string): string {
   return crypto
@@ -37,6 +45,21 @@ function safeEqual(a: string, b: string): boolean {
   const bufB = Buffer.from(b, "utf8");
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Secure fallback for private-app webhook deliveries where HubSpot does not
+ * expose a matching client secret. The target URL carries a high-entropy token;
+ * only its hash is retained by this service.
+ */
+export function verifyCallbackToken(
+  token: string | undefined,
+  expectedHash: string = process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim() ||
+    DEFAULT_CALLBACK_TOKEN_SHA256,
+): boolean {
+  if (!token) return false;
+  const actualHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  return safeEqual(actualHash, expectedHash);
 }
 
 export interface VerificationResult {

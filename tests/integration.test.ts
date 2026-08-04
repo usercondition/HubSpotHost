@@ -5,6 +5,7 @@
  */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import http from "node:http";
 import express from "express";
 import { registerRoutes } from "../server/routes";
@@ -209,10 +210,35 @@ test("health exposes only non-sensitive details about the latest rejected webhoo
     const health = await fetch(`${appBase}/api/health`);
     const body = await health.json();
     assert.equal(body.webhook.latestDelivery.result, "rejected");
-    assert.equal(body.webhook.latestDelivery.reason, "no HubSpot signature header present");
+    assert.equal(
+      body.webhook.latestDelivery.reason,
+      "no HubSpot signature header present; callback token missing or invalid",
+    );
     assert.equal(JSON.stringify(body).includes("diagnostic-secret"), false);
   } finally {
     delete process.env.HUBSPOT_WEBHOOK_SECRET;
+  }
+});
+
+test("callback token authorizes a private-app delivery when signatures do not match", async () => {
+  reset();
+  const callbackToken = "test-callback-token";
+  process.env.HUBSPOT_WEBHOOK_SECRET = "shh";
+  process.env.HUBSPOT_CALLBACK_TOKEN_SHA256 = crypto
+    .createHash("sha256")
+    .update(callbackToken, "utf8")
+    .digest("hex");
+  try {
+    const res = await fetch(`${appBase}/api/webhooks/hubspot?key=${callbackToken}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ objectId: 901, objectTypeId: "0-3", propertyName: "amount" }]),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).signature, "secure callback token valid");
+  } finally {
+    delete process.env.HUBSPOT_WEBHOOK_SECRET;
+    delete process.env.HUBSPOT_CALLBACK_TOKEN_SHA256;
   }
 });
 

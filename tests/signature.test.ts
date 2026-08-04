@@ -6,6 +6,7 @@ import {
   computeV1Signature,
   computeV3Signature,
   findMatchingV3UriProfile,
+  verifyCallbackToken,
   verifyV1,
   verifyV3,
   verifyWebhookRequest,
@@ -24,6 +25,14 @@ test("v1 signature is SHA-256 of secret + raw body", () => {
     .digest("hex");
   assert.equal(computeV1Signature(secret, rawBody), expected);
   assert.equal(verifyV1({ clientSecret: secret, rawBody, signature: expected }).valid, true);
+});
+
+test("callback tokens are checked by SHA-256 without storing the raw token", () => {
+  const token = "test-callback-token";
+  const hash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  assert.equal(verifyCallbackToken(token, hash), true);
+  assert.equal(verifyCallbackToken("wrong-token", hash), false);
+  assert.equal(verifyCallbackToken(undefined, hash), false);
 });
 
 test("v1 rejects a tampered body or missing header", () => {
