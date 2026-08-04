@@ -98,3 +98,14 @@ test("the dedicated injected client-secret credential takes priority", () => {
     "correct-client-secret",
   );
 });
+
+test("the Print Orders app secret takes priority over earlier webhook credentials", () => {
+  assert.equal(
+    getWebhookSecret({
+      CUSTOM_CRED_HUBSPOT_PRINT_ORDERS_APP_SECRET_LOCAL_TOKEN: "current-app-secret",
+      CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN: "older-client-secret",
+      CUSTOM_CRED_HUBSPOT_WEBHOOK_SECRET_LOCAL_TOKEN: "older-webhook-secret",
+    } as NodeJS.ProcessEnv),
+    "current-app-secret",
+  );
+});
