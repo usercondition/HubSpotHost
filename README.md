@@ -71,7 +71,7 @@ Copy `.env.example` and keep `.env` out of source control.
 | `HUBSPOT_ACCESS_TOKEN` | Fallback | Private-app token if the custom credential variable is not injected. |
 | `HUBSPOT_WEBHOOK_SECRET` | Recommended | Private-app client secret used to validate webhook signatures. |
 | `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
-| `PUBLIC_BASE_URL` | Sometimes | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. |
+| `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
