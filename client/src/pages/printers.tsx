@@ -500,7 +500,7 @@ export default function PrintersPage() {
             {fleet.data.unassigned.plateCount > 0 ? (
               <Panel
                 title="Unassigned plate profiles"
-                description="These slicer machine names did not match any fleet alias. Add an alias on the correct printer so future (and historical) jobs roll up there."
+                description="Plate history shows every attached job. Fleet totals only count plates whose CTB/ULTX machine name matches a printer name or alias — unmatched names (and their hours) stay here until you add an alias or a new machine."
               >
                 <ul className="space-y-2 text-sm" data-testid="list-unassigned-profiles">
                   {fleet.data.unassigned.profiles.map((profile) => (
