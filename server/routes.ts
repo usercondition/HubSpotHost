@@ -74,6 +74,7 @@ function firstQueryValue(value: unknown): string | undefined {
 
 function intakeAccessCode(): string | null {
   return (
+    process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V4_LOCAL_TOKEN?.trim() ||
     process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V3_LOCAL_TOKEN?.trim() ||
     process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_V2_LOCAL_TOKEN?.trim() ||
     process.env.CUSTOM_CRED_PAID_ORDER_INTAKE_LOCAL_TOKEN?.trim() ||
