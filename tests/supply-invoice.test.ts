@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractSupplyInvoiceFromText } from "../server/lib/supply-invoice";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  detectSource,
+  detectSupplyReceiptFormat,
+  extractSupplyInvoiceFromText,
+  extractTextFromSupplyReceipt,
+  isSupportedSupplyReceiptFileName,
+  parseSupplyReceipt,
+} from "../server/lib/supply-invoice";
 
 const AMAZON_INVOICE = `
 Amazon.com
@@ -46,15 +57,20 @@ Estimated tax: $4.40
 Grand Total: $59.39
 `;
 
-const GENERIC_INVOICE = `
-INVOICE
-Invoice Number: INV-9088
-Invoice Date: 07/15/2026
-Vendor: PrintSupply Co
+const ULINE_INVOICE = `
+ULINE
+Invoice Number: 21554487
+Invoice Date: 07/20/2026
+Vendor: Uline
 
-Description: Nitrile gloves, 100 pack
-Qty: 1
-Total Paid: $12.50
+Description: Corrugated mailer boxes, 12x9x3
+Qty: 25
+Total Paid: $48.75
+`;
+
+const GENERIC_CSV = `Item,Quantity,Amount,Vendor,Date
+"Nitrile gloves, 100 pack",2,12.50,Staples,2026-07-15
+Bubble mailers assortment,1,18.00,Staples,2026-07-15
 `;
 
 test("Amazon-style PDF text fills supply purchase fields", () => {
@@ -90,16 +106,46 @@ test("Amazon multi-item invoices extract a line-item breakdown", () => {
   assert.ok(result.warnings.some((warning) => /2 line items/i.test(warning)));
 });
 
-test("generic invoice text extracts item, total, and date", () => {
-  const result = extractSupplyInvoiceFromText(GENERIC_INVOICE, { fileName: "gloves.pdf" });
+test("non-Amazon invoices detect vendor and nomenclature", () => {
+  const result = extractSupplyInvoiceFromText(ULINE_INVOICE, { fileName: "uline-boxes.pdf" });
 
-  assert.equal(result.fields.orderReference, "INV-9088");
-  assert.match(result.fields.itemName, /Nitrile gloves/i);
-  assert.equal(result.fields.category, "consumables");
-  assert.equal(result.fields.quantity, 1);
-  assert.equal(result.fields.totalAmount, "12.50");
-  assert.equal(result.fields.purchasedAt, "2026-07-15");
-  assert.equal(result.fields.lineItems.length, 1);
+  assert.equal(result.fields.source, "Uline");
+  assert.equal(result.fields.orderReference, "21554487");
+  assert.match(result.fields.itemName, /mailer boxes/i);
+  assert.equal(result.fields.category, "packaging_shipping");
+  assert.equal(result.fields.totalAmount, "48.75");
+  assert.equal(result.fields.purchasedAt, "2026-07-20");
+});
+
+test("vendor detection prefers labeled seller and known brands", () => {
+  assert.equal(detectSource("Sold by: Phrozen Store\nTotal: $40.00"), "Phrozen");
+  assert.equal(detectSource("Thanks for shopping", "homedepot-fep-film.csv"), "Home Depot");
+  assert.equal(detectSource("random receipt text"), "");
+});
+
+test("supported receipt formats include spreadsheets and photos", () => {
+  assert.equal(detectSupplyReceiptFormat("order.pdf"), "pdf");
+  assert.equal(detectSupplyReceiptFormat("export.csv"), "csv");
+  assert.equal(detectSupplyReceiptFormat("ledger.xlsx"), "spreadsheet");
+  assert.equal(detectSupplyReceiptFormat("scan.jpg"), "image");
+  assert.equal(isSupportedSupplyReceiptFileName("notes.txt"), true);
+  assert.equal(isSupportedSupplyReceiptFileName("virus.exe"), false);
+});
+
+test("CSV receipts extract item rows, totals, and vendor", async () => {
+  const filePath = path.join(os.tmpdir(), `supply-csv-${crypto.randomUUID()}.csv`);
+  fs.writeFileSync(filePath, GENERIC_CSV, "utf8");
+  try {
+    const text = await extractTextFromSupplyReceipt(filePath, "staples-order.csv");
+    assert.match(text.text, /Nitrile gloves/i);
+    const parsed = await parseSupplyReceipt(filePath, "staples-order.csv");
+    assert.equal(parsed.format, "csv");
+    assert.equal(parsed.fields.source, "Staples");
+    assert.ok(parsed.fields.lineItems.length >= 1);
+    assert.match(parsed.fields.lineItems[0]!.itemName, /Nitrile gloves/i);
+  } finally {
+    fs.unlinkSync(filePath);
+  }
 });
 
 test("sparse invoice text still returns editable defaults with warnings", () => {
@@ -107,6 +153,7 @@ test("sparse invoice text still returns editable defaults with warnings", () => 
 
   assert.equal(result.fields.totalAmount, "9.00");
   assert.equal(result.fields.quantity, 1);
+  assert.equal(result.fields.source, "");
   assert.ok(result.fields.purchasedAt.length === 10);
   assert.ok(result.warnings.length >= 1);
 });

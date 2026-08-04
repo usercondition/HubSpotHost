@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import { parse as parseCsv } from "csv-parse/sync";
 import pdfParse from "pdf-parse";
+import * as XLSX from "xlsx";
 import { suggestSupplyCategory } from "./supplies";
 import {
   summarizeSupplyLineItems,
@@ -10,6 +13,36 @@ import {
 const MEBIBYTE = 1024 * 1024;
 export const SUPPLY_INVOICE_MAX_BYTES = 12 * MEBIBYTE;
 export const SUPPLY_INVOICE_MAX_LABEL = "12 MB";
+const OCR_TIMEOUT_MS = 45_000;
+
+export const SUPPLY_RECEIPT_EXTENSIONS = [
+  ".pdf",
+  ".txt",
+  ".text",
+  ".csv",
+  ".tsv",
+  ".xlsx",
+  ".xls",
+  ".html",
+  ".htm",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+] as const;
+
+export type SupplyReceiptFormat =
+  | "pdf"
+  | "text"
+  | "csv"
+  | "spreadsheet"
+  | "html"
+  | "image"
+  | "unknown";
 
 export interface SupplyInvoiceFields {
   source: string;
@@ -27,6 +60,7 @@ export interface SupplyInvoiceParseResult {
   fields: SupplyInvoiceFields;
   warnings: string[];
   pageCount: number;
+  format: SupplyReceiptFormat;
 }
 
 const MONTHS: Record<string, number> = {
@@ -55,6 +89,27 @@ const MONTHS: Record<string, number> = {
   nov: 11,
   dec: 12,
 };
+
+const KNOWN_VENDORS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bamazon\b|\bamzn\b|\b1\d{2}-\d{7}-\d{7}\b/i, label: "Amazon" },
+  { pattern: /\bebay\b/i, label: "eBay" },
+  { pattern: /\betsy\b/i, label: "Etsy" },
+  { pattern: /\bwalmart\b/i, label: "Walmart" },
+  { pattern: /\bhome\s*depot\b/i, label: "Home Depot" },
+  { pattern: /\blowes\b|\blowe'?s\b/i, label: "Lowe's" },
+  { pattern: /\bmcmaster(?:-carr)?\b/i, label: "McMaster-Carr" },
+  { pattern: /\belegoo\b/i, label: "ELEGOO" },
+  { pattern: /\banycubic\b/i, label: "Anycubic" },
+  { pattern: /\bphrozen\b/i, label: "Phrozen" },
+  { pattern: /\bhey\s*gears\b|\bheygears\b/i, label: "HeyGears" },
+  { pattern: /\builine\b/i, label: "Uline" },
+  { pattern: /\bstaples\b/i, label: "Staples" },
+  { pattern: /\boffice\s*depot\b|\boffice\s*max\b/i, label: "Office Depot" },
+  { pattern: /\baliexpress\b/i, label: "AliExpress" },
+  { pattern: /\bmouser\b/i, label: "Mouser" },
+  { pattern: /\bdigi[- ]?key\b/i, label: "Digi-Key" },
+  { pattern: /\bspecialty\s*resin\b|\bresiners\b/i, label: "Specialty resin" },
+];
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
@@ -106,12 +161,39 @@ function parseLooseDate(raw: string): string | null {
   return null;
 }
 
+export function pathExt(fileName: string | undefined): string {
+  if (!fileName) return "";
+  return path.extname(fileName).toLowerCase();
+}
+
+export function detectSupplyReceiptFormat(fileName: string | undefined): SupplyReceiptFormat {
+  const ext = pathExt(fileName);
+  if (ext === ".pdf") return "pdf";
+  if (ext === ".csv" || ext === ".tsv") return "csv";
+  if (ext === ".xlsx" || ext === ".xls") return "spreadsheet";
+  if (ext === ".html" || ext === ".htm") return "html";
+  if (ext === ".txt" || ext === ".text") return "text";
+  if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"].includes(ext)) {
+    return "image";
+  }
+  return "unknown";
+}
+
+export function isSupportedSupplyReceiptFileName(fileName: string | undefined): boolean {
+  return detectSupplyReceiptFormat(fileName) !== "unknown";
+}
+
+/** @deprecated Use isSupportedSupplyReceiptFileName */
+export function isPdfInvoiceFileName(fileName: string | undefined): boolean {
+  return pathExt(fileName) === ".pdf";
+}
+
 function extractOrderReference(text: string): string | null {
   const amazon = text.match(/\b(1\d{2}-\d{7}-\d{7})\b/);
   if (amazon?.[1]) return amazon[1];
 
   const labeled = text.match(
-    /\b(?:Order|Invoice|Receipt|PO|Purchase\s*Order)\s*(?:#|Number|No\.?|ID)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,40})\b/i,
+    /\b(?:Order|Invoice|Receipt|PO|Purchase\s*Order|Confirmation)\s*(?:#|Number|No\.?|ID)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,40})\b/i,
   );
   if (labeled?.[1] && !/^(date|total|item|qty|invoice|order|number|receipt)$/i.test(labeled[1])) {
     return labeled[1];
@@ -123,9 +205,10 @@ function extractTotalAmount(text: string): string | null {
   const patterns = [
     /Grand\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Order\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
-    /Amount\s*Due\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
-    /Total\s*(?:Paid|Charged)?\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+    /Amount\s*(?:Due|Paid|Charged)\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+    /Total\s*(?:Paid|Charged|Cost|Price)?\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Invoice\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+    /Balance\s*Due\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -133,7 +216,6 @@ function extractTotalAmount(text: string): string | null {
     if (money) return money;
   }
 
-  // Last-resort: the largest dollar amount that looks like a line total.
   const amounts: number[] = [];
   const moneyPattern = /\$\s*([\d,]+\.\d{2})\b/g;
   let moneyMatch: RegExpExecArray | null;
@@ -143,13 +225,17 @@ function extractTotalAmount(text: string): string | null {
     const amount = Number(money);
     if (amount > 0 && amount < 100_000) amounts.push(amount);
   }
-  if (amounts.length === 0) return null;
+  if (amounts.length === 0) {
+    // Spreadsheet/CSV totals without a $ sign.
+    const bare = text.match(/(?:^|\n)\s*(?:total|amount|cost|price)\s*[,:\t ]+\s*([\d,]+\.\d{2})\s*(?:\n|$)/i);
+    return moneyFromMatch(bare?.[1]);
+  }
   return Math.max(...amounts).toFixed(2);
 }
 
 function extractPurchasedAt(text: string): string | null {
   const labeled = text.match(
-    /(?:Order\s*Placed|Order\s*Date|Invoice\s*Date|Purchase\s*Date|Date\s*of\s*Purchase|Date)\s*[:\s]+([^\n]{6,40})/i,
+    /(?:Order\s*Placed|Order\s*Date|Invoice\s*Date|Purchase\s*Date|Date\s*of\s*Purchase|Transaction\s*Date|Date)\s*[:\s]+([^\n]{6,40})/i,
   );
   if (labeled?.[1]) {
     const parsed = parseLooseDate(labeled[1]);
@@ -176,34 +262,33 @@ function looksLikeNoiseItem(line: string): boolean {
   const normalized = line.toLowerCase();
   return (
     normalized.length < 4 ||
-    /^(amazon\.com|final details|order information|billing|shipping|payment|sold by|condition:|thank you|invoice|receipt|page\s+\d)/i.test(
+    /^(amazon\.com|final details|order information|billing|shipping|payment|sold by|condition:|thank you|invoice|receipt|page\s+\d|vendor|merchant|store)/i.test(
       normalized,
     ) ||
-    /^(subtotal|shipping|tax|total|grand total|order total|amount due)/i.test(normalized) ||
+    /^(subtotal|shipping|tax|total|grand total|order total|amount due|balance due)/i.test(normalized) ||
     /^\$?\d/.test(normalized) ||
     /^(https?:|www\.)/i.test(normalized)
   );
 }
 
 function isSectionEnd(line: string): boolean {
-  return /^(subtotal|shipping|tax|estimated tax|total before|grand total|order total|amount due|payment information|billing address|shipping address)/i.test(
+  return /^(subtotal|shipping|tax|estimated tax|total before|grand total|order total|amount due|balance due|payment information|billing address|shipping address)/i.test(
     line,
   );
 }
 
-function extractLineItems(text: string): SupplyPurchaseLineItem[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => normalizeWhitespace(line))
-    .filter(Boolean);
-
+function extractAmazonStyleLineItems(lines: string[]): SupplyPurchaseLineItem[] {
   const items: SupplyPurchaseLineItem[] = [];
   let inItems = false;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
 
-    if (/^Items?\s+Ordered$/i.test(line) || /^Order\s+Details$/i.test(line)) {
+    if (
+      /^Items?\s+Ordered$/i.test(line) ||
+      /^Order\s+Details$/i.test(line) ||
+      /^Items?\s*$/i.test(line)
+    ) {
       inItems = true;
       continue;
     }
@@ -212,8 +297,6 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
     if (looksLikeNoiseItem(line)) continue;
     if (/sold by|condition:|asin|unit price|of:|shipment/i.test(line)) continue;
     if (/^quantity\b/i.test(line)) continue;
-
-    // Product title line — gather qty / price from the next few lines.
     if (!/[a-zA-Z]{3,}/.test(line) || line.length < 6) continue;
 
     let quantity = 1;
@@ -230,18 +313,14 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
       const unitMatch = next.match(/\bUnit\s*Price\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i);
       if (unitMatch) unitPrice = moneyFromMatch(unitMatch[1]);
 
-      const totalMatch = next.match(
-        /\b(?:Item\s*)?(?:Sub)?total\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i,
-      );
+      const totalMatch = next.match(/\b(?:Item\s*)?(?:Sub)?total\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i);
       if (totalMatch) lineTotal = moneyFromMatch(totalMatch[1]);
 
-      // Amazon often prints "$28.99" alone after quantity.
       if (!unitPrice && !lineTotal) {
         const lone = next.match(/^\$?\s*([\d,]+\.\d{2})$/);
         if (lone) unitPrice = moneyFromMatch(lone[1]);
       }
 
-      // Next product title ends this block.
       if (
         offset > 1 &&
         /[a-zA-Z]{6,}/.test(next) &&
@@ -254,9 +333,7 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
     }
 
     let amount = lineTotal;
-    if (!amount && unitPrice) {
-      amount = (Number(unitPrice) * quantity).toFixed(2);
-    }
+    if (!amount && unitPrice) amount = (Number(unitPrice) * quantity).toFixed(2);
 
     items.push({
       itemName: line.slice(0, 300),
@@ -264,15 +341,66 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
       lineAmount: amount ?? "",
       category: suggestSupplyCategory(line),
     });
-
     if (items.length >= 40) break;
   }
 
-  if (items.length > 0) return items;
+  return items;
+}
 
-  // Generic single-description invoices.
+/** Generic "Description .... $12.50" or "Name, qty, amount" rows from any vendor. */
+function extractGenericLineItems(lines: string[]): SupplyPurchaseLineItem[] {
+  const items: SupplyPurchaseLineItem[] = [];
+
+  for (const line of lines) {
+    if (looksLikeNoiseItem(line) || isSectionEnd(line)) continue;
+
+    const trailingMoney = line.match(/^(.+?)\s+[x×]?\s*(\d{1,5})?\s*\$?\s*([\d,]+\.\d{2})\s*$/i);
+    if (trailingMoney) {
+      const itemName = normalizeWhitespace(trailingMoney[1]!).replace(/[,\t]+$/, "").slice(0, 300);
+      if (itemName.length >= 4 && /[a-zA-Z]{3,}/.test(itemName) && !/^(total|subtotal|tax|shipping)/i.test(itemName)) {
+        items.push({
+          itemName,
+          quantity: Number(trailingMoney[2]) || 1,
+          lineAmount: moneyFromMatch(trailingMoney[3]) ?? "",
+          category: suggestSupplyCategory(itemName),
+        });
+        if (items.length >= 40) break;
+        continue;
+      }
+    }
+
+    const csvish = line.match(/^"?([^",\t]{4,200})"?\s*[,\t]\s*(\d{1,5})\s*[,\t]\s*\$?\s*([\d,]+\.\d{2})\s*$/);
+    if (csvish) {
+      const itemName = normalizeWhitespace(csvish[1]!).slice(0, 300);
+      if (!/^(item|description|product|name|sku)$/i.test(itemName)) {
+        items.push({
+          itemName,
+          quantity: Number(csvish[2]) || 1,
+          lineAmount: moneyFromMatch(csvish[3]) ?? "",
+          category: suggestSupplyCategory(itemName),
+        });
+        if (items.length >= 40) break;
+      }
+    }
+  }
+
+  return items;
+}
+
+function extractLineItems(text: string): SupplyPurchaseLineItem[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
+
+  const amazonStyle = extractAmazonStyleLineItems(lines);
+  if (amazonStyle.length > 0) return amazonStyle;
+
+  const generic = extractGenericLineItems(lines);
+  if (generic.length > 0) return generic;
+
   const titled = text.match(
-    /(?:Item(?:\s*Description)?|Description|Product)\s*[:\s]+([^\n]{4,300})/i,
+    /(?:Item(?:\s*Description|\s*Name)?|Description|Product|Nomenclature|SKU\s*Description)\s*:\s*([^\n]{4,300})/i,
   );
   if (titled?.[1] && !looksLikeNoiseItem(titled[1])) {
     const itemName = normalizeWhitespace(titled[1]).slice(0, 300);
@@ -311,17 +439,32 @@ function extractItemName(text: string): string | null {
   return null;
 }
 
-function detectSource(text: string, fileName?: string): string {
-  const haystack = `${text}\n${fileName ?? ""}`.toLowerCase();
-  if (/\bamazon\b/.test(haystack) || /\b1\d{2}-\d{7}-\d{7}\b/.test(text)) return "Amazon";
-  if (/\bebay\b/.test(haystack)) return "eBay";
-  if (/\betsy\b/.test(haystack)) return "Etsy";
-  if (/\bwalmart\b/.test(haystack)) return "Walmart";
-  if (/\bulta\b|\bhome depot\b|\bmcmaster\b/.test(haystack)) {
-    if (/\bhome depot\b/.test(haystack)) return "Home Depot";
-    if (/\bmcmaster\b/.test(haystack)) return "McMaster-Carr";
+export function detectSource(text: string, fileName?: string): string {
+  const haystack = `${text}\n${fileName ?? ""}`;
+
+  for (const vendor of KNOWN_VENDORS) {
+    if (vendor.pattern.test(haystack)) return vendor.label;
   }
-  return "Amazon";
+
+  const labeled = text.match(
+    /\b(?:Vendor|Merchant|Store|Sold\s*by|Seller|From|Supplier|Bill\s*From|Company)\s*[:\s]+([A-Za-z0-9][A-Za-z0-9 .,&'-]{1,60})/i,
+  );
+  if (labeled?.[1]) {
+    const cleaned = normalizeWhitespace(labeled[1])
+      .replace(/\s+(Inc\.?|LLC|Ltd\.?|Corp\.?)$/i, "")
+      .slice(0, 80);
+    if (cleaned.length >= 2 && !/^(date|total|invoice|order)$/i.test(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  // Filename tokens like "homedepot-receipt.pdf" or "uline_order.csv"
+  const base = (fileName ?? "").replace(/\.[^.]+$/, "").replace(/[_\-.]+/g, " ");
+  for (const vendor of KNOWN_VENDORS) {
+    if (vendor.pattern.test(base)) return vendor.label;
+  }
+
+  return "";
 }
 
 function localTodayIso(): string {
@@ -330,10 +473,10 @@ function localTodayIso(): string {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
-/** Pure text heuristics used by the PDF path and unit tests. */
+/** Pure text heuristics used by every file path and unit tests. */
 export function extractSupplyInvoiceFromText(
   text: string,
-  options: { fileName?: string; pageCount?: number } = {},
+  options: { fileName?: string; pageCount?: number; format?: SupplyReceiptFormat } = {},
 ): SupplyInvoiceParseResult {
   const cleaned = text.replace(/\u0000/g, " ");
   const warnings: string[] = [];
@@ -347,14 +490,13 @@ export function extractSupplyInvoiceFromText(
   const quantity = summary.quantity || extractQuantity(cleaned) || 1;
   const source = detectSource(cleaned, options.fileName);
 
-  if (lineItems.length === 0) warnings.push("Could not find a clear item name — enter it manually.");
+  if (lineItems.length === 0) warnings.push("Could not find a clear item name — enter nomenclature manually.");
   if (!totalAmount) warnings.push("Could not find a receipt total — enter the amount paid.");
   if (!purchasedAt) warnings.push("Could not find a purchase date — today's date was used.");
   if (!orderReference) warnings.push("No order or invoice number was found.");
+  if (!source) warnings.push("Vendor/source was not detected — set it before saving.");
   if (lineItems.length > 1) {
     warnings.push(`Found ${lineItems.length} line items — review the breakdown before saving.`);
-  } else if (lineItems.length === 1 && !lineItems[0]!.quantity) {
-    warnings.push("Quantity was not found — defaulted to 1.");
   }
 
   const resolvedItem = itemName ?? "";
@@ -386,47 +528,361 @@ export function extractSupplyInvoiceFromText(
     fields,
     warnings,
     pageCount: options.pageCount ?? 1,
+    format: options.format ?? "text",
   };
 }
 
-export async function parseSupplyInvoicePdf(
-  filePath: string,
-  fileName?: string,
-): Promise<SupplyInvoiceParseResult> {
-  const buffer = await fs.readFile(filePath);
-  if (buffer.length === 0) {
-    throw new Error("That PDF is empty");
-  }
-  if (buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
-    throw new Error("That file does not look like a PDF invoice");
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/(div|li|h\d)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"');
+}
+
+type CsvColumnMap = {
+  item?: number;
+  quantity?: number;
+  amount?: number;
+  vendor?: number;
+  date?: number;
+};
+
+function mapCsvColumns(header: string[]): CsvColumnMap {
+  const map: CsvColumnMap = {};
+  header.forEach((cell, index) => {
+    const key = cell.toLowerCase();
+    if (map.item === undefined && /^(item|description|product|nomenclature|name|sku)$/i.test(key)) {
+      map.item = index;
+    } else if (map.quantity === undefined && /^(qty|quantity|count|units?)$/i.test(key)) {
+      map.quantity = index;
+    } else if (map.amount === undefined && /^(amount|total|price|cost|line\s*total|unit\s*price)$/i.test(key)) {
+      map.amount = index;
+    } else if (map.vendor === undefined && /^(vendor|merchant|store|seller|source|supplier)$/i.test(key)) {
+      map.vendor = index;
+    } else if (map.date === undefined && /^(date|purchased|order\s*date|invoice\s*date)$/i.test(key)) {
+      map.date = index;
+    }
+  });
+  return map;
+}
+
+function extractLineItemsFromCsvRecords(records: string[][]): {
+  lineItems: SupplyPurchaseLineItem[];
+  vendor: string;
+  purchasedAt: string | null;
+  totalAmount: string | null;
+  text: string;
+} {
+  if (records.length === 0) {
+    return { lineItems: [], vendor: "", purchasedAt: null, totalAmount: null, text: "" };
   }
 
+  const header = records[0]!.map((cell) => normalizeWhitespace(String(cell ?? "")));
+  const columns = mapCsvColumns(header);
+  const hasMappedItem = columns.item !== undefined;
+  const start = hasMappedItem || header.some((cell) => /item|description|product|qty|amount|total/i.test(cell)) ? 1 : 0;
+  const lineItems: SupplyPurchaseLineItem[] = [];
+  let vendor = "";
+  let purchasedAt: string | null = null;
+  let total = 0;
+  const lines: string[] = [];
+
+  for (let index = start; index < records.length; index += 1) {
+    const row = records[index]!.map((cell) => normalizeWhitespace(String(cell ?? "")));
+    if (row.every((cell) => !cell)) continue;
+
+    const itemName = hasMappedItem
+      ? row[columns.item!] ?? ""
+      : row.find((cell) => /[a-zA-Z]{3,}/.test(cell) && !/^[\d.$,]+$/.test(cell)) ?? "";
+    if (!itemName || itemName.length < 2) continue;
+
+    const quantityRaw = columns.quantity !== undefined ? row[columns.quantity!] : "";
+    const quantity = Math.max(1, Number(quantityRaw) || 1);
+    const amountRaw =
+      columns.amount !== undefined
+        ? row[columns.amount!]
+        : row.find((cell) => /^\$?[\d,]+\.\d{2}$/.test(cell)) ?? "";
+    const lineAmount = moneyFromMatch(amountRaw) ?? "";
+    if (lineAmount) total += Number(lineAmount);
+
+    const rowVendor = columns.vendor !== undefined ? row[columns.vendor!] ?? "" : "";
+    if (!vendor && rowVendor) vendor = rowVendor;
+
+    const rowDate = columns.date !== undefined ? row[columns.date!] ?? "" : "";
+    if (!purchasedAt && rowDate) purchasedAt = parseLooseDate(rowDate);
+
+    lineItems.push({
+      itemName: itemName.slice(0, 300),
+      quantity,
+      lineAmount,
+      category: suggestSupplyCategory(itemName),
+    });
+
+    lines.push(
+      [
+        `Item: ${itemName}`,
+        `Quantity: ${quantity}`,
+        lineAmount ? `Amount: $${lineAmount}` : "",
+        rowVendor ? `Vendor: ${rowVendor}` : "",
+        rowDate ? `Date: ${rowDate}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    );
+    lines.push(`${itemName} ${quantity} $${lineAmount || "0.00"}`);
+  }
+
+  if (vendor) lines.unshift(`Vendor: ${vendor}`);
+  if (total > 0) lines.push(`Grand Total: $${total.toFixed(2)}`);
+
+  return {
+    lineItems: lineItems.slice(0, 40),
+    vendor,
+    purchasedAt,
+    totalAmount: total > 0 ? total.toFixed(2) : null,
+    text: lines.join("\n"),
+  };
+}
+
+function csvRecordsToText(records: string[][]): string {
+  return extractLineItemsFromCsvRecords(records).text || records.map((row) => row.join(", ")).join("\n");
+}
+
+async function extractTextFromPdf(buffer: Buffer): Promise<{ text: string; pageCount: number }> {
+  if (buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
+    throw new Error("That file does not look like a PDF");
+  }
   let parsed: { text?: string; numpages?: number };
   try {
     parsed = await pdfParse(buffer);
   } catch {
-    throw new Error("The PDF could not be read. Try exporting a text-based invoice, not a scanned image.");
+    throw new Error("The PDF could not be read. Try a text export, CSV, or a clearer photo.");
   }
-
-  const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
-  if (!text) {
-    throw new Error(
-      "No readable text was found in that PDF. Image-only scans cannot be extracted yet — enter the receipt manually.",
-    );
-  }
-
-  return extractSupplyInvoiceFromText(text, {
-    fileName,
+  return {
+    text: typeof parsed.text === "string" ? parsed.text.trim() : "",
     pageCount: typeof parsed.numpages === "number" ? parsed.numpages : 1,
+  };
+}
+
+async function extractTextFromCsv(buffer: Buffer): Promise<string> {
+  const raw = buffer.toString("utf8");
+  const delimiter = raw.includes("\t") && !raw.includes(",") ? "\t" : ",";
+  const records = parseCsv(raw, {
+    relax_column_count: true,
+    skip_empty_lines: true,
+    trim: true,
+    delimiter,
+  }) as string[][];
+  return csvRecordsToText(records);
+}
+
+async function extractTextFromSpreadsheet(buffer: Buffer): Promise<string> {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const chunks: string[] = [];
+  for (const sheetName of workbook.SheetNames.slice(0, 3)) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+    if (!csv.trim()) continue;
+    chunks.push(`Sheet: ${sheetName}\n${csv}`);
+  }
+  if (chunks.length === 0) return "";
+  // Re-run through CSV normalizer for labeled pairs.
+  const combined = chunks.join("\n\n");
+  try {
+    const records = parseCsv(combined.replace(/^Sheet:.*\n/gm, ""), {
+      relax_column_count: true,
+      skip_empty_lines: true,
+      trim: true,
+    }) as string[][];
+    const normalized = csvRecordsToText(records);
+    return normalized || combined;
+  } catch {
+    return combined;
+  }
+}
+
+async function extractTextFromImage(filePath: string): Promise<string> {
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("eng");
+  try {
+    const recognize = worker.recognize(filePath);
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("OCR timed out")), OCR_TIMEOUT_MS);
+    });
+    const result = await Promise.race([recognize, timeout]);
+    return String(result.data?.text ?? "").trim();
+  } finally {
+    await worker.terminate().catch(() => undefined);
+  }
+}
+
+export async function extractTextFromSupplyReceipt(
+  filePath: string,
+  fileName?: string,
+): Promise<{ text: string; pageCount: number; format: SupplyReceiptFormat }> {
+  const format = detectSupplyReceiptFormat(fileName ?? filePath);
+  const buffer = await fs.readFile(filePath);
+  if (buffer.length === 0) {
+    throw new Error("That file is empty");
+  }
+
+  switch (format) {
+    case "pdf": {
+      const pdf = await extractTextFromPdf(buffer);
+      return { ...pdf, format };
+    }
+    case "csv":
+      return { text: await extractTextFromCsv(buffer), pageCount: 1, format };
+    case "spreadsheet":
+      return { text: await extractTextFromSpreadsheet(buffer), pageCount: 1, format };
+    case "html":
+      return { text: stripHtml(buffer.toString("utf8")), pageCount: 1, format };
+    case "text":
+      return { text: buffer.toString("utf8"), pageCount: 1, format };
+    case "image": {
+      try {
+        const text = await extractTextFromImage(filePath);
+        return { text, pageCount: 1, format };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "OCR failed";
+        throw new Error(
+          `${message}. Try a PDF, CSV, or spreadsheet export, or enter the receipt manually.`,
+        );
+      }
+    }
+    default:
+      throw new Error(
+        "Unsupported file type. Use PDF, CSV, Excel, text, HTML, or a photo of the receipt.",
+      );
+  }
+}
+
+async function structuredRowsFromFile(
+  filePath: string,
+  format: SupplyReceiptFormat,
+): Promise<ReturnType<typeof extractLineItemsFromCsvRecords> | null> {
+  if (format !== "csv" && format !== "spreadsheet") return null;
+  const buffer = await fs.readFile(filePath);
+  try {
+    if (format === "csv") {
+      const raw = buffer.toString("utf8");
+      const delimiter = raw.includes("\t") && !raw.includes(",") ? "\t" : ",";
+      const records = parseCsv(raw, {
+        relax_column_count: true,
+        skip_empty_lines: true,
+        trim: true,
+        delimiter,
+      }) as string[][];
+      return extractLineItemsFromCsvRecords(records);
+    }
+
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return null;
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return null;
+    const records = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      raw: false,
+    }) as string[][];
+    return extractLineItemsFromCsvRecords(records.map((row) => row.map((cell) => String(cell ?? ""))));
+  } catch {
+    return null;
+  }
+}
+
+/** Prefill-only parse for any supported receipt/invoice file. */
+export async function parseSupplyReceipt(
+  filePath: string,
+  fileName?: string,
+): Promise<SupplyInvoiceParseResult> {
+  const format = detectSupplyReceiptFormat(fileName ?? filePath);
+  const structured = await structuredRowsFromFile(filePath, format);
+
+  if (structured && structured.lineItems.length > 0) {
+    const summary = summarizeSupplyLineItems(structured.lineItems);
+    const source = structured.vendor || detectSource(structured.text, fileName);
+    const warnings: string[] = [];
+    if (!source) warnings.push("Vendor/source was not detected — set it before saving.");
+    if (structured.lineItems.length > 1) {
+      warnings.push(`Found ${structured.lineItems.length} line items — review the breakdown before saving.`);
+    }
+    return {
+      fields: {
+        source,
+        orderReference: extractOrderReference(structured.text) ?? "",
+        itemName: summary.itemName,
+        category: summary.category,
+        quantity: summary.quantity,
+        totalAmount: structured.totalAmount ?? "",
+        purchasedAt: structured.purchasedAt ?? localTodayIso(),
+        notes: fileName ? `Imported from ${fileName}` : "",
+        lineItems: structured.lineItems,
+      },
+      warnings,
+      pageCount: 1,
+      format,
+    };
+  }
+
+  const extracted = await extractTextFromSupplyReceipt(filePath, fileName);
+  if (!extracted.text.trim()) {
+    const source = detectSource("", fileName);
+    return {
+      fields: {
+        source,
+        orderReference: "",
+        itemName: "",
+        category: "other",
+        quantity: 1,
+        totalAmount: "",
+        purchasedAt: localTodayIso(),
+        notes: fileName ? `Imported from ${fileName}` : "",
+        lineItems: [],
+      },
+      warnings: [
+        extracted.format === "image"
+          ? "No readable text was found in that photo — enter nomenclature, cost, and source manually."
+          : "No readable text was found — enter the purchase details manually.",
+      ],
+      pageCount: extracted.pageCount,
+      format: extracted.format,
+    };
+  }
+
+  const parsed = extractSupplyInvoiceFromText(extracted.text, {
+    fileName,
+    pageCount: extracted.pageCount,
+    format: extracted.format,
   });
+
+  if (extracted.format === "image") {
+    parsed.warnings = [
+      "Photo OCR is best-effort — double-check nomenclature, cost, and vendor.",
+      ...parsed.warnings,
+    ];
+  }
+
+  return parsed;
 }
 
-export function isPdfInvoiceFileName(fileName: string | undefined): boolean {
-  return pathExt(fileName) === ".pdf";
-}
-
-function pathExt(fileName: string | undefined): string {
-  if (!fileName) return "";
-  const index = fileName.lastIndexOf(".");
-  return index >= 0 ? fileName.slice(index).toLowerCase() : "";
+/** @deprecated Prefer parseSupplyReceipt for multi-format uploads. */
+export async function parseSupplyInvoicePdf(
+  filePath: string,
+  fileName?: string,
+): Promise<SupplyInvoiceParseResult> {
+  return parseSupplyReceipt(filePath, fileName);
 }

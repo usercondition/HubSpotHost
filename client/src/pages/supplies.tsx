@@ -60,13 +60,26 @@ function emptyLine(): LineDraft {
 
 function emptyForm(): SupplyForm {
   return {
-    source: "Amazon",
+    source: "",
     orderReference: "",
     totalAmount: "",
     purchasedAt: localToday(),
     notes: "",
     lineItems: [emptyLine()],
   };
+}
+
+const RECEIPT_ACCEPT =
+  ".pdf,.txt,.csv,.tsv,.xlsx,.xls,.html,.htm,.jpg,.jpeg,.png,.webp,.gif,application/pdf,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/html,image/*";
+
+function isSupportedReceiptFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return (
+    /\.(pdf|txt|text|csv|tsv|xlsx|xls|html|htm|jpe?g|png|webp|gif|bmp|tiff?)$/i.test(name) ||
+    /^(application\/pdf|text\/(plain|csv|html)|application\/vnd\.(ms-excel|openxmlformats)|image\/)/i.test(
+      file.type,
+    )
+  );
 }
 
 interface SupplySummary {
@@ -252,7 +265,7 @@ export default function Supplies() {
             : [],
       );
       setForm({
-        source: fields.source || "Amazon",
+        source: fields.source || "",
         orderReference: fields.orderReference || "",
         totalAmount: fields.totalAmount || "",
         purchasedAt: fields.purchasedAt || localToday(),
@@ -260,16 +273,16 @@ export default function Supplies() {
         lineItems,
       });
       toast({
-        title: lineItems.length > 1 ? "Invoice item breakdown filled in" : "Invoice fields filled in",
+        title: lineItems.length > 1 ? "Receipt item breakdown filled in" : "Receipt fields filled in",
         description:
           warnings.length > 0
             ? `${warnings[0]} Review the form before saving.`
-            : "Review the extracted fields, then save the purchase.",
+            : "Review nomenclature, cost, and vendor, then save the purchase.",
       });
     },
     onError: (error: Error) => {
       toast({
-        title: "Invoice could not be read",
+        title: "Receipt could not be read",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
         variant: "destructive",
       });
@@ -278,10 +291,10 @@ export default function Supplies() {
 
   const acceptInvoice = (file: File | undefined) => {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+    if (!isSupportedReceiptFile(file)) {
       toast({
-        title: "PDF invoices only",
-        description: "Drop an Amazon or supplier invoice saved as a PDF.",
+        title: "Unsupported receipt file",
+        description: "Use a PDF, CSV, Excel, text, HTML, or photo of the receipt.",
         variant: "destructive",
       });
       return;
@@ -387,12 +400,15 @@ export default function Supplies() {
             ) : null}
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="Log a supply purchase" description="Drop a PDF invoice to fill the item breakdown, or enter items by hand.">
+              <Panel
+                title="Log a supply purchase"
+                description="Drop any vendor receipt or invoice to fill nomenclature, cost, and source — or enter items by hand."
+              >
                 <div className="mb-5 space-y-2">
                   <input
                     ref={invoiceInputRef}
                     type="file"
-                    accept="application/pdf,.pdf"
+                    accept={RECEIPT_ACCEPT}
                     className="sr-only"
                     onChange={(event) => {
                       acceptInvoice(event.target.files?.[0]);
@@ -426,10 +442,10 @@ export default function Supplies() {
                       <FileUp className="h-5 w-5 text-primary" />
                     )}
                     <span className="mt-2 text-sm font-medium">
-                      {parseInvoice.isPending ? "Reading invoice…" : "Drop a PDF invoice here"}
+                      {parseInvoice.isPending ? "Reading receipt…" : "Drop a receipt or invoice here"}
                     </span>
                     <span className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                      Multi-item Amazon orders fill each line for review. Nothing is saved until you confirm.
+                      PDF, CSV, Excel, text, HTML, or a photo. Extracts items, cost, and vendor across Amazon and other suppliers. Nothing is saved until you confirm.
                     </span>
                   </button>
                 </div>
@@ -561,17 +577,17 @@ export default function Supplies() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="supply-source">Source</Label>
+                    <Label htmlFor="supply-source">Vendor / source</Label>
                     <Input
                       id="supply-source"
                       value={form.source}
                       onChange={(event) => setForm((current) => ({ ...current, source: event.target.value }))}
-                      placeholder="Amazon"
+                      placeholder="Amazon, Uline, ELEGOO, Home Depot…"
                       data-testid="input-supply-source"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="supply-reference">Amazon order number</Label>
+                    <Label htmlFor="supply-reference">Order / invoice number</Label>
                     <Input
                       id="supply-reference"
                       value={form.orderReference}
