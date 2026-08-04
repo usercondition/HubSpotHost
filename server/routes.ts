@@ -28,6 +28,7 @@ import { createPaidOrder } from "./lib/paid-orders";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const DEFAULT_INTAKE_ACCESS_CODE_HASH = "9c8d6cb9a08c8026d4009c956faac43be8eff7b959b5cc13e7eda5d475b0e47b";
+const INTAKE_BUILD_ID = "intake-auth-v5-20260803";
 
 function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === "production";
@@ -237,6 +238,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
       paidOrderIntake: {
         accessCodeConfigured: Boolean(intakeAccessCodeHash()),
+        buildId: INTAKE_BUILD_ID,
       },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",

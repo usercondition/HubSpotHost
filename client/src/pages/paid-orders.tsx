@@ -63,11 +63,42 @@ export default function PaidOrders() {
   const { toast } = useToast();
   const [conversation, setConversation] = useState("");
   const [accessCode, setAccessCode] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState<"unchecked" | "checking" | "ready" | "stale">(
+    "unchecked",
+  );
   const [analysis, setAnalysis] = useState<PaidOrderAnalysis | null>(null);
   const [draft, setDraft] = useState<PaidOrderDraft>(EMPTY_DRAFT);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
 
   const headers = () => ({ "x-paid-order-access-code": accessCode });
+
+  const checkLiveConnection = async () => {
+    setConnectionStatus("checking");
+    try {
+      const res = await apiRequest("GET", "/api/health");
+      const health = (await res.json()) as {
+        paidOrderIntake?: { accessCodeConfigured?: boolean; buildId?: string };
+      };
+      const ready =
+        health.paidOrderIntake?.accessCodeConfigured === true &&
+        health.paidOrderIntake?.buildId === "intake-auth-v5-20260803";
+      setConnectionStatus(ready ? "ready" : "stale");
+      toast({
+        title: ready ? "Connected to the current live intake service" : "This page is not on the current live intake service",
+        description: ready
+          ? "You can use the printed access code on this page."
+          : "Open the public Print Orders site directly, then return to Paid order intake.",
+        variant: ready ? "default" : "destructive",
+      });
+    } catch {
+      setConnectionStatus("stale");
+      toast({
+        title: "This page cannot reach the live intake service",
+        description: "Open the public Print Orders site directly, then return to Paid order intake.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const analyze = useMutation({
     mutationFn: async () => {
@@ -243,6 +274,23 @@ export default function PaidOrders() {
                   This code is not retained by the page. It protects the HubSpot record-creation action.
                 </p>
               </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={checkLiveConnection}
+                disabled={connectionStatus === "checking"}
+                className="w-full"
+                data-testid="button-check-live-intake-connection"
+              >
+                {connectionStatus === "checking" ? "Checking live connection..." : "Check live intake connection"}
+              </Button>
+
+              {connectionStatus === "ready" ? (
+                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400" data-testid="text-live-intake-ready">
+                  Connected to current live intake service.
+                </p>
+              ) : null}
 
               <Button
                 type="button"
