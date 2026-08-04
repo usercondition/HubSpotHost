@@ -90,6 +90,21 @@ export const DEFAULT_FLEET_PRINTERS: SeedPrinter[] = [
     recommendedFepLayers: 25_000,
   },
   {
+    name: "Phrozen Mega",
+    brand: "Phrozen",
+    model: "Mega 8K",
+    aliases: [
+      "Phrozen Mega",
+      "Phrozen Mega 8K",
+      "Phrozen Sonic Mega 8K",
+      "Sonic Mega 8K",
+      "PhrozenSonicMega8K",
+    ],
+    sortOrder: 65,
+    recommendedFepHours: 80,
+    recommendedFepLayers: 25_000,
+  },
+  {
     name: "Mighty 8K OLD",
     brand: "ELEGOO",
     model: "Mighty 8K",
@@ -181,15 +196,23 @@ export function ensureDefaultPrinters(): Printer[] {
   return db.select().from(printers).orderBy(asc(printers.sortOrder), asc(printers.name)).all();
 }
 
-function matchTokens(profile: string, candidate: string): boolean {
+export function matchTokens(profile: string, candidate: string): boolean {
   const profileKey = normalizePrinterKey(profile);
   const candidateKey = normalizePrinterKey(candidate);
   if (!profileKey || !candidateKey) return false;
   if (profileKey === candidateKey) return true;
-  // Distinctive short tokens like NEWX1 / NEWX2 must match as whole tokens.
-  if (/^[a-z]*\d+[a-z0-9]*$/.test(candidateKey) || candidateKey.length <= 8) {
-    return profileKey.split(" ").includes(candidateKey) || profileKey === candidateKey;
+
+  const candidateTokens = candidateKey.split(" ").filter(Boolean);
+  // Single short tokens like NEWX1 must match as whole words so they do not
+  // accidentally hit every Mighty 8K plate. Multi-word aliases (e.g. "mega 8k",
+  // "phrozen mega") use substring matching.
+  if (candidateTokens.length === 1) {
+    const token = candidateTokens[0]!;
+    if (/^[a-z]*\d+[a-z0-9]*$/.test(token) || token.length <= 8) {
+      return profileKey.split(" ").includes(token);
+    }
   }
+
   return profileKey.includes(candidateKey) || candidateKey.includes(profileKey);
 }
 

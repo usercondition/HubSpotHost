@@ -169,13 +169,21 @@ test("machine-name matching prefers distinctive aliases like NEWX1", () => {
   const fleet = ensureDefaultPrinters();
   const newx1 = fleet.find((printer) => printer.name === "Mighty 8K NEWX1")!;
   const mega = fleet.find((printer) => printer.name === "MEGA 8K")!;
+  const phrozen = fleet.find((printer) => printer.name === "Phrozen Mega")!;
   const heygears = fleet.find((printer) => printer.name === "HeyGears Reflex Turbo")!;
 
   assert.equal(matchPrinterId("Mighty 8K NEWX1", fleet), newx1.id);
   assert.equal(matchPrinterId("ELEGOO Mega 8K", fleet), mega.id);
+  assert.equal(matchPrinterId("Phrozen Mega", fleet), phrozen.id);
+  assert.equal(matchPrinterId("Phrozen Sonic Mega 8K", fleet), phrozen.id);
   assert.equal(matchPrinterId("Reflex RS Turbo", fleet), heygears.id);
   assert.equal(matchPrinterId("totally unknown box", fleet), null);
   assert.equal(normalizePrinterKey("Mighty  8K!!! NEWX1"), "mighty 8k newx1");
+});
+
+test("default fleet includes Phrozen Mega", () => {
+  const names = ensureDefaultPrinters().map((printer) => printer.name);
+  assert.ok(names.includes("Phrozen Mega"));
 });
 
 test("ULTX zip metadata is harvested into print metrics", () => {
