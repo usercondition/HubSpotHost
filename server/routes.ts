@@ -63,7 +63,9 @@ function rawBodyString(req: Request): string {
  * through PUBLIC_BASE_URL, while these alternatives exist solely to pinpoint
  * reverse-proxy path issues during setup. They are never accepted as valid.
  */
-function v3UriDiagnosticCandidates(req: Request): Array<{ label: string; uri: string }> {
+function v3SignatureDiagnosticCandidates(
+  req: Request,
+): Array<{ label: string; uri: string; body: string }> {
   const headers = req.headers;
   const originalUrl = req.originalUrl;
   const configuredBase = (process.env.PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
@@ -75,7 +77,7 @@ function v3UriDiagnosticCandidates(req: Request): Array<{ label: string; uri: st
     req.get("host") ||
     "localhost";
   const publicOrigin = `${forwardedProto}://${forwardedHost}`;
-  const candidates = [
+  const uriCandidates = [
     {
       label: "configured-public-base",
       uri: buildRequestUri({
@@ -101,9 +103,22 @@ function v3UriDiagnosticCandidates(req: Request): Array<{ label: string; uri: st
       }),
     },
   ];
+  const bodyCandidates = [
+    { label: "raw-body", body: rawBodyString(req) },
+    { label: "canonical-json", body: JSON.stringify(req.body) },
+  ].filter(
+    (candidate, index, all) => all.findIndex((item) => item.body === candidate.body) === index,
+  );
+  const candidates = uriCandidates.flatMap((uriCandidate) =>
+    bodyCandidates.map((bodyCandidate) => ({
+      label: `${uriCandidate.label}/${bodyCandidate.label}`,
+      uri: uriCandidate.uri,
+      body: bodyCandidate.body,
+    })),
+  );
 
   return candidates.filter(
-    (candidate, index, all) => all.findIndex((item) => item.uri === candidate.uri) === index,
+    (candidate, index, all) => all.findIndex((item) => item.uri === candidate.uri && item.body === candidate.body) === index,
   );
 }
 
@@ -183,17 +198,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ? findMatchingV3UriProfile({
               clientSecret: secret,
               method: req.method,
-              rawBody: rawBodyString(req),
               timestamp: headers["x-hubspot-request-timestamp"] as string | undefined,
               signature: headers["x-hubspot-signature-v3"] as string | undefined,
-              candidates: v3UriDiagnosticCandidates(req),
+              candidates: v3SignatureDiagnosticCandidates(req),
             })
           : null;
       const diagnosticReason =
         verification.reason === "v3 signature mismatch"
           ? matchingUriProfile
-            ? `v3 signature matches alternate URI profile: ${matchingUriProfile}`
-            : "v3 signature mismatch; no known public URI profile matched"
+            ? `v3 signature matches alternate request profile: ${matchingUriProfile}`
+            : "v3 signature mismatch; no known request profile matched"
           : verification.reason;
       recordWebhookDiagnostic({
         result: "rejected",

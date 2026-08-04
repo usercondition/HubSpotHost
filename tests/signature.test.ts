@@ -106,24 +106,32 @@ test("v3 URI diagnostic identifies a matching legitimate proxy profile", () => {
     findMatchingV3UriProfile({
       clientSecret: secret,
       method: "POST",
-      rawBody,
       timestamp: ts,
       signature: expected,
       candidates: [
-        { label: "configured-public-base", uri: "https://calc.example.com/port/5000/api/webhooks/hubspot" },
-        { label: "direct-public-path", uri: directUri },
+        {
+          label: "configured-public-base/raw-body",
+          uri: "https://calc.example.com/port/5000/api/webhooks/hubspot",
+          body: rawBody,
+        },
+        { label: "direct-public-path/raw-body", uri: directUri, body: rawBody },
       ],
     }),
-    "direct-public-path",
+    "direct-public-path/raw-body",
   );
   assert.equal(
     findMatchingV3UriProfile({
       clientSecret: secret,
       method: "POST",
-      rawBody,
       timestamp: ts,
       signature: expected,
-      candidates: [{ label: "other", uri: "https://other.example.com/api/webhooks/hubspot" }],
+      candidates: [
+        {
+          label: "other/canonical-json",
+          uri: "https://other.example.com/api/webhooks/hubspot",
+          body: rawBody,
+        },
+      ],
     }),
     null,
   );

@@ -110,16 +110,15 @@ export function verifyV3(params: {
 export function findMatchingV3UriProfile(params: {
   clientSecret: string;
   method: string;
-  rawBody: string;
   timestamp: string | undefined;
   signature: string | undefined;
-  candidates: Array<{ label: string; uri: string }>;
+  candidates: Array<{ label: string; uri: string; body: string }>;
 }): string | null {
-  const { clientSecret, method, rawBody, timestamp, signature, candidates } = params;
+  const { clientSecret, method, timestamp, signature, candidates } = params;
   if (!clientSecret || !timestamp || !signature) return null;
 
   for (const candidate of candidates) {
-    const expected = computeV3Signature(clientSecret, method, candidate.uri, rawBody, timestamp);
+    const expected = computeV3Signature(clientSecret, method, candidate.uri, candidate.body, timestamp);
     if (safeEqual(expected, signature.trim())) return candidate.label;
   }
   return null;
