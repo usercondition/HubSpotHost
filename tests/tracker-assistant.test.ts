@@ -131,8 +131,9 @@ test("tracker assistant lists plate gaps with attach actions", () => {
   assert.ok(answer.actions.every((action) => action.href.includes("prints") || action.href === "/prints"));
 });
 
-test("tracker assistant explains incomplete costs with Queue deep links", () => {
+test("tracker assistant explains incomplete costs with Print files links", () => {
   const answer = answerTrackerQuestionRules("What is missing costs?", sampleContext());
   assert.match(answer.reply, /Display base/);
-  assert.ok(answer.actions.some((action) => action.href.includes("/queue?dealId=d2")));
+  assert.match(answer.reply, /confirm before any HubSpot write/i);
+  assert.ok(answer.actions.some((action) => action.href.includes("/prints?dealId=d2")));
 });

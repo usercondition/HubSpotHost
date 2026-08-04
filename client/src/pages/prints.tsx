@@ -100,6 +100,28 @@ interface StagedPrintFile {
   printerMatch?: PrinterMatchInfo;
 }
 
+interface CostFieldProposal {
+  field: "material" | "labor" | "packaging" | "shipping";
+  property: string;
+  label: string;
+  proposed: number | null;
+  current: number | null;
+  source: string;
+  willWrite: boolean;
+  skipReason: string | null;
+}
+
+interface CostDefaultsPreview {
+  dealId: string;
+  dealName: string;
+  plateCount: number;
+  totalPrintHours: number | null;
+  totalResinCost: number | null;
+  laborRatePerHour: number;
+  packagingAmount: number;
+  fields: CostFieldProposal[];
+}
+
 function formatHours(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return "Not reported";
   const hours = Math.floor(seconds / 3_600);
@@ -245,6 +267,15 @@ export default function Prints() {
   const [resinPrice, setResinPrice] = useState("");
   const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
   const [logsPathCopied, setLogsPathCopied] = useState(false);
+  const [includeMaterial, setIncludeMaterial] = useState(true);
+  const [includeLabor, setIncludeLabor] = useState(false);
+  const [includePackaging, setIncludePackaging] = useState(true);
+  const [includeShipping, setIncludeShipping] = useState(false);
+  const [overwriteCosts, setOverwriteCosts] = useState(false);
+  const [laborRate, setLaborRate] = useState("25");
+  const [packagingAmount, setPackagingAmount] = useState("5");
+  const [shippingAmount, setShippingAmount] = useState("");
+  const [costPreview, setCostPreview] = useState<CostDefaultsPreview | null>(null);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -505,6 +536,7 @@ export default function Prints() {
       setStaged(null);
       setAttachPrinterId("");
       setIncludeAttached(true);
+      setCostPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
@@ -589,8 +621,56 @@ export default function Prints() {
     promptLogsRefreshThenAnalyze(plate, sliceLogs[0] ?? null);
   };
 
+  const costDefaultsBody = () => ({
+    dealId,
+    laborRatePerHour: laborRate || null,
+    packagingAmount: packagingAmount || null,
+    shippingAmount: includeShipping ? shippingAmount || null : null,
+    includeMaterial,
+    includeLabor,
+    includePackaging,
+    includeShipping,
+    overwriteExisting: overwriteCosts,
+  });
+
+  const previewCosts = useMutation({
+    mutationFn: async () => {
+      if (!dealId) throw new Error("Choose a Print Order first");
+      const response = await apiRequest("POST", "/api/prints/cost-defaults/preview", costDefaultsBody(), { headers });
+      return (await response.json()) as { ok: true; preview: CostDefaultsPreview };
+    },
+    onSuccess: ({ preview }) => {
+      setCostPreview(preview);
+      setLaborRate(String(preview.laborRatePerHour));
+      setPackagingAmount(String(preview.packagingAmount));
+    },
+    onError: (error: Error) => {
+      setCostPreview(null);
+      toast({ title: "Could not preview cost defaults", description: error.message.replace(/^\d+:\s*/, "").slice(0, 240), variant: "destructive" });
+    },
+  });
+
+  const applyCosts = useMutation({
+    mutationFn: async () => {
+      if (!dealId) throw new Error("Choose a Print Order first");
+      const response = await apiRequest("POST", "/api/prints/cost-defaults/apply", { ...costDefaultsBody(), confirm: true }, { headers });
+      return (await response.json()) as { ok: true; preview: CostDefaultsPreview; message: string };
+    },
+    onSuccess: ({ preview, message }) => {
+      setCostPreview(preview);
+      toast({ title: "Cost defaults written", description: message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Cost defaults were not written", description: error.message.replace(/^\d+:\s*/, "").slice(0, 240), variant: "destructive" });
+    },
+  });
+
   const candidates = prints.data?.candidates ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+  const selectedHasPlates =
+    Boolean(selected?.hasPrintFile) ||
+    (prints.data?.records ?? []).some((record) => record.hubspotDealId === dealId);
+  const writableCostCount = costPreview?.fields.filter((field) => field.willWrite).length ?? 0;
 
   const plateHistoryRecords = useMemo(() => {
     const records = prints.data?.records ?? [];
@@ -1012,7 +1092,10 @@ export default function Prints() {
                     <select
                       id="print-order-select"
                       value={dealId}
-                      onChange={(event) => setDealId(event.target.value)}
+                      onChange={(event) => {
+                        setDealId(event.target.value);
+                        setCostPreview(null);
+                      }}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       data-testid="select-print-order"
                     >
@@ -1130,6 +1213,70 @@ export default function Prints() {
                 </p>
               </section>
             )}
+
+            {dealId ? (
+              <Panel
+                title="3. Apply cost defaults"
+                description="Revenue is the quoted order amount. Fill cash-cost fields from plates and simple defaults; labor stays off by default because it is usually already in the quote."
+              >
+                <div className="space-y-4" data-testid="panel-cost-defaults">
+                  {!selectedHasPlates ? (
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Attach at least one plate first so material can be estimated from its resin data.
+                    </p>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-packaging">Packaging default ($)</Label>
+                      <Input id="cost-packaging" inputMode="decimal" value={packagingAmount} onChange={(event) => { setPackagingAmount(event.target.value); setCostPreview(null); }} data-testid="input-cost-packaging" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-shipping">Shipping postage ($)</Label>
+                      <Input id="cost-shipping" inputMode="decimal" value={shippingAmount} placeholder="Paste from Pirate Ship" disabled={!includeShipping} onChange={(event) => { setShippingAmount(event.target.value); setCostPreview(null); }} data-testid="input-cost-shipping" />
+                    </div>
+                  </div>
+                  {([
+                    ["material", includeMaterial, setIncludeMaterial, "Material from plate resin estimates"],
+                    ["packaging", includePackaging, setIncludePackaging, "Packaging flat default"],
+                    ["shipping", includeShipping, setIncludeShipping, "Shipping (paste postage)"],
+                    ["labor", includeLabor, setIncludeLabor, "Optional labor as hours × rate (off by default)"],
+                  ] as const).map(([key, checked, setChecked, label]) => (
+                    <label key={key} className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
+                      <input type="checkbox" checked={checked} onChange={(event) => { setChecked(event.target.checked); setCostPreview(null); }} className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring" data-testid={`checkbox-cost-${key}`} />
+                      <span className="text-muted-foreground">{label}</span>
+                    </label>
+                  ))}
+                  {includeLabor ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cost-labor-rate">Labor rate ($/hr)</Label>
+                      <Input id="cost-labor-rate" inputMode="decimal" value={laborRate} onChange={(event) => { setLaborRate(event.target.value); setCostPreview(null); }} data-testid="input-cost-labor-rate" />
+                    </div>
+                  ) : null}
+                  <label className="flex items-start gap-2.5 rounded-md bg-muted/45 p-3 text-xs leading-5">
+                    <input type="checkbox" checked={overwriteCosts} onChange={(event) => { setOverwriteCosts(event.target.checked); setCostPreview(null); }} className="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-ring" data-testid="checkbox-cost-overwrite" />
+                    <span className="text-muted-foreground">Overwrite existing HubSpot cost fields. Leave off to fill blanks only.</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" onClick={() => previewCosts.mutate()} disabled={previewCosts.isPending} data-testid="button-preview-cost-defaults">
+                      {previewCosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Preview proposals
+                    </Button>
+                    <Button type="button" onClick={() => applyCosts.mutate()} disabled={!costPreview || writableCostCount === 0 || applyCosts.isPending} data-testid="button-apply-cost-defaults">
+                      {applyCosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}Confirm write to HubSpot
+                    </Button>
+                  </div>
+                  {costPreview ? (
+                    <ul className="space-y-2 rounded-md border border-border bg-muted/20 p-3" data-testid="panel-cost-preview">
+                      {costPreview.fields.map((field) => (
+                        <li key={field.field} className="flex flex-wrap items-baseline justify-between gap-2 text-xs" data-testid={`row-cost-proposal-${field.field}`}>
+                          <span><span className="font-medium">{field.label}</span><span className="ml-2 text-muted-foreground">{field.source}</span></span>
+                          <span className={field.willWrite ? "text-chart-4" : "text-muted-foreground"}>{field.willWrite ? `Will write $${field.proposed?.toFixed(2)}` : field.skipReason || "Skipped"}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </Panel>
+            ) : null}
 
             <Panel
               title="Recent plate history"

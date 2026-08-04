@@ -139,8 +139,8 @@ export function attentionNextStep(item: {
   }
   if (issue.includes("cost")) {
     return {
-      href: queueDealHref(item.dealId),
-      label: "Enter costs in Queue",
+      href: printsDealHref(item.dealId),
+      label: "Apply cost defaults",
       external: false,
     };
   }

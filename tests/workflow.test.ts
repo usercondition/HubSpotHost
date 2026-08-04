@@ -31,7 +31,7 @@ test("HubSpot contact deep links use object type 0-1", () => {
   assert.equal(hubspotContactHref("51", null), "https://app.hubspot.com/");
 });
 
-test("attention next steps route plates in-app and costs to the queue", () => {
+test("attention next steps route plates and costs into Print files", () => {
   assert.deepEqual(attentionNextStep({ dealId: "1", issue: "No CTB plates attached" }), {
     href: printsDealHref("1"),
     label: "Attach plates",
@@ -40,8 +40,8 @@ test("attention next steps route plates in-app and costs to the queue", () => {
   assert.deepEqual(
     attentionNextStep({ dealId: "2", issue: "Cost details incomplete", portalId: "99" }),
     {
-      href: "/queue?dealId=2",
-      label: "Enter costs in Queue",
+      href: printsDealHref("2"),
+      label: "Apply cost defaults",
       external: false,
     },
   );
