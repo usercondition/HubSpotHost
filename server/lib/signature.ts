@@ -6,7 +6,9 @@
  *     `method + decoded request URI + rawBody + timestamp`. The timestamp must be
  *     no older than 5 minutes.
  *
- * Verification is only enforced when a secret is configured.
+ * HubSpot private-app subscriptions document the v1 signature for webhook
+ * validation. Some deliveries also include v3 headers, so a valid v1
+ * signature is accepted as a supported compatibility path.
  */
 import crypto from "node:crypto";
 
@@ -136,8 +138,9 @@ export interface RequestFacts {
 }
 
 /**
- * Enforce signing only when a secret exists. Prefers v3 when its header is
- * present, otherwise falls back to v1.
+ * Enforce signing only when a secret exists. Validate v3 when it is present,
+ * then accept a valid v1 signature as a compatibility path for private-app
+ * webhooks. The legacy private-app webhook guide explicitly documents v1.
  */
 export function verifyWebhookRequest(
   clientSecret: string,
@@ -152,29 +155,43 @@ export function verifyWebhookRequest(
       reason: "signature verification not configured",
     };
   }
+  let v3Failure: VerificationResult | null = null;
   if (facts.signatureV3) {
-    return {
-      enforced: true,
-      ...verifyV3({
-        clientSecret,
-        method: facts.method,
-        uri: facts.uri,
-        rawBody: facts.rawBody,
-        timestamp: facts.timestamp,
-        signature: facts.signatureV3,
-        now,
-      }),
-    };
+    const v3Result = verifyV3({
+      clientSecret,
+      method: facts.method,
+      uri: facts.uri,
+      rawBody: facts.rawBody,
+      timestamp: facts.timestamp,
+      signature: facts.signatureV3,
+      now,
+    });
+    if (v3Result.valid) {
+      return {
+        enforced: true,
+        ...v3Result,
+      };
+    }
+    v3Failure = v3Result;
   }
   if (facts.signatureV1) {
-    return {
-      enforced: true,
-      ...verifyV1({
-        clientSecret,
-        rawBody: facts.rawBody,
-        signature: facts.signatureV1,
-      }),
-    };
+    const v1Result = verifyV1({
+      clientSecret,
+      rawBody: facts.rawBody,
+      signature: facts.signatureV1,
+    });
+    if (v1Result.valid) {
+      return {
+        enforced: true,
+        valid: true,
+        version: "v1",
+        reason: v3Failure ? "v1 signature valid (private-app compatibility)" : v1Result.reason,
+      };
+    }
+    return { enforced: true, ...v1Result };
+  }
+  if (v3Failure) {
+    return { enforced: true, ...v3Failure };
   }
   return {
     enforced: true,

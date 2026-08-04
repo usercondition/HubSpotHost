@@ -144,7 +144,7 @@ test("verification is skipped entirely when no secret is configured", () => {
   assert.match(r.reason, /not configured/);
 });
 
-test("v3 header takes precedence over v1 when both are present", () => {
+test("a valid v3 signature is accepted when both v3 and v1 are present", () => {
   const ts = String(Date.now());
   const v3 = computeV3Signature(secret, "POST", uri, rawBody, ts);
   const r = verifyWebhookRequest(secret, {
@@ -157,6 +157,21 @@ test("v3 header takes precedence over v1 when both are present", () => {
   });
   assert.equal(r.version, "v3");
   assert.equal(r.valid, true);
+});
+
+test("a valid v1 private-app signature is accepted when v3 does not match", () => {
+  const ts = String(Date.now());
+  const r = verifyWebhookRequest(secret, {
+    method: "POST",
+    uri,
+    rawBody,
+    signatureV1: computeV1Signature(secret, rawBody),
+    signatureV3: "not-the-v3-signature",
+    timestamp: ts,
+  });
+  assert.equal(r.version, "v1");
+  assert.equal(r.valid, true);
+  assert.match(r.reason, /private-app compatibility/);
 });
 
 test("v1 header is used when only v1 is present", () => {
