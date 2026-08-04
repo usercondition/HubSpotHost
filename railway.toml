@@ -1,8 +1,7 @@
 [build]
 builder = "NIXPACKS"
-# The app build needs Vite/esbuild/tsx. Keep the install in Railway's install
-# phase, rather than running npm ci a second time during build.
-installCommand = "npm ci --include=dev"
+# The Nixpacks install phase is defined in nixpacks.toml so build tooling is
+# included even when the service runs with NODE_ENV=production.
 buildCommand = "npm run build"
 
 [deploy]

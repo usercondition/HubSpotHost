@@ -1,0 +1,5 @@
+# Railway is using Nixpacks for this service. Its default npm install omits
+# devDependencies when the service sets NODE_ENV=production, but Vite, esbuild,
+# and tsx are needed to compile the application during the build phase.
+[phases.install]
+cmds = ["npm ci --include=dev"]
