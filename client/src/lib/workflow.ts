@@ -58,9 +58,9 @@ export function attentionNextStep(item: {
   }
   if (issue.includes("cost")) {
     return {
-      href: hubspotDealHref(item.dealId, item.portalId),
-      label: "Update costs in HubSpot",
-      external: true,
+      href: printsDealHref(item.dealId),
+      label: "Apply cost defaults",
+      external: false,
     };
   }
   return {

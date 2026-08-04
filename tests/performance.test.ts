@@ -96,6 +96,35 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.intake.pendingReview, 1);
 });
 
+test("blank labor is not incomplete when cash costs are filled", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 0, expired: 0 },
+    attachedPrintDealIds: ["quoted"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "quoted",
+        properties: {
+          dealname: "Quote includes labor",
+          dealstage: "deposit",
+          createdate: "2026-08-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "150",
+          print_material_cost: "18",
+          print_labor_cost: "",
+          print_packaging_cost: "5",
+          print_actual_shipping_cost: "9",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.summary.revenue, 150);
+  assert.equal(snapshot.summary.grossProfit, 118);
+  assert.ok(!snapshot.attention.some((item) => item.issue === "Cost details incomplete"));
+});
+
 test("attached print plates suppress the missing-plate attention item", () => {
   const snapshot = buildPerformanceSnapshot({
     now: new Date("2026-08-04T12:00:00.000Z"),

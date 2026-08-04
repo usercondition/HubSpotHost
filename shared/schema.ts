@@ -641,6 +641,46 @@ export const attachPrintFileSchema = z.object({
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
 
+const optionalNonNegativeAmount = z
+  .union([z.number(), z.string()])
+  .optional()
+  .nullable()
+  .transform((value, ctx) => {
+    if (value === undefined || value === null || value === "") return null;
+    const parsed = typeof value === "number" ? value : Number(String(value).replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter a valid non-negative amount" });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+export const costDefaultsPreviewSchema = z.object({
+  dealId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{1,20}$/, "Select a valid active Print Order"),
+  laborRatePerHour: optionalNonNegativeAmount,
+  packagingAmount: optionalNonNegativeAmount,
+  shippingAmount: optionalNonNegativeAmount,
+  includeMaterial: z.boolean().optional().default(true),
+  /** Off by default — quotes usually already include labor in the order amount. */
+  includeLabor: z.boolean().optional().default(false),
+  includePackaging: z.boolean().optional().default(true),
+  includeShipping: z.boolean().optional().default(false),
+  overwriteExisting: z.boolean().optional().default(false),
+});
+
+export type CostDefaultsPreviewInput = z.infer<typeof costDefaultsPreviewSchema>;
+
+export const costDefaultsApplySchema = costDefaultsPreviewSchema.extend({
+  confirm: z.literal(true, {
+    message: "Confirm before writing cost defaults to HubSpot",
+  }),
+});
+
+export type CostDefaultsApplyInput = z.infer<typeof costDefaultsApplySchema>;
+
 export const upsertResinProfileSchema = z.object({
   name: trimmed(200).min(2, "Enter the resin name"),
   amazonAsin: trimmed(20)

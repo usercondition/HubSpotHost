@@ -1,11 +1,15 @@
 /**
  * Print Orders profitability math.
  *
- *   Gross Profit      = amount - material - labor - packaging - shipping
- *   Margin Percentage = (gross profit / amount) * 100, or 0 when amount <= 0
+ *   Revenue (order amount) = HubSpot deal `amount` (the quoted price)
+ *   Gross Profit           = amount - material - labor - packaging - shipping
+ *   Margin Percentage      = (gross profit / amount) * 100, or 0 when amount <= 0
  *
  * Blank / missing / non-numeric inputs are treated as zero. Both outputs are
  * rounded to 2 decimals.
+ *
+ * When labor is already included in the quote, leave `print_labor_cost` blank
+ * (zero) so it is not subtracted again from revenue.
  */
 
 export interface RawDealInputs {

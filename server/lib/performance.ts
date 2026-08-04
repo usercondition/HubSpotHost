@@ -155,9 +155,9 @@ export function buildPerformanceSnapshot(input: {
     const modifiedAt = asDate(props.hs_lastmodifieddate);
     const dealName = props.dealname?.trim() || `Deal ${deal.id}`;
     const displayStage = stageName(stageId, stageMap);
+    // Labor is usually included in the quoted order amount, so blank labor is not incomplete.
     const missingCosts = [
       props.print_material_cost,
-      props.print_labor_cost,
       props.print_packaging_cost,
       props.print_actual_shipping_cost,
     ].some(isBlank);
@@ -213,7 +213,7 @@ export function buildPerformanceSnapshot(input: {
         dealName,
         stage: displayStage,
         issue: "Cost details incomplete",
-        detail: "Add material, labor, packaging, and shipping costs as they become known",
+        detail: "Add material, packaging, and shipping costs as they become known (labor stays in the quoted order amount)",
         severity: "neutral",
       });
     }

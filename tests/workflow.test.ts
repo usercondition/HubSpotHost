@@ -19,7 +19,7 @@ test("HubSpot deal deep links require a portal id", () => {
   );
 });
 
-test("attention next steps route plates in-app and costs to the deal record", () => {
+test("attention next steps route plates and costs into Print files", () => {
   assert.deepEqual(attentionNextStep({ dealId: "1", issue: "No CTB plates attached" }), {
     href: printsDealHref("1"),
     label: "Attach plates",
@@ -28,9 +28,9 @@ test("attention next steps route plates in-app and costs to the deal record", ()
   assert.deepEqual(
     attentionNextStep({ dealId: "2", issue: "Cost details incomplete", portalId: "99" }),
     {
-      href: hubspotDealHref("2", "99"),
-      label: "Update costs in HubSpot",
-      external: true,
+      href: printsDealHref("2"),
+      label: "Apply cost defaults",
+      external: false,
     },
   );
 });
