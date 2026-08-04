@@ -104,8 +104,21 @@ CREATE TABLE IF NOT EXISTS print_file_records (
   print_time_seconds INTEGER,
   resin_volume_ml TEXT,
   resin_mass_g TEXT,
+  resin_cost TEXT,
+  resin_density_g_per_ml TEXT,
   layer_count INTEGER,
   layer_height_mm TEXT,
+  model_height_mm TEXT,
+  exposure_seconds TEXT,
+  bottom_exposure_seconds TEXT,
+  light_off_seconds TEXT,
+  bottom_light_off_seconds TEXT,
+  bottom_layer_count INTEGER,
+  lift_distance_mm TEXT,
+  lift_speed_mm_per_min TEXT,
+  bottom_lift_distance_mm TEXT,
+  bottom_lift_speed_mm_per_min TEXT,
+  retract_speed_mm_per_min TEXT,
   resolution_x INTEGER,
   resolution_y INTEGER,
   printer_profile TEXT,
@@ -115,6 +128,35 @@ CREATE TABLE IF NOT EXISTS print_file_records (
 CREATE INDEX IF NOT EXISTS print_file_records_deal_id_idx
   ON print_file_records (hubspot_deal_id, attached_at DESC);
 `;
+
+/** Columns added after the first Print Files release. Safe on existing Railway volumes. */
+const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
+  ["resin_cost", "TEXT"],
+  ["resin_density_g_per_ml", "TEXT"],
+  ["model_height_mm", "TEXT"],
+  ["exposure_seconds", "TEXT"],
+  ["bottom_exposure_seconds", "TEXT"],
+  ["light_off_seconds", "TEXT"],
+  ["bottom_light_off_seconds", "TEXT"],
+  ["bottom_layer_count", "INTEGER"],
+  ["lift_distance_mm", "TEXT"],
+  ["lift_speed_mm_per_min", "TEXT"],
+  ["bottom_lift_distance_mm", "TEXT"],
+  ["bottom_lift_speed_mm_per_min", "TEXT"],
+  ["retract_speed_mm_per_min", "TEXT"],
+];
+
+function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (
+      sqlite.prepare("PRAGMA table_info(print_file_records)").all() as Array<{ name: string }>
+    ).map((row) => row.name),
+  );
+  for (const [name, type] of PRINT_FILE_RECORD_COLUMN_MIGRATIONS) {
+    if (existing.has(name)) continue;
+    sqlite.exec(`ALTER TABLE print_file_records ADD COLUMN ${name} ${type}`);
+  }
+}
 
 let db: BetterSQLite3Database | null = null;
 
@@ -134,6 +176,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
+  ensurePrintFileRecordColumns(sqlite);
   db = drizzle(sqlite);
   return db;
 }

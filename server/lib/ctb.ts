@@ -16,6 +16,7 @@ import type { PrintFileMetrics } from "../../shared/schema";
 const CTB_MAGIC_PREFIX = 0x12fd;
 const HEADER_MIN_BYTES = 0x50;
 const EXT_CONFIG_OFFSET = 0x54;
+const EXT_CONFIG_SIZE_OFFSET = 0x58;
 const EXT_CONFIG_2_OFFSET = 0x6c;
 const MAX_MACHINE_TYPE_BYTES = 200;
 
@@ -44,6 +45,33 @@ function reasonableUInt(value: number | null, min: number, max: number): number 
   return Math.floor(value);
 }
 
+function extFloat(
+  buffer: Buffer,
+  extOffset: number | null,
+  extSize: number | null,
+  fieldOffset: number,
+  min: number,
+  max: number,
+  digits = 3,
+): number | null {
+  if (extOffset === null) return null;
+  if (extSize !== null && extSize > 0 && fieldOffset + 4 > extSize) return null;
+  return reasonable(f32(buffer, extOffset + fieldOffset), min, max, digits);
+}
+
+function extUInt(
+  buffer: Buffer,
+  extOffset: number | null,
+  extSize: number | null,
+  fieldOffset: number,
+  min: number,
+  max: number,
+): number | null {
+  if (extOffset === null) return null;
+  if (extSize !== null && extSize > 0 && fieldOffset + 4 > extSize) return null;
+  return reasonableUInt(u32(buffer, extOffset + fieldOffset), min, max);
+}
+
 function safeAscii(buffer: Buffer, offset: number | null, length: number | null): string | null {
   if (
     offset === null ||
@@ -61,6 +89,14 @@ function safeAscii(buffer: Buffer, offset: number | null, length: number | null)
     .replace(/\s+/g, " ")
     .trim();
   return value || null;
+}
+
+function densityFromMassVolume(
+  resinMassG: number | null,
+  resinVolumeMl: number | null,
+): number | null {
+  if (resinMassG === null || resinVolumeMl === null || resinVolumeMl <= 0) return null;
+  return reasonable(resinMassG / resinVolumeMl, 0.2, 3, 3);
 }
 
 export class CtbParseError extends Error {
@@ -88,16 +124,14 @@ export function parseCtbFile(fileName: string, buffer: Buffer): PrintFileMetrics
   const layerCount = u32(buffer, 0x44);
   const printTimeSeconds = u32(buffer, 0x4c);
   const extConfigOffset = u32(buffer, EXT_CONFIG_OFFSET);
+  const extConfigSize = u32(buffer, EXT_CONFIG_SIZE_OFFSET);
   const extConfig2Offset = u32(buffer, EXT_CONFIG_2_OFFSET);
 
-  const resinVolumeMl =
-    extConfigOffset !== null && hasRange(buffer, extConfigOffset + 0x14, 4)
-      ? reasonable(f32(buffer, extConfigOffset + 0x14), 0.001, 100_000)
-      : null;
-  const resinMassG =
-    extConfigOffset !== null && hasRange(buffer, extConfigOffset + 0x18, 4)
-      ? reasonable(f32(buffer, extConfigOffset + 0x18), 0.001, 100_000)
-      : null;
+  const headerBottomLayerCount = reasonableUInt(u32(buffer, 0x30), 0, 10_000);
+  const resinVolumeMl = extFloat(buffer, extConfigOffset, extConfigSize, 0x14, 0.001, 100_000);
+  const resinMassG = extFloat(buffer, extConfigOffset, extConfigSize, 0x18, 0.001, 100_000);
+  const resinCost = extFloat(buffer, extConfigOffset, extConfigSize, 0x1c, 0, 1_000_000, 2);
+  const extBottomLayerCount = extUInt(buffer, extConfigOffset, extConfigSize, 0x28, 0, 10_000);
 
   const machineTypeOffset =
     extConfig2Offset !== null && hasRange(buffer, extConfig2Offset + 0x1c, 4)
@@ -120,8 +154,26 @@ export function parseCtbFile(fileName: string, buffer: Buffer): PrintFileMetrics
         : null,
     resinVolumeMl,
     resinMassG,
+    resinCost,
+    resinDensityGPerMl: densityFromMassVolume(resinMassG, resinVolumeMl),
     layerCount: layerCount !== null && layerCount > 0 && layerCount <= 2_000_000 ? layerCount : null,
     layerHeightMm: reasonable(f32(buffer, 0x20), 0.001, 1, 4),
+    modelHeightMm: reasonable(f32(buffer, 0x1c), 0.001, 2_000, 3),
+    exposureSeconds: reasonable(f32(buffer, 0x24), 0.05, 600, 3),
+    bottomExposureSeconds: reasonable(f32(buffer, 0x28), 0.05, 600, 3),
+    lightOffSeconds: reasonable(
+      extFloat(buffer, extConfigOffset, extConfigSize, 0x24, 0, 600, 3) ?? f32(buffer, 0x2c),
+      0,
+      600,
+      3,
+    ),
+    bottomLightOffSeconds: extFloat(buffer, extConfigOffset, extConfigSize, 0x20, 0, 600, 3),
+    bottomLayerCount: extBottomLayerCount ?? headerBottomLayerCount,
+    liftDistanceMm: extFloat(buffer, extConfigOffset, extConfigSize, 0x08, 0, 500, 3),
+    liftSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x0c, 0, 1_000, 2),
+    bottomLiftDistanceMm: extFloat(buffer, extConfigOffset, extConfigSize, 0x00, 0, 500, 3),
+    bottomLiftSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x04, 0, 1_000, 2),
+    retractSpeedMmPerMin: extFloat(buffer, extConfigOffset, extConfigSize, 0x10, 0, 1_000, 2),
     resolutionX: reasonableUInt(u32(buffer, 0x34), 1, 65_536),
     resolutionY: reasonableUInt(u32(buffer, 0x38), 1, 65_536),
     buildVolumeXmm: reasonable(f32(buffer, 0x08), 1, 2_000),

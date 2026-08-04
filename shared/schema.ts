@@ -330,6 +330,9 @@ export type SupplyPurchase = typeof supplyPurchases.$inferSelect;
 /**
  * The production metadata extracted from a Chitubox CTB slice file. These
  * values describe the entire build plate, not one individual model on it.
+ *
+ * `resinCost` is the slicer-configured estimate (currency as set in Chitubox),
+ * not the deal's actual `print_material_cost`.
  */
 export interface PrintFileMetrics {
   fileName: string;
@@ -340,8 +343,21 @@ export interface PrintFileMetrics {
   printTimeSeconds: number | null;
   resinVolumeMl: number | null;
   resinMassG: number | null;
+  resinCost: number | null;
+  resinDensityGPerMl: number | null;
   layerCount: number | null;
   layerHeightMm: number | null;
+  modelHeightMm: number | null;
+  exposureSeconds: number | null;
+  bottomExposureSeconds: number | null;
+  lightOffSeconds: number | null;
+  bottomLightOffSeconds: number | null;
+  bottomLayerCount: number | null;
+  liftDistanceMm: number | null;
+  liftSpeedMmPerMin: number | null;
+  bottomLiftDistanceMm: number | null;
+  bottomLiftSpeedMmPerMin: number | null;
+  retractSpeedMmPerMin: number | null;
   resolutionX: number | null;
   resolutionY: number | null;
   buildVolumeXmm: number | null;
@@ -360,6 +376,7 @@ export interface PrintFileOrderSummary {
   totalPrintTimeSeconds: number | null;
   totalResinVolumeMl: number | null;
   totalResinMassG: number | null;
+  totalResinCost: number | null;
   totalLayerCount: number | null;
   latest: PrintFileMetrics;
 }
@@ -392,8 +409,21 @@ export const printFileRecords = sqliteTable("print_file_records", {
   printTimeSeconds: integer("print_time_seconds"),
   resinVolumeMl: text("resin_volume_ml"),
   resinMassG: text("resin_mass_g"),
+  resinCost: text("resin_cost"),
+  resinDensityGPerMl: text("resin_density_g_per_ml"),
   layerCount: integer("layer_count"),
   layerHeightMm: text("layer_height_mm"),
+  modelHeightMm: text("model_height_mm"),
+  exposureSeconds: text("exposure_seconds"),
+  bottomExposureSeconds: text("bottom_exposure_seconds"),
+  lightOffSeconds: text("light_off_seconds"),
+  bottomLightOffSeconds: text("bottom_light_off_seconds"),
+  bottomLayerCount: integer("bottom_layer_count"),
+  liftDistanceMm: text("lift_distance_mm"),
+  liftSpeedMmPerMin: text("lift_speed_mm_per_min"),
+  bottomLiftDistanceMm: text("bottom_lift_distance_mm"),
+  bottomLiftSpeedMmPerMin: text("bottom_lift_speed_mm_per_min"),
+  retractSpeedMmPerMin: text("retract_speed_mm_per_min"),
   resolutionX: integer("resolution_x"),
   resolutionY: integer("resolution_y"),
   printerProfile: text("printer_profile"),

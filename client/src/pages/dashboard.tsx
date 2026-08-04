@@ -231,7 +231,7 @@ export default function Dashboard() {
                   Attach sliced plate data <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Turn each Chitubox CTB plate into time and resin totals on the right Print Order.
+                  Turn each Chitubox CTB plate into time, resin, cost, and exposure totals on the right Print Order.
                 </span>
               </span>
             </Link>

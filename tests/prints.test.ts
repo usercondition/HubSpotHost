@@ -49,15 +49,30 @@ function fixtureCtb(): Buffer {
   file.writeFloatLE(218, 0x08);
   file.writeFloatLE(123, 0x0c);
   file.writeFloatLE(260, 0x10);
+  file.writeFloatLE(42.5, 0x1c);
   file.writeFloatLE(0.05, 0x20);
+  file.writeFloatLE(2.5, 0x24);
+  file.writeFloatLE(35, 0x28);
+  file.writeFloatLE(1, 0x2c);
+  file.writeUInt32LE(8, 0x30);
   file.writeUInt32LE(1440, 0x34);
   file.writeUInt32LE(2560, 0x38);
   file.writeUInt32LE(420, 0x44);
   file.writeUInt32LE(14_400, 0x4c);
   file.writeUInt32LE(0x80, 0x54);
+  file.writeUInt32LE(0x40, 0x58);
   file.writeUInt32LE(0xc0, 0x6c);
+  file.writeFloatLE(8, 0x80);
+  file.writeFloatLE(65, 0x84);
+  file.writeFloatLE(5, 0x88);
+  file.writeFloatLE(120, 0x8c);
+  file.writeFloatLE(150, 0x90);
   file.writeFloatLE(31.25, 0x94);
   file.writeFloatLE(34.5, 0x98);
+  file.writeFloatLE(4.75, 0x9c);
+  file.writeFloatLE(2, 0xa0);
+  file.writeFloatLE(0.5, 0xa4);
+  file.writeUInt32LE(8, 0xa8);
   file.writeUInt32LE(0x100, 0xdc);
   file.writeUInt32LE(13, 0xe0);
   file.write("ELEGOO SATURN", 0x100, "ascii");
@@ -163,6 +178,11 @@ test("a CTB plate is parsed in memory and the raw file is never persisted", asyn
   assert.equal(analysis.body.metrics.printTimeSeconds, 14_400);
   assert.equal(analysis.body.metrics.resinVolumeMl, 31.25);
   assert.equal(analysis.body.metrics.resinMassG, 34.5);
+  assert.equal(analysis.body.metrics.resinCost, 4.75);
+  assert.equal(analysis.body.metrics.resinDensityGPerMl, 1.104);
+  assert.equal(analysis.body.metrics.exposureSeconds, 2.5);
+  assert.equal(analysis.body.metrics.bottomExposureSeconds, 35);
+  assert.equal(analysis.body.metrics.bottomLayerCount, 8);
   assert.equal(analysis.body.metrics.layerCount, 420);
   assert.equal(analysis.body.metrics.printerProfile, "ELEGOO SATURN");
   assert.match(analysis.body.metrics.sha256, /^[a-f0-9]{64}$/);
@@ -179,6 +199,9 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.summary.plateCount, 1);
   assert.equal(firstAttach.body.summary.totalPrintTimeSeconds, 14_400);
   assert.equal(firstAttach.body.summary.totalResinVolumeMl, 31.25);
+  assert.equal(firstAttach.body.summary.totalResinCost, 4.75);
+  assert.equal(firstAttach.body.record.resinCost, "4.75");
+  assert.equal(firstAttach.body.record.exposureSeconds, "2.5");
 
   const second = await analyzePlate("knight-plate-02.ctb");
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
@@ -189,6 +212,7 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(secondAttach.body.summary.plateCount, 2);
   assert.equal(secondAttach.body.summary.totalPrintTimeSeconds, 28_800);
   assert.equal(secondAttach.body.summary.totalResinMassG, 69);
+  assert.equal(secondAttach.body.summary.totalResinCost, 9.5);
 
   const patchCalls = mockCalls.filter(
     (call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701",
@@ -199,6 +223,12 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(latestPatch.properties.print_estimated_time_hours, "8");
   assert.equal(latestPatch.properties.print_resin_volume_ml, "62.5");
   assert.equal(latestPatch.properties.print_resin_mass_g, "69");
+  assert.equal(latestPatch.properties.print_estimated_resin_cost, "9.5");
+  assert.equal(latestPatch.properties.print_exposure_seconds, "2.5");
+  assert.equal(latestPatch.properties.print_bottom_exposure_seconds, "35");
+  assert.equal(latestPatch.properties.print_bottom_layer_count, "8");
+  assert.equal(latestPatch.properties.print_model_height_mm, "42.5");
+  assert.equal(Object.prototype.hasOwnProperty.call(latestPatch.properties, "print_material_cost"), false);
 
   const listed = await jsonOwnerRequest("GET", "/api/prints?includeAttached=true");
   assert.equal(listed.status, 200);
