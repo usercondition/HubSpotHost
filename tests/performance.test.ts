@@ -79,6 +79,7 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.activeDeals[1]?.dealName, "Needs costs");
   assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
   assert.equal(snapshot.activeDeals[0]?.stageId, "deposit");
+  assert.equal(snapshot.activeDeals[0]?.contactName, null);
   assert.equal(snapshot.hubspotPortalId, null);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "deposit")?.count, 2);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
@@ -193,4 +194,34 @@ test("attached print plates suppress the missing-plate attention item", () => {
   assert.equal(snapshot.attention.length, 0);
   assert.equal(snapshot.activeDeals[0]?.hasPlates, true);
   assert.equal(snapshot.hubspotPortalId, "12345");
+});
+
+test("board deals expose close date and contact parsed from Product - Client names", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["gk"],
+    stages: [{ id: "printing", label: "Printing", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "gk",
+        properties: {
+          dealname: "Knight Valiant - Jose montes",
+          dealstage: "printing",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          closedate: "2026-08-04T00:00:00.000Z",
+          amount: "125",
+          print_material_cost: "40",
+          print_labor_cost: "30",
+          print_packaging_cost: "5",
+          print_actual_shipping_cost: "5",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.activeDeals[0]?.contactName, "Jose montes");
+  assert.ok(snapshot.activeDeals[0]?.closeDate);
+  assert.match(snapshot.activeDeals[0]?.closeDate ?? "", /^2026-08-04/);
 });
