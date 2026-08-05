@@ -1,17 +1,12 @@
 /**
- * Client-only kit dry-run helpers. No HubSpot / SQLite writes.
- *
- * Flow:
- * 1) Select bits + attach plate/CTB → bits are "printing", plate is pending QC
- * 2) After physical print + visual inspection → mark each bit good or reprint
- * 3) Reprints return to the queue for a later plate
+ * Shop-floor kit dry-run: multiple client orders, plates with post-print QC,
+ * and a reprint pool that accumulates failures until you choose to slice again.
  */
 
 export type KitBitStatus = "todo" | "printing" | "done" | "needs_reprint";
-
 export type KitBitQcResult = "pending" | "good" | "reprint";
-
 export type KitPlateStatus = "pending_qc" | "inspected";
+export type KitPlateKind = "planned" | "reprint";
 
 export type KitBit = {
   id: string;
@@ -19,11 +14,11 @@ export type KitBit = {
   label: string;
   group: string;
   status: KitBitStatus;
-  /** Latest plate this bit was assigned to (printing or completed). */
   plateId: string | null;
 };
 
 export type KitPlateBit = {
+  orderId: string;
   bitId: string;
   result: KitBitQcResult;
 };
@@ -31,19 +26,34 @@ export type KitPlateBit = {
 export type KitPlate = {
   id: string;
   name: string;
-  /** Simulated CTB filename for the dry run. */
   ctbFileName: string;
+  kind: KitPlateKind;
   attachedAt: string;
   inspectedAt: string | null;
   status: KitPlateStatus;
   bits: KitPlateBit[];
 };
 
-export type KitDryRun = {
-  name: string;
-  sourceNote: string;
+export type KitOrder = {
+  id: string;
+  clientName: string;
+  orderName: string;
   bits: KitBit[];
+};
+
+export type ShopDryRun = {
+  orders: KitOrder[];
   plates: KitPlate[];
+};
+
+export type ReprintPoolItem = {
+  orderId: string;
+  clientName: string;
+  orderName: string;
+  bitId: string;
+  label: string;
+  group: string;
+  fileName: string;
 };
 
 const ACASTUS_FILES = [
@@ -125,6 +135,30 @@ const ACASTUS_FILES = [
   "73 Secondary Cable B.stl",
 ];
 
+const ARMIGER_FILES = [
+  "01 Hull.stl",
+  "02 Canopy.stl",
+  "03 Leg Left.stl",
+  "04 Leg Right.stl",
+  "05 Arm Left.stl",
+  "06 Arm Right.stl",
+  "07 Weapon.stl",
+  "08 Base Peg.stl",
+];
+
+const CASTELLAN_SAMPLE = [
+  "01 Carapace.stl",
+  "02 Head.stl",
+  "03 Torso.stl",
+  "04 Waist.stl",
+  "05 Leg Left.stl",
+  "06 Leg Right.stl",
+  "07 Shoulder Left.stl",
+  "08 Shoulder Right.stl",
+  "09 Gun Mount.stl",
+  "10 Base.stl",
+];
+
 function bitNumber(fileName: string): number | null {
   const match = /^(\d+)\b/.exec(fileName.trim());
   if (!match) return null;
@@ -146,11 +180,12 @@ export function groupForFileName(fileName: string): string {
     if (n === 58 || n === 59) return "Pennant / heat";
     if (n >= 60) return "Arm weapons";
   }
-  if (/head|face/.test(lower)) return "Head";
+  if (/head|face|canopy/.test(lower)) return "Head";
   if (/leg|thigh|foot|toe|hip|waist/.test(lower)) return "Waist / legs";
-  if (/arm|barrel|manifold|shield/.test(lower)) return "Arm weapons";
-  if (/shoulder|cannon|lascannon/.test(lower)) return "Shoulders / secondaries";
-  if (/torso|interior|gorget|throne/.test(lower)) return "Torso / interior";
+  if (/arm|barrel|manifold|shield|weapon/.test(lower)) return "Arm weapons";
+  if (/shoulder|cannon|lascannon|gun/.test(lower)) return "Shoulders / secondaries";
+  if (/torso|interior|gorget|throne|hull/.test(lower)) return "Torso / interior";
+  if (/base|peg/.test(lower)) return "Base";
   return "Other";
 }
 
@@ -158,23 +193,18 @@ export function labelFromFileName(fileName: string): string {
   return fileName.replace(/\.stl$/i, "").trim();
 }
 
-export function parseKitFileList(
-  raw: string,
-  options?: { kitName?: string; sourceNote?: string },
-): KitDryRun {
+function bitsFromFileList(files: string[], idPrefix: string): KitBit[] {
   const seen = new Set<string>();
   const bits: KitBit[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const fileName = line.trim().replace(/^["']|["']$/g, "");
-    if (!fileName || fileName.startsWith("#")) continue;
-    if (!/\.stl$/i.test(fileName) && !/^[0-9]/.test(fileName)) continue;
-    const normalized = /\.stl$/i.test(fileName) ? fileName : `${fileName}.stl`;
-    const base = normalized.split(/[/\\]/).pop() || normalized;
+  for (const line of files) {
+    const fileName = line.trim();
+    if (!fileName) continue;
+    const base = fileName.split(/[/\\]/).pop() || fileName;
     const key = base.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     bits.push({
-      id: `bit-${bits.length + 1}-${key.replace(/[^a-z0-9]+/g, "-")}`,
+      id: `${idPrefix}-${bits.length + 1}-${key.replace(/[^a-z0-9]+/g, "-")}`,
       fileName: base,
       label: labelFromFileName(base),
       group: groupForFileName(base),
@@ -182,50 +212,84 @@ export function parseKitFileList(
       plateId: null,
     });
   }
-
-  return {
-    name: options?.kitName?.trim() || "Imported kit",
-    sourceNote: options?.sourceNote?.trim() || "Pasted STL list",
-    bits,
-    plates: [],
-  };
+  return bits;
 }
 
-export function createAcastusDryRunKit(): KitDryRun {
-  return parseKitFileList(ACASTUS_FILES.join("\n"), {
-    kitName: "Acastus Knight Porphyrion",
-    sourceNote: "STLHammer sample · dry run only (not saved to HubSpot)",
-  });
+export function parseKitFileList(
+  raw: string,
+  options?: { kitName?: string },
+): KitBit[] {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^["']|["']$/g, ""))
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => (/\.stl$/i.test(line) ? line : `${line}.stl`));
+  return bitsFromFileList(lines, options?.kitName?.replace(/\W+/g, "-").toLowerCase() || "kit");
+}
+
+export function createSampleShop(): ShopDryRun {
+  return {
+    orders: [
+      {
+        id: "order-ada-acastus",
+        clientName: "Ada Lovelace",
+        orderName: "Acastus Knight Porphyrion",
+        bits: bitsFromFileList(ACASTUS_FILES, "acastus"),
+      },
+      {
+        id: "order-ada-armiger",
+        clientName: "Ada Lovelace",
+        orderName: "Armiger Helverin",
+        bits: bitsFromFileList(ARMIGER_FILES, "armiger"),
+      },
+      {
+        id: "order-bob-castellan",
+        clientName: "Bob Martin",
+        orderName: "Knight Castellan (sample)",
+        bits: bitsFromFileList(CASTELLAN_SAMPLE, "castellan"),
+      },
+    ],
+    plates: [],
+  };
 }
 
 export function isSelectableBit(bit: KitBit): boolean {
   return bit.status === "todo" || bit.status === "needs_reprint";
 }
 
-export function kitProgress(kit: KitDryRun): {
+export function orderProgress(order: KitOrder): {
   done: number;
   total: number;
   printing: number;
   reprint: number;
   todo: number;
-  remaining: number;
 } {
-  const total = kit.bits.length;
-  const done = kit.bits.filter((bit) => bit.status === "done").length;
-  const printing = kit.bits.filter((bit) => bit.status === "printing").length;
-  const reprint = kit.bits.filter((bit) => bit.status === "needs_reprint").length;
-  const todo = kit.bits.filter((bit) => bit.status === "todo").length;
+  const total = order.bits.length;
   return {
-    done,
     total,
-    printing,
-    reprint,
-    todo,
-    remaining: total - done,
+    done: order.bits.filter((bit) => bit.status === "done").length,
+    printing: order.bits.filter((bit) => bit.status === "printing").length,
+    reprint: order.bits.filter((bit) => bit.status === "needs_reprint").length,
+    todo: order.bits.filter((bit) => bit.status === "todo").length,
   };
 }
 
-export function groupSummaries(kit: KitDryRun): Array<{
+export function shopProgress(shop: ShopDryRun) {
+  return shop.orders.reduce(
+    (acc, order) => {
+      const p = orderProgress(order);
+      acc.done += p.done;
+      acc.total += p.total;
+      acc.printing += p.printing;
+      acc.reprint += p.reprint;
+      acc.todo += p.todo;
+      return acc;
+    },
+    { done: 0, total: 0, printing: 0, reprint: 0, todo: 0 },
+  );
+}
+
+export function groupSummaries(order: KitOrder): Array<{
   group: string;
   done: number;
   total: number;
@@ -233,7 +297,7 @@ export function groupSummaries(kit: KitDryRun): Array<{
   reprint: number;
 }> {
   const map = new Map<string, { done: number; total: number; printing: number; reprint: number }>();
-  for (const bit of kit.bits) {
+  for (const bit of order.bits) {
     const entry = map.get(bit.group) ?? { done: 0, total: 0, printing: 0, reprint: 0 };
     entry.total += 1;
     if (bit.status === "done") entry.done += 1;
@@ -258,160 +322,238 @@ export function plateQcCounts(plate: KitPlate): { good: number; reprint: number;
   return { good, reprint, pending, total: plate.bits.length };
 }
 
-export function reprintBitIds(kit: KitDryRun): string[] {
-  return kit.bits.filter((bit) => bit.status === "needs_reprint").map((bit) => bit.id);
-}
-
-/**
- * Catch-all reprint plate: move every needs_reprint bit onto one new plate
- * awaiting CTB print + later QC.
- */
-export function createReprintCatchAllPlate(
-  kit: KitDryRun,
-  input?: { plateName?: string; ctbFileName?: string },
-  now: Date = new Date(),
-): { kit: KitDryRun; ok: true; count: number; plateId: string } | { kit: KitDryRun; ok: false; error: string } {
-  const bitIds = reprintBitIds(kit);
-  if (bitIds.length === 0) {
-    return { kit, ok: false, error: "No bits marked for reprint." };
+/** Failures waiting to be sliced again — not a plate until you create one. */
+export function reprintPool(
+  shop: ShopDryRun,
+  filter?: { orderId?: string; clientName?: string },
+): ReprintPoolItem[] {
+  const items: ReprintPoolItem[] = [];
+  for (const order of shop.orders) {
+    if (filter?.orderId && order.id !== filter.orderId) continue;
+    if (filter?.clientName && order.clientName !== filter.clientName) continue;
+    for (const bit of order.bits) {
+      if (bit.status !== "needs_reprint") continue;
+      items.push({
+        orderId: order.id,
+        clientName: order.clientName,
+        orderName: order.orderName,
+        bitId: bit.id,
+        label: bit.label,
+        group: bit.group,
+        fileName: bit.fileName,
+      });
+    }
   }
-
-  const reprintNumber =
-    kit.plates.filter((plate) => /reprint/i.test(plate.name)).length + 1;
-  const next = attachBitsToPlate(
-    kit,
-    {
-      plateName: input?.plateName?.trim() || `Reprint plate ${reprintNumber}`,
-      ctbFileName: input?.ctbFileName?.trim() || `Reprint_P${reprintNumber}.ctb`,
-      bitIds,
-    },
-    now,
+  return items.sort(
+    (a, b) =>
+      a.clientName.localeCompare(b.clientName) ||
+      a.orderName.localeCompare(b.orderName) ||
+      a.label.localeCompare(b.label),
   );
-  const plate = next.plates[0];
-  if (!plate) return { kit, ok: false, error: "Could not create reprint plate." };
-  return { kit: next, ok: true, count: bitIds.length, plateId: plate.id };
+}
+
+export function poolKey(item: Pick<ReprintPoolItem, "orderId" | "bitId">): string {
+  return `${item.orderId}::${item.bitId}`;
+}
+
+function updateOrderBit(
+  shop: ShopDryRun,
+  orderId: string,
+  bitId: string,
+  patch: Partial<KitBit>,
+): ShopDryRun {
+  return {
+    ...shop,
+    orders: shop.orders.map((order) => {
+      if (order.id !== orderId) return order;
+      return {
+        ...order,
+        bits: order.bits.map((bit) => (bit.id === bitId ? { ...bit, ...patch } : bit)),
+      };
+    }),
+  };
 }
 
 /**
- * Attach a sliced plate: bits move to "printing" and wait for post-print QC.
- * Does not mark bits done — inspection comes later.
+ * Planned plate for one order: select todo/reprint bits + CTB.
+ * Bits become printing; QC later.
  */
-export function attachBitsToPlate(
-  kit: KitDryRun,
-  input: { plateName: string; ctbFileName?: string; bitIds: string[] },
+export function attachOrderPlate(
+  shop: ShopDryRun,
+  input: {
+    orderId: string;
+    plateName: string;
+    ctbFileName?: string;
+    bitIds: string[];
+    kind?: KitPlateKind;
+  },
   now: Date = new Date(),
-): KitDryRun {
-  const uniqueIds = Array.from(new Set(input.bitIds)).filter((id) =>
-    kit.bits.some((bit) => bit.id === id && isSelectableBit(bit)),
-  );
-  if (uniqueIds.length === 0) return kit;
+): { shop: ShopDryRun; ok: true; plateId: string } | { shop: ShopDryRun; ok: false; error: string } {
+  const order = shop.orders.find((item) => item.id === input.orderId);
+  if (!order) return { shop, ok: false, error: "Order not found" };
 
-  const plateNumber = kit.plates.length + 1;
+  const bitIds = Array.from(new Set(input.bitIds)).filter((id) =>
+    order.bits.some((bit) => bit.id === id && isSelectableBit(bit)),
+  );
+  if (bitIds.length === 0) return { shop, ok: false, error: "Select at least one queued bit" };
+
+  const plateNumber = shop.plates.length + 1;
   const plateId = `plate-${plateNumber}-${now.getTime()}`;
   const plateName = input.plateName.trim() || `Plate ${plateNumber}`;
-  const ctbFileName =
-    input.ctbFileName?.trim() ||
-    `${plateName.replace(/[^\w.-]+/g, "_")}.ctb`;
-
   const plate: KitPlate = {
     id: plateId,
     name: plateName,
-    ctbFileName,
+    ctbFileName: input.ctbFileName?.trim() || `${plateName.replace(/[^\w.-]+/g, "_")}.ctb`,
+    kind: input.kind ?? "planned",
     attachedAt: now.toISOString(),
     inspectedAt: null,
     status: "pending_qc",
-    bits: uniqueIds.map((bitId) => ({ bitId, result: "pending" })),
+    bits: bitIds.map((bitId) => ({ orderId: order.id, bitId, result: "pending" })),
   };
 
-  const idSet = new Set(uniqueIds);
-  return {
-    ...kit,
-    plates: [plate, ...kit.plates],
-    bits: kit.bits.map((bit) =>
-      idSet.has(bit.id) ? { ...bit, status: "printing", plateId } : bit,
-    ),
+  let next: ShopDryRun = { ...shop, plates: [plate, ...shop.plates] };
+  for (const bitId of bitIds) {
+    next = updateOrderBit(next, order.id, bitId, { status: "printing", plateId });
+  }
+  return { shop: next, ok: true, plateId };
+}
+
+/**
+ * Build a reprint plate from pool selections (may span multiple orders).
+ * Failures stay pooled until this runs — then they move to printing on the new plate.
+ */
+export function createPlateFromReprintPool(
+  shop: ShopDryRun,
+  input: {
+    selections: Array<{ orderId: string; bitId: string }>;
+    plateName?: string;
+    ctbFileName?: string;
+  },
+  now: Date = new Date(),
+): { shop: ShopDryRun; ok: true; plateId: string; count: number } | { shop: ShopDryRun; ok: false; error: string } {
+  const unique = new Map<string, { orderId: string; bitId: string }>();
+  for (const row of input.selections) {
+    unique.set(poolKey(row), row);
+  }
+  const selections = Array.from(unique.values()).filter(({ orderId, bitId }) => {
+    const order = shop.orders.find((item) => item.id === orderId);
+    const bit = order?.bits.find((item) => item.id === bitId);
+    return bit?.status === "needs_reprint";
+  });
+  if (selections.length === 0) {
+    return { shop, ok: false, error: "Select at least one bit from the reprint pool" };
+  }
+
+  const reprintCount = shop.plates.filter((plate) => plate.kind === "reprint").length + 1;
+  const plateId = `plate-reprint-${reprintCount}-${now.getTime()}`;
+  const plateName = input.plateName?.trim() || `Reprint pool plate ${reprintCount}`;
+  const plate: KitPlate = {
+    id: plateId,
+    name: plateName,
+    ctbFileName: input.ctbFileName?.trim() || `Reprint_Pool_P${reprintCount}.ctb`,
+    kind: "reprint",
+    attachedAt: now.toISOString(),
+    inspectedAt: null,
+    status: "pending_qc",
+    bits: selections.map((row) => ({ ...row, result: "pending" })),
   };
+
+  let next: ShopDryRun = { ...shop, plates: [plate, ...shop.plates] };
+  for (const row of selections) {
+    next = updateOrderBit(next, row.orderId, row.bitId, { status: "printing", plateId });
+  }
+  return { shop: next, ok: true, plateId, count: selections.length };
 }
 
 export function setPlateBitResult(
-  kit: KitDryRun,
+  shop: ShopDryRun,
   plateId: string,
+  orderId: string,
   bitId: string,
   result: Exclude<KitBitQcResult, "pending">,
-): KitDryRun {
+): ShopDryRun {
   return {
-    ...kit,
-    plates: kit.plates.map((plate) => {
+    ...shop,
+    plates: shop.plates.map((plate) => {
       if (plate.id !== plateId || plate.status !== "pending_qc") return plate;
       return {
         ...plate,
-        bits: plate.bits.map((row) => (row.bitId === bitId ? { ...row, result } : row)),
+        bits: plate.bits.map((row) =>
+          row.orderId === orderId && row.bitId === bitId ? { ...row, result } : row,
+        ),
       };
     }),
   };
 }
 
 export function markAllPlateBits(
-  kit: KitDryRun,
+  shop: ShopDryRun,
   plateId: string,
   result: Exclude<KitBitQcResult, "pending">,
-): KitDryRun {
-  const plate = kit.plates.find((item) => item.id === plateId);
-  if (!plate || plate.status !== "pending_qc") return kit;
-  let next = kit;
+): ShopDryRun {
+  const plate = shop.plates.find((item) => item.id === plateId);
+  if (!plate || plate.status !== "pending_qc") return shop;
+  let next = shop;
   for (const row of plate.bits) {
-    next = setPlateBitResult(next, plateId, row.bitId, result);
+    next = setPlateBitResult(next, plateId, row.orderId, row.bitId, result);
   }
   return next;
 }
 
 /**
- * Finalize QC after physical inspection. Good bits → done.
- * Reprint bits → needs_reprint (selectable again). Pending not allowed.
+ * After physical inspection: good → done on that order; reprint → back to pool.
  */
 export function completePlateQc(
-  kit: KitDryRun,
+  shop: ShopDryRun,
   plateId: string,
   now: Date = new Date(),
-): { kit: KitDryRun; ok: true } | { kit: KitDryRun; ok: false; error: string } {
-  const plate = kit.plates.find((item) => item.id === plateId);
-  if (!plate) return { kit, ok: false, error: "Plate not found" };
-  if (plate.status !== "pending_qc") return { kit, ok: false, error: "Plate already inspected" };
-
+): { shop: ShopDryRun; ok: true } | { shop: ShopDryRun; ok: false; error: string } {
+  const plate = shop.plates.find((item) => item.id === plateId);
+  if (!plate) return { shop, ok: false, error: "Plate not found" };
+  if (plate.status !== "pending_qc") return { shop, ok: false, error: "Plate already inspected" };
   const pending = plate.bits.filter((row) => row.result === "pending");
   if (pending.length > 0) {
-    return {
-      kit,
-      ok: false,
-      error: `Inspect all bits first (${pending.length} still unmarked).`,
-    };
+    return { shop, ok: false, error: `Inspect all bits first (${pending.length} still unmarked).` };
   }
 
-  const resultByBit = new Map(plate.bits.map((row) => [row.bitId, row.result]));
+  let next: ShopDryRun = {
+    ...shop,
+    plates: shop.plates.map((item) =>
+      item.id === plateId ? { ...item, status: "inspected", inspectedAt: now.toISOString() } : item,
+    ),
+  };
+
+  for (const row of plate.bits) {
+    if (row.result === "good") {
+      next = updateOrderBit(next, row.orderId, row.bitId, { status: "done", plateId });
+    } else if (row.result === "reprint") {
+      // Back to pool — not a plate until operator creates one from the pool.
+      next = updateOrderBit(next, row.orderId, row.bitId, { status: "needs_reprint", plateId: null });
+    }
+  }
+
+  return { shop: next, ok: true };
+}
+
+export function resetShop(shop: ShopDryRun): ShopDryRun {
   return {
-    ok: true,
-    kit: {
-      ...kit,
-      plates: kit.plates.map((item) =>
-        item.id === plateId
-          ? { ...item, status: "inspected", inspectedAt: now.toISOString() }
-          : item,
-      ),
-      bits: kit.bits.map((bit) => {
-        const result = resultByBit.get(bit.id);
-        if (!result || bit.plateId !== plateId) return bit;
-        if (result === "good") return { ...bit, status: "done", plateId };
-        if (result === "reprint") return { ...bit, status: "needs_reprint", plateId: null };
-        return bit;
-      }),
-    },
+    orders: shop.orders.map((order) => ({
+      ...order,
+      bits: order.bits.map((bit) => ({ ...bit, status: "todo" as const, plateId: null })),
+    })),
+    plates: [],
   };
 }
 
-export function resetKitProgress(kit: KitDryRun): KitDryRun {
+export function replaceOrderKit(shop: ShopDryRun, orderId: string, bits: KitBit[]): ShopDryRun {
   return {
-    ...kit,
-    plates: [],
-    bits: kit.bits.map((bit) => ({ ...bit, status: "todo", plateId: null })),
+    ...shop,
+    orders: shop.orders.map((order) => (order.id === orderId ? { ...order, bits } : order)),
+    plates: shop.plates.filter((plate) => !plate.bits.some((row) => row.orderId === orderId)),
   };
+}
+
+/** @deprecated keep name for older tests — prefer createSampleShop */
+export function createAcastusDryRunKit(): ShopDryRun {
+  return createSampleShop();
 }
