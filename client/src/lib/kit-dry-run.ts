@@ -215,6 +215,11 @@ function bitsFromFileList(files: string[], idPrefix: string): KitBit[] {
   return bits;
 }
 
+/** Build kit bits from STL basenames (folder import / paste). */
+export function buildKitBitsFromFileNames(files: string[], idPrefix = "kit"): KitBit[] {
+  return bitsFromFileList(files, idPrefix.replace(/\W+/g, "-").toLowerCase() || "kit");
+}
+
 export function parseKitFileList(
   raw: string,
   options?: { kitName?: string },
