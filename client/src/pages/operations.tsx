@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
   INPUT_PROPERTY_LABELS,
@@ -113,7 +113,6 @@ export default function Operations() {
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
               Refresh
             </Button>
-            <ThemeToggle />
           </>
         }
       />

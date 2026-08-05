@@ -39,7 +39,7 @@ import {
   type OrderIntakeStatus,
 } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { useOwnerSession } from "@/hooks/use-owner-session";
@@ -312,7 +312,6 @@ export default function OrderLinks() {
               label={isUnlocked ? "Owner tools unlocked" : "Locked"}
               testId="status-owner-lock"
             />
-            <ThemeToggle />
           </>
         }
       />

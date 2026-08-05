@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import type { ResinBottleEconomics, ResinInventorySnapshot } from "@shared/schema";
 
@@ -216,7 +216,6 @@ export default function ResinInventoryPage() {
                 Refresh
               </Button>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />

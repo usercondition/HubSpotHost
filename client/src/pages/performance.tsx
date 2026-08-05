@@ -21,7 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { BooksBalancePanel } from "@/components/books-balance";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -154,7 +154,6 @@ export default function Performance() {
                 Refresh
               </Button>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />

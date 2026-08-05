@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { CodeLine, Panel } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HealthResponse } from "@shared/schema";
@@ -87,7 +87,6 @@ export default function Setup() {
       <PageHeader
         title="System setup"
         subtitle="Connection details, webhook setup, and technical reference for this order system."
-        actions={<ThemeToggle />}
       />
 
       <div className="page-stack">

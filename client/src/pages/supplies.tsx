@@ -19,7 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { BooksBalancePanel } from "@/components/books-balance";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatCard } from "@/components/primitives";
 import {
   SUPPLY_CATEGORIES,
@@ -346,7 +346,6 @@ export default function Supplies() {
                 Refresh
               </Button>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />

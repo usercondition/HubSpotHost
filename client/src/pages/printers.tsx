@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
   PRINTER_LIFECYCLE_EVENT_LABELS,
@@ -505,7 +505,6 @@ export default function PrintersPage() {
                 Refresh
               </Button>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />
