@@ -1,20 +1,12 @@
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Bell, ExternalLink, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Bell, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { AttentionAlertCard } from "@/components/attention-alert-card";
 import { useToast } from "@/hooks/use-toast";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { attentionNextStep } from "@/lib/workflow";
-import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
-
-const ISSUE_TONE = {
-  neutral: "border-border bg-muted/40",
-  warn: "border-chart-3/35 bg-chart-3/10",
-  bad: "border-destructive/35 bg-destructive/10",
-} as const;
 
 export function AttentionBell() {
   const { toast } = useToast();
@@ -112,56 +104,17 @@ export function AttentionBell() {
           </div>
         ) : (
           <div className="max-h-[22rem] space-y-2 overflow-y-auto pr-0.5">
-            {items.map((item) => {
-              const next = attentionNextStep({ ...item, portalId });
-              return (
-                <article
-                  key={`${item.dealId}-${item.issueKey}`}
-                  className={cn("rounded-md border p-2.5", ISSUE_TONE[item.severity])}
-                  data-testid={`row-attention-bell-${item.dealId}-${item.issueKey}`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{item.dealName}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {item.stage} · {item.issue}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 shrink-0 px-2 text-xs"
-                      disabled={dismiss.isPending}
-                      onClick={() => dismiss.mutate({ dealId: item.dealId, issueKey: item.issueKey })}
-                      data-testid={`button-dismiss-attention-${item.dealId}-${item.issueKey}`}
-                      title="Skip this alert for this order"
-                    >
-                      <X className="mr-1 h-3 w-3" />
-                      Skip
-                    </Button>
-                  </div>
-                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{item.detail}</p>
-                  <div className="mt-2">
-                    {next.external ? (
-                      <a
-                        href={next.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                      >
-                        {next.label}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    ) : (
-                      <Link href={next.href} className="text-xs font-medium text-primary hover:underline">
-                        {next.label}
-                      </Link>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+            {items.map((item) => (
+              <AttentionAlertCard
+                key={`${item.dealId}-${item.issueKey}`}
+                item={item}
+                portalId={portalId}
+                dense
+                dismissPending={dismiss.isPending}
+                onDismiss={() => dismiss.mutate({ dealId: item.dealId, issueKey: item.issueKey })}
+                testId={`row-attention-bell-${item.dealId}-${item.issueKey}`}
+              />
+            ))}
           </div>
         )}
       </PopoverContent>
