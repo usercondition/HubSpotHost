@@ -33,12 +33,12 @@ export function StatusPill({
     <span
       data-testid={testId}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-wide",
+        "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-wide",
         TONE_PILL[tone],
       )}
     >
-      <Icon className="h-3 w-3" />
-      {label}
+      <Icon className="h-3 w-3 shrink-0" />
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   );
 }

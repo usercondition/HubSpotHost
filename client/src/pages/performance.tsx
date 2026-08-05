@@ -6,23 +6,22 @@ import {
   Boxes,
   CircleDollarSign,
   ClipboardList,
-  ExternalLink,
   Loader2,
   Package,
   RefreshCw,
   ShieldCheck,
   TrendingUp,
   WalletCards,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
+import { hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { BooksBalancePanel } from "@/components/books-balance";
+import { AttentionAlertCard } from "@/components/attention-alert-card";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -45,12 +44,6 @@ function updatedAt(value: string): string {
     minute: "2-digit",
   })}`;
 }
-
-const ISSUE_TONE = {
-  neutral: "border-border bg-muted/45",
-  warn: "border-primary/35 bg-primary/5",
-  bad: "border-destructive/35 bg-destructive/5",
-} as const;
 
 function LoadingMetrics() {
   return (
@@ -249,70 +242,18 @@ export default function Performance() {
               >
                 {snapshot.attention.length > 0 ? (
                   <div className="space-y-2">
-                    {snapshot.attention.map((item) => {
-                      const next = attentionNextStep({
-                        ...item,
-                        portalId: snapshot.hubspotPortalId,
-                      });
-                      return (
-                        <article
-                          key={`${item.dealId}-${item.issueKey}`}
-                          className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
-                          data-testid={`row-attention-${item.dealId}`}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div>
-                              <h3 className="text-sm font-medium">{item.dealName}</h3>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{item.stage}</p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <StatusPill
-                                tone={item.severity}
-                                icon={item.severity === "bad" ? AlertTriangle : ClipboardList}
-                                label={item.issue}
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 text-xs"
-                                disabled={dismissAttention.isPending}
-                                onClick={() =>
-                                  dismissAttention.mutate({ dealId: item.dealId, issueKey: item.issueKey })
-                                }
-                                data-testid={`button-dismiss-attention-${item.dealId}-${item.issueKey}`}
-                              >
-                                <X className="mr-1 h-3 w-3" />
-                                Skip
-                              </Button>
-                            </div>
-                          </div>
-                          <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
-                          <div className="mt-2">
-                            {next.external ? (
-                              <a
-                                href={next.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                                data-testid={`link-attention-action-${item.dealId}`}
-                              >
-                                {next.label}
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            ) : (
-                              <Link
-                                href={next.href}
-                                className="text-xs font-medium text-primary hover:underline"
-                                data-testid={`link-attention-action-${item.dealId}`}
-                              >
-                                {next.label}
-                              </Link>
-                            )}
-                          </div>
-                        </article>
-                      );
-                    })}
+                    {snapshot.attention.map((item) => (
+                      <AttentionAlertCard
+                        key={`${item.dealId}-${item.issueKey}`}
+                        item={item}
+                        portalId={snapshot.hubspotPortalId}
+                        dismissPending={dismissAttention.isPending}
+                        onDismiss={() =>
+                          dismissAttention.mutate({ dealId: item.dealId, issueKey: item.issueKey })
+                        }
+                        testId={`row-attention-${item.dealId}`}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <div className="rounded-md bg-muted/50 p-4" data-testid="empty-performance-attention">
