@@ -1,30 +1,50 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  attachBitsToPlate,
+  completePlateQc,
+  createAcastusDryRunKit,
+  kitProgress,
+  setPlateBitResult,
+} from "../client/src/lib/kit-dry-run";
 
-// Mirror client helpers with a tiny Node-side copy of parse/group logic for CI
-// without a browser harness. Keep in sync with client/src/lib/kit-dry-run.ts.
+test("attach plate leaves bits printing until QC", () => {
+  const kit = createAcastusDryRunKit();
+  const head = kit.bits.filter((bit) => bit.group === "Head").map((bit) => bit.id);
+  assert.ok(head.length >= 2);
 
-function groupForFileName(fileName: string): string {
-  const match = /^(\d+)\b/.exec(fileName.trim());
-  const n = match ? Number(match[1]) : null;
-  if (n != null && Number.isFinite(n)) {
-    if (n <= 8) return "Carapace / launcher";
-    if (n <= 17 || n === 37) return "Torso / interior";
-    if (n <= 19) return "Head";
-    if (n <= 25) return "Rear plates";
-    if ((n >= 26 && n <= 29) || (n >= 68 && n <= 71)) return "Shoulders / secondaries";
-    if (n <= 35) return "Rails / details";
-    if (n >= 38 && n <= 57) return "Waist / legs";
-    if (n === 58 || n === 59) return "Pennant / heat";
-    if (n >= 60) return "Arm weapons";
-  }
-  return "Other";
-}
+  const afterAttach = attachBitsToPlate(kit, {
+    plateName: "Plate 1",
+    ctbFileName: "Acastus_P1.ctb",
+    bitIds: head,
+  });
+  const progress = kitProgress(afterAttach);
+  assert.equal(progress.printing, head.length);
+  assert.equal(progress.done, 0);
+  assert.equal(afterAttach.plates[0]?.status, "pending_qc");
+});
 
-test("Acastus-style numbered files land in expected groups", () => {
-  assert.equal(groupForFileName("18 Head.stl"), "Head");
-  assert.equal(groupForFileName("41 Lower Leg x2.stl"), "Waist / legs");
-  assert.equal(groupForFileName("01 Carapace.stl"), "Carapace / launcher");
-  assert.equal(groupForFileName("66 Manifold Pipe x12.stl"), "Arm weapons");
-  assert.equal(groupForFileName("37 Torso Front.stl"), "Torso / interior");
+test("QC good and reprint update kit queue", () => {
+  let kit = createAcastusDryRunKit();
+  const ids = kit.bits.filter((bit) => bit.group === "Head").map((bit) => bit.id);
+  assert.equal(ids.length, 2);
+
+  kit = attachBitsToPlate(kit, { plateName: "Plate 1", ctbFileName: "P1.ctb", bitIds: ids });
+  const plateId = kit.plates[0]!.id;
+
+  // Only one bit inspected so far — finalize must fail.
+  kit = setPlateBitResult(kit, plateId, ids[0]!, "good");
+  const blocked = completePlateQc(kit, plateId);
+  assert.equal(blocked.ok, false);
+
+  kit = setPlateBitResult(kit, plateId, ids[1]!, "reprint");
+  const finished = completePlateQc(kit, plateId);
+  assert.equal(finished.ok, true);
+  if (!finished.ok) return;
+
+  assert.equal(finished.kit.bits.find((bit) => bit.id === ids[0]!)?.status, "done");
+  assert.equal(finished.kit.bits.find((bit) => bit.id === ids[1]!)?.status, "needs_reprint");
+  assert.equal(finished.kit.plates[0]?.status, "inspected");
+  assert.equal(kitProgress(finished.kit).reprint, 1);
+  assert.equal(kitProgress(finished.kit).done, 1);
 });
