@@ -5,6 +5,7 @@ import {
   Activity,
   BarChart3,
   Beaker,
+  Boxes,
   ClipboardCheck,
   ExternalLink,
   Home,
@@ -103,6 +104,7 @@ export function Mark({ className }: { className?: string }) {
 
 const NAV = [
   { href: "/", label: "Command Center", icon: Home, testId: "link-nav-home", group: "Home" },
+  { href: "/deals", label: "Orders", icon: Boxes, testId: "link-nav-deals", group: "Daily Work" },
   { href: "/orders", label: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Daily Work" },
   {
     href: "/paid-orders",

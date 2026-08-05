@@ -261,12 +261,9 @@ function TodaysWork() {
         <div className="border-t border-border px-5 py-4" data-testid="panel-todays-active-deals">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <p className="rule-label">Active Print Orders</p>
-            <p className="text-xs text-muted-foreground numeric">
-              {snapshot.summary.activeOrders} open
-              {snapshot.summary.activeOrders > activeDeals.length
-                ? ` · showing ${activeDeals.length}`
-                : ""}
-            </p>
+            <Link href="/deals" className="text-xs font-medium text-primary hover:underline" data-testid="link-todays-all-deals">
+              View all orders
+            </Link>
           </div>
           <ul className="divide-y divide-border rounded-md border border-border">
             {activeDeals.map((deal) => (

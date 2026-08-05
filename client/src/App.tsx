@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, ThemeProvider } from "@/components/shell";
 import { OwnerSessionProvider } from "@/hooks/use-owner-session";
 import Dashboard from "@/pages/dashboard";
+import DealsPage from "@/pages/deals";
 import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
@@ -26,6 +27,7 @@ function ShellRoutes() {
       <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/deals" component={DealsPage} />
           <Route path="/orders" component={OrderLinks} />
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />
