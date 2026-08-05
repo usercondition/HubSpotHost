@@ -5,6 +5,7 @@ import {
   ClipboardCheck,
   Layers3,
   PackageOpen,
+  RefreshCw,
   RotateCcw,
   Search,
   Square,
@@ -21,6 +22,7 @@ import {
   attachBitsToPlate,
   completePlateQc,
   createAcastusDryRunKit,
+  createReprintCatchAllPlate,
   groupSummaries,
   isSelectableBit,
   kitProgress,
@@ -116,6 +118,23 @@ export default function KitDryRunPage() {
     );
   };
 
+  const createCatchAllReprintPlate = () => {
+    const result = createReprintCatchAllPlate(kit);
+    if (!result.ok) {
+      setNote(result.error);
+      return;
+    }
+    setKit(result.kit);
+    setSelected(new Set());
+    setQcPlateId(result.plateId);
+    const plate = result.kit.plates.find((item) => item.id === result.plateId);
+    setPlateName(`Plate ${result.kit.plates.length + 1}`);
+    setCtbFileName(`Acastus_P${result.kit.plates.length + 1}.ctb`);
+    setNote(
+      `Catch-all reprint plate “${plate?.name}” created with ${result.count} failed bit${result.count === 1 ? "" : "s"}. Slice those into ${plate?.ctbFileName}, print, then QC again.`,
+    );
+  };
+
   const loadAcastus = () => {
     setKit(createAcastusDryRunKit());
     setSelected(new Set());
@@ -156,8 +175,12 @@ export default function KitDryRunPage() {
       result.kit.plates.find((item) => item.id === plate.id) ?? plate,
     );
     setKit(result.kit);
+    const reprintCount = kitProgress(result.kit).reprint;
     setNote(
-      `QC saved for “${plate.name}”: ${counts.good} good, ${counts.reprint} reprint. Reprints are back in the queue.`,
+      `QC saved for “${plate.name}”: ${counts.good} good, ${counts.reprint} reprint.` +
+        (reprintCount > 0
+          ? ` ${reprintCount} bit${reprintCount === 1 ? "" : "s"} waiting — use Catch-all reprint plate when ready.`
+          : ""),
     );
     const stillPending = result.kit.plates.find((item) => item.status === "pending_qc");
     setQcPlateId(stillPending?.id ?? null);
@@ -255,12 +278,43 @@ export default function KitDryRunPage() {
               <RotateCcw className="mr-2 h-4 w-4" />
               Reset
             </Button>
+            {progress.reprint > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={createCatchAllReprintPlate}
+                data-testid="button-catchall-reprint-plate"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Catch-all reprint plate ({progress.reprint})
+              </Button>
+            ) : null}
             {groupFilter !== "all" ? (
               <Button type="button" variant="ghost" size="sm" onClick={() => setGroupFilter("all")}>
                 Show all groups
               </Button>
             ) : null}
           </div>
+
+          {progress.reprint > 0 ? (
+            <div
+              className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm"
+              data-testid="panel-reprint-queue"
+            >
+              <p className="font-medium text-foreground">
+                Reprint queue · {progress.reprint} bit{progress.reprint === 1 ? "" : "s"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {kit.bits
+                  .filter((bit) => bit.status === "needs_reprint")
+                  .map((bit) => bit.label)
+                  .join(" · ")}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Create one catch-all plate for all of these, slice that CTB, print, then QC again.
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <div className="grid gap-6 xl:grid-cols-2">

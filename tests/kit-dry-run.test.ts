@@ -4,6 +4,7 @@ import {
   attachBitsToPlate,
   completePlateQc,
   createAcastusDryRunKit,
+  createReprintCatchAllPlate,
   kitProgress,
   setPlateBitResult,
 } from "../client/src/lib/kit-dry-run";
@@ -32,7 +33,6 @@ test("QC good and reprint update kit queue", () => {
   kit = attachBitsToPlate(kit, { plateName: "Plate 1", ctbFileName: "P1.ctb", bitIds: ids });
   const plateId = kit.plates[0]!.id;
 
-  // Only one bit inspected so far — finalize must fail.
   kit = setPlateBitResult(kit, plateId, ids[0]!, "good");
   const blocked = completePlateQc(kit, plateId);
   assert.equal(blocked.ok, false);
@@ -47,4 +47,25 @@ test("QC good and reprint update kit queue", () => {
   assert.equal(finished.kit.plates[0]?.status, "inspected");
   assert.equal(kitProgress(finished.kit).reprint, 1);
   assert.equal(kitProgress(finished.kit).done, 1);
+});
+
+test("catch-all reprint plate gathers every needs_reprint bit", () => {
+  let kit = createAcastusDryRunKit();
+  const ids = kit.bits.filter((bit) => bit.group === "Head").map((bit) => bit.id);
+  kit = attachBitsToPlate(kit, { plateName: "Plate 1", ctbFileName: "P1.ctb", bitIds: ids });
+  const plateId = kit.plates[0]!.id;
+  kit = setPlateBitResult(kit, plateId, ids[0]!, "reprint");
+  kit = setPlateBitResult(kit, plateId, ids[1]!, "reprint");
+  const finished = completePlateQc(kit, plateId);
+  assert.equal(finished.ok, true);
+  if (!finished.ok) return;
+
+  const catchAll = createReprintCatchAllPlate(finished.kit);
+  assert.equal(catchAll.ok, true);
+  if (!catchAll.ok) return;
+  assert.equal(catchAll.count, 2);
+  assert.equal(kitProgress(catchAll.kit).printing, 2);
+  assert.equal(kitProgress(catchAll.kit).reprint, 0);
+  assert.equal(catchAll.kit.plates[0]?.status, "pending_qc");
+  assert.match(catchAll.kit.plates[0]?.name ?? "", /Reprint/i);
 });

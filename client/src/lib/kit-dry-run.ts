@@ -258,6 +258,40 @@ export function plateQcCounts(plate: KitPlate): { good: number; reprint: number;
   return { good, reprint, pending, total: plate.bits.length };
 }
 
+export function reprintBitIds(kit: KitDryRun): string[] {
+  return kit.bits.filter((bit) => bit.status === "needs_reprint").map((bit) => bit.id);
+}
+
+/**
+ * Catch-all reprint plate: move every needs_reprint bit onto one new plate
+ * awaiting CTB print + later QC.
+ */
+export function createReprintCatchAllPlate(
+  kit: KitDryRun,
+  input?: { plateName?: string; ctbFileName?: string },
+  now: Date = new Date(),
+): { kit: KitDryRun; ok: true; count: number; plateId: string } | { kit: KitDryRun; ok: false; error: string } {
+  const bitIds = reprintBitIds(kit);
+  if (bitIds.length === 0) {
+    return { kit, ok: false, error: "No bits marked for reprint." };
+  }
+
+  const reprintNumber =
+    kit.plates.filter((plate) => /reprint/i.test(plate.name)).length + 1;
+  const next = attachBitsToPlate(
+    kit,
+    {
+      plateName: input?.plateName?.trim() || `Reprint plate ${reprintNumber}`,
+      ctbFileName: input?.ctbFileName?.trim() || `Reprint_P${reprintNumber}.ctb`,
+      bitIds,
+    },
+    now,
+  );
+  const plate = next.plates[0];
+  if (!plate) return { kit, ok: false, error: "Could not create reprint plate." };
+  return { kit: next, ok: true, count: bitIds.length, plateId: plate.id };
+}
+
 /**
  * Attach a sliced plate: bits move to "printing" and wait for post-print QC.
  * Does not mark bits done — inspection comes later.
