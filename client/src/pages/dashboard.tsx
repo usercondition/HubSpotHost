@@ -283,7 +283,7 @@ function TodaysWork() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-3">
-                  {!deal.hasPlates ? (
+                  {deal.promptAttachPlates ? (
                     <Link
                       href={printsDealHref(deal.dealId)}
                       className="text-xs font-medium text-primary hover:underline"

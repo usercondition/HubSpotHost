@@ -78,6 +78,7 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.activeDeals[0]?.dealName, "Low-margin Knight");
   assert.equal(snapshot.activeDeals[1]?.dealName, "Needs costs");
   assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
+  assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, true);
   assert.equal(snapshot.hubspotPortalId, null);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "deposit")?.count, 2);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
@@ -132,6 +133,8 @@ test("dismissed attention keys hide skipped plate reminders for legacy orders", 
     false,
   );
   assert.equal(snapshot.summary.activeOrders, 1);
+  assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
+  assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, false);
 });
 
 test("HubSpot closed-won flag removes deals from attention without relying on stage metadata", () => {
@@ -191,5 +194,6 @@ test("attached print plates suppress the missing-plate attention item", () => {
   assert.equal(snapshot.summary.activeOrders, 1);
   assert.equal(snapshot.attention.length, 0);
   assert.equal(snapshot.activeDeals[0]?.hasPlates, true);
+  assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, false);
   assert.equal(snapshot.hubspotPortalId, "12345");
 });

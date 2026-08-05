@@ -54,8 +54,22 @@ function sampleContext(overrides?: Partial<TrackerAssistantContext>): TrackerAss
       },
     ],
     activeDeals: [
-      { dealId: "d1", dealName: "Knight bust", stage: "Deposit received", amount: 200, hasPlates: false },
-      { dealId: "d2", dealName: "Display base", stage: "Deposit received", amount: 45, hasPlates: true },
+      {
+        dealId: "d1",
+        dealName: "Knight bust",
+        stage: "Deposit received",
+        amount: 200,
+        hasPlates: false,
+        promptAttachPlates: true,
+      },
+      {
+        dealId: "d2",
+        dealName: "Display base",
+        stage: "Deposit received",
+        amount: 45,
+        hasPlates: true,
+        promptAttachPlates: false,
+      },
     ],
     hubspotPortalId: "12345",
   };
