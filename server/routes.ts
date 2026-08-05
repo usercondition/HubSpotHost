@@ -40,6 +40,7 @@ import {
   getOwnerDigestSchedule,
   sendOwnerDigest,
   startOwnerDigestScheduler,
+  type OwnerDigestContext,
 } from "./lib/owner-digest";
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
@@ -380,6 +381,18 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     status: link.status,
   }));
   return { snapshot, awaitingLinks, pendingLinks };
+}
+
+async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
+  const base = await loadTrackerAssistantContext();
+  ensureDefaultPrinters();
+  ensureDefaultResinInventory();
+  return {
+    ...base,
+    fleet: buildPrinterFleetSnapshot(),
+    resin: buildResinInventorySnapshot(),
+    recentPlates: listPrintFileRecords(200),
+  };
 }
 
 function firstIssue(error: { issues: Array<{ message: string }> }): string {
@@ -980,7 +993,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     try {
-      const ctx = await loadTrackerAssistantContext();
+      const ctx = await loadOwnerDigestContext();
       const result = await sendOwnerDigest(ctx, process.env, {
         title: "Print Ops — briefing (manual)",
         force: true,
@@ -1023,7 +1036,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         : false;
 
     try {
-      const ctx = await loadTrackerAssistantContext();
+      const ctx = await loadOwnerDigestContext();
       const result = await sendOwnerDigest(ctx, process.env, {
         title: "Print Ops — morning briefing",
         force,
@@ -1050,7 +1063,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Optional in-process daily schedule (OWNER_DIGEST_SCHEDULE_ENABLED=true).
-  startOwnerDigestScheduler(loadTrackerAssistantContext, process.env, (message) => {
+  startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     console.log(`${new Date().toISOString()} [owner-digest] ${message}`);
   });
 

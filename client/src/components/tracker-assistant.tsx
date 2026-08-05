@@ -71,7 +71,7 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
             Ops briefing from live queue data
           </h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Read-only helper — prioritizes intake, plates, costs, and stale deals. Never writes to HubSpot.
+            Read-only helper — prioritizes intake, plates, costs, and stale deals. Telegram digests also include fleet, resin, and next-print suggestions.
           </p>
         </div>
         {answer ? (
