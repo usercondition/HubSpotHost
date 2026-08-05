@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertTriangle,
-  Boxes,
   ExternalLink,
   FileUp,
   Loader2,
@@ -17,7 +16,6 @@ import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
-import { StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
 
@@ -33,6 +31,10 @@ type BoardDeal = PerformanceResponse["activeDeals"][number] & {
   needsCosts: boolean;
 };
 
+/**
+ * Left-nav Orders page: a read-only transcript of the Print Orders pipeline
+ * stages, laid out like the HubSpot CRM board. Stage moves still happen in HubSpot.
+ */
 export default function DealsPage() {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
@@ -57,7 +59,7 @@ export default function DealsPage() {
       setSessionUnlocked(code);
       toast({
         title: "Orders unlocked",
-        description: `${snapshot.summary.activeOrders} open Print Order${snapshot.summary.activeOrders === 1 ? "" : "s"} in view.`,
+        description: `${snapshot.summary.activeOrders} open Print Order${snapshot.summary.activeOrders === 1 ? "" : "s"} on the board.`,
       });
     },
     onError: (error: Error) => {
@@ -98,24 +100,33 @@ export default function DealsPage() {
     <div className="mx-auto max-w-[100rem]">
       <PageHeader
         title="Orders"
-        subtitle="Your Print Orders pipeline board — same stages as HubSpot, with plate and cost actions in this hub."
+        subtitle="Where each print sits in the pipeline — same stages as your HubSpot Print Orders board."
         actions={
           <>
             {isUnlocked ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => performance.refetch()}
-                disabled={performance.isFetching}
-                data-testid="button-refresh-deals"
-              >
-                {performance.isFetching ? (
-                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
-                )}
-                Refresh
-              </Button>
+              <>
+                <Button asChild size="sm" variant="outline" data-testid="button-open-hubspot-deals">
+                  <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
+                    <Store className="mr-2 h-3.5 w-3.5" />
+                    HubSpot board
+                    <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                  </a>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => performance.refetch()}
+                  disabled={performance.isFetching}
+                  data-testid="button-refresh-deals"
+                >
+                  {performance.isFetching ? (
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                  )}
+                  Refresh
+                </Button>
+              </>
             ) : null}
             <ThemeToggle />
           </>
@@ -125,15 +136,15 @@ export default function DealsPage() {
       <div className="page-stack">
         {!isUnlocked ? (
           <OwnerUnlockPanel
-            title="Unlock your Print Orders board"
-            description="Same owner code as the rest of Daily Work. Pulls live HubSpot pipeline stages and open deals."
+            title="Unlock the Orders board"
+            description="Same owner code as Daily Work. Shows live HubSpot pipeline stages and which print is in each one."
             buttonLabel="Unlock Orders"
             testIdPrefix="deals"
             pending={unlock.isPending}
             onUnlock={(code) => unlock.mutate(code)}
           />
         ) : performance.isLoading ? (
-          <Skeleton className="h-[28rem] rounded-lg" data-testid="skeleton-deals" />
+          <Skeleton className="h-[32rem] rounded-lg" data-testid="skeleton-deals" />
         ) : performance.isError || !snapshot ? (
           <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-deals-error">
             <div className="flex items-start gap-3">
@@ -151,84 +162,76 @@ export default function DealsPage() {
             </div>
           </section>
         ) : (
-          <>
-            <section
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-card-border bg-card px-5 py-4"
-              data-testid="panel-deals-hubspot-escape"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="rule-label">Print Orders pipeline</p>
-                  <StatusPill
-                    tone={snapshot.summary.attentionCount > 0 ? "warn" : "good"}
-                    icon={Boxes}
-                    label={`${snapshot.summary.activeOrders} open`}
-                    testId="status-deals-attention"
-                  />
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Board mirrors your HubSpot stages. Dragging between stages still happens in HubSpot.
-                </p>
-              </div>
-              <Button asChild data-testid="button-open-hubspot-deals">
-                <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
-                  <Store className="mr-2 h-4 w-4" />
-                  Open board in HubSpot
-                  <ExternalLink className="ml-2 h-3.5 w-3.5" />
-                </a>
-              </Button>
-            </section>
+          <section
+            className="rounded-lg border border-border bg-muted/30"
+            data-testid="panel-deals-board"
+            aria-label="Print Orders pipeline board"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+              <p className="text-sm font-medium">
+                Print Orders
+                <span className="ml-2 text-xs font-normal text-muted-foreground numeric">
+                  {snapshot.summary.activeOrders} open
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Read-only here · move stages in HubSpot
+              </p>
+            </div>
 
-            <section
-              className="overflow-x-auto rounded-lg border border-card-border bg-card"
-              data-testid="panel-deals-board"
-              aria-label="Print Orders pipeline board"
-            >
-              <div className="flex min-w-max gap-3 p-4">
-                {columns.map((column) => (
+            <div className="overflow-x-auto">
+              <div className="flex min-w-max items-stretch gap-0">
+                {columns.map((column, index) => (
                   <div
                     key={column.id}
-                    className="flex w-[15.5rem] shrink-0 flex-col"
+                    className={cn(
+                      "flex w-[16rem] shrink-0 flex-col border-border",
+                      index > 0 && "border-l",
+                    )}
                     data-testid={`column-deal-stage-${column.id}`}
                   >
-                    <div className="mb-2 flex items-start justify-between gap-2 px-1">
-                      <div className="min-w-0">
-                        <p
-                          className={cn(
-                            "truncate text-sm font-semibold",
-                            column.closed && /lost/i.test(column.label)
-                              ? "text-destructive"
-                              : column.closed
-                                ? "text-emerald-700 dark:text-emerald-400"
-                                : "text-foreground",
-                          )}
-                        >
-                          {column.label}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground numeric">
-                          {column.deals.length} deal{column.deals.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                    </div>
-
                     <div
                       className={cn(
-                        "flex min-h-[18rem] flex-1 flex-col gap-2 rounded-md border border-border/80 bg-muted/35 p-2",
-                        column.closed && "bg-muted/20",
+                        "border-b border-border px-3 py-2.5",
+                        column.closed && /lost/i.test(column.label)
+                          ? "bg-destructive/10"
+                          : column.closed
+                            ? "bg-emerald-500/10"
+                            : "bg-background/80",
                       )}
                     >
+                      <p
+                        className={cn(
+                          "truncate text-sm font-semibold",
+                          column.closed && /lost/i.test(column.label)
+                            ? "text-destructive"
+                            : column.closed
+                              ? "text-emerald-700 dark:text-emerald-400"
+                              : "text-foreground",
+                        )}
+                      >
+                        {column.label}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground numeric">
+                        {column.deals.length}
+                      </p>
+                    </div>
+
+                    <div className="flex min-h-[22rem] flex-1 flex-col gap-2 bg-muted/20 p-2">
                       {column.deals.length === 0 ? (
-                        <p className="px-1 py-6 text-center text-xs text-muted-foreground">No deals</p>
+                        <p className="px-1 py-8 text-center text-xs text-muted-foreground">—</p>
                       ) : (
                         column.deals.map((deal) => (
                           <article
                             key={deal.dealId}
-                            className="rounded-md border border-border bg-card p-3 shadow-sm"
+                            className="rounded-md border border-border bg-card p-3"
                             data-testid={`card-deal-${deal.dealId}`}
                           >
-                            <p className="text-sm font-medium leading-5">{deal.dealName}</p>
-                            <p className="mt-1 text-sm font-semibold numeric">{money(deal.amount)}</p>
-                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                            <p className="text-sm font-medium leading-snug">{deal.dealName}</p>
+                            <p className="mt-1.5 text-base font-semibold numeric tracking-tight">
+                              {money(deal.amount)}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-2">
                               {!deal.hasPlates ? (
                                 <Link
                                   href={printsDealHref(deal.dealId)}
@@ -258,7 +261,7 @@ export default function DealsPage() {
                                 className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
                                 data-testid={`link-deal-hubspot-${deal.dealId}`}
                               >
-                                HubSpot
+                                Open
                                 <ExternalLink className="h-3 w-3" />
                               </a>
                             </div>
@@ -267,26 +270,17 @@ export default function DealsPage() {
                       )}
                     </div>
 
-                    <div className="mt-2 space-y-0.5 px-1 text-xs text-muted-foreground">
-                      <p className="flex justify-between gap-2">
-                        <span>Total</span>
+                    <div className="border-t border-border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                      <div className="flex justify-between gap-2">
+                        <span>Total amount</span>
                         <span className="numeric font-medium text-foreground">{money(column.totalAmount)}</span>
-                      </p>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-            </section>
-
-            {snapshot.summary.activeOrders === 0 ? (
-              <p className="text-sm text-muted-foreground" data-testid="empty-deals">
-                No open Print Orders right now.{" "}
-                <Link href="/orders" className="font-medium text-primary hover:underline" data-testid="link-deals-to-intake">
-                  Open Paid Order Intake
-                </Link>
-              </p>
-            ) : null}
-          </>
+            </div>
+          </section>
         )}
       </div>
     </div>
