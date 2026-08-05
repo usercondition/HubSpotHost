@@ -13,11 +13,12 @@ import {
   ShieldCheck,
   TrendingUp,
   WalletCards,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
@@ -77,6 +78,32 @@ export default function Performance() {
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
+    },
+  });
+
+  const dismissAttention = useMutation({
+    mutationFn: async (input: { dealId: string; issueKey: string }) => {
+      const response = await apiRequest(
+        "POST",
+        "/api/attention/dismiss",
+        { dealId: input.dealId, issueKey: input.issueKey, note: "Skipped from Performance" },
+        { headers },
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      toast({
+        title: "Alert skipped",
+        description: "That reminder is hidden for this order. Closing the deal in HubSpot also clears it.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not skip that alert",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 160),
+        variant: "destructive",
+      });
     },
   });
 
@@ -228,7 +255,7 @@ export default function Performance() {
             <section className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
               <Panel
                 title="Needs attention"
-                description="The highest-impact active orders to check first."
+                description="Also available from the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
                 actions={
                   <a
                     href={hubspotDealsListHref(snapshot.hubspotPortalId)}
@@ -250,7 +277,7 @@ export default function Performance() {
                       });
                       return (
                         <article
-                          key={`${item.dealId}-${item.issue}`}
+                          key={`${item.dealId}-${item.issueKey}`}
                           className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
                           data-testid={`row-attention-${item.dealId}`}
                         >
@@ -259,11 +286,27 @@ export default function Performance() {
                               <h3 className="text-sm font-medium">{item.dealName}</h3>
                               <p className="mt-0.5 text-xs text-muted-foreground">{item.stage}</p>
                             </div>
-                            <StatusPill
-                              tone={item.severity}
-                              icon={item.severity === "bad" ? AlertTriangle : ClipboardList}
-                              label={item.issue}
-                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusPill
+                                tone={item.severity}
+                                icon={item.severity === "bad" ? AlertTriangle : ClipboardList}
+                                label={item.issue}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs"
+                                disabled={dismissAttention.isPending}
+                                onClick={() =>
+                                  dismissAttention.mutate({ dealId: item.dealId, issueKey: item.issueKey })
+                                }
+                                data-testid={`button-dismiss-attention-${item.dealId}-${item.issueKey}`}
+                              >
+                                <X className="mr-1 h-3 w-3" />
+                                Skip
+                              </Button>
+                            </div>
                           </div>
                           <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
                           <div className="mt-2">
@@ -296,7 +339,7 @@ export default function Performance() {
                   <div className="rounded-md bg-muted/50 p-4" data-testid="empty-performance-attention">
                     <p className="text-sm font-medium">Your active orders look clear.</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      This panel will highlight low margins, missing plates, stale deals, or incomplete cost details as they appear.
+                      Closed HubSpot deals leave this list automatically. Skip plate or cost reminders for older orders that don’t need them.
                     </p>
                   </div>
                 )}

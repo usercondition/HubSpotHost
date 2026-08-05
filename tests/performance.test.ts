@@ -98,8 +98,69 @@ test("performance summarizes recent deals and ranks low margins before incomplet
       (item) => item.dealName === "Needs costs" && item.issue === "No CTB plates attached",
     ),
   );
+  assert.ok(snapshot.attention.every((item) => item.issueKey.length > 0));
   assert.equal(snapshot.supplySpend.total, 62.5);
   assert.equal(snapshot.intake.pendingReview, 1);
+});
+
+test("dismissed attention keys hide skipped plate reminders for legacy orders", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    dismissedAttentionKeys: ["legacy:no_plates"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "legacy",
+        properties: {
+          dealname: "GK Combat Patrol - Luke price",
+          dealstage: "deposit",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "200",
+          print_material_cost: "40",
+          print_labor_cost: "30",
+          print_packaging_cost: "5",
+          print_actual_shipping_cost: "5",
+        },
+      },
+    ],
+  });
+
+  assert.equal(
+    snapshot.attention.some((item) => item.issueKey === "no_plates"),
+    false,
+  );
+  assert.equal(snapshot.summary.activeOrders, 1);
+});
+
+test("HubSpot closed-won flag removes deals from attention without relying on stage metadata", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    stages: [{ id: "done", label: "Completed", displayOrder: 1, metadata: {} }],
+    deals: [
+      {
+        id: "won",
+        properties: {
+          dealname: "Finished knight",
+          dealstage: "done",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          hs_is_closed: "true",
+          hs_is_closed_won: "true",
+          amount: "200",
+          print_material_cost: "",
+          print_labor_cost: "",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.summary.activeOrders, 0);
+  assert.equal(snapshot.attention.length, 0);
 });
 
 test("attached print plates suppress the missing-plate attention item", () => {

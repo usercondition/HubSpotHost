@@ -17,6 +17,7 @@ import {
   ShipWheel,
   Sun,
 } from "lucide-react";
+import { AttentionBell } from "@/components/attention-bell";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -130,17 +131,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[15.5rem_1fr] md:grid-rows-1">
       <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar/95 px-4 py-3 backdrop-blur-sm md:h-full md:flex-col md:items-stretch md:gap-5 md:border-b-0 md:border-r md:px-3 md:py-4">
-        <Link
-          href="/"
-          className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1"
-          data-testid="link-home"
-        >
-          <Mark className="h-7 w-7 text-primary" />
-          <span className="flex min-w-0 flex-col leading-tight">
-            <span className="truncate text-sm font-semibold tracking-tight">Print Operations</span>
-            <span className="rule-label">Owner hub</span>
-          </span>
-        </Link>
+        <div className="flex min-w-0 items-center gap-2 md:gap-2.5">
+          <Link
+            href="/"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1"
+            data-testid="link-home"
+          >
+            <Mark className="h-7 w-7 shrink-0 text-primary" />
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span className="truncate text-sm font-semibold tracking-tight">Print Operations</span>
+              <span className="rule-label">Owner hub</span>
+            </span>
+          </Link>
+          <AttentionBell />
+        </div>
 
         {/* On phones the nav remains a compact horizontal strip. */}
         <nav

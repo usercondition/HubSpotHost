@@ -30,6 +30,11 @@ import {
   patchDealPrintFileMetrics,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import {
+  activeAttentionOverrideKeys,
+  clearAttentionOverride,
+  dismissAttentionAlert,
+} from "./lib/attention";
 import { answerTrackerQuestion } from "./lib/tracker-assistant";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
@@ -100,6 +105,8 @@ import {
   clientOrderSubmissionSchema,
   createOrderLinkSchema,
   createSupplyPurchaseSchema,
+  dismissAttentionSchema,
+  ATTENTION_ISSUE_KEYS,
   attachPrintFileSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
@@ -799,6 +806,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           intakeCounts: orderLinkCounts(),
           supplySpend: buildSupplySpendSummary(),
           attachedPrintDealIds: attachedPrintFileDealIds(),
+          dismissedAttentionKeys: activeAttentionOverrideKeys(),
           hubspotPortalId,
         }),
       );
@@ -809,6 +817,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
       });
     }
+  });
+
+  /** Skip / dismiss one attention alert for an open deal (e.g. legacy order without plates). */
+  app.post("/api/attention/dismiss", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = dismissAttentionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const override = dismissAttentionAlert(parsed.data);
+    return res.status(201).json({ ok: true, override });
+  });
+
+  app.delete("/api/attention/dismiss/:dealId/:issueKey", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId ?? "").trim();
+    const issueKey = String(req.params.issueKey ?? "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId) || !(ATTENTION_ISSUE_KEYS as readonly string[]).includes(issueKey)) {
+      return res.status(400).json({ ok: false, error: "Choose a valid alert to restore" });
+    }
+    const cleared = clearAttentionOverride(dealId, issueKey as (typeof ATTENTION_ISSUE_KEYS)[number]);
+    return res.json({ ok: true, cleared });
   });
 
   /**

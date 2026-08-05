@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import type { LucideIcon } from "lucide-react";
 import {
-  AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckCircle2,
@@ -21,12 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { attentionNextStep, hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
+import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
-import { cn } from "@/lib/utils";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
 const HUBSPOT_URL = "https://app.hubspot.com/";
@@ -132,18 +130,12 @@ function WorkflowStep({
   );
 }
 
-const ISSUE_TONE = {
-  neutral: "border-border bg-muted/45",
-  warn: "border-primary/35 bg-primary/5",
-  bad: "border-destructive/35 bg-destructive/5",
-} as const;
-
 function TodaysWork() {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers, unlock } = useOwnerSession();
 
   const performance = useQuery<PerformanceResponse>({
-    queryKey: ["/api/performance", ownerCode, "dashboard"],
+    queryKey: ["/api/performance", ownerCode],
     enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
@@ -202,7 +194,6 @@ function TodaysWork() {
   }
 
   const snapshot = performance.data;
-  const attention = snapshot.attention.slice(0, 4);
   const activeDeals = snapshot.activeDeals ?? [];
   const portalId = snapshot.hubspotPortalId;
   const money = (value: number) =>
@@ -220,6 +211,9 @@ function TodaysWork() {
           <h2 id="todays-work-title" className="mt-1 text-base font-semibold tracking-tight">
             What needs you right now
           </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Order alerts live in the bell next to Print Operations — skip any step that doesn’t apply.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild size="sm" variant="outline" data-testid="button-todays-work-hubspot">
@@ -257,9 +251,9 @@ function TodaysWork() {
           <p className="mt-1 text-xs text-muted-foreground">Links still open for buyer details</p>
         </Link>
         <div className="rounded-md border border-border bg-muted/35 p-3" data-testid="card-todays-attention">
-          <p className="rule-label">Needs attention</p>
+          <p className="rule-label">Open alerts</p>
           <p className="mt-1 text-2xl font-semibold numeric">{snapshot.summary.attentionCount}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Active orders with plates, costs, or margin gaps</p>
+          <p className="mt-1 text-xs text-muted-foreground">Check the bell icon to review or skip reminders</p>
         </div>
       </div>
 
@@ -315,52 +309,6 @@ function TodaysWork() {
         </div>
       ) : null}
 
-      {attention.length > 0 ? (
-        <div className="space-y-2 border-t border-border px-5 py-4">
-          {attention.map((item) => {
-            const next = attentionNextStep({ ...item, portalId });
-            return (
-              <article
-                key={`${item.dealId}-${item.issue}`}
-                className={cn("rounded-md border p-3", ISSUE_TONE[item.severity])}
-                data-testid={`row-todays-attention-${item.dealId}`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-medium">{item.dealName}</h3>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {item.stage} · {item.issue}
-                    </p>
-                  </div>
-                  {next.external ? (
-                    <a
-                      href={next.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                    >
-                      {next.label}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : (
-                    <Link href={next.href} className="text-xs font-medium text-primary hover:underline">
-                      {next.label}
-                    </Link>
-                  )}
-                </div>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.detail}</p>
-              </article>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="border-t border-border px-5 py-4" data-testid="empty-todays-attention">
-          <p className="text-sm font-medium">No attention items right now</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Clear queue — keep attaching plates and logging costs as work moves.
-          </p>
-        </div>
-      )}
     </section>
   );
 }

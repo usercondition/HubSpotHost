@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
 );
 `;
 
+const CREATE_ATTENTION_OVERRIDES_SQL = `
+CREATE TABLE IF NOT EXISTS attention_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hubspot_deal_id TEXT NOT NULL,
+  issue_key TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE (hubspot_deal_id, issue_key)
+);
+`;
+
 const CREATE_PRINT_FILE_ANALYSES_SQL = `
 CREATE TABLE IF NOT EXISTS print_file_analyses (
   id TEXT PRIMARY KEY,
@@ -355,6 +366,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
+  sqlite.exec(CREATE_ATTENTION_OVERRIDES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
