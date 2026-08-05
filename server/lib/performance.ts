@@ -78,7 +78,7 @@ export interface PerformanceSnapshot {
     detail: string;
     severity: "neutral" | "warn" | "bad";
   }>;
-  /** Compact open Print Orders for the command-center glance. */
+  /** Compact open Print Orders for the command-center glance / Orders board. */
   activeDeals: Array<{
     dealId: string;
     dealName: string;
@@ -86,6 +86,10 @@ export interface PerformanceSnapshot {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /** HubSpot close date (ISO), when set. */
+    closeDate: string | null;
+    /** Best-effort contact label from “Product - Client” deal names. */
+    contactName: string | null;
   }>;
   /** HubSpot portal id for deal deep links; null when account info is unavailable. */
   hubspotPortalId: string | null;
@@ -128,6 +132,20 @@ function stageName(
 ): string {
   if (!stageId) return "Unassigned stage";
   return stageMap.get(stageId)?.label ?? "Unknown stage";
+}
+
+/** Many Print Orders are named “Product - Client”; surface the client on board cards. */
+function contactNameFromDeal(dealName: string): string | null {
+  const separator = " - ";
+  const index = dealName.lastIndexOf(separator);
+  if (index < 0) return null;
+  const contact = dealName.slice(index + separator.length).trim();
+  return contact.length >= 2 ? contact : null;
+}
+
+function closeDateIso(value: string | null | undefined): string | null {
+  const date = asDate(value);
+  return date ? date.toISOString() : null;
 }
 
 function formatMoney(value: number): string {
@@ -205,6 +223,8 @@ export function buildPerformanceSnapshot(input: {
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,
+      closeDate: closeDateIso(props.closedate),
+      contactName: contactNameFromDeal(dealName),
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
     });
 

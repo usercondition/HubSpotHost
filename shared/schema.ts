@@ -224,6 +224,8 @@ export interface PerformanceResponse {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    closeDate: string | null;
+    contactName: string | null;
   }>;
   hubspotPortalId: string | null;
 }
