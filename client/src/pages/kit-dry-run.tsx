@@ -35,17 +35,28 @@ import {
   type ImportedStlFile,
 } from "@/lib/stl-folder-import";
 
-function statusLabel(bit: KitBit): string {
+function statusLabel(bit: KitBit, plateName?: string | null): string {
   switch (bit.status) {
     case "on_plate":
-      return "On plate";
+      return plateName ? `On ${plateName}` : "On plate";
     case "good":
-      return "Good";
+      return plateName ? `Good · ${plateName}` : "Good";
     case "reprint":
       return "Reprint";
     default:
       return "Needed";
   }
+}
+
+function plateStatusMessage(
+  plateName: string,
+  bitCount: number,
+  awaitingQc: number,
+): string {
+  if (awaitingQc > 0) {
+    return `${plateName} selected — ${bitCount} bit${bitCount === 1 ? "" : "s"} (${awaitingQc} awaiting QC). After print, mark each good or reprint.`;
+  }
+  return `${plateName} selected — ${bitCount} bit${bitCount === 1 ? "" : "s"}. QC complete for this plate.`;
 }
 
 /**
@@ -72,8 +83,13 @@ export default function KitDryRunPage() {
   const groups = groupSummaries(kit);
   const activePlate = kit.plates.find((plate) => plate.id === activePlateId) ?? kit.plates[kit.plates.length - 1] ?? null;
   const activePlateBits = activePlate ? plateBits(kit, activePlate.id) : [];
+  const activeAwaitingQc = activePlateBits.filter((bit) => bit.status === "on_plate").length;
+  const plateById = useMemo(() => new Map(kit.plates.map((plate) => [plate.id, plate])), [kit.plates]);
   const previewBit = kit.bits.find((bit) => bit.id === previewBitId) ?? null;
   const previewFile = previewBitId ? stlByBitId[previewBitId] ?? null : null;
+  const plateBanner = activePlate
+    ? plateStatusMessage(activePlate.name, activePlateBits.length, activeAwaitingQc)
+    : null;
 
   const visibleBits = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -148,7 +164,21 @@ export default function KitDryRunPage() {
     setSelected(new Set());
     setActivePlateId(result.plateId);
     setPlateName(`Plate ${result.kit.plates.length + 1}`);
-    setNote(`Plate ready with ${result.kit.plates.find((p) => p.id === result.plateId)?.bitIds.length ?? 0} bits. After print, mark each good or reprint.`);
+    const created = result.kit.plates.find((plate) => plate.id === result.plateId);
+    setNote(
+      created
+        ? `Created ${created.name} with ${created.bitIds.length} bits.`
+        : "Plate created.",
+    );
+  };
+
+  const selectPlate = (plateId: string) => {
+    setActivePlateId(plateId);
+    const plate = kit.plates.find((item) => item.id === plateId);
+    if (!plate) return;
+    const bits = plateBits(kit, plate.id);
+    const awaiting = bits.filter((bit) => bit.status === "on_plate").length;
+    setNote(plateStatusMessage(plate.name, bits.length, awaiting));
   };
 
   return (
@@ -167,8 +197,17 @@ export default function KitDryRunPage() {
       />
 
       <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
-        {note ? (
+        {plateBanner ? (
           <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
+            {plateBanner}
+          </p>
+        ) : note ? (
+          <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
+            {note}
+          </p>
+        ) : null}
+        {plateBanner && note && !note.includes("selected —") && !note.startsWith("Created ") ? (
+          <p className="text-sm text-muted-foreground" data-testid="text-kit-action-note">
             {note}
           </p>
         ) : null}
@@ -288,12 +327,19 @@ export default function KitDryRunPage() {
                 {visibleBits.map((bit) => {
                   const printable = isPrintable(bit);
                   const checked = selected.has(bit.id);
+                  const bitPlate = bit.plateId ? plateById.get(bit.plateId) : null;
+                  const onActivePlate = Boolean(activePlate && bit.plateId === activePlate.id);
                   return (
                     <li key={bit.id}>
                       <button
                         type="button"
-                        disabled={!printable}
-                        onClick={() => toggleBit(bit)}
+                        onClick={() => {
+                          if (printable) {
+                            toggleBit(bit);
+                            return;
+                          }
+                          if (bit.plateId) selectPlate(bit.plateId);
+                        }}
                         onDoubleClick={() => setPreviewBitId(bit.id)}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors",
@@ -301,7 +347,9 @@ export default function KitDryRunPage() {
                             ? checked
                               ? "border-primary/40 bg-primary/10"
                               : "border-border bg-background hover:bg-muted/40"
-                            : "border-transparent bg-muted/20 text-muted-foreground",
+                            : onActivePlate
+                              ? "border-primary/30 bg-primary/5 text-foreground"
+                              : "border-transparent bg-muted/20 text-muted-foreground hover:bg-muted/40",
                         )}
                         data-testid={`row-kit-bit-${bit.id}`}
                       >
@@ -315,7 +363,7 @@ export default function KitDryRunPage() {
                         </span>
                         <span className="min-w-0 flex-1 truncate font-medium">{bit.label}</span>
                         <span className="shrink-0 text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-                          {statusLabel(bit)}
+                          {statusLabel(bit, bitPlate?.name)}
                         </span>
                         {stlByBitId[bit.id] ? (
                           <button
@@ -401,7 +449,13 @@ export default function KitDryRunPage() {
               <p className="rule-label">Current plate</p>
               {activePlate ? (
                 <>
-                  <h2 className="mt-1 text-base font-semibold tracking-tight">{activePlate.name}</h2>
+                  <h2 className="mt-1 text-base font-semibold tracking-tight">
+                    {activePlate.name}
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      {activePlateBits.length} bit{activePlateBits.length === 1 ? "" : "s"}
+                      {activeAwaitingQc > 0 ? ` · ${activeAwaitingQc} awaiting QC` : ""}
+                    </span>
+                  </h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">{activePlate.ctbFileName}</p>
                   <ul className="mt-3 space-y-1.5" data-testid="list-plate-bits">
                     {activePlateBits.map((bit) => (
@@ -456,7 +510,7 @@ export default function KitDryRunPage() {
                       </li>
                     ))}
                   </ul>
-                  {activePlateBits.some((bit) => bit.status === "on_plate") ? (
+                  {activeAwaitingQc > 0 ? (
                     <Button
                       type="button"
                       className="mt-3 w-full"
@@ -482,9 +536,12 @@ export default function KitDryRunPage() {
               )}
             </div>
 
-            {kit.plates.length > 1 ? (
+            {kit.plates.length > 0 ? (
               <div className="rounded-md border border-card-border bg-card p-4" data-testid="panel-plate-list">
                 <p className="rule-label">Plates</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Kit-wide on plate: {counts.onPlate}. Selecting a plate updates Current plate only.
+                </p>
                 <ul className="mt-2 space-y-1">
                   {kit.plates.map((plate) => (
                     <li key={plate.id}>
@@ -494,7 +551,7 @@ export default function KitDryRunPage() {
                           "w-full rounded-md px-2 py-1.5 text-left text-sm",
                           activePlate?.id === plate.id ? "bg-primary/10 font-medium" : "hover:bg-muted/40",
                         )}
-                        onClick={() => setActivePlateId(plate.id)}
+                        onClick={() => selectPlate(plate.id)}
                         data-testid={`button-select-plate-${plate.id}`}
                       >
                         {plate.name}
