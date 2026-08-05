@@ -222,6 +222,8 @@ export interface PerformanceResponse {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /** False when plates exist or owner skipped the no_plates alert for this deal. */
+    promptAttachPlates: boolean;
   }>;
   hubspotPortalId: string | null;
 }

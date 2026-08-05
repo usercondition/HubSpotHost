@@ -84,6 +84,8 @@ export interface PerformanceSnapshot {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /** False when plates exist or owner skipped the no_plates alert for this deal. */
+    promptAttachPlates: boolean;
   }>;
   /** HubSpot portal id for deal deep links; null when account info is unavailable. */
   hubspotPortalId: string | null;
@@ -196,12 +198,14 @@ export function buildPerformanceSnapshot(input: {
     activeOrders += 1;
 
     const hasPlates = attachedPrintDealIds.has(deal.id);
+    const platesSkipped = dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
     openDeals.push({
       dealId: deal.id,
       dealName,
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,
+      promptAttachPlates: !hasPlates && !platesSkipped,
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
     });
 
