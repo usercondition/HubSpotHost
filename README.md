@@ -98,28 +98,27 @@ This works well for a single service and keeps the current SQLite queue across r
 
 Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. The app can then use a returning customer's verified email or Marketplace username to prefill the next private order link, asking them to confirm rather than retype their shipping information. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.
 
-## Paid Order Intake (conversation route)
+## Manual Order Entry
 
-The **Conversation intake** screen (nav: *Conversation intake*) is the earlier payment-confirmed, review-first route for Facebook Marketplace orders. It is deliberately not a lead-capture tool:
+The **Manual** screen (nav: *Manual*) is for paid orders you already have details for — no buyer form link required:
 
-1. Paste the relevant part of a paid Marketplace conversation.
-2. The screen creates editable suggestions for the customer, Marketplace username, model, paid amount, shipping details, and a brief order summary.
-3. Correct any missing or inaccurate details.
-4. Check **Payment has been confirmed**.
-5. Confirm the final prompt to create a HubSpot Contact and one associated Deal.
+1. Unlock with the same owner access code as Intake / Daily Work.
+2. Enter buyer, shipping, and one or more order items directly (or optionally paste a Marketplace thread to suggest fields).
+3. Check **Payment has been confirmed**.
+4. Create in HubSpot — one Contact (reused by email when possible) and one Print Order deal per item at **Deposit Received**.
 
-The service creates the Deal in the **Print Orders** pipeline at **Deposit Received**. It uses the existing `amount` field for revenue, so the live gross-profit and margin automation takes over as production costs are recorded.
+Prefer **Intake** when the buyer still needs a private details link. Prefer **Manual** when payment and details are already in hand.
 
-The pasted conversation is processed to produce the draft and is not written into the HubSpot record. The HubSpot Deal receives only the edited order summary and normal operational fields. The raw conversation is also not written to the service audit file.
+The optional conversation paste only assists fill; it is not required to create an order, and the raw conversation is never stored in HubSpot.
 
 ### Intake protection
 
-The public route is protected by a dedicated **Paid Order Intake access code**. It is required for both analysis and creation:
+Manual create uses the same **Paid Order Intake access code** as the rest of Daily Work:
 
 - The server stores only a SHA-256 hash of the code, never its plain value.
 - Set `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` as a protected deployment variable. The server has no default owner code and fails closed when the hash is missing.
-- The browser does not retain the access code.
-- The server requires an explicit `paymentConfirmed: true` value, a customer name or Marketplace username, an item description, and a paid amount greater than zero before it can call HubSpot.
+- The browser holds the code in session memory only (shared unlock across Daily Work pages).
+- The server requires an explicit `paymentConfirmed: true` value, a customer name or Marketplace username, item description(s), and paid amount(s) greater than zero before it can call HubSpot.
 - A final browser confirmation is required immediately before the write request.
 
 The intake creates a Contact only after payment is confirmed. If the buyer supplied an email that matches an existing HubSpot Contact, that Contact is reused; otherwise, a new Contact is created and associated with the new Deal.
@@ -202,8 +201,8 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `POST /api/recalculate/:dealId` | Manual read/calculate attempt in local/private mode. Disabled on a public production deployment. |
 | `POST /api/webhooks/hubspot` | Receives HubSpot property-change event batches. |
 | `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
-| `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions. |
-| `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Orders Deal. |
+| `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions (optional Manual assist). |
+| `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Order deal(s); accepts optional `lineItems`. |
 | `POST /api/order-links` | Protected. Mints a one-time client link and returns the plain token exactly once. |
 | `GET /api/order-links` | Protected. Queue listing with per-status counts. Never returns the token hash. |
 | `GET /api/order-links/:id` | Protected. Full detail for one intake. |

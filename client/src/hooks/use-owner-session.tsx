@@ -98,7 +98,7 @@ export function OwnerUnlockPanel({
         </h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
         <p className="mt-3 text-xs leading-5 text-muted-foreground md:mt-4">
-          Unlock once for this browser tab — Order links, Print files, Supplies, and Performance share the same session until you reload.
+          Unlock once for this browser tab — Intake, Manual Entry, Print files, Supplies, and Performance share the same session until you reload.
         </p>
       </div>
       <form
