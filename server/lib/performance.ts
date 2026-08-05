@@ -8,7 +8,8 @@ export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
 export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
 const ATTENTION_LIMIT = 8;
-const ACTIVE_DEALS_LIMIT = 6;
+/** Cap for Command Center + Orders page open-deal lists. */
+const ACTIVE_DEALS_LIMIT = 40;
 
 type QueueCounts = {
   awaiting_client: number;
@@ -81,6 +82,7 @@ export interface PerformanceSnapshot {
   activeDeals: Array<{
     dealId: string;
     dealName: string;
+    stageId: string;
     stage: string;
     amount: number;
     hasPlates: boolean;
@@ -199,6 +201,7 @@ export function buildPerformanceSnapshot(input: {
     openDeals.push({
       dealId: deal.id,
       dealName,
+      stageId: stageId ?? "",
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,
