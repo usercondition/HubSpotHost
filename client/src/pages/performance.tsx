@@ -18,7 +18,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useDismissAttention } from "@/hooks/use-dismiss-attention";
+import { apiRequest } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
@@ -81,31 +82,7 @@ export default function Performance() {
     },
   });
 
-  const dismissAttention = useMutation({
-    mutationFn: async (input: { dealId: string; issueKey: string }) => {
-      const response = await apiRequest(
-        "POST",
-        "/api/attention/dismiss",
-        { dealId: input.dealId, issueKey: input.issueKey, note: "Skipped from Performance" },
-        { headers },
-      );
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
-      toast({
-        title: "Alert skipped",
-        description: "That reminder is hidden for this order. Closing the deal in HubSpot also clears it.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Could not skip that alert",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 160),
-        variant: "destructive",
-      });
-    },
-  });
+  const dismissAttention = useDismissAttention("performance");
 
   const unlock = useMutation({
     mutationFn: async (code: string) => {
@@ -255,7 +232,7 @@ export default function Performance() {
             <section className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
               <Panel
                 title="Needs attention"
-                description="Also available from the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
+                description="Same inbox as the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
                 actions={
                   <a
                     href={hubspotDealsListHref(snapshot.hubspotPortalId)}

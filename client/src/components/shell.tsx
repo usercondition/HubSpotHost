@@ -106,7 +106,7 @@ const NAV = [
   { href: "/orders", label: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Daily Work" },
   {
     href: "/paid-orders",
-    label: "Manual Order Entry",
+    label: "Manual Entry",
     icon: ClipboardCheck,
     testId: "link-nav-paid-orders",
     group: "Daily Work",

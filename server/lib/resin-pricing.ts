@@ -11,6 +11,7 @@
 import { desc, eq } from "drizzle-orm";
 import {
   lineItemsForSupplyPurchase,
+  resinProducts,
   resinProfiles,
   type PrintFileMetrics,
   type ResinCostSource,
@@ -20,6 +21,26 @@ import {
 import { round2 } from "./calc";
 import { getDb } from "./order-links";
 import { listSupplyPurchases } from "./supplies";
+
+/**
+ * Keep Resin Inventory unit cost aligned with the active bottle price so owners
+ * are not asked to enter the same $/bottle in two places.
+ */
+function mirrorBottlePriceToInventory(profileName: string, bottlePriceUsd: number): void {
+  const db = getDb();
+  const products = db.select().from(resinProducts).all();
+  if (products.length === 0) return;
+  const normalized = profileName.trim().toLowerCase();
+  const target =
+    products.find((row) => row.name.trim().toLowerCase() === normalized) ?? products[0]!;
+  db.update(resinProducts)
+    .set({
+      unitCostUsd: bottlePriceUsd.toFixed(2),
+      updatedAt: nowIso(),
+    })
+    .where(eq(resinProducts.id, target.id))
+    .run();
+}
 
 export const DEFAULT_RESIN_NAME = "ELEGOO ABS-Like 3.0 Space Grey";
 export const DEFAULT_RESIN_ASIN = "B0D6Y6JV42";
@@ -95,7 +116,7 @@ export function upsertActiveResinProfile(input: UpsertResinProfileInput): ResinP
       ? null
       : positive(input.bottleVolumeMl);
 
-  return getDb()
+  const updated = getDb()
     .update(resinProfiles)
     .set({
       name: input.name.trim(),
@@ -111,6 +132,8 @@ export function upsertActiveResinProfile(input: UpsertResinProfileInput): ResinP
     .where(eq(resinProfiles.id, active.id))
     .returning()
     .get();
+  mirrorBottlePriceToInventory(updated.name, price);
+  return updated;
 }
 
 export function parseAmazonProductPrice(html: string): number | null {
@@ -198,6 +221,7 @@ export async function refreshResinPriceFromAmazon(
       .where(eq(resinProfiles.id, profile.id))
       .returning()
       .get();
+    mirrorBottlePriceToInventory(updated.name, price);
 
     return { profile: updated, price, cached: false };
   } finally {

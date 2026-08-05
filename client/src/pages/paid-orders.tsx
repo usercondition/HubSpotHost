@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ClipboardPaste,
   FileText,
-  KeyRound,
   Loader2,
   LockKeyhole,
   PlusCircle,
@@ -19,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import type { PaidOrderAnalysis, PaidOrderCreateResult, PaidOrderDraft } from "@shared/schema";
@@ -61,8 +61,8 @@ type FieldKey = Exclude<keyof PaidOrderDraft, "paymentConfirmed">;
 
 export default function PaidOrders() {
   const { toast } = useToast();
+  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
   const [conversation, setConversation] = useState("");
-  const [accessCode, setAccessCode] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<"unchecked" | "checking" | "ready" | "stale">(
     "unchecked",
   );
@@ -70,7 +70,30 @@ export default function PaidOrders() {
   const [draft, setDraft] = useState<PaidOrderDraft>(EMPTY_DRAFT);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
 
-  const headers = () => ({ "x-paid-order-access-code": accessCode });
+  const unlock = useMutation({
+    mutationFn: async (code: string) => {
+      await apiRequest("GET", "/api/performance", undefined, {
+        headers: { "x-paid-order-access-code": code },
+      });
+      return code;
+    },
+    onSuccess: (code) => {
+      setSessionUnlocked(code);
+      toast({
+        title: "Manual entry unlocked",
+        description: "This tab shares the same owner session as Paid Order Intake and the rest of Daily Work.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "That owner code was not accepted",
+        description: error.message.startsWith("401")
+          ? "Check the code and try again. Nothing was unlocked."
+          : "Could not reach the live intake service.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const checkLiveConnection = async () => {
     setConnectionStatus("checking");
@@ -84,15 +107,15 @@ export default function PaidOrders() {
       toast({
         title: ready ? "Connected to the current live intake service" : "This page is not on the current live intake service",
         description: ready
-          ? "You can use the printed access code on this page."
-          : "Open the public Print Orders site directly, then return to Paid order intake.",
+          ? "Your shared owner session can create HubSpot records from this page."
+          : "Open the public Print Orders site directly, then return to Manual Entry.",
         variant: ready ? "default" : "destructive",
       });
     } catch {
       setConnectionStatus("stale");
       toast({
         title: "This page cannot reach the live intake service",
-        description: "Open the public Print Orders site directly, then return to Paid order intake.",
+        description: "Open the public Print Orders site directly, then return to Manual Entry.",
         variant: "destructive",
       });
     }
@@ -103,8 +126,8 @@ export default function PaidOrders() {
       const res = await apiRequest(
         "POST",
         "/api/paid-orders/analyze",
-        { conversation, intakeAccessCode: accessCode },
-        { headers: headers() },
+        { conversation, intakeAccessCode: ownerCode },
+        { headers },
       );
       return (await res.json()) as { ok: true; analysis: PaidOrderAnalysis };
     },
@@ -144,8 +167,8 @@ export default function PaidOrders() {
       const res = await apiRequest(
         "POST",
         "/api/paid-orders",
-        { ...draft, intakeAccessCode: accessCode },
-        { headers: headers() },
+        { ...draft, intakeAccessCode: ownerCode },
+        { headers },
       );
       return (await res.json()) as { ok: true; result: PaidOrderCreateResult };
     },
@@ -179,10 +202,10 @@ export default function PaidOrders() {
       });
       return;
     }
-    if (!accessCode.trim()) {
+    if (!isUnlocked) {
       toast({
-        title: "Enter the intake access code",
-        description: "The code protects HubSpot from unauthorized order creation.",
+        title: "Unlock Manual Entry first",
+        description: "Use the same owner code as the rest of Daily Work.",
         variant: "destructive",
       });
       return;
@@ -209,7 +232,7 @@ export default function PaidOrders() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Manual order entry"
-        subtitle="Use this when you already have a paid buyer's details and do not need to send an order form."
+        subtitle="Fallback when the buyer can’t use an order form — paste a paid conversation and create the HubSpot deal here."
         actions={
           <>
             <StatusPill
@@ -224,6 +247,17 @@ export default function PaidOrders() {
       />
 
       <div className="page-stack">
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock Manual Entry"
+            description="Same owner code as Paid Order Intake. Unlock once for this tab, then paste a paid conversation."
+            buttonLabel="Unlock Manual Entry"
+            testIdPrefix="paid-orders"
+            pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
+          />
+        ) : null}
+
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
           <Panel
             title="1. Paste the paid Marketplace conversation"
@@ -250,34 +284,15 @@ export default function PaidOrders() {
                   onChange={(event) => setConversation(event.target.value)}
                   placeholder={"Buyer: John Smith\nI'm paid for the Acastus Knight Porphyrion at $350. Please ship to...\nPayment sent. My address is..."}
                   data-testid="input-marketplace-conversation"
+                  disabled={!isUnlocked}
                 />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="intake-access-code">Intake access code</Label>
-                <div className="relative">
-                  <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="intake-access-code"
-                    type="password"
-                    autoComplete="off"
-                    className="pl-9"
-                    value={accessCode}
-                    onChange={(event) => setAccessCode(event.target.value)}
-                    placeholder="Enter your private intake code"
-                    data-testid="input-intake-access-code"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  This code is not retained by the page. It protects the HubSpot record-creation action.
-                </p>
               </div>
 
               <Button
                 type="button"
                 variant="outline"
                 onClick={checkLiveConnection}
-                disabled={connectionStatus === "checking"}
+                disabled={!isUnlocked || connectionStatus === "checking"}
                 className="w-full"
                 data-testid="button-check-live-intake-connection"
               >
@@ -293,7 +308,7 @@ export default function PaidOrders() {
               <Button
                 type="button"
                 onClick={startAnalysis}
-                disabled={analyze.isPending}
+                disabled={!isUnlocked || analyze.isPending}
                 className="w-full"
                 data-testid="button-analyze-conversation"
               >

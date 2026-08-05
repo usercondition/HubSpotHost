@@ -864,6 +864,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         intakeCounts: orderLinkCounts(),
         supplySpend: buildSupplySpendSummary(),
         attachedPrintDealIds: attachedPrintFileDealIds(),
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
         hubspotPortalId,
       });
       const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({

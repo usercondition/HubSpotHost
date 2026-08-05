@@ -9,11 +9,9 @@ import {
   ExternalLink,
   FileUp,
   Link2,
-  PackageCheck,
   ShoppingBag,
   ShipWheel,
   SlidersHorizontal,
-  Store,
   Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,9 +24,6 @@ import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader, ThemeToggle } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
-
-const HUBSPOT_URL = "https://app.hubspot.com/";
-const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
 
 function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   const live = health?.safety.liveWriteReady === true;
@@ -95,38 +90,34 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   );
 }
 
-function WorkflowStep({
-  number,
+function DailyPathLink({
+  href,
   title,
   body,
-  href,
-  action,
   icon: Icon,
+  testId,
 }: {
-  number: string;
+  href: string;
   title: string;
   body: string;
-  href: string;
-  action: string;
   icon: LucideIcon;
+  testId: string;
 }) {
   return (
-    <article className="relative border-t border-border pt-4 first:border-t-0 first:pt-0 md:border-l md:border-t-0 md:pl-5 md:first:pl-0">
-      <div className="flex items-center gap-2 text-primary">
-        <Icon className="h-4 w-4" />
-        <span className="rule-label">Step {number}</span>
-      </div>
-      <h3 className="mt-2 text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-1 max-w-[30ch] text-xs leading-5 text-muted-foreground">{body}</p>
-      <Link
-        href={href}
-        className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-        data-testid={`link-workflow-${number}`}
-      >
-        {action}
-        <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
-    </article>
+    <Link
+      href={href}
+      data-testid={testId}
+      className="group flex items-start gap-3 rounded-md px-3 py-3 transition-colors hover:bg-muted/55"
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+      <span>
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          {title}
+          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+        </span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{body}</span>
+      </span>
+    </Link>
   );
 }
 
@@ -308,7 +299,6 @@ function TodaysWork() {
           </ul>
         </div>
       ) : null}
-
     </section>
   );
 }
@@ -380,167 +370,50 @@ export default function Dashboard() {
           </div>
         </section>
 
-        <section aria-labelledby="workflow-title" data-testid="panel-daily-workflow">
-          <div className="mb-3 flex items-end justify-between gap-4">
-            <div>
-              <p className="rule-label">Daily workflow</p>
-              <h2 id="workflow-title" className="mt-1 text-base font-semibold tracking-tight">
-                One sale, one clear path
-              </h2>
-            </div>
-            <span className="hidden text-xs text-muted-foreground sm:block">Repeat for every paid order</span>
-          </div>
-          <div className="grid gap-5 rounded-lg border border-card-border bg-card p-5 md:grid-cols-3 md:gap-0">
-            <WorkflowStep
-              number="01"
-              title="Collect buyer details"
-              body="Create the secure intake link once payment is received."
-              href="/orders"
-              action="Open paid order intake"
-              icon={Link2}
-            />
-            <WorkflowStep
-              number="02"
-              title="Attach production data"
-              body="After approval, attach each Chitubox plate so time and resin estimates land on the deal."
-              href="/prints"
-              action="Open Print files"
-              icon={FileUp}
-            />
-            <WorkflowStep
-              number="03"
-              title="Buy and record shipping"
-              body="Create a label in Pirate Ship, then enter the actual shipping cost on the deal."
-              href="/operations"
-              action="See cost fields"
-              icon={ShipWheel}
-            />
-          </div>
-        </section>
-
         <section
           className="overflow-hidden rounded-lg border border-card-border bg-card"
-          aria-labelledby="control-loop-title"
-          data-testid="panel-control-loop"
+          aria-labelledby="daily-path-title"
+          data-testid="panel-daily-workflow"
         >
           <div className="border-b border-border px-5 py-4">
-            <p className="rule-label">Control loop</p>
-            <h2 id="control-loop-title" className="mt-1 text-base font-semibold tracking-tight">
-              Keep the whole business visible
+            <p className="rule-label">Daily path</p>
+            <h2 id="daily-path-title" className="mt-1 text-base font-semibold tracking-tight">
+              One sale, one clear path
             </h2>
           </div>
           <div className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
-            <Link
+            <DailyPathLink
+              href="/orders"
+              title="Collect buyer details"
+              body="Create the secure intake link once payment is received."
+              icon={Link2}
+              testId="link-workflow-01"
+            />
+            <DailyPathLink
               href="/prints"
-              data-testid="link-control-loop-prints"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-            >
-              <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Attach sliced plate data <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Turn each Chitubox CTB plate into time, resin, cost, and exposure totals on the right Print Order.
-                </span>
-              </span>
-            </Link>
-            <Link
+              title="Attach production plates"
+              body="Drop each Chitubox plate so time and resin estimates land on the deal."
+              icon={FileUp}
+              testId="link-workflow-02"
+            />
+            <DailyPathLink
               href="/supplies"
-              data-testid="link-control-loop-supplies"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-            >
-              <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Log supply purchases <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Copy Amazon receipt totals into a clean materials, consumables, and packaging ledger.
-                </span>
-              </span>
-            </Link>
-            <Link
-              href="/performance"
-              data-testid="link-control-loop-performance"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-            >
-              <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Review performance <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  See pipeline workload, recent revenue, margins, supply spend, and orders that need attention.
-                </span>
-              </span>
-            </Link>
-            <Link
+              title="Log supply purchases"
+              body="Receipt totals for resin, consumables, and packaging stay off the HubSpot deal."
+              icon={ShoppingBag}
+              testId="link-control-loop-supplies"
+            />
+            <DailyPathLink
               href="/operations"
-              data-testid="link-control-loop-operations"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-            >
-              <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Profit automation <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Confirm webhook health when HubSpot cost fields change.
-                </span>
-              </span>
-            </Link>
+              title="Record shipping cost"
+              body="Buy the Pirate Ship label, then enter actual postage on the HubSpot deal."
+              icon={ShipWheel}
+              testId="link-workflow-03"
+            />
           </div>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-          <SystemStatus health={health.data} />
-
-          <section
-            className="rounded-lg border border-card-border bg-card p-5"
-            aria-labelledby="tools-title"
-            data-testid="panel-business-tools"
-          >
-            <p className="rule-label">Business tools</p>
-            <h2 id="tools-title" className="mt-1 text-base font-semibold tracking-tight">
-              Open the systems you use
-            </h2>
-            <div className="mt-4 space-y-2">
-              <a
-                href={HUBSPOT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="link-command-center-hubspot"
-                className="flex items-center justify-between rounded-md border border-border px-3 py-3 text-sm transition-colors hover:bg-muted/60"
-              >
-                <span className="flex items-center gap-2.5">
-                  <Store className="h-4 w-4 text-primary" />
-                  <span>
-                    <span className="block font-medium">HubSpot CRM</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Orders, customers, costs, and pipeline</span>
-                  </span>
-                </span>
-                <ExternalLink className="h-4 w-4 text-muted-foreground" />
-              </a>
-              <a
-                href={PIRATE_SHIP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="link-command-center-pirateship"
-                className="flex items-center justify-between rounded-md border border-border px-3 py-3 text-sm transition-colors hover:bg-muted/60"
-              >
-                <span className="flex items-center gap-2.5">
-                  <ShipWheel className="h-4 w-4 text-primary" />
-                  <span>
-                    <span className="block font-medium">Pirate Ship</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Shipping labels and actual postage</span>
-                  </span>
-                </span>
-                <ExternalLink className="h-4 w-4 text-muted-foreground" />
-              </a>
-            </div>
-          </section>
-        </section>
+        <SystemStatus health={health.data} />
       </div>
     </div>
   );

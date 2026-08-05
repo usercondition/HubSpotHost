@@ -29,6 +29,7 @@ const {
 const { createSupplyPurchase } = await import("../server/lib/supplies");
 const { encryptCtbSettingsBlock, parseCtbFile } = await import("../server/lib/ctb");
 const { stagePrintFile } = await import("../server/lib/print-files");
+const { ensureDefaultResinInventory, listResinProducts } = await import("../server/lib/resin-inventory");
 
 before(() => {
   store.getDb();
@@ -129,6 +130,23 @@ test("supplies resin purchases can provide a fallback rate", () => {
   });
   assert.equal(estimate.resinCostSource, "supplies");
   assert.equal(estimate.resinCost, 4);
+});
+
+test("updating the active bottle price mirrors unit cost into resin inventory", () => {
+  ensureDefaultResinInventory();
+  upsertActiveResinProfile({
+    name: "ELEGOO ABS-Like 3.0 Space Grey",
+    amazonAsin: DEFAULT_RESIN_ASIN,
+    amazonUrl: `https://www.amazon.com/dp/${DEFAULT_RESIN_ASIN}`,
+    bottleMassG: 1000,
+    bottleVolumeMl: null,
+    bottlePriceUsd: "41.50",
+    notes: "",
+  });
+
+  const products = listResinProducts();
+  assert.ok(products.length > 0);
+  assert.equal(products[0]?.unitCostUsd, "41.50");
 });
 
 test("refreshResinPriceFromAmazon updates the active profile from HTML", async () => {

@@ -157,8 +157,9 @@ export default function Supplies() {
     },
   });
 
+  /** Share cache with Command Center / bell / Performance — one HubSpot pull. */
   const books = useQuery<PerformanceResponse>({
-    queryKey: ["/api/performance", ownerCode, "books"],
+    queryKey: ["/api/performance", ownerCode],
     enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });

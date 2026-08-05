@@ -84,11 +84,13 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
   assert.equal(snapshot.attention[0]?.dealName, "Low-margin Knight");
   assert.match(snapshot.attention[0]?.issue ?? "", /Margin below/);
-  assert.ok(
-    snapshot.attention.some(
-      (item) => item.dealName === "Needs costs" && item.issue === "Cost details incomplete",
-    ),
+  const costAlert = snapshot.attention.find(
+    (item) => item.dealName === "Needs costs" && item.issue === "Cost details incomplete",
   );
+  assert.ok(costAlert);
+  assert.match(costAlert?.detail ?? "", /material/);
+  assert.match(costAlert?.detail ?? "", /labor/);
+  assert.equal(/packaging|shipping/.test(costAlert?.detail ?? ""), false);
   assert.ok(
     snapshot.attention.some(
       (item) => item.dealName === "Low-margin Knight" && item.issue === "No CTB plates attached",
@@ -196,4 +198,35 @@ test("attached print plates suppress the missing-plate attention item", () => {
   assert.equal(snapshot.activeDeals[0]?.hasPlates, true);
   assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, false);
   assert.equal(snapshot.hubspotPortalId, "12345");
+});
+
+test("post-process stages also require packaging and shipping cost fields", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["qc"],
+    stages: [{ id: "qc", label: "Post-Process / QC", displayOrder: 2, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "qc",
+        properties: {
+          dealname: "GK Combat Patrol",
+          dealstage: "qc",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "100",
+          print_material_cost: "40",
+          print_labor_cost: "30",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "",
+        },
+      },
+    ],
+  });
+
+  const costAlert = snapshot.attention.find((item) => item.issueKey === "costs_incomplete");
+  assert.ok(costAlert);
+  assert.match(costAlert?.detail ?? "", /packaging/);
+  assert.match(costAlert?.detail ?? "", /shipping/);
+  assert.equal(/material|labor/.test(costAlert?.detail ?? ""), false);
 });

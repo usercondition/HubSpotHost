@@ -122,6 +122,25 @@ function dealIsClosed(
   return truthyHubSpotFlag(props.hs_is_closed) || truthyHubSpotFlag(props.hs_is_closed_won);
 }
 
+/** Packaging / shipping are only expected once the order is near fulfill. */
+function stageExpectsFulfillmentCosts(stageLabel: string): boolean {
+  return /ship|pack|post|qc|fulfill|complete|ready|deliver/i.test(stageLabel);
+}
+
+function missingCostLabels(
+  props: HubSpotDealRecord["properties"],
+  stageLabel: string,
+): string[] {
+  const labels: string[] = [];
+  if (isBlank(props.print_material_cost)) labels.push("material");
+  if (isBlank(props.print_labor_cost)) labels.push("labor");
+  if (stageExpectsFulfillmentCosts(stageLabel)) {
+    if (isBlank(props.print_packaging_cost)) labels.push("packaging");
+    if (isBlank(props.print_actual_shipping_cost)) labels.push("shipping");
+  }
+  return labels;
+}
+
 function stageName(
   stageId: string | null | undefined,
   stageMap: Map<string, HubSpotPipelineStage>,
@@ -181,12 +200,8 @@ export function buildPerformanceSnapshot(input: {
     const modifiedAt = asDate(props.hs_lastmodifieddate);
     const dealName = props.dealname?.trim() || `Deal ${deal.id}`;
     const displayStage = stageName(stageId, stageMap);
-    const missingCosts = [
-      props.print_material_cost,
-      props.print_labor_cost,
-      props.print_packaging_cost,
-      props.print_actual_shipping_cost,
-    ].some(isBlank);
+    const blankCostLabels = missingCostLabels(props, displayStage);
+    const missingCosts = blankCostLabels.length > 0;
 
     if (createdAt && createdAt >= periodStart) {
       orders += 1;
@@ -249,10 +264,14 @@ export function buildPerformanceSnapshot(input: {
     }
 
     if (missingCosts) {
+      const list =
+        blankCostLabels.length === 1
+          ? blankCostLabels[0]!
+          : `${blankCostLabels.slice(0, -1).join(", ")}, and ${blankCostLabels[blankCostLabels.length - 1]}`;
       pushAttention(
         4,
         "Cost details incomplete",
-        "Add material, labor, packaging, and shipping costs as they become known",
+        `Add ${list} cost${blankCostLabels.length === 1 ? "" : "s"} on the HubSpot deal as they become known`,
         "neutral",
       );
     }
@@ -268,9 +287,10 @@ export function buildPerformanceSnapshot(input: {
   }
 
   const weightedMarginPercent = revenue > 0 ? round2((grossProfit / revenue) * 100) : 0;
-  const sortedAttention = attention
+  const visibleAttention = attention
     .sort((a, b) => a.priority - b.priority || a.dealName.localeCompare(b.dealName))
-    .map(({ priority: _priority, ...item }) => item);
+    .map(({ priority: _priority, ...item }) => item)
+    .slice(0, ATTENTION_LIMIT);
   const activeDeals = openDeals
     .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
     .slice(0, ACTIVE_DEALS_LIMIT)
@@ -301,7 +321,8 @@ export function buildPerformanceSnapshot(input: {
       orders,
       averageOrderValue: orders > 0 ? round2(revenue / orders) : 0,
       activeOrders,
-      attentionCount: sortedAttention.length,
+      /** Matches the alerts list length so bell badge and inbox stay aligned. */
+      attentionCount: visibleAttention.length,
     },
     intake: {
       awaitingClient: input.intakeCounts.awaiting_client,
@@ -316,7 +337,7 @@ export function buildPerformanceSnapshot(input: {
       count: stageCounts.get(stage.id) ?? 0,
       closed: stageClosed(stage),
     })),
-    attention: sortedAttention.slice(0, ATTENTION_LIMIT),
+    attention: visibleAttention,
     activeDeals,
     hubspotPortalId: input.hubspotPortalId ?? null,
   };

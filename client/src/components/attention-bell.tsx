@@ -1,11 +1,11 @@
 import { Link } from "wouter";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Bell, ExternalLink, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useToast } from "@/hooks/use-toast";
+import { useDismissAttention } from "@/hooks/use-dismiss-attention";
 import { useOwnerSession } from "@/hooks/use-owner-session";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { attentionNextStep } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -17,8 +17,8 @@ const ISSUE_TONE = {
 } as const;
 
 export function AttentionBell() {
-  const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const dismiss = useDismissAttention("alerts");
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -26,32 +26,6 @@ export function AttentionBell() {
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
-    },
-  });
-
-  const dismiss = useMutation({
-    mutationFn: async (input: { dealId: string; issueKey: string }) => {
-      const response = await apiRequest(
-        "POST",
-        "/api/attention/dismiss",
-        { dealId: input.dealId, issueKey: input.issueKey, note: "Skipped from alerts" },
-        { headers },
-      );
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
-      toast({
-        title: "Alert skipped",
-        description: "This reminder won’t show again for that order. Closed HubSpot deals also clear automatically.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Could not skip that alert",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 160),
-        variant: "destructive",
-      });
     },
   });
 
