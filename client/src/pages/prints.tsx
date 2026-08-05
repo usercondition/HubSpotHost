@@ -358,6 +358,7 @@ export default function Prints() {
       setStaged(null);
       setIncludeAttached(true);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       toast({
         title: `Plate ${summary.plateCount} attached`,
         description: `${message} Running time: ${formatHours(summary.totalPrintTimeSeconds)}.`,

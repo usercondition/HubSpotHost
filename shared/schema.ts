@@ -211,6 +211,8 @@ export interface PerformanceResponse {
     dealName: string;
     stage: string;
     issue: string;
+    /** Stable key for dismiss/bypass: no_plates | costs_incomplete | low_margin | stale | other */
+    issueKey: string;
     detail: string;
     severity: "neutral" | "warn" | "bad";
   }>;
@@ -223,6 +225,47 @@ export interface PerformanceResponse {
   }>;
   hubspotPortalId: string | null;
 }
+
+export const ATTENTION_ISSUE_KEYS = [
+  "no_plates",
+  "costs_incomplete",
+  "low_margin",
+  "stale",
+  "other",
+] as const;
+
+export type AttentionIssueKey = (typeof ATTENTION_ISSUE_KEYS)[number];
+
+/** Owner-dismissed attention alerts (per deal + issue). Survives until undone. */
+export const attentionOverrides = sqliteTable("attention_overrides", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  hubspotDealId: text("hubspot_deal_id").notNull(),
+  issueKey: text("issue_key").notNull().$type<AttentionIssueKey>(),
+  note: text("note").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+export type AttentionOverride = typeof attentionOverrides.$inferSelect;
+
+export function attentionIssueKeyFromIssue(issue: string): AttentionIssueKey {
+  const normalized = issue.toLowerCase();
+  if (normalized.includes("ctb") || normalized.includes("plate")) return "no_plates";
+  if (normalized.includes("cost")) return "costs_incomplete";
+  if (normalized.includes("margin")) return "low_margin";
+  if (normalized.includes("recent activity") || normalized.includes("stale")) return "stale";
+  return "other";
+}
+
+export const dismissAttentionSchema = z.object({
+  dealId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{1,20}$/, "Select a valid Print Order"),
+  issueKey: z.enum(ATTENTION_ISSUE_KEYS),
+  note: z.string().trim().max(200).default(""),
+});
+
+export type DismissAttentionInput = z.infer<typeof dismissAttentionSchema>;
 
 export interface TrackerAssistantAction {
   label: string;

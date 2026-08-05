@@ -1,4 +1,5 @@
 import { calculateProfit, round2 } from "./calc";
+import { attentionIssueKeyFromIssue, overrideKey } from "./attention";
 import { buildSupplyBooksBalance } from "./books";
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
 import type { SupplyBooksBalance } from "../../shared/schema";
@@ -72,6 +73,7 @@ export interface PerformanceSnapshot {
     dealName: string;
     stage: string;
     issue: string;
+    issueKey: string;
     detail: string;
     severity: "neutral" | "warn" | "bad";
   }>;
@@ -97,9 +99,25 @@ function isBlank(value: string | null | undefined): boolean {
   return value === null || value === undefined || value.trim() === "";
 }
 
+function truthyHubSpotFlag(value: string | null | undefined): boolean {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
 function stageClosed(stage: HubSpotPipelineStage | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
+}
+
+/** Closed pipeline stage or HubSpot closed / closed-won flags. */
+function dealIsClosed(
+  props: HubSpotDealRecord["properties"],
+  stage: HubSpotPipelineStage | undefined,
+): boolean {
+  if (stageClosed(stage)) return true;
+  return truthyHubSpotFlag(props.hs_is_closed) || truthyHubSpotFlag(props.hs_is_closed_won);
 }
 
 function stageName(
@@ -125,6 +143,8 @@ export function buildPerformanceSnapshot(input: {
   supplySpend?: SupplySpend;
   /** Local Print-files deal IDs that already have at least one attached CTB plate. */
   attachedPrintDealIds?: Iterable<string>;
+  /** Dismissed attention keys as `dealId:issueKey`. */
+  dismissedAttentionKeys?: Iterable<string>;
   hubspotPortalId?: string | null;
   now?: Date;
 }): PerformanceSnapshot {
@@ -136,6 +156,7 @@ export function buildPerformanceSnapshot(input: {
   const stageMap = new Map(input.stages.map((stage) => [stage.id, stage]));
   const stageCounts = new Map(input.stages.map((stage) => [stage.id, 0]));
   const attachedPrintDealIds = new Set(input.attachedPrintDealIds ?? []);
+  const dismissedAttentionKeys = new Set(input.dismissedAttentionKeys ?? []);
 
   let revenue = 0;
   let grossProfit = 0;
@@ -148,7 +169,7 @@ export function buildPerformanceSnapshot(input: {
     const props = deal.properties;
     const stageId = props.dealstage;
     const stage = stageMap.get(stageId ?? "");
-    const closed = stageClosed(stage);
+    const closed = dealIsClosed(props, stage);
     if (stageId && stageCounts.has(stageId)) {
       stageCounts.set(stageId, (stageCounts.get(stageId) ?? 0) + 1);
     }
@@ -184,53 +205,61 @@ export function buildPerformanceSnapshot(input: {
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
     });
 
-    // Collect every open issue for the deal so one alert does not hide another.
-    if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
+    const pushAttention = (
+      priority: number,
+      issue: string,
+      detail: string,
+      severity: "neutral" | "warn" | "bad",
+    ) => {
+      const issueKey = attentionIssueKeyFromIssue(issue);
+      if (dismissedAttentionKeys.has(overrideKey(deal.id, issueKey))) return;
       attention.push({
-        priority: calculation.marginPercentage < 20 ? 1 : 2,
+        priority,
         dealId: deal.id,
         dealName,
         stage: displayStage,
-        issue: `Margin below ${PERFORMANCE_MARGIN_ALERT_PERCENT}%`,
-        detail: `${calculation.marginPercentage.toFixed(1)}% margin · ${formatMoney(calculation.grossProfit)} gross profit`,
-        severity: calculation.marginPercentage < 20 ? "bad" : "warn",
+        issue,
+        issueKey,
+        detail,
+        severity,
       });
+    };
+
+    // Collect every open issue for the deal so one alert does not hide another.
+    if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
+      pushAttention(
+        calculation.marginPercentage < 20 ? 1 : 2,
+        `Margin below ${PERFORMANCE_MARGIN_ALERT_PERCENT}%`,
+        `${calculation.marginPercentage.toFixed(1)}% margin · ${formatMoney(calculation.grossProfit)} gross profit`,
+        calculation.marginPercentage < 20 ? "bad" : "warn",
+      );
     }
 
     if (modifiedAt && modifiedAt < staleBefore) {
-      attention.push({
-        priority: 3,
-        dealId: deal.id,
-        dealName,
-        stage: displayStage,
-        issue: "No recent activity",
-        detail: `No HubSpot update in ${daysSince(modifiedAt, now)} days`,
-        severity: "warn",
-      });
+      pushAttention(
+        3,
+        "No recent activity",
+        `No HubSpot update in ${daysSince(modifiedAt, now)} days`,
+        "warn",
+      );
     }
 
     if (missingCosts) {
-      attention.push({
-        priority: 4,
-        dealId: deal.id,
-        dealName,
-        stage: displayStage,
-        issue: "Cost details incomplete",
-        detail: "Add material, labor, packaging, and shipping costs as they become known",
-        severity: "neutral",
-      });
+      pushAttention(
+        4,
+        "Cost details incomplete",
+        "Add material, labor, packaging, and shipping costs as they become known",
+        "neutral",
+      );
     }
 
     if (!hasPlates && calculation.amount > 0) {
-      attention.push({
-        priority: 5,
-        dealId: deal.id,
-        dealName,
-        stage: displayStage,
-        issue: "No CTB plates attached",
-        detail: "Attach sliced plates in Print files so production time and resin estimates are on this order",
-        severity: "warn",
-      });
+      pushAttention(
+        5,
+        "No CTB plates attached",
+        "Attach sliced plates in Print files so production time and resin estimates are on this order",
+        "warn",
+      );
     }
   }
 

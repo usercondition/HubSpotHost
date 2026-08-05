@@ -20,6 +20,8 @@ export const PERFORMANCE_PROPERTIES = [
   "createdate",
   "hs_lastmodifieddate",
   "closedate",
+  "hs_is_closed",
+  "hs_is_closed_won",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
