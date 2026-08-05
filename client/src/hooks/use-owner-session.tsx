@@ -2,14 +2,19 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { KeyRound, Loader2, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, onOwnerAuthFailure } from "@/lib/queryClient";
+import { describeOwnerAuthError } from "@/lib/api-error";
 
 type OwnerSessionValue = {
   ownerCode: string;
@@ -30,6 +35,7 @@ const OwnerSessionContext = createContext<OwnerSessionValue | null>(null);
 export function OwnerSessionProvider({ children }: { children: ReactNode }) {
   const [ownerCode, setOwnerCode] = useState("");
   const [codeDraft, setCodeDraft] = useState("");
+  const { toast } = useToast();
 
   const unlock = useCallback((code: string) => {
     setOwnerCode(code);
@@ -39,6 +45,20 @@ export function OwnerSessionProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     setOwnerCode("");
   }, []);
+
+  useEffect(() => {
+    return onOwnerAuthFailure(() => {
+      setOwnerCode((current) => {
+        if (!current) return current;
+        toast({
+          title: "Owner session expired",
+          description: "Unlock again with your owner code to continue.",
+          variant: "destructive",
+        });
+        return "";
+      });
+    });
+  }, [toast]);
 
   const value = useMemo<OwnerSessionValue>(() => {
     const headers: Record<string, string> = {};
@@ -63,6 +83,38 @@ export function useOwnerSession(): OwnerSessionValue {
     throw new Error("useOwnerSession must be used within OwnerSessionProvider");
   }
   return value;
+}
+
+/** One unlock probe for every Daily Work page — hits `GET /api/owner/session`. */
+export function useOwnerUnlock(options: {
+  successTitle: string;
+  successDescription?: string;
+}) {
+  const { toast } = useToast();
+  const { unlock } = useOwnerSession();
+
+  return useMutation({
+    mutationFn: async (code: string) => {
+      await apiRequest("GET", "/api/owner/session", undefined, {
+        headers: { "x-paid-order-access-code": code },
+      });
+      return code;
+    },
+    onSuccess: (code) => {
+      unlock(code);
+      toast({
+        title: options.successTitle,
+        description: options.successDescription,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "That owner code was not accepted",
+        description: describeOwnerAuthError(error),
+        variant: "destructive",
+      });
+    },
+  });
 }
 
 export function OwnerUnlockPanel({
@@ -98,7 +150,7 @@ export function OwnerUnlockPanel({
         </h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
         <p className="mt-3 text-xs leading-5 text-muted-foreground md:mt-4">
-          Unlock once for this browser tab — Intake, Manual Entry, Print files, Supplies, and Performance share the same session until you reload.
+          Unlock once for this browser tab — Intake, Manual, Orders, Print files, Supplies, and Performance share the same session until you lock or reload.
         </p>
       </div>
       <form

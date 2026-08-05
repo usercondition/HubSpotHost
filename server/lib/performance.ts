@@ -86,6 +86,11 @@ export interface PerformanceSnapshot {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /**
+     * True when plates are still missing and the owner has not dismissed the
+     * “No CTB plates” attention alert for this deal.
+     */
+    promptAttachPlates: boolean;
     /** HubSpot close date (ISO), when set. */
     closeDate: string | null;
     /** Best-effort contact label from “Product - Client” deal names. */
@@ -216,6 +221,8 @@ export function buildPerformanceSnapshot(input: {
     activeOrders += 1;
 
     const hasPlates = attachedPrintDealIds.has(deal.id);
+    const promptAttachPlates =
+      !hasPlates && !dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
     openDeals.push({
       dealId: deal.id,
       dealName,
@@ -223,6 +230,7 @@ export function buildPerformanceSnapshot(input: {
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,
+      promptAttachPlates,
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),

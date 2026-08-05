@@ -20,8 +20,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/api-error";
+import { formatMoney } from "@/lib/format";
 import { printsDealHref } from "@/lib/workflow";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -52,14 +54,6 @@ function newLine(seed?: Partial<LineDraft>): LineDraft {
   };
 }
 
-function money(value: number): string {
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
-  });
-}
-
 function parseAmount(value: string): number {
   return Number(String(value).replace(/[$,\s]/g, ""));
 }
@@ -70,7 +64,11 @@ function parseAmount(value: string): number {
  */
 export default function PaidOrders() {
   const { toast } = useToast();
-  const { isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Manual entry unlocked',
+    successDescription: 'Enter the paid order details, confirm payment, then create in HubSpot.',
+  });
 
   const [contact, setContact] = useState<ContactDraft>(EMPTY_CONTACT);
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
@@ -87,31 +85,6 @@ export default function PaidOrders() {
     }, 0);
   }, [lines]);
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/order-links", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      await response.json();
-      return code;
-    },
-    onSuccess: (code) => {
-      setSessionUnlocked(code);
-      toast({
-        title: "Manual entry unlocked",
-        description: "Enter the paid order details, confirm payment, then create in HubSpot.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : "Could not reach the owner service. Try again shortly.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const analyze = useMutation({
     mutationFn: async () => {
@@ -279,8 +252,8 @@ export default function PaidOrders() {
 
     const label =
       cleaned.length > 1
-        ? `${cleaned.length} items totaling ${money(lineTotal)}`
-        : `${cleaned[0]!.productName} at ${money(parseAmount(cleaned[0]!.amount))}`;
+        ? `${cleaned.length} items totaling ${formatMoney(lineTotal)}`
+        : `${cleaned[0]!.productName} at ${formatMoney(parseAmount(cleaned[0]!.amount))}`;
     const proceed = window.confirm(`Create the paid HubSpot order for ${label}?`);
     if (proceed) create.mutate();
   };
@@ -548,7 +521,7 @@ export default function PaidOrders() {
                     {lines.length === 1 ? "" : "s"}
                   </span>
                   <span className="numeric font-semibold" data-testid="text-manual-line-total">
-                    {money(lineTotal)}
+                    {formatMoney(lineTotal)}
                   </span>
                 </div>
               </div>
@@ -628,7 +601,7 @@ export default function PaidOrders() {
                             <div className="min-w-0">
                               <p className="truncate font-medium">{deal.dealName}</p>
                               <p className="numeric text-xs text-muted-foreground">
-                                Deal {deal.dealId} · {money(parseAmount(deal.amount))}
+                                Deal {deal.dealId} · {formatMoney(parseAmount(deal.amount))}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">

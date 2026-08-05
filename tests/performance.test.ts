@@ -193,7 +193,41 @@ test("attached print plates suppress the missing-plate attention item", () => {
   assert.equal(snapshot.summary.activeOrders, 1);
   assert.equal(snapshot.attention.length, 0);
   assert.equal(snapshot.activeDeals[0]?.hasPlates, true);
+  assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, false);
   assert.equal(snapshot.hubspotPortalId, "12345");
+});
+
+test("dismissed no_plates alert keeps hasPlates false but clears attach prompt", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: [],
+    dismissedAttentionKeys: ["skip-me:no_plates"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "skip-me",
+        properties: {
+          dealname: "Legacy without plates",
+          dealstage: "deposit",
+          createdate: "2026-07-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "200",
+          print_material_cost: "40",
+          print_labor_cost: "30",
+          print_packaging_cost: "5",
+          print_actual_shipping_cost: "5",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
+  assert.equal(snapshot.activeDeals[0]?.promptAttachPlates, false);
+  assert.equal(
+    snapshot.attention.some((item) => item.issueKey === "no_plates"),
+    false,
+  );
 });
 
 test("board deals expose close date and contact parsed from Product - Client names", () => {

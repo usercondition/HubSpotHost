@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import type { ResinBottleEconomics, ResinInventorySnapshot } from "@shared/schema";
@@ -38,7 +38,11 @@ function localDate(value: string): string {
 
 export default function ResinInventoryPage() {
   const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Resin inventory unlocked',
+    successDescription: 'Active pour, bottle economics, and quoted-deal coverage.',
+  });
   const [unitCost, setUnitCost] = useState("");
   const [addSealed, setAddSealed] = useState("1");
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -52,35 +56,6 @@ export default function ResinInventoryPage() {
     },
   });
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/resin-inventory", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, data: (await response.json()) as ResinInventorySnapshot & { ok: true } };
-    },
-    onSuccess: ({ code, data }) => {
-      setSessionUnlocked(code);
-      const first = data.products[0];
-      if (first) {
-        setSelectedProductId(first.id);
-        setUnitCost(first.unitCostUsd ? String(first.unitCostUsd) : "");
-      }
-      toast({
-        title: "Resin inventory unlocked",
-        description: `${data.totals.sealedBottles} sealed bottle${data.totals.sealedBottles === 1 ? "" : "s"} on hand.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again."
-          : "Resin inventory could not be loaded.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const product =
     inventory.data?.products.find((row) => row.id === selectedProductId) ??

@@ -11,6 +11,7 @@ import {
   Home,
   Link2,
   FileUp,
+  Lock,
   Moon,
   Printer,
   ShoppingBag,
@@ -19,6 +20,7 @@ import {
   Sun,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
+import { useOwnerSession } from "@/hooks/use-owner-session";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -133,6 +135,7 @@ const NAV = [
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const groups = Array.from(new Set(NAV.map((item) => item.group)));
+  const { isUnlocked, lock } = useOwnerSession();
 
   useEffect(() => {
     document.title = "Print Operations";
@@ -215,6 +218,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-xs font-medium">Ship</span>
           </a>
           <ThemeToolButton />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="flex w-full flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Lock className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">Lock</span>
+            </button>
+          ) : null}
         </div>
       </aside>
 

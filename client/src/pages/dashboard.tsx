@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -14,17 +14,16 @@ import {
   ShipWheel,
   SlidersHorizontal,
   Store,
-  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
+import { formatMoney } from "@/lib/format";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
 const HUBSPOT_URL = "https://app.hubspot.com/";
@@ -131,8 +130,11 @@ function WorkflowStep({
 }
 
 function TodaysWork() {
-  const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlockMutation = useOwnerUnlock({
+    successTitle: "Daily work unlocked",
+    successDescription: "Intake, Manual, Orders, Print files, Supplies, and Performance share this session.",
+  });
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -143,27 +145,6 @@ function TodaysWork() {
     },
   });
 
-  const unlockMutation = useMutation({
-    mutationFn: async (code: string) => {
-      await apiRequest("GET", "/api/performance", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return code;
-    },
-    onSuccess: (code) => {
-      unlock(code);
-      toast({ title: "Daily work unlocked", description: "Order links, Print files, Supplies, and Performance share this session." });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again."
-          : "Could not reach the performance service.",
-        variant: "destructive",
-      });
-    },
-  });
 
   if (!isUnlocked) {
     return (
@@ -284,11 +265,11 @@ function TodaysWork() {
                   <p className="truncate text-sm font-medium">{deal.dealName}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {deal.stage}
-                    {deal.amount > 0 ? ` · ${money(deal.amount)}` : ""}
+                    {deal.amount > 0 ? ` · ${formatMoney(deal.amount)}` : ""}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-3">
-                  {!deal.hasPlates ? (
+                  {deal.promptAttachPlates ? (
                     <Link
                       href={printsDealHref(deal.dealId)}
                       className="text-xs font-medium text-primary hover:underline"
@@ -320,23 +301,13 @@ function TodaysWork() {
 
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const { isUnlocked, lock, ownerCode } = useOwnerSession();
+  const { isUnlocked, ownerCode } = useOwnerSession();
 
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Command center"
         subtitle="Run paid orders from buyer details to shipping without losing the thread."
-        actions={
-          <>
-            {isUnlocked ? (
-              <Button size="sm" variant="ghost" onClick={lock} data-testid="button-lock-owner-session">
-                <Unlock className="mr-2 h-3.5 w-3.5" />
-                Lock session
-              </Button>
-            ) : null}
-          </>
-        }
       />
 
       <div className="page-stack">

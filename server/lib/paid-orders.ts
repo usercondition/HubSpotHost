@@ -1,9 +1,11 @@
-import { HubSpotError, PRINT_ORDERS_PIPELINE } from "./hubspot";
-import { getConfig, getToken } from "./config";
-import { type PaidOrderDraft, splitName } from "./intake";
-import type { HubSpotIntakeDealRef, PaidOrderCreateResult } from "../../shared/schema";
+import { HubSpotError, PRINT_ORDERS_PIPELINE, hubspotRequest } from "./hubspot";
+import { splitName } from "./intake";
+import type {
+  HubSpotIntakeDealRef,
+  PaidOrderCreateResult,
+  PaidOrderDraft,
+} from "../../shared/schema";
 
-const REQUEST_TIMEOUT_MS = 15_000;
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
 
 interface HubSpotRecord {
@@ -12,53 +14,6 @@ interface HubSpotRecord {
 }
 
 export type { PaidOrderCreateResult };
-
-function authHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
-
-async function hubspotRequest(path: string, init: { method: string; body?: string }): Promise<any> {
-  const config = getConfig();
-  const token = getToken();
-  if (!token) throw new HubSpotError("HubSpot token not configured", 503);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${config.apiBase}${path}`, {
-      method: init.method,
-      headers: authHeaders(token),
-      body: init.body,
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      let detail = "";
-      try {
-        const parsed = JSON.parse(text);
-        detail = typeof parsed?.message === "string" ? parsed.message : "";
-      } catch {
-        detail = "";
-      }
-      throw new HubSpotError(
-        `HubSpot API ${res.status}${detail ? `: ${detail}` : ""}`,
-        res.status,
-      );
-    }
-    return text ? JSON.parse(text) : {};
-  } catch (error) {
-    if (error instanceof HubSpotError) throw error;
-    if ((error as Error)?.name === "AbortError") {
-      throw new HubSpotError("HubSpot API request timed out", 504);
-    }
-    throw new HubSpotError("HubSpot API request failed", 502);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 function clean(value: string | undefined, limit = 500): string {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
