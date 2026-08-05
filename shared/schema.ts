@@ -219,6 +219,8 @@ export interface PerformanceResponse {
   activeDeals: Array<{
     dealId: string;
     dealName: string;
+    /** HubSpot dealstage id for pipeline board columns. */
+    stageId: string;
     stage: string;
     amount: number;
     hasPlates: boolean;

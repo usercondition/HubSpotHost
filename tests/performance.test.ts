@@ -78,6 +78,7 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.activeDeals[0]?.dealName, "Low-margin Knight");
   assert.equal(snapshot.activeDeals[1]?.dealName, "Needs costs");
   assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
+  assert.equal(snapshot.activeDeals[0]?.stageId, "deposit");
   assert.equal(snapshot.hubspotPortalId, null);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "deposit")?.count, 2);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);

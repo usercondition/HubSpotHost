@@ -82,6 +82,7 @@ export interface PerformanceSnapshot {
   activeDeals: Array<{
     dealId: string;
     dealName: string;
+    stageId: string;
     stage: string;
     amount: number;
     hasPlates: boolean;
@@ -200,6 +201,7 @@ export function buildPerformanceSnapshot(input: {
     openDeals.push({
       dealId: deal.id,
       dealName,
+      stageId: stageId ?? "",
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,

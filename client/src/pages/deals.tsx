@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -16,7 +17,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader, ThemeToggle } from "@/components/shell";
-import { Panel, StatusPill } from "@/components/primitives";
+import { StatusPill } from "@/components/primitives";
+import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
 
 function money(value: number): string {
@@ -26,6 +28,10 @@ function money(value: number): string {
     maximumFractionDigits: value % 1 === 0 ? 0 : 2,
   });
 }
+
+type BoardDeal = PerformanceResponse["activeDeals"][number] & {
+  needsCosts: boolean;
+};
 
 export default function DealsPage() {
   const { toast } = useToast();
@@ -67,18 +73,32 @@ export default function DealsPage() {
 
   const snapshot = performance.data;
   const portalId = snapshot?.hubspotPortalId ?? null;
-  const deals = snapshot?.activeDeals ?? [];
-  const costsByDeal = new Map(
-    (snapshot?.attention ?? [])
-      .filter((item) => item.issueKey === "costs_incomplete")
-      .map((item) => [item.dealId, item] as const),
-  );
+
+  const columns = useMemo(() => {
+    if (!snapshot) return [];
+    const costs = new Set(
+      snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
+    );
+    const byStage = new Map<string, BoardDeal[]>();
+    for (const deal of snapshot.activeDeals) {
+      const key = deal.stageId || deal.stage;
+      const list = byStage.get(key) ?? [];
+      list.push({ ...deal, needsCosts: costs.has(deal.dealId) });
+      byStage.set(key, list);
+    }
+
+    return snapshot.pipeline.map((stage) => {
+      const deals = byStage.get(stage.id) ?? [];
+      const totalAmount = deals.reduce((sum, deal) => sum + deal.amount, 0);
+      return { ...stage, deals, totalAmount };
+    });
+  }, [snapshot]);
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-[100rem]">
       <PageHeader
         title="Orders"
-        subtitle="Open Print Orders from HubSpot — act on plates and costs here, open the full CRM when you need to edit a deal."
+        subtitle="Your Print Orders pipeline board — same stages as HubSpot, with plate and cost actions in this hub."
         actions={
           <>
             {isUnlocked ? (
@@ -105,15 +125,15 @@ export default function DealsPage() {
       <div className="page-stack">
         {!isUnlocked ? (
           <OwnerUnlockPanel
-            title="Unlock your open Print Orders"
-            description="Same owner code as the rest of Daily Work. Pulls live HubSpot deals without leaving Print Operations."
+            title="Unlock your Print Orders board"
+            description="Same owner code as the rest of Daily Work. Pulls live HubSpot pipeline stages and open deals."
             buttonLabel="Unlock Orders"
             testIdPrefix="deals"
             pending={unlock.isPending}
             onUnlock={(code) => unlock.mutate(code)}
           />
         ) : performance.isLoading ? (
-          <Skeleton className="h-64 rounded-lg" data-testid="skeleton-deals" />
+          <Skeleton className="h-[28rem] rounded-lg" data-testid="skeleton-deals" />
         ) : performance.isError || !snapshot ? (
           <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-deals-error">
             <div className="flex items-start gap-3">
@@ -137,113 +157,135 @@ export default function DealsPage() {
               data-testid="panel-deals-hubspot-escape"
             >
               <div className="min-w-0">
-                <p className="rule-label">HubSpot CRM</p>
-                <p className="mt-1 text-sm font-medium">Need the full deals board?</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  HubSpot can’t open inside this page, so the CRM opens in a new tab when you need stages, notes, or cost fields.
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="rule-label">Print Orders pipeline</p>
+                  <StatusPill
+                    tone={snapshot.summary.attentionCount > 0 ? "warn" : "good"}
+                    icon={Boxes}
+                    label={`${snapshot.summary.activeOrders} open`}
+                    testId="status-deals-attention"
+                  />
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Board mirrors your HubSpot stages. Dragging between stages still happens in HubSpot.
                 </p>
               </div>
               <Button asChild data-testid="button-open-hubspot-deals">
                 <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
                   <Store className="mr-2 h-4 w-4" />
-                  Open deals in HubSpot
+                  Open board in HubSpot
                   <ExternalLink className="ml-2 h-3.5 w-3.5" />
                 </a>
               </Button>
             </section>
 
-            <Panel
-              title="Open Print Orders"
-              description={`${snapshot.summary.activeOrders} active deal${snapshot.summary.activeOrders === 1 ? "" : "s"} in your Print Orders pipeline.`}
-              actions={
-                <StatusPill
-                  tone={snapshot.summary.attentionCount > 0 ? "warn" : "good"}
-                  icon={Boxes}
-                  label={
-                    snapshot.summary.attentionCount > 0
-                      ? `${snapshot.summary.attentionCount} alert${snapshot.summary.attentionCount === 1 ? "" : "s"}`
-                      : "Clear"
-                  }
-                  testId="status-deals-attention"
-                />
-              }
+            <section
+              className="overflow-x-auto rounded-lg border border-card-border bg-card"
+              data-testid="panel-deals-board"
+              aria-label="Print Orders pipeline board"
             >
-              {deals.length === 0 ? (
-                <div className="rounded-md bg-muted/50 p-4" data-testid="empty-deals">
-                  <p className="text-sm font-medium">No open Print Orders right now</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    New deals appear here after you approve a paid order into HubSpot.
-                  </p>
-                  <Link href="/orders" className="mt-3 inline-flex text-sm font-medium text-primary hover:underline" data-testid="link-deals-to-intake">
-                    Open Paid Order Intake
-                  </Link>
-                </div>
-              ) : (
-                <ul className="divide-y divide-border rounded-md border border-border" data-testid="list-deals">
-                  {deals.map((deal) => {
-                    const costIssue = costsByDeal.get(deal.dealId);
-                    const showAttach = !deal.hasPlates;
-                    return (
-                      <li
-                        key={deal.dealId}
-                        className="flex flex-wrap items-start justify-between gap-3 px-3 py-3"
-                        data-testid={`row-deal-${deal.dealId}`}
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{deal.dealName}</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {deal.stage}
-                            {deal.amount > 0 ? ` · ${money(deal.amount)}` : ""}
-                          </p>
-                          {costIssue ? (
-                            <p className="mt-1 text-xs text-muted-foreground">{costIssue.detail}</p>
-                          ) : null}
-                        </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-3">
-                          {showAttach ? (
-                            <Link
-                              href={printsDealHref(deal.dealId)}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                              data-testid={`link-deal-attach-${deal.dealId}`}
-                            >
-                              <FileUp className="h-3 w-3" />
-                              Attach plates
-                            </Link>
-                          ) : null}
-                          {costIssue ? (
-                            <a
-                              href={hubspotDealHref(deal.dealId, portalId)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                              data-testid={`link-deal-costs-${deal.dealId}`}
-                            >
-                              Update costs
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : null}
-                          <a
-                            href={hubspotDealHref(deal.dealId, portalId)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-                            data-testid={`link-deal-hubspot-${deal.dealId}`}
+              <div className="flex min-w-max gap-3 p-4">
+                {columns.map((column) => (
+                  <div
+                    key={column.id}
+                    className="flex w-[15.5rem] shrink-0 flex-col"
+                    data-testid={`column-deal-stage-${column.id}`}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-2 px-1">
+                      <div className="min-w-0">
+                        <p
+                          className={cn(
+                            "truncate text-sm font-semibold",
+                            column.closed && /lost/i.test(column.label)
+                              ? "text-destructive"
+                              : column.closed
+                                ? "text-emerald-700 dark:text-emerald-400"
+                                : "text-foreground",
+                          )}
+                        >
+                          {column.label}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground numeric">
+                          {column.deals.length} deal{column.deals.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      className={cn(
+                        "flex min-h-[18rem] flex-1 flex-col gap-2 rounded-md border border-border/80 bg-muted/35 p-2",
+                        column.closed && "bg-muted/20",
+                      )}
+                    >
+                      {column.deals.length === 0 ? (
+                        <p className="px-1 py-6 text-center text-xs text-muted-foreground">No deals</p>
+                      ) : (
+                        column.deals.map((deal) => (
+                          <article
+                            key={deal.dealId}
+                            className="rounded-md border border-border bg-card p-3 shadow-sm"
+                            data-testid={`card-deal-${deal.dealId}`}
                           >
-                            HubSpot
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {snapshot.summary.activeOrders > deals.length ? (
-                <p className="mt-3 text-xs text-muted-foreground" data-testid="text-deals-truncated">
-                  Showing {deals.length} of {snapshot.summary.activeOrders} open orders. Open HubSpot for the full list.
-                </p>
-              ) : null}
-            </Panel>
+                            <p className="text-sm font-medium leading-5">{deal.dealName}</p>
+                            <p className="mt-1 text-sm font-semibold numeric">{money(deal.amount)}</p>
+                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                              {!deal.hasPlates ? (
+                                <Link
+                                  href={printsDealHref(deal.dealId)}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                                  data-testid={`link-deal-attach-${deal.dealId}`}
+                                >
+                                  <FileUp className="h-3 w-3" />
+                                  Attach plates
+                                </Link>
+                              ) : null}
+                              {deal.needsCosts ? (
+                                <a
+                                  href={hubspotDealHref(deal.dealId, portalId)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                                  data-testid={`link-deal-costs-${deal.dealId}`}
+                                >
+                                  Update costs
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              ) : null}
+                              <a
+                                href={hubspotDealHref(deal.dealId, portalId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                                data-testid={`link-deal-hubspot-${deal.dealId}`}
+                              >
+                                HubSpot
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
+                          </article>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="mt-2 space-y-0.5 px-1 text-xs text-muted-foreground">
+                      <p className="flex justify-between gap-2">
+                        <span>Total</span>
+                        <span className="numeric font-medium text-foreground">{money(column.totalAmount)}</span>
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {snapshot.summary.activeOrders === 0 ? (
+              <p className="text-sm text-muted-foreground" data-testid="empty-deals">
+                No open Print Orders right now.{" "}
+                <Link href="/orders" className="font-medium text-primary hover:underline" data-testid="link-deals-to-intake">
+                  Open Paid Order Intake
+                </Link>
+              </p>
+            ) : null}
           </>
         )}
       </div>
