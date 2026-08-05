@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import {
@@ -442,7 +442,11 @@ function UnassignedProfilesPanel({
 
 export default function PrintersPage() {
   const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Printer fleet unlocked',
+    successDescription: 'Track printers, maintenance, and lifecycle events.',
+  });
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const fleet = useQuery<PrinterFleetSnapshot & { ok: true }>({
@@ -454,31 +458,6 @@ export default function PrintersPage() {
     },
   });
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/printers", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, data: (await response.json()) as PrinterFleetSnapshot & { ok: true } };
-    },
-    onSuccess: ({ code, data }) => {
-      setSessionUnlocked(code);
-      setSelectedId(data.printers[0]?.printerId ?? null);
-      toast({
-        title: "Printer fleet unlocked",
-        description: `${data.fleetTotals.activePrinters} active machine${data.fleetTotals.activePrinters === 1 ? "" : "s"} ready.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again."
-          : "Printer fleet could not be loaded.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const printers = fleet.data?.printers ?? [];
   const selected = useMemo(

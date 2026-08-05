@@ -6,38 +6,9 @@
  * It never writes or retains the raw conversation text.
  */
 
-export interface IntakeAnalysis {
-  fullName: string;
-  marketplaceUsername: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  postalCode: string;
-  country: string;
-  productName: string;
-  amount: string;
-  conversationSummary: string;
-  missing: string[];
-  paymentLanguageDetected: boolean;
-}
+import type { PaidOrderAnalysis, PaidOrderDraft } from "../../shared/schema";
 
-export interface PaidOrderDraft {
-  paymentConfirmed: boolean;
-  fullName: string;
-  marketplaceUsername: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  postalCode: string;
-  country: string;
-  productName: string;
-  amount: string;
-  conversationSummary: string;
-}
+export type { PaidOrderAnalysis, PaidOrderDraft };
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const PHONE_RE = /(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/;
@@ -121,7 +92,7 @@ function inferAddress(conversation: string) {
   };
 }
 
-export function analyzeMarketplaceConversation(conversation: string): IntakeAnalysis {
+export function analyzeMarketplaceConversation(conversation: string): PaidOrderAnalysis {
   const source = conversation.trim().slice(0, 20_000);
   const lines = normalizedLines(source);
   const email = source.match(EMAIL_RE)?.[0] ?? "";

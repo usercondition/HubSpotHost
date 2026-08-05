@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { attentionNextStep, hubspotDealsListHref } from "@/lib/workflow";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { BooksBalancePanel } from "@/components/books-balance";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
@@ -70,7 +70,11 @@ function LoadingMetrics() {
 
 export default function Performance() {
   const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Performance unlocked',
+    successDescription: 'Rolling books, margins, and attention for open Print Orders.',
+  });
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -107,30 +111,6 @@ export default function Performance() {
     },
   });
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/performance", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, snapshot: (await response.json()) as PerformanceResponse };
-    },
-    onSuccess: ({ code, snapshot }) => {
-      setSessionUnlocked(code);
-      toast({
-        title: "Performance unlocked",
-        description: `${snapshot.summary.activeOrders} active print order${snapshot.summary.activeOrders === 1 ? "" : "s"} are in view.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : "The performance service could not be reached. Check the HubSpot connection and try again.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const snapshot = performance.data;
   const maxPipelineCount = Math.max(1, ...(snapshot?.pipeline.map((stage) => stage.count) ?? [0]));

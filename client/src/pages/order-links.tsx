@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   AlertTriangle,
   CalendarClock,
@@ -42,7 +42,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import { useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { printsDealHref } from "@/lib/workflow";
 
 /** Owner-side rows never carry the token hash. */
@@ -136,7 +136,11 @@ function absoluteClientUrl(path: string): string {
 export default function OrderLinks() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const { ownerCode, codeDraft, setCodeDraft, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Intake unlocked',
+    successDescription: 'Create buyer links and approve paid orders into HubSpot.',
+  });
   const [tab, setTab] = useState<OrderIntakeStatus>("pending_review");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [lineItems, setLineItems] = useState<LineDraft[]>([emptyLine()]);
@@ -158,27 +162,6 @@ export default function OrderLinks() {
 
   const counts = queue.data?.counts;
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      await apiRequest("GET", "/api/order-links?status=pending_review", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return code;
-    },
-    onSuccess: (code) => {
-      setSessionUnlocked(code);
-      toast({ title: "Owner tools unlocked", description: "Create links and review submitted details." });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : error.message.slice(0, 160),
-        variant: "destructive",
-      });
-    },
-  });
 
   const createLink = useMutation({
     mutationFn: async (payload: {
@@ -318,42 +301,14 @@ export default function OrderLinks() {
 
       <div className="page-stack">
         {!isUnlocked ? (
-          <Panel
-            title="Unlock owner tools"
-            description="The owner code protects link creation and the review queue. Buyers never need it."
-          >
-            <form
-              className="flex flex-col gap-3 sm:flex-row sm:items-end"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (codeDraft.trim()) unlock.mutate(codeDraft.trim());
-              }}
-            >
-              <div className="flex-1 space-y-1.5">
-                <Label htmlFor="owner-code">Owner access code</Label>
-                <div className="relative">
-                  <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="owner-code"
-                    type="password"
-                    autoComplete="off"
-                    className="pl-9"
-                    value={codeDraft}
-                    onChange={(event) => setCodeDraft(event.target.value)}
-                    placeholder="Enter your owner code"
-                    data-testid="input-owner-code"
-                  />
-                </div>
-              </div>
-              <Button type="submit" disabled={unlock.isPending} data-testid="button-unlock-owner">
-                {unlock.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
-                Unlock
-              </Button>
-            </form>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Unlock once for this browser tab — Order links, Print files, Supplies, and Performance share the same session until you reload. The code is never written to storage or logs.
-            </p>
-          </Panel>
+          <OwnerUnlockPanel
+            title="Unlock Intake"
+            description="Create buyer links and approve paid orders into HubSpot. Buyers never need this code."
+            buttonLabel="Unlock Intake"
+            testIdPrefix="intake"
+            pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
+          />
         ) : (
           <>
             <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.85fr)]">
@@ -361,6 +316,13 @@ export default function OrderLinks() {
                 title="Create an order form link"
                 description="Add one or more items. Approval creates one HubSpot Contact and one Print Order deal per item."
               >
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Already have the buyer’s details?{" "}
+                  <Link href="/paid-orders" className="hs-link font-medium" data-testid="link-intake-to-manual">
+                    Use Manual entry
+                  </Link>
+                  .
+                </p>
                 <div className="space-y-3" data-testid="panel-intake-line-items">
                   {lineItems.map((line, index) => (
                     <div

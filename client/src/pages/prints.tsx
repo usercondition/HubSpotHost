@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { readHashQueryParam } from "@/lib/workflow";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import type {
@@ -186,7 +186,11 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
 export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Print files unlocked',
+    successDescription: 'Attach CTB plates and seed cost estimates on open Print Orders.',
+  });
   const [includeAttached, setIncludeAttached] = useState(true);
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
   const [dealId, setDealId] = useState(() => readHashQueryParam("dealId") ?? "");
@@ -289,30 +293,6 @@ export default function Prints() {
     },
   });
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/prints?includeAttached=true", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, data: (await response.json()) as PrintsResponse };
-    },
-    onSuccess: ({ code, data }) => {
-      setSessionUnlocked(code);
-      toast({
-        title: "Print files unlocked",
-        description: `${data.candidates.length} active order${data.candidates.length === 1 ? "" : "s"} can receive plate data.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : "The Print Orders pipeline could not be reached. Try again shortly.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const analyze = useMutation({
     mutationFn: async (file: File) => {

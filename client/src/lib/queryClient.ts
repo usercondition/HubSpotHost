@@ -2,6 +2,23 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
+type OwnerAuthFailureListener = () => void;
+const ownerAuthFailureListeners = new Set<OwnerAuthFailureListener>();
+
+/** Subscribe to mid-session owner auth failures (401 on requests that sent the owner code). */
+export function onOwnerAuthFailure(listener: OwnerAuthFailureListener): () => void {
+  ownerAuthFailureListeners.add(listener);
+  return () => {
+    ownerAuthFailureListeners.delete(listener);
+  };
+}
+
+function notifyOwnerAuthFailure() {
+  ownerAuthFailureListeners.forEach((listener) => {
+    listener();
+  });
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -16,14 +33,20 @@ export async function apiRequest(
   options?: { headers?: Record<string, string> },
 ): Promise<Response> {
   const isFormData = typeof FormData !== "undefined" && data instanceof FormData;
+  const headers: Record<string, string> = {
+    ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
+    ...(options?.headers ?? {}),
+  };
   const res = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: {
-      ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
-      ...(options?.headers ?? {}),
-    },
+    headers,
     body: data ? (isFormData ? data : JSON.stringify(data)) : undefined,
   });
+
+  const ownerCode = headers["x-paid-order-access-code"];
+  if (res.status === 401 && typeof ownerCode === "string" && ownerCode.length > 0) {
+    notifyOwnerAuthFailure();
+  }
 
   await throwIfResNotOk(res);
   return res;

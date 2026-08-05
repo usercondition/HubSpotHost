@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { BooksBalancePanel } from "@/components/books-balance";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard } from "@/components/primitives";
@@ -142,7 +142,11 @@ type ParsedInvoiceResponse = {
 
 export default function Supplies() {
   const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: 'Supply ledger unlocked',
+    successDescription: 'Log purchases and keep the rolling spend books in sync.',
+  });
   const [form, setForm] = useState<SupplyForm>(emptyForm);
   const [draggingInvoice, setDraggingInvoice] = useState(false);
   const invoiceInputRef = useRef<HTMLInputElement>(null);
@@ -165,30 +169,6 @@ export default function Supplies() {
     },
   });
 
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/supplies", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, data: (await response.json()) as SupplyResponse };
-    },
-    onSuccess: ({ code, data }) => {
-      setSessionUnlocked(code);
-      toast({
-        title: "Supply ledger unlocked",
-        description: `${data.summary.purchases} purchase${data.summary.purchases === 1 ? "" : "s"} logged in the last ${data.summary.periodDays} days.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : "The supply ledger could not be reached. Try again shortly.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const createPurchase = useMutation({
     mutationFn: async () => {

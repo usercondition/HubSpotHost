@@ -541,6 +541,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  /** Cheap shared unlock probe for every Daily Work page. */
+  app.get("/api/owner/session", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({
+      ok: true,
+      unlocked: true,
+      serverTime: new Date().toISOString(),
+    });
+  });
+
   /* ---------------------------------------------------------------- */
   /* Client order links — the primary paid-order intake workflow.       */
   /*                                                                   */

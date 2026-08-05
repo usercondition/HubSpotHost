@@ -224,6 +224,8 @@ export interface PerformanceResponse {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /** Show Attach plates when plates missing and alert not dismissed. */
+    promptAttachPlates: boolean;
     closeDate: string | null;
     contactName: string | null;
   }>;

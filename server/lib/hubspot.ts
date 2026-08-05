@@ -156,7 +156,7 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-async function request(
+export async function hubspotRequest(
   path: string,
   init: { method: string; body?: string },
 ): Promise<any> {
@@ -200,6 +200,14 @@ async function request(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** @deprecated Prefer hubspotRequest — kept as internal alias for existing call sites. */
+async function request(
+  path: string,
+  init: { method: string; body?: string },
+): Promise<any> {
+  return hubspotRequest(path, init);
 }
 
 export interface DealProperties {

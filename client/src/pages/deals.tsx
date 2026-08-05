@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertTriangle,
@@ -14,29 +14,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
-import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
+import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
-
-function money(value: number): string {
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
-  });
-}
-
-function shortDate(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return null;
-  return date.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
-}
 
 type BoardDeal = PerformanceResponse["activeDeals"][number] & {
   needsCosts: boolean;
@@ -49,8 +34,11 @@ type BoardDeal = PerformanceResponse["activeDeals"][number] & {
  * Stage moves stay in HubSpot; this page is the owner’s daily glance.
  */
 export default function DealsPage() {
-  const { toast } = useToast();
-  const { ownerCode, isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: "Orders unlocked",
+    successDescription: "Live HubSpot stages and open print jobs, without leaving Print Operations.",
+  });
   const [showClosedStages, setShowClosedStages] = useState(false);
 
   const performance = useQuery<PerformanceResponse>({
@@ -59,31 +47,6 @@ export default function DealsPage() {
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
-    },
-  });
-
-  const unlock = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await apiRequest("GET", "/api/performance", undefined, {
-        headers: { "x-paid-order-access-code": code },
-      });
-      return { code, snapshot: (await response.json()) as PerformanceResponse };
-    },
-    onSuccess: ({ code, snapshot }) => {
-      setSessionUnlocked(code);
-      toast({
-        title: "Orders unlocked",
-        description: `${snapshot.summary.activeOrders} open Print Order${snapshot.summary.activeOrders === 1 ? "" : "s"} on the board.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "That owner code was not accepted",
-        description: error.message.startsWith("401")
-          ? "Check the code and try again. Nothing was unlocked."
-          : "Could not reach HubSpot order data. Try again shortly.",
-        variant: "destructive",
-      });
     },
   });
 
@@ -112,7 +75,7 @@ export default function DealsPage() {
       list.push({
         ...deal,
         needsCosts: alerts.some((item) => item.issueKey === "costs_incomplete"),
-        needsPlates: !deal.hasPlates,
+        needsPlates: deal.promptAttachPlates,
         alerts,
       });
       byStage.set(key, list);
@@ -209,7 +172,7 @@ export default function DealsPage() {
               />
               <SummaryStat
                 label="Open pipeline value"
-                value={money(openValue)}
+                value={formatMoney(openValue)}
                 hint="Sum of amounts on open board cards"
                 testId="metric-orders-value"
               />
@@ -254,7 +217,7 @@ export default function DealsPage() {
                   <StatusPill
                     tone={snapshot.summary.attentionCount > 0 ? "warn" : "good"}
                     icon={snapshot.summary.attentionCount > 0 ? AlertTriangle : CircleDollarSign}
-                    label={`${snapshot.summary.activeOrders} open · ${money(openValue)}`}
+                    label={`${snapshot.summary.activeOrders} open · ${formatMoney(openValue)}`}
                     testId="status-orders-board"
                   />
                 </div>
@@ -306,7 +269,7 @@ export default function DealsPage() {
                       <div className="mt-auto space-y-1 rounded-b-md border-t border-border bg-card/80 px-3 py-2 text-xs text-muted-foreground">
                         <div className="flex justify-between gap-2">
                           <span>Total</span>
-                          <span className="numeric font-semibold text-foreground">{money(column.totalAmount)}</span>
+                          <span className="numeric font-semibold text-foreground">{formatMoney(column.totalAmount)}</span>
                         </div>
                       </div>
                     </div>
@@ -359,7 +322,7 @@ function DealCard({
   deal: BoardDeal;
   portalId: string | null;
 }) {
-  const closeLabel = shortDate(deal.closeDate);
+  const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
 
   return (
@@ -388,7 +351,7 @@ function DealCard({
         <div className="flex items-center gap-2">
           <CircleDollarSign className="h-3.5 w-3.5 shrink-0 opacity-70" />
           <dt className="sr-only">Amount</dt>
-          <dd className="font-semibold text-foreground numeric">{money(deal.amount)}</dd>
+          <dd className="font-semibold text-foreground numeric">{formatMoney(deal.amount)}</dd>
         </div>
         {deal.contactName ? (
           <div className="flex items-center gap-2">
