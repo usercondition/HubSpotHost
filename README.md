@@ -89,6 +89,19 @@ For the initial single-service setup:
    PUBLIC_BASE_URL=https://<your-railway-domain>
    ```
 
+   Optional Telegram morning digest (set these as Railway **Variables**, never in git):
+
+   ```text
+   TELEGRAM_BOT_TOKEN=<BotFather token>
+   TELEGRAM_CHAT_ID=<your numeric Telegram chat id>
+   OWNER_DIGEST_SCHEDULE_ENABLED=true
+   OWNER_DIGEST_TZ=America/New_York
+   OWNER_DIGEST_HOUR=7
+   OWNER_DIGEST_CRON_SECRET=<long random secret for POST /api/cron/owner-digest>
+   ```
+
+   After deploy, unlock the Command center and use **Send to Telegram** on the tracker panel to verify. With `OWNER_DIGEST_SCHEDULE_ENABLED=true`, the service also sends once per day at the configured local hour.
+
 4. Keep `ENABLE_INTERNAL_ADMIN` unset. It deliberately leaves manual recalculation and local audit endpoints unavailable to public visitors.
 5. Add the Railway HTTPS URL plus `/api/webhooks/hubspot` as the HubSpot webhook target, then send a dry-run test before relying on automatic updates.
 
@@ -209,6 +222,9 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `PATCH /api/order-links/:id` | Protected. Owner corrections while the intake is pending review. |
 | `POST /api/order-links/:id/expire` | Protected. Manually expires a link. |
 | `POST /api/order-links/:id/create-order` | Protected. The only HubSpot-writing route in this flow. Requires `paymentVerified: true`. |
+| `POST /api/tracker-assistant` | Protected. Read-only ops briefing / Q&A over live Performance + intake. |
+| `POST /api/owner-digest/send` | Protected. Sends the live tracker briefing to Telegram immediately. |
+| `POST /api/cron/owner-digest` | Secured by `OWNER_DIGEST_CRON_SECRET`. Daily digest entrypoint (skips if already sent today unless `force: true`). |
 | `POST /api/client-order/lookup` | Public. Token in the body. Returns only client-safe agreed-order details. |
 | `POST /api/client-order/submit` | Public. Writes the buyer's details to the local queue. Never calls HubSpot. |
 
