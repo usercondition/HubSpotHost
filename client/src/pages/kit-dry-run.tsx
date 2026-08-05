@@ -1,17 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
-  CheckSquare,
-  ClipboardCheck,
   FolderOpen,
-  Layers3,
-  PackageOpen,
-  RefreshCw,
+  Package,
   RotateCcw,
   Search,
-  Square,
   Upload,
-  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,26 +14,19 @@ import { StatusPill } from "@/components/primitives";
 import { StlPreview } from "@/components/stl-preview";
 import { cn } from "@/lib/utils";
 import {
-  attachOrderPlate,
   buildKitBitsFromFileNames,
-  completePlateQc,
-  createPlateFromReprintPool,
-  createSampleShop,
+  createKitFromBits,
+  createPlate,
+  createSampleKit,
   groupSummaries,
-  isSelectableBit,
-  markAllPlateBits,
-  orderProgress,
-  plateQcCounts,
-  poolKey,
-  replaceOrderKit,
-  reprintPool,
-  resetShop,
-  setPlateBitResult,
-  shopProgress,
+  inventory,
+  isPrintable,
+  markBitGood,
+  markBitReprint,
+  markPlateAllGood,
+  plateBits,
   type KitBit,
-  type KitOrder,
-  type KitPlate,
-  type ShopDryRun,
+  type KitTracker,
 } from "@/lib/kit-dry-run";
 import {
   collectStlFilesFromDataTransfer,
@@ -48,82 +35,67 @@ import {
   type ImportedStlFile,
 } from "@/lib/stl-folder-import";
 
-function bitStatusLabel(bit: KitBit): string {
+function statusLabel(bit: KitBit): string {
   switch (bit.status) {
-    case "printing":
-      return "on plate · waiting QC";
-    case "done":
-      return "good · done";
-    case "needs_reprint":
-      return "in reprint pool";
+    case "on_plate":
+      return "On plate";
+    case "good":
+      return "Good";
+    case "reprint":
+      return "Reprint";
     default:
-      return "not printed yet";
+      return "Needed";
   }
 }
 
+/**
+ * Simple kit tracker: inventory of bits + plates.
+ * Select what still needs printing → make a plate → mark good or reprint.
+ */
 export default function KitDryRunPage() {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
-  const [shop, setShop] = useState<ShopDryRun>(() => createSampleShop());
-  const [orderId, setOrderId] = useState(shop.orders[0]?.id ?? "");
+  const [kit, setKit] = useState<KitTracker>(() => createSampleKit());
   const [groupFilter, setGroupFilter] = useState("all");
   const [query, setQuery] = useState("");
-  const [selectedBits, setSelectedBits] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [plateName, setPlateName] = useState("Plate 1");
   const [ctbFileName, setCtbFileName] = useState("Acastus_P1.ctb");
-  const [poolFilter, setPoolFilter] = useState<"all" | "order" | "client">("all");
-  const [poolSelected, setPoolSelected] = useState<Set<string>>(() => new Set());
-  const [qcPlateId, setQcPlateId] = useState<string | null>(null);
+  const [activePlateId, setActivePlateId] = useState<string | null>(null);
   const [stlByBitId, setStlByBitId] = useState<Record<string, File>>({});
   const [previewBitId, setPreviewBitId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Drag a kit folder here (or Choose folder). STLs stay in this browser tab for preview — not uploaded.",
+    "Load a kit folder or use the Acastus sample. Track what still needs printing, plate by plate.",
   );
 
-  const order = shop.orders.find((item) => item.id === orderId) ?? shop.orders[0] ?? null;
-  const progress = order ? orderProgress(order) : null;
-  const shopTotals = shopProgress(shop);
-  const groups = order ? groupSummaries(order) : [];
-  const pendingQc = shop.plates.filter((plate) => plate.status === "pending_qc");
-  const qcPlate = shop.plates.find((plate) => plate.id === qcPlateId) ?? pendingQc[0] ?? null;
-  const previewBit = order?.bits.find((bit) => bit.id === previewBitId) ?? null;
+  const counts = inventory(kit);
+  const groups = groupSummaries(kit);
+  const activePlate = kit.plates.find((plate) => plate.id === activePlateId) ?? kit.plates[kit.plates.length - 1] ?? null;
+  const activePlateBits = activePlate ? plateBits(kit, activePlate.id) : [];
+  const previewBit = kit.bits.find((bit) => bit.id === previewBitId) ?? null;
   const previewFile = previewBitId ? stlByBitId[previewBitId] ?? null : null;
 
-  const poolItems = useMemo(() => {
-    if (!order) return reprintPool(shop);
-    if (poolFilter === "order") return reprintPool(shop, { orderId: order.id });
-    if (poolFilter === "client") return reprintPool(shop, { clientName: order.clientName });
-    return reprintPool(shop);
-  }, [shop, order, poolFilter]);
-
   const visibleBits = useMemo(() => {
-    if (!order) return [];
     const q = query.trim().toLowerCase();
-    return order.bits.filter((bit) => {
+    return kit.bits.filter((bit) => {
       if (groupFilter !== "all" && bit.group !== groupFilter) return false;
       if (!q) return true;
       return bit.label.toLowerCase().includes(q) || bit.fileName.toLowerCase().includes(q);
     });
-  }, [order, groupFilter, query]);
+  }, [kit.bits, groupFilter, query]);
 
-  const selectableVisible = visibleBits.filter(isSelectableBit);
-  const selectedCount = selectableVisible.filter((bit) => selectedBits.has(bit.id)).length;
+  const printableVisible = visibleBits.filter(isPrintable);
+  const selectedCount = printableVisible.filter((bit) => selected.has(bit.id)).length;
 
-  const applyFolderImport = (imports: ImportedStlFile[]) => {
-    if (!order) {
-      setNote("Select an order first, then import the folder onto that kit.");
-      return;
-    }
+  const applyImport = (imports: ImportedStlFile[]) => {
     if (imports.length === 0) {
-      setNote("No .stl files found in that folder/drop.");
+      setNote("No .stl files found in that folder.");
       return;
     }
-
     const kitName = inferKitNameFromImports(imports);
     const bits = buildKitBitsFromFileNames(
       imports.map((item) => item.fileName),
-      `${order.id}-${kitName}`,
+      kitName,
     );
     const fileByName = new Map(imports.map((item) => [item.fileName.toLowerCase(), item.file]));
     const nextFiles: Record<string, File> = {};
@@ -131,53 +103,30 @@ export default function KitDryRunPage() {
       const file = fileByName.get(bit.fileName.toLowerCase());
       if (file) nextFiles[bit.id] = file;
     }
-
-    setShop(replaceOrderKit(shop, order.id, bits));
+    setKit(createKitFromBits(kitName, bits));
     setStlByBitId(nextFiles);
-    setSelectedBits(new Set());
-    setPoolSelected(new Set());
-    setQcPlateId(null);
+    setSelected(new Set());
+    setActivePlateId(null);
     setGroupFilter("all");
     setPreviewBitId(bits[0]?.id ?? null);
     setPlateName("Plate 1");
     setCtbFileName(`${kitName.replace(/[^\w]+/g, "_").slice(0, 28)}_P1.ctb`);
-    setNote(
-      `Imported ${bits.length} STL${bits.length === 1 ? "" : "s"} onto ${order.clientName} / ${order.orderName} from “${kitName}”. Click a bit to preview.`,
-    );
+    setNote(`Loaded ${bits.length} bits from “${kitName}”. Select bits that still need printing, then make a plate.`);
   };
 
-  const onFolderInput = (list: FileList | null) => {
-    if (!list) return;
-    applyFolderImport(collectStlFilesFromFileList(list));
-  };
-
-  const onDropFolder = async (event: React.DragEvent<HTMLDivElement>) => {
+  const onDropFolder = async (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragActive(false);
-    setImportBusy(true);
     try {
-      const imports = await collectStlFilesFromDataTransfer(event.dataTransfer);
-      applyFolderImport(imports);
+      applyImport(await collectStlFilesFromDataTransfer(event.dataTransfer));
     } catch (error) {
       setNote(error instanceof Error ? error.message : "Could not read dropped folder");
-    } finally {
-      setImportBusy(false);
     }
   };
 
-  const selectOrder = (nextOrder: KitOrder) => {
-    setOrderId(nextOrder.id);
-    setSelectedBits(new Set());
-    setGroupFilter("all");
-    setQuery("");
-    setPreviewBitId(null);
-    setPlateName("Plate 1");
-    setCtbFileName(`${nextOrder.orderName.replace(/[^\w]+/g, "_").slice(0, 24)}_P1.ctb`);
-  };
-
   const toggleBit = (bit: KitBit) => {
-    if (!isSelectableBit(bit)) return;
-    setSelectedBits((prev) => {
+    if (!isPrintable(bit)) return;
+    setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(bit.id)) next.delete(bit.id);
       else next.add(bit.id);
@@ -185,541 +134,437 @@ export default function KitDryRunPage() {
     });
   };
 
-  const attachPlate = () => {
-    if (!order) return;
-    const result = attachOrderPlate(shop, {
-      orderId: order.id,
-      plateName,
+  const makePlate = () => {
+    const result = createPlate(kit, {
+      name: plateName,
       ctbFileName,
-      bitIds: Array.from(selectedBits),
-      kind: "planned",
+      bitIds: Array.from(selected),
     });
     if (!result.ok) {
       setNote(result.error);
       return;
     }
-    setShop(result.shop);
-    setSelectedBits(new Set());
-    setQcPlateId(result.plateId);
-    setPlateName(`Plate ${result.shop.plates.filter((p) => p.kind === "planned").length + 1}`);
-    setNote(`Logged CTB on ${order.clientName} / ${order.orderName}. QC only after print + inspection.`);
-  };
-
-  const createFromPool = () => {
-    const selections = poolItems
-      .filter((item) => poolSelected.has(poolKey(item)))
-      .map((item) => ({ orderId: item.orderId, bitId: item.bitId }));
-    const result = createPlateFromReprintPool(shop, { selections });
-    if (!result.ok) {
-      setNote(result.error);
-      return;
-    }
-    setShop(result.shop);
-    setPoolSelected(new Set());
-    setQcPlateId(result.plateId);
-    setNote(`Reprint pool plate created with ${result.count} bits. Slice, print, then QC.`);
-  };
-
-  const finalizeQc = (plate: KitPlate) => {
-    const result = completePlateQc(shop, plate.id);
-    if (!result.ok) {
-      setNote(result.error);
-      return;
-    }
-    const counts = plateQcCounts(result.shop.plates.find((item) => item.id === plate.id) ?? plate);
-    const poolSize = reprintPool(result.shop).length;
-    setShop(result.shop);
-    setNote(
-      `QC saved: ${counts.good} good, ${counts.reprint} to pool.` +
-        (poolSize > 0 ? ` Reprint pool now has ${poolSize}.` : ""),
-    );
-    setQcPlateId(result.shop.plates.find((item) => item.status === "pending_qc")?.id ?? null);
+    setKit(result.kit);
+    setSelected(new Set());
+    setActivePlateId(result.plateId);
+    setPlateName(`Plate ${result.kit.plates.length + 1}`);
+    setNote(`Plate ready with ${result.kit.plates.find((p) => p.id === result.plateId)?.bitIds.length ?? 0} bits. After print, mark each good or reprint.`);
   };
 
   return (
     <div data-testid="page-kit-dry-run">
       <PageHeader
-        title="Kit & plate bits"
-        subtitle="Import a kit folder with Choose folder / drag-drop for local STL previews. Failures pool shop-wide until you build a reprint plate."
+        title="Kits"
+        subtitle="Bit inventory and plates — what still needs printing, what’s on a plate, what’s good or needs a reprint."
+        actions={
+          <StatusPill
+            tone={counts.remaining === 0 ? "good" : "warn"}
+            icon={Package}
+            label={`${counts.good}/${counts.total} good · ${counts.remaining} left`}
+            testId="status-kit-inventory"
+          />
+        }
       />
 
-      <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-        <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm leading-6">
-          <strong className="font-semibold">Safe import.</strong> Use drag-drop or Choose folder — not a disk path.
-          STL files stay in this browser tab for preview and are not uploaded to the server in this dry run.
+      <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
+        {note ? (
+          <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
+            {note}
+          </p>
+        ) : null}
+
+        <section className="grid gap-3 sm:grid-cols-4" data-testid="panel-kit-inventory">
+          <InvStat label="Needed" value={counts.needed} />
+          <InvStat label="Reprint" value={counts.reprint} warn={counts.reprint > 0} />
+          <InvStat label="On plate" value={counts.onPlate} />
+          <InvStat label="Good" value={counts.good} good />
         </section>
 
         <section
           className={cn(
-            "rounded-lg border border-dashed p-5 transition-colors",
-            dragActive ? "border-primary bg-primary/10" : "border-card-border bg-card",
+            "rounded-md border border-dashed p-4 transition-colors",
+            dragActive ? "border-primary bg-primary/10" : "border-border bg-card",
           )}
           data-testid="panel-folder-import"
-          onDragEnter={(event) => {
-            event.preventDefault();
+          onDragEnter={(e) => {
+            e.preventDefault();
             setDragActive(true);
           }}
-          onDragOver={(event) => {
-            event.preventDefault();
+          onDragOver={(e) => {
+            e.preventDefault();
             setDragActive(true);
           }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            if (event.currentTarget === event.target) setDragActive(false);
+          onDragLeave={(e) => {
+            e.preventDefault();
+            if (e.currentTarget === e.target) setDragActive(false);
           }}
           onDrop={onDropFolder}
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="rule-label">Import kit folder</p>
-              <h2 className="mt-1 text-base font-semibold tracking-tight">Drop STL kit onto the selected order</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {order
-                  ? `Target: ${order.clientName} · ${order.orderName}`
-                  : "Select an order first"}
+              <p className="text-sm font-semibold tracking-tight">{kit.name}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Drop an STL folder or choose one. Previews stay in this tab — nothing uploads.
               </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!order || importBusy}
-              onClick={() => folderInputRef.current?.click()}
-              data-testid="button-choose-kit-folder"
-            >
-              <FolderOpen className="mr-2 h-4 w-4" />
-              {importBusy ? "Reading…" : "Choose folder"}
-            </Button>
-          </div>
-          <input
-            ref={(element) => {
-              folderInputRef.current = element;
-              if (element) {
-                element.setAttribute("webkitdirectory", "");
-                element.setAttribute("directory", "");
-              }
-            }}
-            type="file"
-            className="hidden"
-            multiple
-            onChange={(event) => {
-              onFolderInput(event.target.files);
-              event.target.value = "";
-            }}
-          />
-          <p className="mt-3 text-sm text-muted-foreground">
-            Drop the kit folder here (e.g. Acastus Knight … @STLHammer). Only <code>.stl</code> files are read.
-          </p>
-        </section>
-
-        <section className="rounded-lg border border-card-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="rule-label">Shop snapshot</p>
-              <h2 className="mt-1 text-base font-semibold tracking-tight">Open kit orders</h2>
             </div>
             <div className="flex flex-wrap gap-2">
-              <StatusPill tone="warn" icon={PackageOpen} label={`${shopTotals.done}/${shopTotals.total} good`} />
-              <StatusPill tone="warn" icon={ClipboardCheck} label={`${shopTotals.printing} awaiting QC`} />
-              <StatusPill tone="bad" icon={XCircle} label={`${shopTotals.reprint} in pool`} />
+              <input
+                ref={folderInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                // @ts-expect-error webkitdirectory is supported in Chromium
+                webkitdirectory=""
+                onChange={(event) => {
+                  applyImport(collectStlFilesFromFileList(event.target.files ?? []));
+                  event.target.value = "";
+                }}
+                data-testid="input-kit-folder"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => folderInputRef.current?.click()}
+                data-testid="button-choose-kit-folder"
+              >
+                <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                Choose folder
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setKit(createSampleKit());
+                  setStlByBitId({});
+                  setSelected(new Set());
+                  setActivePlateId(null);
+                  setPreviewBitId(null);
+                  setNote("Reset to Acastus sample kit.");
+                }}
+                data-testid="button-reset-sample-kit"
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Sample
+              </Button>
             </div>
-          </div>
-
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            {shop.orders.map((item) => {
-              const p = orderProgress(item);
-              const active = item.id === order?.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => selectOrder(item)}
-                  className={cn(
-                    "rounded-md border px-3 py-3 text-left transition-colors",
-                    active ? "border-primary bg-primary/10" : "border-border bg-muted/30 hover:bg-muted/55",
-                  )}
-                >
-                  <p className="text-xs text-muted-foreground">{item.clientName}</p>
-                  <p className="mt-0.5 text-sm font-medium">{item.orderName}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {p.done}/{p.total} good · {p.printing} QC · {p.reprint} pool
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const next = createSampleShop();
-                setShop(next);
-                setOrderId(next.orders[0]!.id);
-                setStlByBitId({});
-                setPreviewBitId(null);
-                setSelectedBits(new Set());
-                setPoolSelected(new Set());
-                setQcPlateId(null);
-                setNote("Reloaded sample shop (filenames only — import a folder for STL previews).");
-              }}
-            >
-              <Layers3 className="mr-2 h-4 w-4" />
-              Reload sample shop
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setShop(resetShop(shop));
-                setSelectedBits(new Set());
-                setPoolSelected(new Set());
-                setQcPlateId(null);
-                setNote("Reset all plates and bit statuses (STL files kept if imported).");
-              }}
-            >
-              <RotateCcw className="mr-2 h-4 w-4" />
-              Reset progress
-            </Button>
           </div>
         </section>
 
-        {!order ? null : (
-          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-            <section className="rounded-lg border border-card-border bg-card p-5">
-              <p className="rule-label">Selected order kit</p>
-              <h3 className="mt-1 text-base font-semibold tracking-tight">
-                {order.clientName} · {order.orderName}
-              </h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {progress?.todo} todo · {progress?.printing} awaiting QC · {progress?.reprint} in pool ·{" "}
-                {progress?.done}/{progress?.total} good
-                {Object.keys(stlByBitId).length > 0
-                  ? ` · ${Object.keys(stlByBitId).length} STLs loaded for preview`
-                  : " · no local STLs yet"}
-              </p>
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.85fr)]">
+          <div className="space-y-4">
+            <div className="rounded-md border border-card-border bg-card p-4" data-testid="panel-bit-inventory">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="rule-label">Inventory</p>
+                  <h2 className="mt-1 text-base font-semibold tracking-tight">Bits still to print</h2>
+                </div>
+                <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    className="pl-8"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Filter bits"
+                    data-testid="input-kit-bit-filter"
+                  />
+                </div>
+              </div>
 
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <FilterChip active={groupFilter === "all"} onClick={() => setGroupFilter("all")} label="All" />
                 {groups.map((group) => (
-                  <button
+                  <FilterChip
                     key={group.group}
-                    type="button"
+                    active={groupFilter === group.group}
                     onClick={() => setGroupFilter(group.group)}
-                    className={cn(
-                      "rounded-md border px-3 py-2 text-left text-xs",
-                      groupFilter === group.group ? "border-primary bg-primary/10" : "border-border bg-muted/30",
-                    )}
-                  >
-                    <span className="font-medium">{group.group}</span>
-                    <span className="mt-0.5 block text-muted-foreground">
-                      {group.done}/{group.total}
-                      {group.reprint ? ` · ${group.reprint} pool` : ""}
-                    </span>
-                  </button>
+                    label={`${group.group} (${group.remaining})`}
+                  />
                 ))}
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">Plate name</span>
-                  <Input value={plateName} onChange={(e) => setPlateName(e.target.value)} />
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">CTB file</span>
-                  <Input value={ctbFileName} onChange={(e) => setCtbFileName(e.target.value)} />
-                </label>
-                <label className="space-y-1 text-xs sm:col-span-2">
-                  <span className="text-muted-foreground">Search</span>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input className="pl-8" value={query} onChange={(e) => setQuery(e.target.value)} />
-                  </div>
-                </label>
-              </div>
+              <ul className="mt-3 max-h-[28rem] space-y-1 overflow-y-auto" data-testid="list-kit-bits">
+                {visibleBits.map((bit) => {
+                  const printable = isPrintable(bit);
+                  const checked = selected.has(bit.id);
+                  return (
+                    <li key={bit.id}>
+                      <button
+                        type="button"
+                        disabled={!printable}
+                        onClick={() => toggleBit(bit)}
+                        onDoubleClick={() => setPreviewBitId(bit.id)}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors",
+                          printable
+                            ? checked
+                              ? "border-primary/40 bg-primary/10"
+                              : "border-border bg-background hover:bg-muted/40"
+                            : "border-transparent bg-muted/20 text-muted-foreground",
+                        )}
+                        data-testid={`row-kit-bit-${bit.id}`}
+                      >
+                        <span
+                          className={cn(
+                            "flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[0.625rem]",
+                            checked ? "border-primary bg-primary text-primary-foreground" : "border-border",
+                          )}
+                        >
+                          {checked ? "✓" : ""}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate font-medium">{bit.label}</span>
+                        <span className="shrink-0 text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+                          {statusLabel(bit)}
+                        </span>
+                        {stlByBitId[bit.id] ? (
+                          <button
+                            type="button"
+                            className="hs-link shrink-0 text-xs"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPreviewBitId(bit.id);
+                            }}
+                            data-testid={`button-preview-bit-${bit.id}`}
+                          >
+                            View
+                          </button>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-[1fr_1fr_auto]">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium" htmlFor="plate-name">
+                    Plate name
+                  </label>
+                  <Input
+                    id="plate-name"
+                    value={plateName}
+                    onChange={(event) => setPlateName(event.target.value)}
+                    data-testid="input-plate-name"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium" htmlFor="ctb-name">
+                    CTB file (optional)
+                  </label>
+                  <Input
+                    id="ctb-name"
+                    value={ctbFileName}
+                    onChange={(event) => setCtbFileName(event.target.value)}
+                    data-testid="input-ctb-name"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    disabled={selectedCount === 0}
+                    onClick={makePlate}
+                    data-testid="button-make-plate"
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Make plate ({selectedCount})
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedBits(new Set(selectableVisible.map((bit) => bit.id)))}
+                  variant="ghost"
+                  disabled={printableVisible.length === 0}
+                  onClick={() => setSelected(new Set(printableVisible.map((bit) => bit.id)))}
+                  data-testid="button-select-visible-printable"
                 >
-                  Select visible queue ({selectableVisible.length})
+                  Select visible needed
                 </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedBits(new Set())}>
-                  Clear
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={selectedCount === 0}
+                  onClick={() => setSelected(new Set())}
+                  data-testid="button-clear-bit-selection"
+                >
+                  Clear selection
                 </Button>
               </div>
-
-              <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                {visibleBits.map((bit) => {
-                  const selectable = isSelectableBit(bit);
-                  const checked = selectable && selectedBits.has(bit.id);
-                  const hasStl = Boolean(stlByBitId[bit.id]);
-                  const previewing = previewBitId === bit.id;
-                  return (
-                    <li key={bit.id}>
-                      <div
-                        className={cn(
-                          "flex items-start gap-1 rounded-md px-1 py-1",
-                          previewing ? "bg-muted/50" : "",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          disabled={!selectable}
-                          onClick={() => toggleBit(bit)}
-                          className={cn(
-                            "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
-                            !selectable ? "opacity-55" : checked ? "bg-primary/10" : "hover:bg-muted/60",
-                          )}
-                        >
-                          {bit.status === "done" ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-                          ) : checked ? (
-                            <CheckSquare className="mt-0.5 h-4 w-4 text-primary" />
-                          ) : (
-                            <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                          )}
-                          <span className="min-w-0">
-                            <span className="block font-medium">
-                              {bit.label}
-                              {hasStl ? (
-                                <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-primary">STL</span>
-                              ) : null}
-                            </span>
-                            <span className="block text-xs text-muted-foreground">
-                              {bit.group} · {bitStatusLabel(bit)}
-                            </span>
-                          </span>
-                        </button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={previewing ? "default" : "ghost"}
-                          disabled={!hasStl}
-                          onClick={() => setPreviewBitId(bit.id)}
-                          title={hasStl ? "Preview STL" : "Import folder to preview"}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-
-              <Button type="button" className="mt-4" onClick={attachPlate}>
-                <Upload className="mr-2 h-4 w-4" />
-                Attach CTB + {selectedCount} bit{selectedCount === 1 ? "" : "s"}
-              </Button>
-            </section>
-
-            <div className="space-y-6">
-              <section className="rounded-lg border border-card-border bg-card p-5">
-                <p className="rule-label">STL preview</p>
-                <h3 className="mt-1 text-base font-semibold tracking-tight">
-                  {previewBit ? previewBit.label : "No bit selected"}
-                </h3>
-                <div className="mt-3">
-                  <StlPreview file={previewFile} label={previewBit?.fileName} />
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-card-border bg-card p-5" data-testid="panel-reprint-pool">
-                <p className="rule-label">Shop reprint pool</p>
-                <h3 className="mt-1 text-base font-semibold tracking-tight">Failed bits waiting to be sliced</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(
-                    [
-                      ["all", "All orders"],
-                      ["client", `Client: ${order.clientName}`],
-                      ["order", "This order only"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <Button
-                      key={key}
-                      type="button"
-                      size="sm"
-                      variant={poolFilter === key ? "default" : "outline"}
-                      onClick={() => setPoolFilter(key)}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-                {poolItems.length === 0 ? (
-                  <p className="mt-4 text-sm text-muted-foreground">Pool empty.</p>
-                ) : (
-                  <>
-                    <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                      {poolItems.map((item) => {
-                        const key = poolKey(item);
-                        const checked = poolSelected.has(key);
-                        return (
-                          <li key={key}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setPoolSelected((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) next.delete(key);
-                                  else next.add(key);
-                                  return next;
-                                })
-                              }
-                              className={cn(
-                                "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
-                                checked ? "bg-destructive/10" : "hover:bg-muted/60",
-                              )}
-                            >
-                              {checked ? (
-                                <CheckSquare className="mt-0.5 h-4 w-4 text-destructive" />
-                              ) : (
-                                <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                              )}
-                              <span>
-                                <span className="block font-medium">{item.label}</span>
-                                <span className="block text-xs text-muted-foreground">
-                                  {item.clientName} · {item.orderName}
-                                </span>
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <Button type="button" className="mt-3" onClick={createFromPool}>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Create reprint plate from pool ({poolSelected.size})
-                    </Button>
-                  </>
-                )}
-              </section>
             </div>
           </div>
-        )}
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-lg border border-card-border bg-card p-5">
-            <p className="rule-label">Post-print QC</p>
-            <h3 className="mt-1 text-base font-semibold">After physical inspection</h3>
-            {pendingQc.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">No plates awaiting QC.</p>
-            ) : (
-              <>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {pendingQc.map((plate) => (
-                    <Button
-                      key={plate.id}
-                      type="button"
-                      size="sm"
-                      variant={qcPlate?.id === plate.id ? "default" : "outline"}
-                      onClick={() => setQcPlateId(plate.id)}
-                    >
-                      {plate.name}
-                      {plate.kind === "reprint" ? " · redo" : ""}
-                    </Button>
-                  ))}
-                </div>
-                {qcPlate ? (
-                  <div className="mt-4 space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" size="sm" variant="outline" onClick={() => setShop(markAllPlateBits(shop, qcPlate.id, "good"))}>
-                        Mark all good
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShop(markAllPlateBits(shop, qcPlate.id, "reprint"))}
+          <div className="space-y-4">
+            <div className="rounded-md border border-card-border bg-card p-4" data-testid="panel-active-plate">
+              <p className="rule-label">Current plate</p>
+              {activePlate ? (
+                <>
+                  <h2 className="mt-1 text-base font-semibold tracking-tight">{activePlate.name}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{activePlate.ctbFileName}</p>
+                  <ul className="mt-3 space-y-1.5" data-testid="list-plate-bits">
+                    {activePlateBits.map((bit) => (
+                      <li
+                        key={bit.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
+                        data-testid={`row-plate-bit-${bit.id}`}
                       >
-                        Mark all reprint (→ pool)
-                      </Button>
-                    </div>
-                    <ul className="max-h-64 space-y-2 overflow-y-auto">
-                      {qcPlate.bits.map((row) => {
-                        const bitOrder = shop.orders.find((item) => item.id === row.orderId);
-                        const bit = bitOrder?.bits.find((item) => item.id === row.bitId);
-                        if (!bit || !bitOrder) return null;
-                        return (
-                          <li key={`${row.orderId}-${row.bitId}`} className="rounded-md border border-border px-3 py-2">
-                            <p className="text-sm font-medium">{bit.label}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {bitOrder.clientName} · {bitOrder.orderName}
-                            </p>
-                            <div className="mt-2 flex gap-1.5">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant={row.result === "good" ? "default" : "outline"}
-                                onClick={() => setShop(setPlateBitResult(shop, qcPlate.id, row.orderId, row.bitId, "good"))}
-                              >
-                                Good
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant={row.result === "reprint" ? "destructive" : "outline"}
-                                onClick={() =>
-                                  setShop(setPlateBitResult(shop, qcPlate.id, row.orderId, row.bitId, "reprint"))
+                        <span className="min-w-0 truncate font-medium">{bit.label}</span>
+                        <div className="flex shrink-0 gap-1.5">
+                          {bit.status === "on_plate" || bit.status === "good" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={bit.status === "good" ? "default" : "outline"}
+                              onClick={() => {
+                                const result = markBitGood(kit, bit.id);
+                                if (!result.ok) {
+                                  setNote(result.error);
+                                  return;
                                 }
-                              >
-                                Reprint → pool
-                              </Button>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <Button type="button" onClick={() => finalizeQc(qcPlate)}>
-                      <ClipboardCheck className="mr-2 h-4 w-4" />
-                      Save QC after inspection
+                                setKit(result.kit);
+                              }}
+                              data-testid={`button-mark-good-${bit.id}`}
+                            >
+                              <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                              Good
+                            </Button>
+                          ) : null}
+                          {bit.status === "on_plate" || bit.status === "good" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const result = markBitReprint(kit, bit.id);
+                                if (!result.ok) {
+                                  setNote(result.error);
+                                  return;
+                                }
+                                setKit(result.kit);
+                                setNote(`${bit.label} marked for reprint — select it for the next plate.`);
+                              }}
+                              data-testid={`button-mark-reprint-${bit.id}`}
+                            >
+                              Reprint
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{statusLabel(bit)}</span>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {activePlateBits.some((bit) => bit.status === "on_plate") ? (
+                    <Button
+                      type="button"
+                      className="mt-3 w-full"
+                      onClick={() => {
+                        const result = markPlateAllGood(kit, activePlate.id);
+                        if (!result.ok) {
+                          setNote(result.error);
+                          return;
+                        }
+                        setKit(result.kit);
+                        setNote(`Marked ${result.count} bits good on ${activePlate.name}.`);
+                      }}
+                      data-testid="button-mark-plate-all-good"
+                    >
+                      Mark remaining good
                     </Button>
-                  </div>
-                ) : null}
-              </>
-            )}
-            {note ? <p className="mt-4 text-sm text-muted-foreground">{note}</p> : null}
-          </section>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No plate yet. Select bits that need printing, then Make plate.
+                </p>
+              )}
+            </div>
 
-          <section className="rounded-lg border border-card-border bg-card p-5">
-            <p className="rule-label">Plate history</p>
-            <h3 className="mt-1 text-base font-semibold">All logged CTBs</h3>
-            {shop.plates.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">None yet.</p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {shop.plates.map((plate) => {
-                  const counts = plateQcCounts(plate);
-                  return (
-                    <li key={plate.id} className="rounded-md border border-border bg-muted/30 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-medium">
-                          {plate.name}
-                          {plate.kind === "reprint" ? " · pool redo" : ""}
-                        </p>
-                        <StatusPill
-                          tone={plate.status === "inspected" ? (counts.reprint > 0 ? "warn" : "good") : "warn"}
-                          icon={plate.status === "inspected" ? CheckCircle2 : ClipboardCheck}
-                          label={
-                            plate.status === "pending_qc"
-                              ? "Awaiting QC"
-                              : `${counts.good} good / ${counts.reprint} to pool`
-                          }
-                        />
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{plate.ctbFileName}</p>
+            {kit.plates.length > 1 ? (
+              <div className="rounded-md border border-card-border bg-card p-4" data-testid="panel-plate-list">
+                <p className="rule-label">Plates</p>
+                <ul className="mt-2 space-y-1">
+                  {kit.plates.map((plate) => (
+                    <li key={plate.id}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded-md px-2 py-1.5 text-left text-sm",
+                          activePlate?.id === plate.id ? "bg-primary/10 font-medium" : "hover:bg-muted/40",
+                        )}
+                        onClick={() => setActivePlateId(plate.id)}
+                        data-testid={`button-select-plate-${plate.id}`}
+                      >
+                        {plate.name}
+                        <span className="ml-2 text-xs text-muted-foreground">{plate.bitIds.length} bits</span>
+                      </button>
                     </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        </div>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {previewBit && previewFile ? (
+              <div className="rounded-md border border-card-border bg-card p-3" data-testid="panel-stl-preview">
+                <p className="mb-2 text-xs font-medium">{previewBit.label}</p>
+                <StlPreview file={previewFile} />
+              </div>
+            ) : null}
+          </div>
+        </section>
       </div>
     </div>
+  );
+}
+
+function InvStat({
+  label,
+  value,
+  warn,
+  good,
+}: {
+  label: string;
+  value: number;
+  warn?: boolean;
+  good?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-card-border bg-card px-3 py-2.5" data-testid={`stat-kit-${label.toLowerCase()}`}>
+      <p className="rule-label">{label}</p>
+      <p
+        className={cn(
+          "mt-1 text-xl font-semibold numeric",
+          warn && value > 0 && "text-primary",
+          good && "text-chart-4",
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-md border px-2 py-1 text-xs transition-colors",
+        active ? "border-primary/40 bg-primary/10 font-medium" : "border-border text-muted-foreground hover:bg-muted/40",
+      )}
+    >
+      {label}
+    </button>
   );
 }

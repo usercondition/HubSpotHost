@@ -131,7 +131,7 @@ const NAV = [
   {
     href: "/kit-dry-run",
     label: "Kits",
-    title: "Kit bits dry run",
+    title: "Kit bit inventory & plates",
     icon: Layers3,
     testId: "link-nav-kit-dry-run",
     group: "Work",
