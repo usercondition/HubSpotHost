@@ -1,9 +1,17 @@
 /**
  * Client-only kit dry-run helpers. No HubSpot / SQLite writes.
- * Bit lists are filename inventories (e.g. STLHammer kits).
+ *
+ * Flow:
+ * 1) Select bits + attach plate/CTB → bits are "printing", plate is pending QC
+ * 2) After physical print + visual inspection → mark each bit good or reprint
+ * 3) Reprints return to the queue for a later plate
  */
 
-export type KitBitStatus = "todo" | "on_plate";
+export type KitBitStatus = "todo" | "printing" | "done" | "needs_reprint";
+
+export type KitBitQcResult = "pending" | "good" | "reprint";
+
+export type KitPlateStatus = "pending_qc" | "inspected";
 
 export type KitBit = {
   id: string;
@@ -11,14 +19,24 @@ export type KitBit = {
   label: string;
   group: string;
   status: KitBitStatus;
+  /** Latest plate this bit was assigned to (printing or completed). */
   plateId: string | null;
+};
+
+export type KitPlateBit = {
+  bitId: string;
+  result: KitBitQcResult;
 };
 
 export type KitPlate = {
   id: string;
   name: string;
+  /** Simulated CTB filename for the dry run. */
+  ctbFileName: string;
   attachedAt: string;
-  bitIds: string[];
+  inspectedAt: string | null;
+  status: KitPlateStatus;
+  bits: KitPlateBit[];
 };
 
 export type KitDryRun = {
@@ -180,22 +198,47 @@ export function createAcastusDryRunKit(): KitDryRun {
   });
 }
 
-export function kitProgress(kit: KitDryRun): { done: number; total: number; remaining: number } {
+export function isSelectableBit(bit: KitBit): boolean {
+  return bit.status === "todo" || bit.status === "needs_reprint";
+}
+
+export function kitProgress(kit: KitDryRun): {
+  done: number;
+  total: number;
+  printing: number;
+  reprint: number;
+  todo: number;
+  remaining: number;
+} {
   const total = kit.bits.length;
-  const done = kit.bits.filter((bit) => bit.status === "on_plate").length;
-  return { done, total, remaining: total - done };
+  const done = kit.bits.filter((bit) => bit.status === "done").length;
+  const printing = kit.bits.filter((bit) => bit.status === "printing").length;
+  const reprint = kit.bits.filter((bit) => bit.status === "needs_reprint").length;
+  const todo = kit.bits.filter((bit) => bit.status === "todo").length;
+  return {
+    done,
+    total,
+    printing,
+    reprint,
+    todo,
+    remaining: total - done,
+  };
 }
 
 export function groupSummaries(kit: KitDryRun): Array<{
   group: string;
   done: number;
   total: number;
+  printing: number;
+  reprint: number;
 }> {
-  const map = new Map<string, { done: number; total: number }>();
+  const map = new Map<string, { done: number; total: number; printing: number; reprint: number }>();
   for (const bit of kit.bits) {
-    const entry = map.get(bit.group) ?? { done: 0, total: 0 };
+    const entry = map.get(bit.group) ?? { done: 0, total: 0, printing: 0, reprint: 0 };
     entry.total += 1;
-    if (bit.status === "on_plate") entry.done += 1;
+    if (bit.status === "done") entry.done += 1;
+    if (bit.status === "printing") entry.printing += 1;
+    if (bit.status === "needs_reprint") entry.reprint += 1;
     map.set(bit.group, entry);
   }
   return Array.from(map.entries())
@@ -203,21 +246,47 @@ export function groupSummaries(kit: KitDryRun): Array<{
     .sort((a, b) => a.group.localeCompare(b.group));
 }
 
+export function plateQcCounts(plate: KitPlate): { good: number; reprint: number; pending: number; total: number } {
+  let good = 0;
+  let reprint = 0;
+  let pending = 0;
+  for (const row of plate.bits) {
+    if (row.result === "good") good += 1;
+    else if (row.result === "reprint") reprint += 1;
+    else pending += 1;
+  }
+  return { good, reprint, pending, total: plate.bits.length };
+}
+
+/**
+ * Attach a sliced plate: bits move to "printing" and wait for post-print QC.
+ * Does not mark bits done — inspection comes later.
+ */
 export function attachBitsToPlate(
   kit: KitDryRun,
-  plateName: string,
-  bitIds: string[],
+  input: { plateName: string; ctbFileName?: string; bitIds: string[] },
   now: Date = new Date(),
 ): KitDryRun {
-  const uniqueIds = Array.from(new Set(bitIds));
+  const uniqueIds = Array.from(new Set(input.bitIds)).filter((id) =>
+    kit.bits.some((bit) => bit.id === id && isSelectableBit(bit)),
+  );
   if (uniqueIds.length === 0) return kit;
 
-  const plateId = `plate-${kit.plates.length + 1}-${now.getTime()}`;
+  const plateNumber = kit.plates.length + 1;
+  const plateId = `plate-${plateNumber}-${now.getTime()}`;
+  const plateName = input.plateName.trim() || `Plate ${plateNumber}`;
+  const ctbFileName =
+    input.ctbFileName?.trim() ||
+    `${plateName.replace(/[^\w.-]+/g, "_")}.ctb`;
+
   const plate: KitPlate = {
     id: plateId,
-    name: plateName.trim() || `Plate ${kit.plates.length + 1}`,
+    name: plateName,
+    ctbFileName,
     attachedAt: now.toISOString(),
-    bitIds: uniqueIds,
+    inspectedAt: null,
+    status: "pending_qc",
+    bits: uniqueIds.map((bitId) => ({ bitId, result: "pending" })),
   };
 
   const idSet = new Set(uniqueIds);
@@ -225,10 +294,83 @@ export function attachBitsToPlate(
     ...kit,
     plates: [plate, ...kit.plates],
     bits: kit.bits.map((bit) =>
-      idSet.has(bit.id) && bit.status === "todo"
-        ? { ...bit, status: "on_plate", plateId }
-        : bit,
+      idSet.has(bit.id) ? { ...bit, status: "printing", plateId } : bit,
     ),
+  };
+}
+
+export function setPlateBitResult(
+  kit: KitDryRun,
+  plateId: string,
+  bitId: string,
+  result: Exclude<KitBitQcResult, "pending">,
+): KitDryRun {
+  return {
+    ...kit,
+    plates: kit.plates.map((plate) => {
+      if (plate.id !== plateId || plate.status !== "pending_qc") return plate;
+      return {
+        ...plate,
+        bits: plate.bits.map((row) => (row.bitId === bitId ? { ...row, result } : row)),
+      };
+    }),
+  };
+}
+
+export function markAllPlateBits(
+  kit: KitDryRun,
+  plateId: string,
+  result: Exclude<KitBitQcResult, "pending">,
+): KitDryRun {
+  const plate = kit.plates.find((item) => item.id === plateId);
+  if (!plate || plate.status !== "pending_qc") return kit;
+  let next = kit;
+  for (const row of plate.bits) {
+    next = setPlateBitResult(next, plateId, row.bitId, result);
+  }
+  return next;
+}
+
+/**
+ * Finalize QC after physical inspection. Good bits → done.
+ * Reprint bits → needs_reprint (selectable again). Pending not allowed.
+ */
+export function completePlateQc(
+  kit: KitDryRun,
+  plateId: string,
+  now: Date = new Date(),
+): { kit: KitDryRun; ok: true } | { kit: KitDryRun; ok: false; error: string } {
+  const plate = kit.plates.find((item) => item.id === plateId);
+  if (!plate) return { kit, ok: false, error: "Plate not found" };
+  if (plate.status !== "pending_qc") return { kit, ok: false, error: "Plate already inspected" };
+
+  const pending = plate.bits.filter((row) => row.result === "pending");
+  if (pending.length > 0) {
+    return {
+      kit,
+      ok: false,
+      error: `Inspect all bits first (${pending.length} still unmarked).`,
+    };
+  }
+
+  const resultByBit = new Map(plate.bits.map((row) => [row.bitId, row.result]));
+  return {
+    ok: true,
+    kit: {
+      ...kit,
+      plates: kit.plates.map((item) =>
+        item.id === plateId
+          ? { ...item, status: "inspected", inspectedAt: now.toISOString() }
+          : item,
+      ),
+      bits: kit.bits.map((bit) => {
+        const result = resultByBit.get(bit.id);
+        if (!result || bit.plateId !== plateId) return bit;
+        if (result === "good") return { ...bit, status: "done", plateId };
+        if (result === "reprint") return { ...bit, status: "needs_reprint", plateId: null };
+        return bit;
+      }),
+    },
   };
 }
 
