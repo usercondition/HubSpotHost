@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import type { PaidOrderAnalysis, PaidOrderCreateResult, PaidOrderDraft } from "@shared/schema";
 
@@ -218,7 +218,6 @@ export default function PaidOrders() {
               label="Paid orders only"
               testId="status-paid-only"
             />
-            <ThemeToggle />
           </>
         }
       />

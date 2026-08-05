@@ -23,7 +23,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
@@ -335,7 +335,6 @@ export default function Dashboard() {
                 Lock session
               </Button>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />

@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
-import { PageHeader, ThemeToggle } from "@/components/shell";
+import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -162,7 +162,6 @@ export default function DealsPage() {
                 </Button>
               </>
             ) : null}
-            <ThemeToggle />
           </>
         }
       />

@@ -53,15 +53,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ className, testId = "button-theme-toggle" }: { className?: string; testId?: string }) {
   const { theme, toggle } = useContext(ThemeContext);
   return (
     <button
       type="button"
       onClick={toggle}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      data-testid="button-theme-toggle"
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      data-testid={testId}
+      className={cn(
+        "inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+      )}
     >
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
@@ -149,8 +153,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               Print Ops
             </span>
           </Link>
-          <div className="md:flex md:justify-center">
+          <div className="flex items-center gap-1.5 md:justify-center">
             <AttentionBell />
+            <ThemeToggle className="md:hidden" testId="button-theme-toggle-mobile" />
           </div>
         </div>
 
@@ -209,14 +214,29 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ShipWheel className="h-3.5 w-3.5" />
             <span className="text-xs font-medium">Ship</span>
           </a>
-          <div className="flex justify-center pt-1">
-            <ThemeToggle />
-          </div>
+          <ThemeToolButton />
         </div>
       </aside>
 
       <main className="scroll-pane min-w-0 bg-background">{children}</main>
     </div>
+  );
+}
+
+function ThemeToolButton() {
+  const { theme, toggle } = useContext(ThemeContext);
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      data-testid="button-theme-toggle"
+      className="flex w-full flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+    >
+      {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+      <span className="text-xs font-medium">Theme</span>
+    </button>
   );
 }
 

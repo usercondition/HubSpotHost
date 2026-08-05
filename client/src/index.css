@@ -5,6 +5,7 @@
 /*
  * Print Operations — HubSpot-inspired CRM look.
  * Light-first: cool gray canvas, white cards, coral/orange accent, teal links.
+ * Dark: warm graphite ink (not cool blue-slate).
  */
 
 /* LIGHT MODE (default — matches HubSpot CRM) */
@@ -96,46 +97,47 @@
 }
 
 .dark {
-  --button-outline: rgba(255, 255, 255, 0.1);
-  --badge-outline: rgba(255, 255, 255, 0.05);
+  /* Warm graphite ink — soft charcoal, not cool blue-slate */
+  --button-outline: rgba(255, 245, 235, 0.1);
+  --badge-outline: rgba(255, 245, 235, 0.05);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255, 255, 255, 0.04);
-  --elevate-2: rgba(255, 255, 255, 0.09);
+  --elevate-1: rgba(255, 245, 235, 0.035);
+  --elevate-2: rgba(255, 245, 235, 0.08);
 
-  --background: 210 20% 10%;
-  --foreground: 204 33% 96%;
-  --border: 210 14% 20%;
-  --card: 210 18% 13%;
-  --card-foreground: 204 33% 96%;
-  --card-border: 210 14% 18%;
-  --sidebar: 210 20% 11%;
-  --sidebar-foreground: 204 33% 96%;
-  --sidebar-border: 210 14% 18%;
-  --sidebar-primary: 11 100% 67%;
+  --background: 30 8% 9%;
+  --foreground: 36 18% 94%;
+  --border: 28 7% 18%;
+  --card: 30 8% 12%;
+  --card-foreground: 36 18% 94%;
+  --card-border: 28 7% 17%;
+  --sidebar: 30 9% 10%;
+  --sidebar-foreground: 36 18% 94%;
+  --sidebar-border: 28 7% 16%;
+  --sidebar-primary: 14 100% 64%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 16% 16%;
-  --sidebar-accent-foreground: 204 33% 96%;
-  --sidebar-ring: 11 100% 67%;
-  --popover: 210 18% 14%;
-  --popover-foreground: 204 33% 96%;
-  --popover-border: 210 14% 22%;
-  --primary: 11 100% 67%;
+  --sidebar-accent: 28 8% 15%;
+  --sidebar-accent-foreground: 36 18% 94%;
+  --sidebar-ring: 14 100% 64%;
+  --popover: 30 8% 13%;
+  --popover-foreground: 36 18% 94%;
+  --popover-border: 28 7% 20%;
+  --primary: 14 100% 64%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 16% 17%;
-  --secondary-foreground: 204 33% 96%;
-  --muted: 210 16% 16%;
-  --muted-foreground: 210 12% 68%;
-  --accent: 189 80% 42%;
+  --secondary: 28 8% 16%;
+  --secondary-foreground: 36 18% 94%;
+  --muted: 28 8% 15%;
+  --muted-foreground: 30 10% 68%;
+  --accent: 186 72% 48%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 68% 52%;
+  --destructive: 0 68% 54%;
   --destructive-foreground: 0 0% 98%;
-  --input: 210 14% 28%;
-  --ring: 11 100% 67%;
-  --chart-1: 11 100% 67%;
-  --chart-2: 189 80% 48%;
-  --chart-3: 210 65% 64%;
-  --chart-4: 152 45% 52%;
-  --chart-5: 350 65% 60%;
+  --input: 28 7% 26%;
+  --ring: 14 100% 64%;
+  --chart-1: 14 100% 64%;
+  --chart-2: 186 72% 52%;
+  --chart-3: 32 55% 58%;
+  --chart-4: 152 42% 48%;
+  --chart-5: 350 55% 58%;
 
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
