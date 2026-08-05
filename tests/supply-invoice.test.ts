@@ -10,8 +10,43 @@ import {
   extractSupplyInvoiceFromText,
   extractTextFromSupplyReceipt,
   isSupportedSupplyReceiptFileName,
+  isSupportedSupplyReceiptUpload,
+  normalizeOcrText,
   parseSupplyReceipt,
 } from "../server/lib/supply-invoice";
+
+const ELEGOO_EMAIL_SCREENSHOT = `
+Hi Miguel,
+
+Order Date 07/31/2026
+Order Number #EUS338607
+Track Your Order
+
+Billing Address
+Miguel
+Shipping Address
+4547 Kensington Dr
+San Diego, California 92116
+United States
+
+Order Details
+Worry-Free Purchase
+Quantity: 1
+Total: $1.98
+ABS-Like Resin V3.0
+Quantity: 4
+Total: $123.96
+
+Subtotal $101.18
+Shipping $0.00
+Total $101.18
+`;
+
+const ELEGOO_OCR_GLUED = `
+Order Details Worry-Free Purchase Quantity: 1 Total: $1.98 ABS-Like Resin V3.0 Quantity: 4 Total: $123.96
+Subtotal $101.18 Shipping $0.00 Total $101.18
+Order Number #EUS338607
+`;
 
 const AMAZON_INVOICE = `
 Amazon.com
@@ -117,10 +152,47 @@ test("non-Amazon invoices detect vendor and nomenclature", () => {
   assert.equal(result.fields.purchasedAt, "2026-07-20");
 });
 
+test("ELEGOO order-confirmation screenshots capture items and quantities", () => {
+  const result = extractSupplyInvoiceFromText(ELEGOO_EMAIL_SCREENSHOT, {
+    fileName: "elegoo-order.png",
+    format: "image",
+  });
+
+  assert.equal(result.fields.source, "ELEGOO");
+  assert.equal(result.fields.orderReference, "EUS338607");
+  assert.equal(result.fields.purchasedAt, "2026-07-31");
+  assert.equal(result.fields.totalAmount, "101.18");
+  assert.equal(result.fields.lineItems.length, 2);
+  assert.equal(result.fields.lineItems[0]?.itemName, "Worry-Free Purchase");
+  assert.equal(result.fields.lineItems[0]?.quantity, 1);
+  assert.equal(result.fields.lineItems[0]?.lineAmount, "1.98");
+  assert.match(result.fields.lineItems[1]?.itemName ?? "", /ABS-Like Resin V3\.0/i);
+  assert.equal(result.fields.lineItems[1]?.quantity, 4);
+  assert.equal(result.fields.lineItems[1]?.lineAmount, "123.96");
+  assert.equal(result.fields.lineItems[1]?.category, "materials");
+});
+
+test("OCR-glued screenshot text is split into Quantity/Total item blocks", () => {
+  const normalized = normalizeOcrText(ELEGOO_OCR_GLUED);
+  assert.match(normalized, /Quantity:\s*1\nTotal:/i);
+  const result = extractSupplyInvoiceFromText(ELEGOO_OCR_GLUED, { fileName: "screenshot.png" });
+  assert.equal(result.fields.lineItems.length, 2);
+  assert.equal(result.fields.lineItems[1]?.quantity, 4);
+  assert.equal(result.fields.totalAmount, "101.18");
+  assert.equal(result.fields.source, "ELEGOO");
+});
+
 test("vendor detection prefers labeled seller and known brands", () => {
   assert.equal(detectSource("Sold by: Phrozen Store\nTotal: $40.00"), "Phrozen");
   assert.equal(detectSource("Thanks for shopping", "homedepot-fep-film.csv"), "Home Depot");
+  assert.equal(detectSource("Order Number #EUS338607"), "ELEGOO");
   assert.equal(detectSource("random receipt text"), "");
+});
+
+test("clipboard screenshots without a file extension are accepted by mime type", () => {
+  assert.equal(isSupportedSupplyReceiptUpload({ originalname: "image", mimetype: "image/png" }), true);
+  assert.equal(isSupportedSupplyReceiptUpload({ originalname: "blob", mimetype: "image/jpeg" }), true);
+  assert.equal(isSupportedSupplyReceiptUpload({ originalname: "virus.exe", mimetype: "application/octet-stream" }), false);
 });
 
 test("supported receipt formats include spreadsheets and photos", () => {

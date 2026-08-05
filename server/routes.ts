@@ -55,7 +55,8 @@ import {
 } from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
 import {
-  isSupportedSupplyReceiptFileName,
+  formatFromUpload,
+  isSupportedSupplyReceiptUpload,
   parseSupplyReceipt,
   SUPPLY_INVOICE_MAX_BYTES,
   SUPPLY_INVOICE_MAX_LABEL,
@@ -128,12 +129,27 @@ const printFileUpload = multer({
   limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
 });
 
+function extensionForSupplyUpload(file: Express.Multer.File): string {
+  const fromName = path.extname(file.originalname || "").toLowerCase();
+  if (fromName) return fromName;
+  const mime = String(file.mimetype || "").toLowerCase();
+  if (mime === "image/png") return ".png";
+  if (mime === "image/jpeg") return ".jpg";
+  if (mime === "image/webp") return ".webp";
+  if (mime === "image/gif") return ".gif";
+  if (mime === "text/csv") return ".csv";
+  if (mime === "text/plain") return ".txt";
+  if (mime === "text/html") return ".html";
+  if (mime.includes("spreadsheet") || mime.includes("excel")) return ".xlsx";
+  if (mime === "application/pdf") return ".pdf";
+  return ".bin";
+}
+
 const supplyInvoiceUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, os.tmpdir()),
     filename: (_req, file, cb) => {
-      const extension = path.extname(file.originalname || "").toLowerCase() || ".pdf";
-      cb(null, `supply-invoice-${crypto.randomUUID()}${extension}`);
+      cb(null, `supply-invoice-${crypto.randomUUID()}${extensionForSupplyUpload(file)}`);
     },
   }),
   limits: { fileSize: SUPPLY_INVOICE_MAX_BYTES, files: 1 },
@@ -591,23 +607,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           error: "Drop one receipt or invoice file to extract purchase fields",
         });
       }
-      if (!isSupportedSupplyReceiptFileName(file.originalname)) {
+      if (!isSupportedSupplyReceiptUpload(file)) {
         removeTempUpload(file.path);
         return res.status(400).json({
           ok: false,
           error:
-            "Use a PDF, CSV, Excel, text, HTML, or photo receipt so nomenclature, cost, and vendor can be extracted",
+            "Use a PDF, CSV, Excel, text, HTML, or photo/screenshot receipt so nomenclature, cost, and vendor can be extracted",
         });
       }
 
       try {
-        const parsed = await parseSupplyReceipt(file.path, file.originalname);
+        const format = formatFromUpload(file);
+        const parseName =
+          path.extname(file.originalname || "")
+            ? file.originalname
+            : `receipt${extensionForSupplyUpload(file)}`;
+        const parsed = await parseSupplyReceipt(file.path, parseName);
         return res.json({
           ok: true,
           fields: parsed.fields,
           warnings: parsed.warnings,
           pageCount: parsed.pageCount,
-          format: parsed.format,
+          format: parsed.format || format,
           maxUploadLabel: SUPPLY_INVOICE_MAX_LABEL,
         });
       } catch (error) {
