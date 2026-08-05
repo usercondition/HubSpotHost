@@ -98,7 +98,7 @@ const KNOWN_VENDORS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bhome\s*depot\b/i, label: "Home Depot" },
   { pattern: /\blowes\b|\blowe'?s\b/i, label: "Lowe's" },
   { pattern: /\bmcmaster(?:-carr)?\b/i, label: "McMaster-Carr" },
-  { pattern: /\belegoo\b/i, label: "ELEGOO" },
+  { pattern: /\belegoo\b|\bEUS\d{5,}\b/i, label: "ELEGOO" },
   { pattern: /\banycubic\b/i, label: "Anycubic" },
   { pattern: /\bphrozen\b/i, label: "Phrozen" },
   { pattern: /\bhey\s*gears\b|\bheygears\b/i, label: "HeyGears" },
@@ -113,6 +113,33 @@ const KNOWN_VENDORS: Array<{ pattern: RegExp; label: string }> = [
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
+}
+
+/** Repair common screenshot/OCR glitches before field extraction. */
+export function normalizeOcrText(text: string): string {
+  let value = text.replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ");
+
+  value = value
+    .replace(/\bQuan[il1]{1,3}ty\b/gi, "Quantity")
+    .replace(/\bQty\b/gi, "Qty")
+    .replace(/\bTota[il1]\b/gi, "Total")
+    .replace(/\bSub\s*tota[il1]\b/gi, "Subtotal")
+    .replace(/\bOrder\s*Deta[il1]{2,3}s\b/gi, "Order Details")
+    .replace(/\bOrder\s*Num(?:ber|her|her)\b/gi, "Order Number")
+    .replace(/[|]/g, "I")
+    .replace(/[;]/g, ":")
+    .replace(/\$\s+(\d)/g, "$$$1")
+    .replace(/(\d),(\d{2})\b/g, "$1.$2");
+
+  // Split glued email-style blocks onto their own lines.
+  value = value
+    .replace(/([^\n])\s+(Quantity\s*:)/gi, "$1\n$2")
+    .replace(/(Quantity\s*:\s*\d{1,5})\s+(Total\s*:)/gi, "$1\n$2")
+    .replace(/(Total\s*:\s*\$?\s*[\d,]+\.\d{2})\s+(?=[A-Z(])/g, "$1\n")
+    .replace(/([^\n])\s+(Subtotal\s*:?)/gi, "$1\n$2")
+    .replace(/\b(Order\s*Details)\s+/gi, "$1\n");
+
+  return value;
 }
 
 function moneyFromMatch(raw: string | undefined): string | null {
@@ -183,6 +210,39 @@ export function isSupportedSupplyReceiptFileName(fileName: string | undefined): 
   return detectSupplyReceiptFormat(fileName) !== "unknown";
 }
 
+export function isSupportedSupplyReceiptUpload(file: {
+  originalname?: string;
+  mimetype?: string;
+}): boolean {
+  if (isSupportedSupplyReceiptFileName(file.originalname)) return true;
+  const mime = String(file.mimetype || "").toLowerCase();
+  return (
+    mime === "application/pdf" ||
+    mime.startsWith("image/") ||
+    mime === "text/plain" ||
+    mime === "text/csv" ||
+    mime === "text/html" ||
+    mime.includes("spreadsheet") ||
+    mime.includes("excel")
+  );
+}
+
+export function formatFromUpload(file: {
+  originalname?: string;
+  mimetype?: string;
+}): SupplyReceiptFormat {
+  const fromName = detectSupplyReceiptFormat(file.originalname);
+  if (fromName !== "unknown") return fromName;
+  const mime = String(file.mimetype || "").toLowerCase();
+  if (mime === "application/pdf") return "pdf";
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "text/csv") return "csv";
+  if (mime === "text/html") return "html";
+  if (mime === "text/plain") return "text";
+  if (mime.includes("spreadsheet") || mime.includes("excel")) return "spreadsheet";
+  return "unknown";
+}
+
 /** @deprecated Use isSupportedSupplyReceiptFileName */
 export function isPdfInvoiceFileName(fileName: string | undefined): boolean {
   return pathExt(fileName) === ".pdf";
@@ -191,6 +251,9 @@ export function isPdfInvoiceFileName(fileName: string | undefined): boolean {
 function extractOrderReference(text: string): string | null {
   const amazon = text.match(/\b(1\d{2}-\d{7}-\d{7})\b/);
   if (amazon?.[1]) return amazon[1];
+
+  const elegoo = text.match(/#\s*(EUS\d{5,})\b/i);
+  if (elegoo?.[1]) return elegoo[1].toUpperCase();
 
   const labeled = text.match(
     /\b(?:Order|Invoice|Receipt|PO|Purchase\s*Order|Confirmation)\s*(?:#|Number|No\.?|ID)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,40})\b/i,
@@ -202,19 +265,30 @@ function extractOrderReference(text: string): string | null {
 }
 
 function extractTotalAmount(text: string): string | null {
-  const patterns = [
+  // Prefer order-level totals. Avoid the first line-item "Total: $1.98".
+  const preferred = [
     /Grand\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Order\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Amount\s*(?:Due|Paid|Charged)\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
-    /Total\s*(?:Paid|Charged|Cost|Price)?\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Invoice\s*Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
     /Balance\s*Due\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
+    /Subtotal\s*[:\s]*\$?\s*([\d,]+\.\d{2})/i,
   ];
-  for (const pattern of patterns) {
+  for (const pattern of preferred) {
     const match = text.match(pattern);
     const money = moneyFromMatch(match?.[1]);
     if (money) return money;
   }
+
+  // Bare "Total:" labels — use the last one (summary is usually at the bottom).
+  const bareTotals: string[] = [];
+  const barePattern = /(?:^|\n)\s*Total\s*(?:Paid|Charged|Cost|Price)?\s*[:\s]*\$?\s*([\d,]+\.\d{2})/gi;
+  let bareMatch: RegExpExecArray | null;
+  while ((bareMatch = barePattern.exec(text)) !== null) {
+    const money = moneyFromMatch(bareMatch[1]);
+    if (money) bareTotals.push(money);
+  }
+  if (bareTotals.length > 0) return bareTotals[bareTotals.length - 1]!;
 
   const amounts: number[] = [];
   const moneyPattern = /\$\s*([\d,]+\.\d{2})\b/g;
@@ -226,7 +300,6 @@ function extractTotalAmount(text: string): string | null {
     if (amount > 0 && amount < 100_000) amounts.push(amount);
   }
   if (amounts.length === 0) {
-    // Spreadsheet/CSV totals without a $ sign.
     const bare = text.match(/(?:^|\n)\s*(?:total|amount|cost|price)\s*[,:\t ]+\s*([\d,]+\.\d{2})\s*(?:\n|$)/i);
     return moneyFromMatch(bare?.[1]);
   }
@@ -261,20 +334,107 @@ function extractQuantity(text: string): number | null {
 function looksLikeNoiseItem(line: string): boolean {
   const normalized = line.toLowerCase();
   return (
-    normalized.length < 4 ||
-    /^(amazon\.com|final details|order information|billing|shipping|payment|sold by|condition:|thank you|invoice|receipt|page\s+\d|vendor|merchant|store)/i.test(
+    normalized.length < 3 ||
+    /^(amazon\.com|final details|order information|billing|shipping|payment|sold by|condition:|thank you|invoice|receipt|page\s+\d|vendor|merchant|store|track your order|hi[, ]|hello)/i.test(
       normalized,
     ) ||
-    /^(subtotal|shipping|tax|total|grand total|order total|amount due|balance due)/i.test(normalized) ||
+    /^(subtotal|shipping|tax|total|grand total|order total|amount due|balance due|quantity)\b/i.test(normalized) ||
+    /^(billing address|shipping address|order date|order number)\b/i.test(normalized) ||
     /^\$?\d/.test(normalized) ||
     /^(https?:|www\.)/i.test(normalized)
   );
 }
 
 function isSectionEnd(line: string): boolean {
-  return /^(subtotal|shipping|tax|estimated tax|total before|grand total|order total|amount due|balance due|payment information|billing address|shipping address)/i.test(
+  return /^(subtotal|shipping\b(?!\s+address)|tax|estimated tax|total before|grand total|order total|amount due|balance due|payment information)\b/i.test(
     line,
   );
+}
+
+function isProductTitleLine(line: string): boolean {
+  if (looksLikeNoiseItem(line)) return false;
+  if (/^(quantity|qty|total|unit price)\b/i.test(line)) return false;
+  if (!/[a-zA-Z]{3,}/.test(line)) return false;
+  if (line.length < 3 || line.length > 180) return false;
+  return true;
+}
+
+/**
+ * Email/screenshot layout: product name, then Quantity:, then Total:.
+ * Works with or without an "Order Details" heading, including OCR-glued lines.
+ */
+export function extractQuantityTotalBlocks(lines: string[]): SupplyPurchaseLineItem[] {
+  const items: SupplyPurchaseLineItem[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+
+    // Same-line: "ABS-Like Resin V3.0 Quantity: 4 Total: $123.96"
+    const sameLine = line.match(
+      /^(.+?)\s+Quantity\s*:\s*(\d{1,5})\s+Total\s*:\s*\$?\s*([\d,]+\.\d{2})\s*$/i,
+    );
+    if (sameLine) {
+      const itemName = normalizeWhitespace(sameLine[1]!).slice(0, 300);
+      if (isProductTitleLine(itemName)) {
+        items.push({
+          itemName,
+          quantity: Number(sameLine[2]) || 1,
+          lineAmount: moneyFromMatch(sameLine[3]) ?? "",
+          category: suggestSupplyCategory(itemName),
+        });
+      }
+      continue;
+    }
+
+    if (!isProductTitleLine(line)) continue;
+
+    const next1 = lines[index + 1] ?? "";
+    const next2 = lines[index + 2] ?? "";
+    const qtyLine = next1.match(/^Quantity\s*:\s*(\d{1,5})\s*$/i) || next1.match(/^Qty\.?\s*:\s*(\d{1,5})\s*$/i);
+    const totalOnNext1 = next1.match(/^Total\s*:\s*\$?\s*([\d,]+\.\d{2})\s*$/i);
+    const totalOnNext2 = next2.match(/^Total\s*:\s*\$?\s*([\d,]+\.\d{2})\s*$/i);
+
+    if (qtyLine && totalOnNext2) {
+      items.push({
+        itemName: line.slice(0, 300),
+        quantity: Number(qtyLine[1]) || 1,
+        lineAmount: moneyFromMatch(totalOnNext2[1]) ?? "",
+        category: suggestSupplyCategory(line),
+      });
+      index += 2;
+      continue;
+    }
+
+    // Quantity and total somehow on one following line.
+    const qtyTotal = next1.match(/^Quantity\s*:\s*(\d{1,5})\s+Total\s*:\s*\$?\s*([\d,]+\.\d{2})\s*$/i);
+    if (qtyTotal) {
+      items.push({
+        itemName: line.slice(0, 300),
+        quantity: Number(qtyTotal[1]) || 1,
+        lineAmount: moneyFromMatch(qtyTotal[2]) ?? "",
+        category: suggestSupplyCategory(line),
+      });
+      index += 1;
+      continue;
+    }
+
+    // Name + quantity on this line, total on next.
+    const nameQty = line.match(/^(.+?)\s+Quantity\s*:\s*(\d{1,5})\s*$/i);
+    if (nameQty && totalOnNext1) {
+      const itemName = normalizeWhitespace(nameQty[1]!).slice(0, 300);
+      if (isProductTitleLine(itemName)) {
+        items.push({
+          itemName,
+          quantity: Number(nameQty[2]) || 1,
+          lineAmount: moneyFromMatch(totalOnNext1[1]) ?? "",
+          category: suggestSupplyCategory(itemName),
+        });
+        index += 1;
+      }
+    }
+  }
+
+  return items.slice(0, 40);
 }
 
 function extractAmazonStyleLineItems(lines: string[]): SupplyPurchaseLineItem[] {
@@ -393,6 +553,10 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean);
 
+  // Prefer Quantity/Total email blocks (ELEGOO, Shopify, etc.) — most reliable for screenshots.
+  const quantityTotalBlocks = extractQuantityTotalBlocks(lines);
+  if (quantityTotalBlocks.length > 0) return quantityTotalBlocks;
+
   const amazonStyle = extractAmazonStyleLineItems(lines);
   if (amazonStyle.length > 0) return amazonStyle;
 
@@ -478,7 +642,7 @@ export function extractSupplyInvoiceFromText(
   text: string,
   options: { fileName?: string; pageCount?: number; format?: SupplyReceiptFormat } = {},
 ): SupplyInvoiceParseResult {
-  const cleaned = text.replace(/\u0000/g, " ");
+  const cleaned = normalizeOcrText(text.replace(/\u0000/g, " "));
   const warnings: string[] = [];
 
   const lineItems = extractLineItems(cleaned);
@@ -713,15 +877,22 @@ async function extractTextFromSpreadsheet(buffer: Buffer): Promise<string> {
 }
 
 async function extractTextFromImage(filePath: string): Promise<string> {
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker("eng");
+  const { createWorker, PSM } = await import("tesseract.js");
+  // SINGLE_BLOCK fits email/receipt screenshots better than fully automatic layout.
+  const worker = await createWorker("eng", 1, {
+    logger: () => undefined,
+  });
   try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+      preserve_interword_spaces: "1",
+    });
     const recognize = worker.recognize(filePath);
     const timeout = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error("OCR timed out")), OCR_TIMEOUT_MS);
     });
     const result = await Promise.race([recognize, timeout]);
-    return String(result.data?.text ?? "").trim();
+    return normalizeOcrText(String(result.data?.text ?? "").trim());
   } finally {
     await worker.terminate().catch(() => undefined);
   }

@@ -380,9 +380,9 @@ export default function Supplies() {
           <>
             <section className="flex flex-wrap items-center justify-between gap-3" data-testid="summary-supplies-status">
               <div>
-                <p className="rule-label">Regular Amazon account workflow</p>
+                <p className="rule-label">Multi-vendor purchase ledger</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Log a receipt with one or more items. PDF invoices fill the item breakdown automatically when the text is readable.
+                  Log receipts from Amazon or any supplier. Drop a file or screenshot to extract items, quantities, cost, and source.
                 </p>
               </div>
               <StatusPill
@@ -445,7 +445,7 @@ export default function Supplies() {
                       {parseInvoice.isPending ? "Reading receipt…" : "Drop a receipt or invoice here"}
                     </span>
                     <span className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                      PDF, CSV, Excel, text, HTML, or a photo. Extracts items, cost, and vendor across Amazon and other suppliers. Nothing is saved until you confirm.
+                      PDF, CSV, Excel, text, HTML, photo, or screenshot. Reads item names, quantities, cost, and vendor. Nothing is saved until you confirm.
                     </span>
                   </button>
                 </div>
