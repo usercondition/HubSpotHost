@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   CheckSquare,
   ClipboardCheck,
+  FolderOpen,
   Layers3,
   PackageOpen,
   RefreshCw,
@@ -16,9 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
+import { StlPreview } from "@/components/stl-preview";
 import { cn } from "@/lib/utils";
 import {
   attachOrderPlate,
+  buildKitBitsFromFileNames,
   completePlateQc,
   createPlateFromReprintPool,
   createSampleShop,
@@ -28,6 +31,7 @@ import {
   orderProgress,
   plateQcCounts,
   poolKey,
+  replaceOrderKit,
   reprintPool,
   resetShop,
   setPlateBitResult,
@@ -37,6 +41,12 @@ import {
   type KitPlate,
   type ShopDryRun,
 } from "@/lib/kit-dry-run";
+import {
+  collectStlFilesFromDataTransfer,
+  collectStlFilesFromFileList,
+  inferKitNameFromImports,
+  type ImportedStlFile,
+} from "@/lib/stl-folder-import";
 
 function bitStatusLabel(bit: KitBit): string {
   switch (bit.status) {
@@ -52,6 +62,7 @@ function bitStatusLabel(bit: KitBit): string {
 }
 
 export default function KitDryRunPage() {
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [shop, setShop] = useState<ShopDryRun>(() => createSampleShop());
   const [orderId, setOrderId] = useState(shop.orders[0]?.id ?? "");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -62,8 +73,12 @@ export default function KitDryRunPage() {
   const [poolFilter, setPoolFilter] = useState<"all" | "order" | "client">("all");
   const [poolSelected, setPoolSelected] = useState<Set<string>>(() => new Set());
   const [qcPlateId, setQcPlateId] = useState<string | null>(null);
+  const [stlByBitId, setStlByBitId] = useState<Record<string, File>>({});
+  const [previewBitId, setPreviewBitId] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Failures go to the reprint pool. Build a redo plate only when you are ready to slice.",
+    "Drag a kit folder here (or Choose folder). STLs stay in this browser tab for preview — not uploaded.",
   );
 
   const order = shop.orders.find((item) => item.id === orderId) ?? shop.orders[0] ?? null;
@@ -72,6 +87,8 @@ export default function KitDryRunPage() {
   const groups = order ? groupSummaries(order) : [];
   const pendingQc = shop.plates.filter((plate) => plate.status === "pending_qc");
   const qcPlate = shop.plates.find((plate) => plate.id === qcPlateId) ?? pendingQc[0] ?? null;
+  const previewBit = order?.bits.find((bit) => bit.id === previewBitId) ?? null;
+  const previewFile = previewBitId ? stlByBitId[previewBitId] ?? null : null;
 
   const poolItems = useMemo(() => {
     if (!order) return reprintPool(shop);
@@ -93,11 +110,67 @@ export default function KitDryRunPage() {
   const selectableVisible = visibleBits.filter(isSelectableBit);
   const selectedCount = selectableVisible.filter((bit) => selectedBits.has(bit.id)).length;
 
+  const applyFolderImport = (imports: ImportedStlFile[]) => {
+    if (!order) {
+      setNote("Select an order first, then import the folder onto that kit.");
+      return;
+    }
+    if (imports.length === 0) {
+      setNote("No .stl files found in that folder/drop.");
+      return;
+    }
+
+    const kitName = inferKitNameFromImports(imports);
+    const bits = buildKitBitsFromFileNames(
+      imports.map((item) => item.fileName),
+      `${order.id}-${kitName}`,
+    );
+    const fileByName = new Map(imports.map((item) => [item.fileName.toLowerCase(), item.file]));
+    const nextFiles: Record<string, File> = {};
+    for (const bit of bits) {
+      const file = fileByName.get(bit.fileName.toLowerCase());
+      if (file) nextFiles[bit.id] = file;
+    }
+
+    setShop(replaceOrderKit(shop, order.id, bits));
+    setStlByBitId(nextFiles);
+    setSelectedBits(new Set());
+    setPoolSelected(new Set());
+    setQcPlateId(null);
+    setGroupFilter("all");
+    setPreviewBitId(bits[0]?.id ?? null);
+    setPlateName("Plate 1");
+    setCtbFileName(`${kitName.replace(/[^\w]+/g, "_").slice(0, 28)}_P1.ctb`);
+    setNote(
+      `Imported ${bits.length} STL${bits.length === 1 ? "" : "s"} onto ${order.clientName} / ${order.orderName} from “${kitName}”. Click a bit to preview.`,
+    );
+  };
+
+  const onFolderInput = (list: FileList | null) => {
+    if (!list) return;
+    applyFolderImport(collectStlFilesFromFileList(list));
+  };
+
+  const onDropFolder = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    setImportBusy(true);
+    try {
+      const imports = await collectStlFilesFromDataTransfer(event.dataTransfer);
+      applyFolderImport(imports);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "Could not read dropped folder");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   const selectOrder = (nextOrder: KitOrder) => {
     setOrderId(nextOrder.id);
     setSelectedBits(new Set());
     setGroupFilter("all");
     setQuery("");
+    setPreviewBitId(null);
     setPlateName("Plate 1");
     setCtbFileName(`${nextOrder.orderName.replace(/[^\w]+/g, "_").slice(0, 24)}_P1.ctb`);
   };
@@ -144,9 +217,7 @@ export default function KitDryRunPage() {
     setShop(result.shop);
     setPoolSelected(new Set());
     setQcPlateId(result.plateId);
-    setNote(
-      `Reprint pool plate created with ${result.count} bit${result.count === 1 ? "" : "s"} (may span orders). Slice, print, then QC.`,
-    );
+    setNote(`Reprint pool plate created with ${result.count} bits. Slice, print, then QC.`);
   };
 
   const finalizeQc = (plate: KitPlate) => {
@@ -169,14 +240,75 @@ export default function KitDryRunPage() {
     <div data-testid="page-kit-dry-run">
       <PageHeader
         title="Kit & plate bits"
-        subtitle="Multi-order dry run: kits live on each client order; failures pool shop-wide until you build a reprint plate."
+        subtitle="Import a kit folder with Choose folder / drag-drop for local STL previews. Failures pool shop-wide until you build a reprint plate."
       />
 
       <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
         <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm leading-6">
-          <strong className="font-semibold">Logic.</strong> Attach planned plates per order → inspect after printing →
-          fails enter the <em>reprint pool</em> (not a plate yet). When you are ready, select pooled bits (one order,
-          one client, or mixed) and create a reprint CTB.
+          <strong className="font-semibold">Safe import.</strong> Use drag-drop or Choose folder — not a disk path.
+          STL files stay in this browser tab for preview and are not uploaded to the server in this dry run.
+        </section>
+
+        <section
+          className={cn(
+            "rounded-lg border border-dashed p-5 transition-colors",
+            dragActive ? "border-primary bg-primary/10" : "border-card-border bg-card",
+          )}
+          data-testid="panel-folder-import"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            if (event.currentTarget === event.target) setDragActive(false);
+          }}
+          onDrop={onDropFolder}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="rule-label">Import kit folder</p>
+              <h2 className="mt-1 text-base font-semibold tracking-tight">Drop STL kit onto the selected order</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {order
+                  ? `Target: ${order.clientName} · ${order.orderName}`
+                  : "Select an order first"}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!order || importBusy}
+              onClick={() => folderInputRef.current?.click()}
+              data-testid="button-choose-kit-folder"
+            >
+              <FolderOpen className="mr-2 h-4 w-4" />
+              {importBusy ? "Reading…" : "Choose folder"}
+            </Button>
+          </div>
+          <input
+            ref={(element) => {
+              folderInputRef.current = element;
+              if (element) {
+                element.setAttribute("webkitdirectory", "");
+                element.setAttribute("directory", "");
+              }
+            }}
+            type="file"
+            className="hidden"
+            multiple
+            onChange={(event) => {
+              onFolderInput(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Drop the kit folder here (e.g. Acastus Knight … @STLHammer). Only <code>.stl</code> files are read.
+          </p>
         </section>
 
         <section className="rounded-lg border border-card-border bg-card p-5">
@@ -186,11 +318,7 @@ export default function KitDryRunPage() {
               <h2 className="mt-1 text-base font-semibold tracking-tight">Open kit orders</h2>
             </div>
             <div className="flex flex-wrap gap-2">
-              <StatusPill
-                tone="warn"
-                icon={PackageOpen}
-                label={`${shopTotals.done}/${shopTotals.total} good`}
-              />
+              <StatusPill tone="warn" icon={PackageOpen} label={`${shopTotals.done}/${shopTotals.total} good`} />
               <StatusPill tone="warn" icon={ClipboardCheck} label={`${shopTotals.printing} awaiting QC`} />
               <StatusPill tone="bad" icon={XCircle} label={`${shopTotals.reprint} in pool`} />
             </div>
@@ -209,7 +337,6 @@ export default function KitDryRunPage() {
                     "rounded-md border px-3 py-3 text-left transition-colors",
                     active ? "border-primary bg-primary/10" : "border-border bg-muted/30 hover:bg-muted/55",
                   )}
-                  data-testid={`button-order-${item.id}`}
                 >
                   <p className="text-xs text-muted-foreground">{item.clientName}</p>
                   <p className="mt-0.5 text-sm font-medium">{item.orderName}</p>
@@ -230,10 +357,12 @@ export default function KitDryRunPage() {
                 const next = createSampleShop();
                 setShop(next);
                 setOrderId(next.orders[0]!.id);
+                setStlByBitId({});
+                setPreviewBitId(null);
                 setSelectedBits(new Set());
                 setPoolSelected(new Set());
                 setQcPlateId(null);
-                setNote("Reloaded sample shop (Ada×2, Bob×1).");
+                setNote("Reloaded sample shop (filenames only — import a folder for STL previews).");
               }}
             >
               <Layers3 className="mr-2 h-4 w-4" />
@@ -248,7 +377,7 @@ export default function KitDryRunPage() {
                 setSelectedBits(new Set());
                 setPoolSelected(new Set());
                 setQcPlateId(null);
-                setNote("Reset all plates and bit statuses.");
+                setNote("Reset all plates and bit statuses (STL files kept if imported).");
               }}
             >
               <RotateCcw className="mr-2 h-4 w-4" />
@@ -258,7 +387,7 @@ export default function KitDryRunPage() {
         </section>
 
         {!order ? null : (
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
             <section className="rounded-lg border border-card-border bg-card p-5">
               <p className="rule-label">Selected order kit</p>
               <h3 className="mt-1 text-base font-semibold tracking-tight">
@@ -267,6 +396,9 @@ export default function KitDryRunPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {progress?.todo} todo · {progress?.printing} awaiting QC · {progress?.reprint} in pool ·{" "}
                 {progress?.done}/{progress?.total} good
+                {Object.keys(stlByBitId).length > 0
+                  ? ` · ${Object.keys(stlByBitId).length} STLs loaded for preview`
+                  : " · no local STLs yet"}
               </p>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -319,42 +451,61 @@ export default function KitDryRunPage() {
                 <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedBits(new Set())}>
                   Clear
                 </Button>
-                {groupFilter !== "all" ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setGroupFilter("all")}>
-                    All groups
-                  </Button>
-                ) : null}
               </div>
 
               <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto rounded-md border border-border p-2">
                 {visibleBits.map((bit) => {
                   const selectable = isSelectableBit(bit);
                   const checked = selectable && selectedBits.has(bit.id);
+                  const hasStl = Boolean(stlByBitId[bit.id]);
+                  const previewing = previewBitId === bit.id;
                   return (
                     <li key={bit.id}>
-                      <button
-                        type="button"
-                        disabled={!selectable}
-                        onClick={() => toggleBit(bit)}
+                      <div
                         className={cn(
-                          "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
-                          !selectable ? "opacity-55" : checked ? "bg-primary/10" : "hover:bg-muted/60",
+                          "flex items-start gap-1 rounded-md px-1 py-1",
+                          previewing ? "bg-muted/50" : "",
                         )}
                       >
-                        {bit.status === "done" ? (
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-                        ) : checked ? (
-                          <CheckSquare className="mt-0.5 h-4 w-4 text-primary" />
-                        ) : (
-                          <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                        )}
-                        <span>
-                          <span className="block font-medium">{bit.label}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {bit.group} · {bitStatusLabel(bit)}
+                        <button
+                          type="button"
+                          disabled={!selectable}
+                          onClick={() => toggleBit(bit)}
+                          className={cn(
+                            "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
+                            !selectable ? "opacity-55" : checked ? "bg-primary/10" : "hover:bg-muted/60",
+                          )}
+                        >
+                          {bit.status === "done" ? (
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                          ) : checked ? (
+                            <CheckSquare className="mt-0.5 h-4 w-4 text-primary" />
+                          ) : (
+                            <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span className="min-w-0">
+                            <span className="block font-medium">
+                              {bit.label}
+                              {hasStl ? (
+                                <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-primary">STL</span>
+                              ) : null}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {bit.group} · {bitStatusLabel(bit)}
+                            </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={previewing ? "default" : "ghost"}
+                          disabled={!hasStl}
+                          onClick={() => setPreviewBitId(bit.id)}
+                          title={hasStl ? "Preview STL" : "Import folder to preview"}
+                        >
+                          View
+                        </Button>
+                      </div>
                     </li>
                   );
                 })}
@@ -366,100 +517,94 @@ export default function KitDryRunPage() {
               </Button>
             </section>
 
-            <section className="rounded-lg border border-card-border bg-card p-5" data-testid="panel-reprint-pool">
-              <p className="rule-label">Shop reprint pool</p>
-              <h3 className="mt-1 text-base font-semibold tracking-tight">Failed bits waiting to be sliced</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Not a plate. Accumulate fails while you keep building other plates, then pull a redo CTB from this pool.
-              </p>
+            <div className="space-y-6">
+              <section className="rounded-lg border border-card-border bg-card p-5">
+                <p className="rule-label">STL preview</p>
+                <h3 className="mt-1 text-base font-semibold tracking-tight">
+                  {previewBit ? previewBit.label : "No bit selected"}
+                </h3>
+                <div className="mt-3">
+                  <StlPreview file={previewFile} label={previewBit?.fileName} />
+                </div>
+              </section>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(
-                  [
-                    ["all", "All orders"],
-                    ["client", `Client: ${order.clientName}`],
-                    ["order", "This order only"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Button
-                    key={key}
-                    type="button"
-                    size="sm"
-                    variant={poolFilter === key ? "default" : "outline"}
-                    onClick={() => setPoolFilter(key)}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-
-              {poolItems.length === 0 ? (
-                <p className="mt-6 text-sm text-muted-foreground">Pool empty — QC some fails first.</p>
-              ) : (
-                <>
-                  <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                    {poolItems.map((item) => {
-                      const key = poolKey(item);
-                      const checked = poolSelected.has(key);
-                      return (
-                        <li key={key}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPoolSelected((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(key)) next.delete(key);
-                                else next.add(key);
-                                return next;
-                              })
-                            }
-                            className={cn(
-                              "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
-                              checked ? "bg-destructive/10" : "hover:bg-muted/60",
-                            )}
-                          >
-                            {checked ? (
-                              <CheckSquare className="mt-0.5 h-4 w-4 text-destructive" />
-                            ) : (
-                              <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                            )}
-                            <span>
-                              <span className="block font-medium">{item.label}</span>
-                              <span className="block text-xs text-muted-foreground">
-                                {item.clientName} · {item.orderName} · {item.group}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  <div className="mt-3 flex flex-wrap gap-2">
+              <section className="rounded-lg border border-card-border bg-card p-5" data-testid="panel-reprint-pool">
+                <p className="rule-label">Shop reprint pool</p>
+                <h3 className="mt-1 text-base font-semibold tracking-tight">Failed bits waiting to be sliced</h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["all", "All orders"],
+                      ["client", `Client: ${order.clientName}`],
+                      ["order", "This order only"],
+                    ] as const
+                  ).map(([key, label]) => (
                     <Button
+                      key={key}
                       type="button"
                       size="sm"
-                      variant="outline"
-                      onClick={() => setPoolSelected(new Set(poolItems.map(poolKey)))}
+                      variant={poolFilter === key ? "default" : "outline"}
+                      onClick={() => setPoolFilter(key)}
                     >
-                      Select visible pool ({poolItems.length})
+                      {label}
                     </Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setPoolSelected(new Set())}>
-                      Clear
+                  ))}
+                </div>
+                {poolItems.length === 0 ? (
+                  <p className="mt-4 text-sm text-muted-foreground">Pool empty.</p>
+                ) : (
+                  <>
+                    <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                      {poolItems.map((item) => {
+                        const key = poolKey(item);
+                        const checked = poolSelected.has(key);
+                        return (
+                          <li key={key}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPoolSelected((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(key)) next.delete(key);
+                                  else next.add(key);
+                                  return next;
+                                })
+                              }
+                              className={cn(
+                                "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm",
+                                checked ? "bg-destructive/10" : "hover:bg-muted/60",
+                              )}
+                            >
+                              {checked ? (
+                                <CheckSquare className="mt-0.5 h-4 w-4 text-destructive" />
+                              ) : (
+                                <Square className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                              )}
+                              <span>
+                                <span className="block font-medium">{item.label}</span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {item.clientName} · {item.orderName}
+                                </span>
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <Button type="button" className="mt-3" onClick={createFromPool}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Create reprint plate from pool ({poolSelected.size})
                     </Button>
-                  </div>
-                  <Button type="button" className="mt-4" onClick={createFromPool} data-testid="button-create-pool-plate">
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Create reprint plate from pool ({poolSelected.size})
-                  </Button>
-                </>
-              )}
-            </section>
+                  </>
+                )}
+              </section>
+            </div>
           </div>
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-lg border border-card-border bg-card p-5">
-            <p className="rule-label">Step · Post-print QC</p>
+            <p className="rule-label">Post-print QC</p>
             <h3 className="mt-1 text-base font-semibold">After physical inspection</h3>
             {pendingQc.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">No plates awaiting QC.</p>
@@ -481,9 +626,6 @@ export default function KitDryRunPage() {
                 </div>
                 {qcPlate ? (
                   <div className="mt-4 space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      {qcPlate.ctbFileName} · {qcPlate.bits.length} bits · mark good/reprint then save
-                    </p>
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" size="sm" variant="outline" onClick={() => setShop(markAllPlateBits(shop, qcPlate.id, "good"))}>
                         Mark all good
