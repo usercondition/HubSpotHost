@@ -35,7 +35,13 @@ import {
   clearAttentionOverride,
   dismissAttentionAlert,
 } from "./lib/attention";
-import { answerTrackerQuestion } from "./lib/tracker-assistant";
+import { answerTrackerQuestion, type TrackerAssistantContext } from "./lib/tracker-assistant";
+import {
+  getOwnerDigestSchedule,
+  sendOwnerDigest,
+  startOwnerDigestScheduler,
+} from "./lib/owner-digest";
+import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
 import { UltxParseError } from "./lib/ultx";
@@ -314,6 +320,68 @@ function rejectUnsecuredIntake(req: Request, res: Response): boolean {
   return true;
 }
 
+function ownerDigestCronSecret(): string {
+  return process.env.OWNER_DIGEST_CRON_SECRET?.trim() || "";
+}
+
+function providedOwnerDigestCronSecret(req: Request): string {
+  const header = req.get("x-owner-digest-cron-secret") ?? "";
+  const auth = req.get("authorization") ?? "";
+  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  const bodyValue =
+    req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>).cronSecret
+      : "";
+  return normalizedAccessCode(header || bearer || (typeof bodyValue === "string" ? bodyValue : ""));
+}
+
+function rejectUnsecuredOwnerDigestCron(req: Request, res: Response): boolean {
+  const expected = ownerDigestCronSecret();
+  if (!expected) {
+    res.status(503).json({ ok: false, error: "Owner digest cron secret is not configured" });
+    return true;
+  }
+  const provided = providedOwnerDigestCronSecret(req);
+  if (!provided || !timingSafeMatch(provided, expected)) {
+    res.status(401).json({ ok: false, error: "Invalid owner digest cron secret" });
+    return true;
+  }
+  return false;
+}
+
+async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
+  const [deals, stages, hubspotPortalId] = await Promise.all([
+    fetchPrintOrderDeals(),
+    fetchPrintOrderPipelineStages(),
+    fetchHubSpotPortalId(),
+  ]);
+  const snapshot = buildPerformanceSnapshot({
+    deals,
+    stages,
+    intakeCounts: orderLinkCounts(),
+    supplySpend: buildSupplySpendSummary(),
+    attachedPrintDealIds: attachedPrintFileDealIds(),
+    hubspotPortalId,
+  });
+  const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({
+    id: link.id,
+    internalLabel: link.internalLabel,
+    itemDescription: link.itemDescription,
+    agreedAmount: link.agreedAmount,
+    expiresAt: link.expiresAt,
+    status: link.status,
+  }));
+  const pendingLinks = listOrderLinks("pending_review").map((link) => ({
+    id: link.id,
+    internalLabel: link.internalLabel,
+    itemDescription: link.itemDescription,
+    agreedAmount: link.agreedAmount,
+    clientFullName: link.clientFullName,
+    status: link.status,
+  }));
+  return { snapshot, awaitingLinks, pendingLinks };
+}
+
 function firstIssue(error: { issues: Array<{ message: string }> }): string {
   return error.issues[0]?.message ?? "Some details are missing or invalid";
 }
@@ -531,6 +599,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
       admin: {
         internalControlsEnabled: internalAdminEnabled(),
+      },
+      ownerDigest: {
+        telegramConfigured: telegramConfigured(),
+        cronSecretConfigured: Boolean(ownerDigestCronSecret()),
+        schedule: getOwnerDigestSchedule(),
       },
       properties: {
         inputs: [...INPUT_PROPERTIES],
@@ -881,40 +954,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         : "";
 
     try {
-      const [deals, stages, hubspotPortalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        attachedPrintDealIds: attachedPrintFileDealIds(),
-        hubspotPortalId,
-      });
-      const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({
-        id: link.id,
-        internalLabel: link.internalLabel,
-        itemDescription: link.itemDescription,
-        agreedAmount: link.agreedAmount,
-        expiresAt: link.expiresAt,
-        status: link.status,
-      }));
-      const pendingLinks = listOrderLinks("pending_review").map((link) => ({
-        id: link.id,
-        internalLabel: link.internalLabel,
-        itemDescription: link.itemDescription,
-        agreedAmount: link.agreedAmount,
-        clientFullName: link.clientFullName,
-        status: link.status,
-      }));
-      const answer = await answerTrackerQuestion(question, {
-        snapshot,
-        awaitingLinks,
-        pendingLinks,
-      });
+      const ctx = await loadTrackerAssistantContext();
+      const answer = await answerTrackerQuestion(question, ctx);
       return res.json(answer);
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
@@ -923,6 +964,94 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         error: error instanceof Error ? error.message : "Could not ask the tracker",
       });
     }
+  });
+
+  /**
+   * Owner-only: send the live tracker briefing to Telegram immediately.
+   * Does not require the daily schedule; useful for testing from the dashboard.
+   */
+  app.post("/api/owner-digest/send", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    if (!telegramConfigured()) {
+      return res.status(503).json({
+        ok: false,
+        error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on the host.",
+      });
+    }
+
+    try {
+      const ctx = await loadTrackerAssistantContext();
+      const result = await sendOwnerDigest(ctx, process.env, {
+        title: "Print Ops — briefing (manual)",
+        force: true,
+      });
+      if (!result.ok) {
+        return res.status(502).json({ ok: false, error: result.error });
+      }
+      if (result.skipped) {
+        return res.json({ ok: true, skipped: true, reason: result.reason });
+      }
+      return res.json({
+        ok: true,
+        channel: result.channel,
+        messageId: result.messageId,
+        preview: result.text.slice(0, 500),
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not send owner digest",
+      });
+    }
+  });
+
+  /**
+   * Cron / scheduler entrypoint. Secured by OWNER_DIGEST_CRON_SECRET
+   * (Authorization: Bearer … or x-owner-digest-cron-secret). Skips if already
+   * sent today unless { "force": true }.
+   */
+  app.post("/api/cron/owner-digest", async (req: Request, res: Response) => {
+    if (rejectUnsecuredOwnerDigestCron(req, res)) return;
+    if (!telegramConfigured()) {
+      return res.status(503).json({ ok: false, error: "Telegram is not configured" });
+    }
+
+    const force =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as { force?: unknown }).force === true
+        : false;
+
+    try {
+      const ctx = await loadTrackerAssistantContext();
+      const result = await sendOwnerDigest(ctx, process.env, {
+        title: "Print Ops — morning briefing",
+        force,
+      });
+      if (!result.ok) {
+        return res.status(502).json({ ok: false, error: result.error });
+      }
+      if (result.skipped) {
+        return res.json({ ok: true, skipped: true, reason: result.reason });
+      }
+      return res.json({
+        ok: true,
+        skipped: false,
+        channel: result.channel,
+        messageId: result.messageId,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not run owner digest cron",
+      });
+    }
+  });
+
+  // Optional in-process daily schedule (OWNER_DIGEST_SCHEDULE_ENABLED=true).
+  startOwnerDigestScheduler(loadTrackerAssistantContext, process.env, (message) => {
+    console.log(`${new Date().toISOString()} [owner-digest] ${message}`);
   });
 
   /**
