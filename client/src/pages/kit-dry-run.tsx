@@ -29,10 +29,11 @@ import {
   type KitTracker,
 } from "@/lib/kit-dry-run";
 import {
-  collectStlFilesFromDataTransfer,
-  collectStlFilesFromFileList,
+  collectKitFilesFromDataTransfer,
+  collectKitFilesFromFileList,
+  formatKitImportNote,
   inferKitNameFromImports,
-  type ImportedStlFile,
+  type KitImportSummary,
 } from "@/lib/stl-folder-import";
 
 function statusLabel(bit: KitBit, plateName?: string | null): string {
@@ -65,6 +66,7 @@ function plateStatusMessage(
  */
 export default function KitDryRunPage() {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const zipInputRef = useRef<HTMLInputElement | null>(null);
   const [kit, setKit] = useState<KitTracker>(() => createSampleKit());
   const [groupFilter, setGroupFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -75,8 +77,9 @@ export default function KitDryRunPage() {
   const [stlByBitId, setStlByBitId] = useState<Record<string, File>>({});
   const [previewBitId, setPreviewBitId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Load a kit folder or use the Acastus sample. Track what still needs printing, plate by plate.",
+    "Drop a kit folder or .zip (subfolders and zips inside are opened). Previews stay in this tab.",
   );
 
   const counts = inventory(kit);
@@ -103,9 +106,10 @@ export default function KitDryRunPage() {
   const printableVisible = visibleBits.filter(isPrintable);
   const selectedCount = printableVisible.filter((bit) => selected.has(bit.id)).length;
 
-  const applyImport = (imports: ImportedStlFile[]) => {
+  const applyImport = (summary: KitImportSummary) => {
+    const { imports } = summary;
     if (imports.length === 0) {
-      setNote("No .stl files found in that folder.");
+      setNote(formatKitImportNote(summary, "kit"));
       return;
     }
     const kitName = inferKitNameFromImports(imports);
@@ -127,17 +131,24 @@ export default function KitDryRunPage() {
     setPreviewBitId(bits[0]?.id ?? null);
     setPlateName("Plate 1");
     setCtbFileName(`${kitName.replace(/[^\w]+/g, "_").slice(0, 28)}_P1.ctb`);
-    setNote(`Loaded ${bits.length} bits from “${kitName}”. Select bits that still need printing, then make a plate.`);
+    setNote(formatKitImportNote(summary, kitName));
+  };
+
+  const runImport = async (loader: () => Promise<KitImportSummary>) => {
+    setImportBusy(true);
+    try {
+      applyImport(await loader());
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "Could not read kit folder or archive");
+    } finally {
+      setImportBusy(false);
+    }
   };
 
   const onDropFolder = async (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragActive(false);
-    try {
-      applyImport(await collectStlFilesFromDataTransfer(event.dataTransfer));
-    } catch (error) {
-      setNote(error instanceof Error ? error.message : "Could not read dropped folder");
-    }
+    await runImport(() => collectKitFilesFromDataTransfer(event.dataTransfer));
   };
 
   const toggleBit = (bit: KitBit) => {
@@ -185,7 +196,7 @@ export default function KitDryRunPage() {
     <div data-testid="page-kit-dry-run">
       <PageHeader
         title="Kits"
-        subtitle="Bit inventory and plates — what still needs printing, what’s on a plate, what’s good or needs a reprint."
+        subtitle="Import nested kit folders and .zip archives, then track bits plate by plate."
         actions={
           <StatusPill
             tone={counts.remaining === 0 ? "good" : "warn"}
@@ -243,7 +254,8 @@ export default function KitDryRunPage() {
             <div>
               <p className="text-sm font-semibold tracking-tight">{kit.name}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Drop an STL folder or choose one. Previews stay in this tab — nothing uploads.
+                Nested subfolders and .zip archives are opened in the browser. RAR/7z are not supported —
+                convert those to .zip first. Nothing uploads.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -255,20 +267,48 @@ export default function KitDryRunPage() {
                 // @ts-expect-error webkitdirectory is supported in Chromium
                 webkitdirectory=""
                 onChange={(event) => {
-                  applyImport(collectStlFilesFromFileList(event.target.files ?? []));
+                  const list = event.target.files;
                   event.target.value = "";
+                  if (!list) return;
+                  void runImport(() => collectKitFilesFromFileList(list));
                 }}
                 data-testid="input-kit-folder"
+              />
+              <input
+                ref={zipInputRef}
+                type="file"
+                className="hidden"
+                accept=".zip,application/zip"
+                multiple
+                onChange={(event) => {
+                  const list = event.target.files;
+                  event.target.value = "";
+                  if (!list) return;
+                  void runImport(() => collectKitFilesFromFileList(list));
+                }}
+                data-testid="input-kit-zip"
               />
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={importBusy}
                 onClick={() => folderInputRef.current?.click()}
                 data-testid="button-choose-kit-folder"
               >
                 <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
-                Choose folder
+                {importBusy ? "Reading…" : "Choose folder"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={importBusy}
+                onClick={() => zipInputRef.current?.click()}
+                data-testid="button-choose-kit-zip"
+              >
+                <Upload className="mr-1.5 h-3.5 w-3.5" />
+                Choose zip
               </Button>
               <Button
                 type="button"
