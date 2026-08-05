@@ -177,6 +177,21 @@ export function validatePaidOrderDraft(input: PaidOrderDraft): string | null {
   return null;
 }
 
+export function validatePaidOrderLineItems(
+  lines: Array<{ productName: string; amount: string }>,
+): string | null {
+  if (lines.length === 0) return "Add at least one order item";
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!clean(line.productName)) return `Item ${index + 1} needs a model or order description`;
+    const amount = Number(String(line.amount).replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return `Item ${index + 1} needs a paid amount greater than zero`;
+    }
+  }
+  return null;
+}
+
 export function splitName(fullName: string, fallback: string): { firstName: string; lastName: string } {
   const parts = clean(fullName).split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { firstName: clean(fallback) || "Marketplace customer", lastName: "" };

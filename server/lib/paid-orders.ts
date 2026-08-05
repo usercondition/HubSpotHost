@@ -85,14 +85,13 @@ async function findContactByEmail(email: string): Promise<HubSpotRecord | null> 
   return Array.isArray(data?.results) && data.results.length ? (data.results[0] as HubSpotRecord) : null;
 }
 
-async function createContact(draft: PaidOrderDraft): Promise<HubSpotRecord> {
+function contactPropertiesFromDraft(draft: PaidOrderDraft, options?: { includeEmail?: boolean }): Record<string, string> {
   const name = splitName(draft.fullName, draft.marketplaceUsername);
   const properties: Record<string, string> = {
     firstname: name.firstName,
     lastname: name.lastName,
   };
   const optional: Record<string, string> = {
-    email: clean(draft.email),
     phone: clean(draft.phone),
     address: clean(draft.address),
     city: clean(draft.city),
@@ -100,11 +99,29 @@ async function createContact(draft: PaidOrderDraft): Promise<HubSpotRecord> {
     zip: clean(draft.postalCode),
     country: clean(draft.country),
   };
+  if (options?.includeEmail !== false) {
+    const email = clean(draft.email);
+    if (email) properties.email = email;
+  }
   for (const [key, value] of Object.entries(optional)) {
     if (value) properties[key] = value;
   }
+  return properties;
+}
+
+async function createContact(draft: PaidOrderDraft): Promise<HubSpotRecord> {
   return hubspotRequest("/crm/v3/objects/contacts", {
     method: "POST",
+    body: JSON.stringify({ properties: contactPropertiesFromDraft(draft) }),
+  });
+}
+
+/** Refresh shipping / name details when we reuse a Contact by email. */
+async function updateContact(contactId: string, draft: PaidOrderDraft): Promise<void> {
+  const properties = contactPropertiesFromDraft(draft, { includeEmail: false });
+  if (Object.keys(properties).length === 0) return;
+  await hubspotRequest(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
+    method: "PATCH",
     body: JSON.stringify({ properties }),
   });
 }
@@ -176,9 +193,16 @@ export async function createPaidOrder(
   const existing = await findContactByEmail(clean(draft.email));
   const contact = existing ?? (await createContact(draft));
   const contactStatus: "existing" | "created" = existing ? "existing" : "created";
+  if (existing) {
+    try {
+      await updateContact(existing.id, draft);
+    } catch {
+      // Contact reuse still succeeds even if a property patch fails.
+    }
+  }
   const contactName = clean(
-    [contact.properties?.firstname, contact.properties?.lastname].filter(Boolean).join(" ") ||
-      draft.fullName ||
+    draft.fullName ||
+      [contact.properties?.firstname, contact.properties?.lastname].filter(Boolean).join(" ") ||
       draft.marketplaceUsername,
   );
 

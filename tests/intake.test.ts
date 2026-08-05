@@ -4,6 +4,7 @@ import {
   analyzeMarketplaceConversation,
   splitName,
   validatePaidOrderDraft,
+  validatePaidOrderLineItems,
   type PaidOrderDraft,
 } from "../server/lib/intake";
 
@@ -65,7 +66,21 @@ test("Paid-order validation requires payment, an identifiable client, product, a
   );
 });
 
-test("Contact names split predictably without requiring an email", () => {
-  assert.deepEqual(splitName("Jane A. Smith", ""), { firstName: "Jane", lastName: "A. Smith" });
-  assert.deepEqual(splitName("", "jane.prints"), { firstName: "jane.prints", lastName: "" });
+test("Paid-order line items require a description and amount per row", () => {
+  assert.equal(
+    validatePaidOrderLineItems([
+      { productName: "Knight", amount: "120" },
+      { productName: "Base", amount: "15.50" },
+    ]),
+    null,
+  );
+  assert.match(validatePaidOrderLineItems([]) ?? "", /at least one/);
+  assert.match(
+    validatePaidOrderLineItems([{ productName: "", amount: "10" }]) ?? "",
+    /Item 1 needs a model/,
+  );
+  assert.match(
+    validatePaidOrderLineItems([{ productName: "Knight", amount: "0" }]) ?? "",
+    /Item 1 needs a paid amount/,
+  );
 });

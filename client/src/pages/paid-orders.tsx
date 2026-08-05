@@ -1,17 +1,18 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   CheckCircle2,
   ClipboardPaste,
-  FileText,
-  KeyRound,
+  ExternalLink,
+  FileUp,
   Loader2,
-  LockKeyhole,
+  Plus,
   PlusCircle,
   ShieldCheck,
   Sparkles,
-  UserRound,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +20,18 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { printsDealHref } from "@/lib/workflow";
+import { OwnerUnlockPanel, useOwnerSession } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
+import { cn } from "@/lib/utils";
 import type { PaidOrderAnalysis, PaidOrderCreateResult, PaidOrderDraft } from "@shared/schema";
 
-const EMPTY_DRAFT: PaidOrderDraft = {
-  paymentConfirmed: false,
+type LineDraft = { id: string; productName: string; amount: string };
+
+type ContactDraft = Omit<PaidOrderDraft, "paymentConfirmed" | "productName" | "amount">;
+
+const EMPTY_CONTACT: ContactDraft = {
   fullName: "",
   marketplaceUsername: "",
   email: "",
@@ -33,107 +40,131 @@ const EMPTY_DRAFT: PaidOrderDraft = {
   city: "",
   state: "",
   postalCode: "",
-  country: "",
-  productName: "",
-  amount: "",
+  country: "United States",
   conversationSummary: "",
 };
 
-function asDraft(analysis: PaidOrderAnalysis): PaidOrderDraft {
+function newLine(seed?: Partial<LineDraft>): LineDraft {
   return {
-    paymentConfirmed: false,
-    fullName: analysis.fullName,
-    marketplaceUsername: analysis.marketplaceUsername,
-    email: analysis.email,
-    phone: analysis.phone,
-    address: analysis.address,
-    city: analysis.city,
-    state: analysis.state,
-    postalCode: analysis.postalCode,
-    country: analysis.country,
-    productName: analysis.productName,
-    amount: analysis.amount,
-    conversationSummary: analysis.conversationSummary,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    productName: seed?.productName ?? "",
+    amount: seed?.amount ?? "",
   };
 }
 
-type FieldKey = Exclude<keyof PaidOrderDraft, "paymentConfirmed">;
+function money(value: number): string {
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
+  });
+}
 
+function parseAmount(value: string): number {
+  return Number(String(value).replace(/[$,\s]/g, ""));
+}
+
+/**
+ * Manual order entry — type paid buyer + item details straight into HubSpot.
+ * Optional conversation paste only assists fill; create does not require it.
+ */
 export default function PaidOrders() {
   const { toast } = useToast();
+  const { isUnlocked, headers, unlock: setSessionUnlocked } = useOwnerSession();
+
+  const [contact, setContact] = useState<ContactDraft>(EMPTY_CONTACT);
+  const [lines, setLines] = useState<LineDraft[]>([newLine()]);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [showAssist, setShowAssist] = useState(false);
   const [conversation, setConversation] = useState("");
-  const [accessCode, setAccessCode] = useState("");
-  const [connectionStatus, setConnectionStatus] = useState<"unchecked" | "checking" | "ready" | "stale">(
-    "unchecked",
-  );
-  const [analysis, setAnalysis] = useState<PaidOrderAnalysis | null>(null);
-  const [draft, setDraft] = useState<PaidOrderDraft>(EMPTY_DRAFT);
+  const [assistHints, setAssistHints] = useState<PaidOrderAnalysis | null>(null);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
 
-  const headers = () => ({ "x-paid-order-access-code": accessCode });
+  const lineTotal = useMemo(() => {
+    return lines.reduce((sum, line) => {
+      const amount = parseAmount(line.amount);
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+  }, [lines]);
 
-  const checkLiveConnection = async () => {
-    setConnectionStatus("checking");
-    try {
-      const res = await apiRequest("GET", "/api/health");
-      const health = (await res.json()) as {
-        paidOrderIntake?: { accessCodeConfigured?: boolean; buildId?: string };
-      };
-      const ready = health.paidOrderIntake?.accessCodeConfigured === true;
-      setConnectionStatus(ready ? "ready" : "stale");
-      toast({
-        title: ready ? "Connected to the current live intake service" : "This page is not on the current live intake service",
-        description: ready
-          ? "You can use the printed access code on this page."
-          : "Open the public Print Orders site directly, then return to Paid order intake.",
-        variant: ready ? "default" : "destructive",
+  const unlock = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await apiRequest("GET", "/api/order-links", undefined, {
+        headers: { "x-paid-order-access-code": code },
       });
-    } catch {
-      setConnectionStatus("stale");
+      await response.json();
+      return code;
+    },
+    onSuccess: (code) => {
+      setSessionUnlocked(code);
       toast({
-        title: "This page cannot reach the live intake service",
-        description: "Open the public Print Orders site directly, then return to Paid order intake.",
+        title: "Manual entry unlocked",
+        description: "Enter the paid order details, confirm payment, then create in HubSpot.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "That owner code was not accepted",
+        description: error.message.startsWith("401")
+          ? "Check the code and try again. Nothing was unlocked."
+          : "Could not reach the owner service. Try again shortly.",
         variant: "destructive",
       });
-    }
-  };
+    },
+  });
 
   const analyze = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(
+      const response = await apiRequest(
         "POST",
         "/api/paid-orders/analyze",
-        { conversation, intakeAccessCode: accessCode },
-        { headers: headers() },
+        { conversation },
+        { headers },
       );
-      return (await res.json()) as { ok: true; analysis: PaidOrderAnalysis };
+      return (await response.json()) as { ok: true; analysis: PaidOrderAnalysis };
     },
-    onSuccess: ({ analysis: extracted }) => {
-      setAnalysis(extracted);
-      setDraft(asDraft(extracted));
+    onSuccess: ({ analysis }) => {
+      setAssistHints(analysis);
+      setContact((current) => ({
+        fullName: current.fullName || analysis.fullName,
+        marketplaceUsername: current.marketplaceUsername || analysis.marketplaceUsername,
+        email: current.email || analysis.email,
+        phone: current.phone || analysis.phone,
+        address: current.address || analysis.address,
+        city: current.city || analysis.city,
+        state: current.state || analysis.state,
+        postalCode: current.postalCode || analysis.postalCode,
+        country: current.country || analysis.country || "United States",
+        conversationSummary: current.conversationSummary || analysis.conversationSummary,
+      }));
+      setLines((current) => {
+        const first = current[0];
+        const blank = current.length === 1 && !first?.productName.trim() && !first?.amount.trim();
+        if (blank && (analysis.productName || analysis.amount)) {
+          return [newLine({ productName: analysis.productName, amount: analysis.amount })];
+        }
+        return current;
+      });
+      if (analysis.paymentLanguageDetected) {
+        setPaymentConfirmed(true);
+      }
       setCreated(null);
       toast({
-        title: "Conversation reviewed",
-        description: "Check the suggestions, complete missing details, then confirm payment.",
+        title: "Suggestions applied to the form",
+        description: analysis.missing.length
+          ? `Still verify: ${analysis.missing.slice(0, 3).join("; ")}.`
+          : "Review every field, then confirm payment before creating.",
       });
     },
     onError: (error: Error) => {
       const message = error.message;
-      const apiMessage = message.match(/"error":"([^"]+)"/)?.[1];
-      const description = message.startsWith("401:")
-        ? apiMessage === "No intake access code reached the live service"
-          ? "Your browser did not deliver the code to the service. The updated page now also sends it securely in the request body. Refresh and try once more."
-          : apiMessage === "The intake access code does not match the active code"
-            ? "The live server has a different intake code than the one entered. We need to replace the saved code with a fresh one."
-            : "The intake code is missing, expired, or does not match the current code."
-        : message.startsWith("503:")
-          ? "The live service does not have an intake code configured yet. Refresh the page and try again in a moment."
-          : message.startsWith("400:")
-            ? "Paste the complete paid Marketplace conversation, including a few lines of buyer and payment details."
-            : message.slice(0, 180);
       toast({
-        title: "Could not analyze the conversation",
-        description,
+        title: "Could not read that conversation",
+        description: message.startsWith("400:")
+          ? "Paste a few more lines — buyer, item, price, and payment if you have them."
+          : message.startsWith("401:")
+            ? "Owner session expired. Unlock again."
+            : message.slice(0, 180),
         variant: "destructive",
       });
     },
@@ -141,276 +172,299 @@ export default function PaidOrders() {
 
   const create = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(
+      const cleanedLines = lines
+        .map((line) => ({
+          productName: line.productName.trim(),
+          amount: line.amount.trim(),
+        }))
+        .filter((line) => line.productName.length > 0 || line.amount.length > 0);
+
+      const primary = cleanedLines[0] ?? { productName: "", amount: "" };
+      const draft: PaidOrderDraft = {
+        paymentConfirmed,
+        fullName: contact.fullName.trim(),
+        marketplaceUsername: contact.marketplaceUsername.trim(),
+        email: contact.email.trim(),
+        phone: contact.phone.trim(),
+        address: contact.address.trim(),
+        city: contact.city.trim(),
+        state: contact.state.trim(),
+        postalCode: contact.postalCode.trim(),
+        country: contact.country.trim(),
+        productName: primary.productName,
+        amount: primary.amount,
+        conversationSummary:
+          contact.conversationSummary.trim() ||
+          `Manual paid-order entry.${cleanedLines.length > 1 ? ` ${cleanedLines.length} items.` : ""}`,
+      };
+
+      const response = await apiRequest(
         "POST",
         "/api/paid-orders",
-        { ...draft, intakeAccessCode: accessCode },
-        { headers: headers() },
+        {
+          ...draft,
+          lineItems: cleanedLines,
+        },
+        { headers },
       );
-      return (await res.json()) as { ok: true; result: PaidOrderCreateResult };
+      return (await response.json()) as { ok: true; result: PaidOrderCreateResult };
     },
     onSuccess: ({ result }) => {
       setCreated(result);
       toast({
         title: "Paid order created in HubSpot",
-        description: `${result.dealName} is now in Deposit Received.`,
+        description:
+          result.deals.length > 1
+            ? `${result.deals.length} Print Orders on one Contact — Deposit Received.`
+            : `${result.dealName} is now in Deposit Received.`,
       });
     },
     onError: (error: Error) => {
+      const message = error.message;
+      const apiMessage = message.match(/"error":"([^"]+)"/)?.[1];
       toast({
         title: "HubSpot record was not created",
-        description: error.message.slice(0, 180),
+        description: apiMessage || (message.startsWith("401:") ? "Unlock with your owner code and try again." : message.slice(0, 180)),
         variant: "destructive",
       });
     },
   });
 
-  const update = (field: FieldKey, value: string) => {
-    setDraft((current) => ({ ...current, [field]: value }));
+  const updateContact = <K extends keyof ContactDraft>(field: K, value: ContactDraft[K]) => {
+    setContact((current) => ({ ...current, [field]: value }));
     setCreated(null);
   };
 
-  const startAnalysis = () => {
-    if (conversation.trim().length < 20) {
-      toast({
-        title: "Paste the paid conversation first",
-        description: "Include the customer’s request, price, payment confirmation, and shipping details if available.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!accessCode.trim()) {
-      toast({
-        title: "Enter the intake access code",
-        description: "The code protects HubSpot from unauthorized order creation.",
-        variant: "destructive",
-      });
-      return;
-    }
-    analyze.mutate();
+  const updateLine = (id: string, patch: Partial<Omit<LineDraft, "id">>) => {
+    setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+    setCreated(null);
   };
 
-  const createRecord = () => {
-    if (!draft.paymentConfirmed) {
+  const resetForm = () => {
+    setContact(EMPTY_CONTACT);
+    setLines([newLine()]);
+    setPaymentConfirmed(false);
+    setConversation("");
+    setAssistHints(null);
+    setCreated(null);
+    setShowAssist(false);
+  };
+
+  const startCreate = () => {
+    if (!paymentConfirmed) {
       toast({
         title: "Confirm payment first",
-        description: "This intake never creates records for unpaid conversations.",
+        description: "Manual entry only creates HubSpot records after you verify payment.",
         variant: "destructive",
       });
       return;
     }
-    const proceed = window.confirm(
-      `Create the paid HubSpot order for ${draft.productName || "this order"} at $${draft.amount || "0"}?`,
-    );
+    if (!contact.fullName.trim() && !contact.marketplaceUsername.trim()) {
+      toast({
+        title: "Buyer name required",
+        description: "Enter a client name or Marketplace username.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const cleaned = lines.filter((line) => line.productName.trim() || line.amount.trim());
+    if (cleaned.length === 0 || cleaned.some((line) => !line.productName.trim() || !(parseAmount(line.amount) > 0))) {
+      toast({
+        title: "Order items incomplete",
+        description: "Each item needs a description and an amount greater than zero.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const label =
+      cleaned.length > 1
+        ? `${cleaned.length} items totaling ${money(lineTotal)}`
+        : `${cleaned[0]!.productName} at ${money(parseAmount(cleaned[0]!.amount))}`;
+    const proceed = window.confirm(`Create the paid HubSpot order for ${label}?`);
     if (proceed) create.mutate();
   };
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Manual order entry"
-        subtitle="Use this when you already have a paid buyer's details and do not need to send an order form."
+        subtitle="Type a paid buyer’s details and create the HubSpot Contact + Print Order — no order form required."
         actions={
-          <>
-            <StatusPill
-              tone="good"
-              icon={ShieldCheck}
-              label="Paid orders only"
-              testId="status-paid-only"
-            />
-          </>
+          <StatusPill tone="good" icon={ShieldCheck} label="Paid orders only" testId="status-paid-only" />
         }
       />
 
       <div className="page-stack">
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
-          <Panel
-            title="1. Paste the paid Marketplace conversation"
-            description="Analysis is private to this session. The raw conversation is not saved as a HubSpot record."
-          >
-            <div className="space-y-4">
-              <div className="rounded-md border border-primary/25 bg-primary/5 p-3">
-                <div className="flex items-start gap-2.5">
-                  <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <p className="text-sm text-muted-foreground">
-                    Paste enough of the thread to show who ordered, what they want, the agreed
-                    price, payment confirmation, and shipping information. You will review all
-                    extracted fields before a record can be created.
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock Manual Entry"
+            description="Same owner code as Intake and Daily Work. Creates HubSpot Contact and Deposit Received deals only after you confirm payment."
+            buttonLabel="Unlock Manual Entry"
+            testIdPrefix="manual"
+            pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
+          />
+        ) : (
+          <>
+            <section className="rounded-md border border-card-border bg-card px-4 py-3" data-testid="panel-manual-intro">
+              <p className="text-sm text-muted-foreground">
+                Fill the form below for a paid Marketplace (or other) order. Prefer{" "}
+                <Link href="/orders" className="hs-link font-medium">
+                  Intake
+                </Link>{" "}
+                when the buyer still needs a details link. Conversation paste is optional assist only.
+              </p>
+            </section>
+
+            <Panel
+              title="Buyer & shipping"
+              description="Reuses an existing HubSpot Contact when the email already matches."
+              actions={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowAssist((value) => !value)}
+                  data-testid="button-toggle-conversation-assist"
+                >
+                  <ClipboardPaste className="mr-1.5 h-3.5 w-3.5" />
+                  {showAssist ? "Hide paste assist" : "Fill from conversation"}
+                </Button>
+              }
+            >
+              {showAssist ? (
+                <div className="mb-5 space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-conversation-assist">
+                  <p className="text-xs text-muted-foreground">
+                    Paste a Marketplace thread to suggest fields. Nothing is saved until you create the order.
                   </p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="marketplace-conversation">Facebook Marketplace conversation</Label>
-                <Textarea
-                  id="marketplace-conversation"
-                  className="min-h-64 resize-y font-mono text-xs leading-relaxed"
-                  value={conversation}
-                  onChange={(event) => setConversation(event.target.value)}
-                  placeholder={"Buyer: John Smith\nI'm paid for the Acastus Knight Porphyrion at $350. Please ship to...\nPayment sent. My address is..."}
-                  data-testid="input-marketplace-conversation"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="intake-access-code">Intake access code</Label>
-                <div className="relative">
-                  <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="intake-access-code"
-                    type="password"
-                    autoComplete="off"
-                    className="pl-9"
-                    value={accessCode}
-                    onChange={(event) => setAccessCode(event.target.value)}
-                    placeholder="Enter your private intake code"
-                    data-testid="input-intake-access-code"
+                  <Textarea
+                    id="marketplace-conversation"
+                    className="min-h-36 resize-y font-mono text-xs leading-relaxed"
+                    value={conversation}
+                    onChange={(event) => setConversation(event.target.value)}
+                    placeholder={"Buyer: Jane Smith\nPaid $350 for Acastus Knight…\nShip to 123 Resin Way, San Diego CA 92101"}
+                    data-testid="input-marketplace-conversation"
                   />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (conversation.trim().length < 20) {
+                        toast({
+                          title: "Paste a bit more of the thread",
+                          description: "Include buyer, item, price, and payment language if you have it.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      analyze.mutate();
+                    }}
+                    disabled={analyze.isPending}
+                    data-testid="button-analyze-conversation"
+                  >
+                    {analyze.isPending ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="mr-2 h-3.5 w-3.5" />
+                    )}
+                    Apply suggestions to form
+                  </Button>
+                  {assistHints ? (
+                    <div
+                      className={cn(
+                        "rounded-md border p-3 text-xs",
+                        assistHints.paymentLanguageDetected
+                          ? "border-primary/25 bg-primary/5"
+                          : "border-amber-500/35 bg-amber-500/5",
+                      )}
+                      data-testid="panel-payment-detection"
+                    >
+                      <div className="flex gap-2">
+                        {assistHints.paymentLanguageDetected ? (
+                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                        ) : (
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                        )}
+                        <div>
+                          <p className="font-medium text-foreground">
+                            {assistHints.paymentLanguageDetected
+                              ? "Payment language detected — confirm below before creating"
+                              : "Payment confirmation was not clear in the paste"}
+                          </p>
+                          {assistHints.missing.length > 0 ? (
+                            <ul className="mt-1.5 space-y-0.5 text-muted-foreground" data-testid="list-missing-details">
+                              {assistHints.missing.map((item) => (
+                                <li key={item}>• {item}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  This code is not retained by the page. It protects the HubSpot record-creation action.
-                </p>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={checkLiveConnection}
-                disabled={connectionStatus === "checking"}
-                className="w-full"
-                data-testid="button-check-live-intake-connection"
-              >
-                {connectionStatus === "checking" ? "Checking live connection..." : "Check live intake connection"}
-              </Button>
-
-              {connectionStatus === "ready" ? (
-                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400" data-testid="text-live-intake-ready">
-                  Connected to current live intake service.
-                </p>
               ) : null}
 
-              <Button
-                type="button"
-                onClick={startAnalysis}
-                disabled={analyze.isPending}
-                className="w-full"
-                data-testid="button-analyze-conversation"
-              >
-                {analyze.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                Analyze conversation and prepare order
-              </Button>
-            </div>
-          </Panel>
-
-          <Panel
-            title="What happens and what does not"
-            description="A paid order enters operations only after your final confirmation."
-          >
-            <ol className="space-y-4">
-              {[
-                {
-                  title: "Analyze, do not save",
-                  text: "The intake makes editable suggestions for customer details, price, model, shipping, and a summary.",
-                  icon: Sparkles,
-                },
-                {
-                  title: "Confirm payment",
-                  text: "You must explicitly check payment confirmation before the create button becomes usable.",
-                  icon: CheckCircle2,
-                },
-                {
-                  title: "Create Contact and Deal",
-                  text: "HubSpot receives one associated client record and one Deal in the Print Orders Deposit Received stage.",
-                  icon: UserRound,
-                },
-                {
-                  title: "Run the job normally",
-                  text: "You move the order through File Check, Printing, QC, shipping, and the margin fields update as costs are added.",
-                  icon: FileText,
-                },
-              ].map((item, index) => (
-                <li key={item.title} className="flex gap-3" data-testid={`step-intake-${index + 1}`}>
-                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-primary">
-                    {index + 1}
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium">{item.title}</p>
-                    <p className="mt-0.5 text-sm text-muted-foreground">{item.text}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="mt-5 rounded-md border border-border bg-muted/35 p-3">
-              <div className="flex gap-2">
-                <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  This page is for paid orders only. It does not create leads, save unpaid inquiries,
-                  or send customer messages.
-                </p>
-              </div>
-            </div>
-          </Panel>
-        </section>
-
-        {analysis && (
-          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-            <Panel
-              title="2. Review the extraction"
-              description="The analysis is a starting point. Complete or correct every important detail."
-            >
-              <div className="space-y-4">
-                <div
-                  className={`rounded-md border p-3 ${
-                    analysis.paymentLanguageDetected
-                      ? "border-primary/25 bg-primary/5"
-                      : "border-amber-500/35 bg-amber-500/5"
-                  }`}
-                  data-testid="panel-payment-detection"
-                >
-                  <div className="flex gap-2">
-                    {analysis.paymentLanguageDetected ? (
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    ) : (
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium">
-                        {analysis.paymentLanguageDetected
-                          ? "Payment language detected"
-                          : "Payment confirmation was not clear"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        This is a suggestion only. You remain responsible for confirming that payment cleared.
-                      </p>
-                    </div>
-                  </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Client name"
+                  id="full-name"
+                  value={contact.fullName}
+                  onChange={(value) => updateContact("fullName", value)}
+                  required
+                />
+                <Field
+                  label="Marketplace username"
+                  id="marketplace-username"
+                  value={contact.marketplaceUsername}
+                  onChange={(value) => updateContact("marketplaceUsername", value)}
+                />
+                <Field
+                  label="Email"
+                  id="email"
+                  value={contact.email}
+                  onChange={(value) => updateContact("email", value)}
+                  type="email"
+                />
+                <Field
+                  label="Phone"
+                  id="phone"
+                  value={contact.phone}
+                  onChange={(value) => updateContact("phone", value)}
+                  type="tel"
+                />
+                <div className="sm:col-span-2">
+                  <Field
+                    label="Shipping address"
+                    id="address"
+                    value={contact.address}
+                    onChange={(value) => updateContact("address", value)}
+                  />
                 </div>
-
-                {analysis.missing.length > 0 && (
-                  <div className="rounded-md border border-dashed border-border p-3" data-testid="list-missing-details">
-                    <p className="rule-label">Details to verify</p>
-                    <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                      {analysis.missing.map((item) => (
-                        <li key={item} className="flex gap-2">
-                          <span className="text-amber-600 dark:text-amber-400">•</span>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  <Label htmlFor="draft-summary">Conversation summary</Label>
+                <Field label="City" id="city" value={contact.city} onChange={(value) => updateContact("city", value)} />
+                <Field label="State / region" id="state" value={contact.state} onChange={(value) => updateContact("state", value)} />
+                <Field
+                  label="Postal code"
+                  id="postal-code"
+                  value={contact.postalCode}
+                  onChange={(value) => updateContact("postalCode", value)}
+                />
+                <Field
+                  label="Country"
+                  id="country"
+                  value={contact.country}
+                  onChange={(value) => updateContact("country", value)}
+                />
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="draft-summary">Notes for HubSpot deal description</Label>
                   <Textarea
                     id="draft-summary"
-                    className="min-h-28 resize-y text-sm"
-                    value={draft.conversationSummary}
-                    onChange={(event) => update("conversationSummary", event.target.value)}
+                    className="min-h-20 resize-y text-sm"
+                    value={contact.conversationSummary}
+                    onChange={(event) => updateContact("conversationSummary", event.target.value)}
+                    placeholder="Optional — payment method, ship-by date, special requests…"
                     data-testid="input-draft-summary"
                   />
                 </div>
@@ -418,39 +472,102 @@ export default function PaidOrders() {
             </Panel>
 
             <Panel
-              title="3. Confirm and create the paid order"
-              description="Fields remain editable. Creating this record is the only action that writes to HubSpot."
+              title="Order items"
+              description="One HubSpot Print Order deal per item, all on the same Contact."
+              actions={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setLines((current) => [...current, newLine()]);
+                    setCreated(null);
+                  }}
+                  data-testid="button-add-manual-line"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add item
+                </Button>
+              }
             >
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Client name" id="full-name" value={draft.fullName} onChange={(v) => update("fullName", v)} required />
-                <Field label="Marketplace username" id="marketplace-username" value={draft.marketplaceUsername} onChange={(v) => update("marketplaceUsername", v)} />
-                <Field label="Email" id="email" value={draft.email} onChange={(v) => update("email", v)} type="email" />
-                <Field label="Phone" id="phone" value={draft.phone} onChange={(v) => update("phone", v)} type="tel" />
-                <div className="sm:col-span-2">
-                  <Field label="Model or order description" id="product-name" value={draft.productName} onChange={(v) => update("productName", v)} required />
+              <div className="space-y-3">
+                {lines.map((line, index) => (
+                  <div
+                    key={line.id}
+                    className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_8rem_auto]"
+                    data-testid={`row-manual-line-${index}`}
+                  >
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`line-product-${line.id}`}>
+                        Item {index + 1}
+                        <span className="text-primary"> *</span>
+                      </Label>
+                      <Input
+                        id={`line-product-${line.id}`}
+                        value={line.productName}
+                        onChange={(event) => updateLine(line.id, { productName: event.target.value })}
+                        placeholder="Model or order description"
+                        data-testid={`input-line-product-${index}`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`line-amount-${line.id}`}>
+                        Amount
+                        <span className="text-primary"> *</span>
+                      </Label>
+                      <Input
+                        id={`line-amount-${line.id}`}
+                        inputMode="decimal"
+                        value={line.amount}
+                        onChange={(event) => updateLine(line.id, { amount: event.target.value })}
+                        placeholder="0.00"
+                        data-testid={`input-line-amount-${index}`}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={lines.length <= 1}
+                        onClick={() => {
+                          setLines((current) => current.filter((item) => item.id !== line.id));
+                          setCreated(null);
+                        }}
+                        aria-label={`Remove item ${index + 1}`}
+                        data-testid={`button-remove-manual-line-${index}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 border-t border-border pt-3 text-sm">
+                  <span className="text-muted-foreground">
+                    {lines.length} item{lines.length === 1 ? "" : "s"} · {lines.length} HubSpot deal
+                    {lines.length === 1 ? "" : "s"}
+                  </span>
+                  <span className="numeric font-semibold" data-testid="text-manual-line-total">
+                    {money(lineTotal)}
+                  </span>
                 </div>
-                <Field label="Paid amount" id="amount" value={draft.amount} onChange={(v) => update("amount", v)} required inputMode="decimal" />
-                <Field label="Country / region" id="country" value={draft.country} onChange={(v) => update("country", v)} />
-                <div className="sm:col-span-2">
-                  <Field label="Shipping address" id="address" value={draft.address} onChange={(v) => update("address", v)} />
-                </div>
-                <Field label="City" id="city" value={draft.city} onChange={(v) => update("city", v)} />
-                <Field label="State / region" id="state" value={draft.state} onChange={(v) => update("state", v)} />
-                <Field label="Postal code" id="postal-code" value={draft.postalCode} onChange={(v) => update("postalCode", v)} />
               </div>
+            </Panel>
 
+            <Panel title="Confirm & create" description="Creates Contact + Deposit Received Print Order(s). Nothing writes until you confirm.">
               <label
-                className={`mt-5 flex cursor-pointer items-start gap-3 rounded-md border p-3 ${
-                  draft.paymentConfirmed ? "border-primary/35 bg-primary/5" : "border-border bg-muted/20"
-                }`}
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 rounded-md border p-3",
+                  paymentConfirmed ? "border-primary/35 bg-primary/5" : "border-border bg-muted/20",
+                )}
                 data-testid="control-payment-confirmation"
               >
                 <input
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 accent-primary"
-                  checked={draft.paymentConfirmed}
+                  checked={paymentConfirmed}
                   onChange={(event) => {
-                    setDraft((current) => ({ ...current, paymentConfirmed: event.target.checked }));
+                    setPaymentConfirmed(event.target.checked);
                     setCreated(null);
                   }}
                   data-testid="checkbox-payment-confirmed"
@@ -458,27 +575,34 @@ export default function PaidOrders() {
                 <span>
                   <span className="block text-sm font-medium">Payment has been confirmed</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Create this record only after you have verified the customer’s payment.
+                    Only check this after you verified the customer’s payment cleared.
                   </span>
                 </span>
               </label>
 
-              <Button
-                type="button"
-                className="mt-4 w-full"
-                onClick={createRecord}
-                disabled={create.isPending || !draft.paymentConfirmed}
-                data-testid="button-create-paid-order"
-              >
-                {create.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                )}
-                Create paid Contact and Print Order
-              </Button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="min-w-[14rem]"
+                  onClick={startCreate}
+                  disabled={create.isPending || !paymentConfirmed || Boolean(created)}
+                  data-testid="button-create-paid-order"
+                >
+                  {create.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                  )}
+                  Create in HubSpot
+                </Button>
+                {created ? (
+                  <Button type="button" variant="outline" onClick={resetForm} data-testid="button-manual-new-order">
+                    Enter another order
+                  </Button>
+                ) : null}
+              </div>
 
-              {created && (
+              {created ? (
                 <div
                   className="mt-4 rounded-md border border-primary/30 bg-primary/5 p-4"
                   data-testid="panel-paid-order-created"
@@ -488,25 +612,53 @@ export default function PaidOrders() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold">Paid order created in HubSpot</p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {created.dealName} was created in <strong>Deposit Received</strong> and associated
-                        with a {created.contactStatus === "existing" ? "matching" : "new"} Contact.
+                        {created.deals.length > 1
+                          ? `${created.deals.length} Print Orders in Deposit Received on one Contact.`
+                          : `${created.dealName} is in Deposit Received.`}{" "}
+                        Contact was {created.contactStatus === "existing" ? "matched by email" : "created new"}.
                       </p>
-                      <p className="mt-2 numeric text-xs text-muted-foreground">
-                        Deal ID {created.dealId} · Contact ID {created.contactId}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button asChild size="sm" data-testid="button-paid-order-attach-plates">
-                          <a href={`/#/prints?dealId=${encodeURIComponent(created.dealId)}`}>
-                            Attach first plate
-                          </a>
-                        </Button>
-                      </div>
+                      <p className="mt-2 numeric text-xs text-muted-foreground">Contact ID {created.contactId}</p>
+                      <ul className="mt-3 space-y-2">
+                        {created.deals.map((deal) => (
+                          <li
+                            key={deal.dealId}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+                            data-testid={`row-created-deal-${deal.dealId}`}
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{deal.dealName}</p>
+                              <p className="numeric text-xs text-muted-foreground">
+                                Deal {deal.dealId} · {money(parseAmount(deal.amount))}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button asChild size="sm" data-testid={`button-attach-plates-${deal.dealId}`}>
+                                <Link href={printsDealHref(deal.dealId)}>
+                                  <FileUp className="mr-1.5 h-3.5 w-3.5" />
+                                  Attach plates
+                                </Link>
+                              </Button>
+                              <Button asChild size="sm" variant="outline">
+                                <a
+                                  href="https://app.hubspot.com/"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  data-testid={`link-hubspot-deal-${deal.dealId}`}
+                                >
+                                  HubSpot
+                                  <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+                                </a>
+                              </Button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
                 </div>
-              )}
+              ) : null}
             </Panel>
-          </section>
+          </>
         )}
       </div>
     </div>
@@ -520,7 +672,6 @@ function Field({
   onChange,
   required,
   type = "text",
-  inputMode,
 }: {
   label: string;
   id: string;
@@ -528,18 +679,16 @@ function Field({
   onChange: (value: string) => void;
   required?: boolean;
   type?: string;
-  inputMode?: "decimal" | "email" | "tel" | "text";
 }) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>
         {label}
-        {required && <span className="text-primary"> *</span>}
+        {required ? <span className="text-primary"> *</span> : null}
       </Label>
       <Input
         id={id}
         type={type}
-        inputMode={inputMode}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         data-testid={`input-${id}`}

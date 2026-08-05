@@ -85,6 +85,7 @@ import {
   analyzeMarketplaceConversation,
   type PaidOrderDraft,
   validatePaidOrderDraft,
+  validatePaidOrderLineItems,
 } from "./lib/intake";
 import { createPaidOrder } from "./lib/paid-orders";
 import {
@@ -279,6 +280,23 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
     amount: value("amount"),
     conversationSummary: value("conversationSummary"),
   };
+}
+
+/** Optional multi-item payload for Manual Entry (mirrors Intake approve). */
+function paidOrderLineItemsFrom(body: unknown): Array<{ productName: string; amount: string }> | null {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  if (!Array.isArray(record.lineItems)) return null;
+  const lines = record.lineItems
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const row = item as Record<string, unknown>;
+      const productName = typeof row.productName === "string" ? row.productName.trim().slice(0, 180) : "";
+      const amount = typeof row.amount === "string" ? row.amount.trim().slice(0, 40) : "";
+      if (!productName && !amount) return null;
+      return { productName, amount };
+    })
+    .filter((line): line is { productName: string; amount: string } => Boolean(line));
+  return lines.length > 0 ? lines.slice(0, 20) : null;
 }
 
 function rejectUnsecuredIntake(req: Request, res: Response): boolean {
@@ -1318,13 +1336,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
+    const lineItems = paidOrderLineItemsFrom(req.body);
     const draft = paidOrderDraftFrom(req.body);
+
+    if (lineItems) {
+      const lineError = validatePaidOrderLineItems(lineItems);
+      if (lineError) return res.status(400).json({ ok: false, error: lineError });
+      // Keep draft scalars in sync so contact/payment validation still applies.
+      draft.productName = lineItems[0]!.productName;
+      draft.amount = lineItems[0]!.amount;
+    }
+
     const validationError = validatePaidOrderDraft(draft);
     if (validationError) return res.status(400).json({ ok: false, error: validationError });
 
     try {
-      const result = await createPaidOrder(draft);
-      return res.status(201).json({ ok: true, result });
+      const orderGroup =
+        lineItems && lineItems.length > 1 ? `manual-${Date.now().toString(36)}` : undefined;
+      const result = await createPaidOrder(draft, {
+        lineItems: lineItems ?? undefined,
+        orderGroup,
+      });
+      return res.status(201).json({
+        ok: true,
+        result,
+        message:
+          result.deals.length > 1
+            ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
+            : "Created Contact and Print Order — attach the first plate next.",
+      });
     } catch (error) {
       const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;
       return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
