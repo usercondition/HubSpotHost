@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ORDER_INTAKE_STATUSES,
   ORDER_INTAKE_STATUS_LABELS,
+  intakeLineExtendedAmount,
   lineItemsForIntake,
   parseHubSpotDealsJson,
   summarizeIntakeLineItems,
@@ -248,10 +249,10 @@ export default function OrderLinks() {
     }
     for (const line of cleaned) {
       const amount = Number(line.amount.replace(/[$,\s]/g, ""));
-      if (!Number.isFinite(amount) || amount <= 0) {
+      if (!Number.isFinite(amount) || amount < 0) {
         toast({
           title: "Check each item amount",
-          description: "Every line needs an amount greater than zero.",
+          description: "Every line needs a unit price of zero or more (use 0 for free add-ons).",
           variant: "destructive",
         });
         return;
@@ -274,7 +275,11 @@ export default function OrderLinks() {
 
   const lineTotal = summarizeIntakeLineItems(
     lineItems
-      .filter((line) => line.description.trim().length >= 2 && Number(line.amount.replace(/[$,\s]/g, "")) > 0)
+      .filter((line) => {
+        if (line.description.trim().length < 2 || !line.amount.trim()) return false;
+        const amount = Number(line.amount.replace(/[$,\s]/g, ""));
+        return Number.isFinite(amount) && amount >= 0;
+      })
       .map((line) => ({
         description: line.description.trim(),
         amount: line.amount.trim(),
@@ -350,7 +355,7 @@ export default function OrderLinks() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor={`line-amount-${index}`}>Amount *</Label>
+                        <Label htmlFor={`line-amount-${index}`}>Unit price *</Label>
                         <Input
                           id={`line-amount-${index}`}
                           inputMode="decimal"
@@ -362,7 +367,7 @@ export default function OrderLinks() {
                               ),
                             )
                           }
-                          placeholder="150"
+                          placeholder="44.99"
                           data-testid={`input-line-amount-${index}`}
                         />
                       </div>
@@ -906,9 +911,11 @@ function ReviewDialog({
                     >
                       <span className="min-w-0 truncate">
                         {line.description}
-                        {line.quantity > 1 ? ` ×${line.quantity}` : ""}
+                        {line.quantity > 1 ? ` ×${line.quantity} @ $${line.amount}` : ""}
                       </span>
-                      <span className="numeric shrink-0 text-muted-foreground">${line.amount}</span>
+                      <span className="numeric shrink-0 text-muted-foreground">
+                        ${intakeLineExtendedAmount(line).toFixed(2)}
+                      </span>
                     </li>
                   ))}
                 </ul>

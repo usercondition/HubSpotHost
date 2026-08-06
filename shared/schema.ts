@@ -461,16 +461,29 @@ export function normalizeIntakeLineItems(input: {
           amount: String(item?.amount ?? "").trim(),
           quantity: Math.max(1, Math.min(999, Number(item?.quantity) || 1)),
         }))
-        .filter((item) => item.description.length >= 2 && parseAmountNumber(item.amount) > 0)
+        .filter((item) => {
+          if (item.description.length < 2 || !item.amount) return false;
+          const parsed = parseAmountNumber(item.amount);
+          return Number.isFinite(parsed) && parsed >= 0;
+        })
     : [];
   if (fromArray.length > 0) return fromArray.slice(0, 20);
 
   const description = String(input.itemDescription ?? "").trim();
   const amount = String(input.agreedAmount ?? "").trim();
-  if (description.length >= 2 && parseAmountNumber(amount) > 0) {
+  const parsed = parseAmountNumber(amount);
+  if (description.length >= 2 && amount && Number.isFinite(parsed) && parsed >= 0) {
     return [{ description, amount, quantity: 1 }];
   }
   return [];
+}
+
+/** Unit amount × quantity for one intake line (amount is unit price). */
+export function intakeLineExtendedAmount(line: Pick<OrderIntakeLineItem, "amount" | "quantity">): number {
+  const unit = parseAmountNumber(line.amount);
+  const quantity = Math.max(1, Math.min(999, Number(line.quantity) || 1));
+  if (!Number.isFinite(unit) || unit < 0) return 0;
+  return unit * quantity;
 }
 
 export function summarizeIntakeLineItems(lines: OrderIntakeLineItem[]): {
@@ -478,7 +491,7 @@ export function summarizeIntakeLineItems(lines: OrderIntakeLineItem[]): {
   agreedAmount: string;
 } {
   if (lines.length === 0) return { itemDescription: "", agreedAmount: "0" };
-  const total = lines.reduce((sum, line) => sum + parseAmountNumber(line.amount), 0);
+  const total = lines.reduce((sum, line) => sum + intakeLineExtendedAmount(line), 0);
   const itemDescription =
     lines.length === 1
       ? lines[0]!.description
@@ -970,6 +983,16 @@ const amountLike = z
     return Number.isFinite(parsed) && parsed > 0;
   }, "Enter an agreed amount greater than zero");
 
+/** Unit price on intake lines — allows free ($0) add-ons. */
+const nonNegativeAmountLike = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => {
+    const parsed = Number(value.replace(/[$,\s]/g, ""));
+    return Number.isFinite(parsed) && parsed >= 0;
+  }, "Enter an amount of zero or more");
+
 const supplyPurchaseDate = z
   .string()
   .trim()
@@ -1222,7 +1245,7 @@ export interface ResinInventorySnapshot {
 /** Owner form that mints a new one-time client link. Supports one or many line items. */
 const intakeLineItemSchema = z.object({
   description: trimmed(400).min(2, "Describe each agreed item"),
-  amount: amountLike,
+  amount: nonNegativeAmountLike,
   quantity: z.coerce.number().int().min(1).max(999).default(1),
 });
 
