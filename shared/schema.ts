@@ -1267,7 +1267,7 @@ export const createOrderLinkSchema = z
     if (lines.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Add at least one item with a description and amount",
+        message: "Add at least one item with a description and unit price",
         path: ["lineItems"],
       });
     }
