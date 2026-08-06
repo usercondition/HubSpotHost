@@ -128,6 +128,7 @@ import {
   upsertResinProductSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
+  intakeLineExtendedAmount,
   lineItemsForIntake,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
@@ -484,10 +485,12 @@ function draftsFromIntake(link: OrderIntakeLink): {
     `Internal reference: ${link.internalLabel}.`,
     lines.length > 1
       ? `Line items:\n${lines
-          .map(
-            (line, index) =>
-              `  ${index + 1}. ${line.description}${line.quantity > 1 ? ` (qty ${line.quantity})` : ""} — $${line.amount}`,
-          )
+          .map((line, index) => {
+            const extended = intakeLineExtendedAmount(line);
+            return `  ${index + 1}. ${line.description}${
+              line.quantity > 1 ? ` (qty ${line.quantity} @ $${line.amount})` : ""
+            } — $${extended.toFixed(2)}`;
+          })
           .join("\n")}`
       : `Agreed item: ${link.confirmedItem || lines[0]?.description || link.itemDescription}${
           (lines[0]?.quantity ?? link.quantity) > 1
@@ -506,11 +509,13 @@ function draftsFromIntake(link: OrderIntakeLink): {
     .filter(Boolean)
     .join("\n");
 
-  const lineItems = lines.map((line) => ({
-    productName:
-      line.quantity > 1 ? `${line.description} (x${line.quantity})` : line.description,
-    amount: line.amount,
-  }));
+  const lineItems = lines.map((line) => {
+    const quantity = Math.max(1, line.quantity || 1);
+    return {
+      productName: quantity > 1 ? `${line.description} (x${quantity})` : line.description,
+      amount: intakeLineExtendedAmount(line).toFixed(2),
+    };
+  });
 
   const primary = lineItems[0] ?? {
     productName: link.confirmedItem || link.itemDescription,

@@ -394,6 +394,18 @@ test("multi-item intake creates one Contact and one Deal per line item", async (
   assert.match(create.body.link.itemDescription, /2 items/);
   assert.equal(JSON.parse(create.body.link.lineItemsJson).length, 2);
 
+  const withQty = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-QTY",
+    lineItems: [
+      { description: "Invictor Suit", amount: "44.99", quantity: 2 },
+      { description: "Suit Cover", amount: "0", quantity: 2 },
+      { description: "Scouts (2024)", amount: "44.99", quantity: 2 },
+    ],
+  });
+  assert.equal(withQty.status, 201);
+  assert.equal(withQty.body.link.agreedAmount, "179.96");
+  assert.equal(JSON.parse(withQty.body.link.lineItemsJson).length, 3);
+
   const token: string = create.body.token;
   const id: number = create.body.link.id;
   const lookup = await publicRequest("/api/client-order/lookup", { token });
