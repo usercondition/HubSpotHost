@@ -28,6 +28,8 @@ import {
   fetchPrintOrderPipelineStages,
   HubSpotError,
   patchDealPrintFileMetrics,
+  type HubSpotDealRecord,
+  type HubSpotPipelineStage,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
 import {
@@ -56,6 +58,7 @@ import {
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
   stagePrintFileFromPath,
+  syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
   addPrinterLifecycleEvent,
@@ -356,6 +359,7 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     fetchPrintOrderPipelineStages(),
     fetchHubSpotPortalId(),
   ]);
+  refreshPrintFileStagesFromHubSpot(deals, stages);
   const snapshot = buildPerformanceSnapshot({
     deals,
     stages,
@@ -402,6 +406,31 @@ function firstIssue(error: { issues: Array<{ message: string }> }): string {
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
+}
+
+/** Map live HubSpot Print Orders → stage label / name for plate-history refresh. */
+function livePrintOrderStageMap(
+  deals: HubSpotDealRecord[],
+  stages: HubSpotPipelineStage[],
+): Map<string, { stage: string; dealName: string }> {
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+  const map = new Map<string, { stage: string; dealName: string }>();
+  for (const deal of deals) {
+    const stageId = deal.properties.dealstage ?? "";
+    const stage = stageById.get(stageId);
+    map.set(deal.id, {
+      stage: stage?.label || stageId || "No stage",
+      dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
+    });
+  }
+  return map;
+}
+
+function refreshPrintFileStagesFromHubSpot(
+  deals: HubSpotDealRecord[],
+  stages: HubSpotPipelineStage[],
+): void {
+  syncPrintFileDealStages(livePrintOrderStageMap(deals, stages));
 }
 
 /** The owner-side representation. `tokenHash` never leaves the server. */
@@ -913,6 +942,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fetchPrintOrderPipelineStages(),
         fetchHubSpotPortalId(),
       ]);
+      refreshPrintFileStagesFromHubSpot(deals, stages);
       return res.json(
         buildPerformanceSnapshot({
           deals,
@@ -1081,6 +1111,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fetchPrintOrderDeals(),
         fetchPrintOrderPipelineStages(),
       ]);
+      refreshPrintFileStagesFromHubSpot(deals, stages);
       const stageById = new Map(stages.map((stage) => [stage.id, stage]));
       const attachedDealIds = attachedPrintFileDealIds();
       const candidates: PrintFileCandidateDeal[] = deals

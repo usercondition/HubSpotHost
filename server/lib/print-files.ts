@@ -200,6 +200,33 @@ export function listPrintFileRecords(limit = 100): PrintFileRecord[] {
     .all();
 }
 
+/**
+ * Keep plate-history stage/name in sync with live HubSpot Print Orders.
+ * Called when loading Prints / Performance so older attach snapshots
+ * (e.g. "Queued to Print") catch up after the deal moves.
+ */
+export function syncPrintFileDealStages(
+  liveByDealId: Map<string, { stage: string; dealName?: string }>,
+): number {
+  if (liveByDealId.size === 0) return 0;
+  const db = getDb();
+  let updated = 0;
+  for (const [dealId, live] of Array.from(liveByDealId.entries())) {
+    const stage = live.stage.trim();
+    if (!stage) continue;
+    const dealName = live.dealName?.trim();
+    const patch: { dealStage: string; hubspotDealName?: string } = { dealStage: stage };
+    if (dealName) patch.hubspotDealName = dealName;
+    const result = db
+      .update(printFileRecords)
+      .set(patch)
+      .where(eq(printFileRecords.hubspotDealId, dealId))
+      .run();
+    updated += Number(result.changes ?? 0);
+  }
+  return updated;
+}
+
 /** Any historical attachment marks a deal as having print-file planning data. */
 export function attachedPrintFileDealIds(): Set<string> {
   return new Set(listPrintFileRecords(500).map((record) => record.hubspotDealId));

@@ -635,7 +635,10 @@ export default function Prints() {
               </section>
             )}
 
-            <Panel title="Recent plate history" description="A local record of each attached plate. HubSpot receives the matching rolling totals for every order.">
+            <Panel
+              title="Recent plate history"
+              description="Local attach log for each plate. Order stage follows the live HubSpot Print Order as it moves."
+            >
               {prints.data.records.length ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-[54rem] text-left text-xs">

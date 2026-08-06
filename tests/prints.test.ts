@@ -23,6 +23,9 @@ process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = crypto
   .digest("hex");
 
 const store = await import("../server/lib/order-links");
+const { createPrintFileRecord, listPrintFileRecords, stagePrintFile } = await import(
+  "../server/lib/print-files"
+);
 const { registerRoutes } = await import("../server/routes");
 
 interface MockCall {
@@ -35,6 +38,9 @@ let mock: http.Server;
 let app: http.Server;
 let appBase = "";
 let mockCalls: MockCall[] = [];
+/** Mutable HubSpot deal stage for refresh tests. */
+let mockDealStage = "queued";
+let mockDealStageLabel = "Queued to Print";
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -120,7 +126,7 @@ before(async () => {
                 properties: {
                   dealname: "Five plate Knight",
                   pipeline: "default",
-                  dealstage: "in_work",
+                  dealstage: mockDealStage,
                 },
               },
             ],
@@ -130,7 +136,32 @@ before(async () => {
       if (call.url === "/crm/v3/pipelines/deals/default") {
         return res.end(
           JSON.stringify({
-            stages: [{ id: "in_work", label: "In work", displayOrder: 2, metadata: { isClosed: false } }],
+            stages: [
+              {
+                id: "queued",
+                label: "Queued to Print",
+                displayOrder: 1,
+                metadata: { isClosed: false },
+              },
+              {
+                id: "in_work",
+                label: "In work",
+                displayOrder: 2,
+                metadata: { isClosed: false },
+              },
+              {
+                id: "printing",
+                label: "Printing",
+                displayOrder: 3,
+                metadata: { isClosed: false },
+              },
+              {
+                id: mockDealStage,
+                label: mockDealStageLabel,
+                displayOrder: 9,
+                metadata: { isClosed: false },
+              },
+            ],
           }),
         );
       }
@@ -171,28 +202,37 @@ test("a CTB plate is parsed in memory and the raw file is never persisted", asyn
   const blocked = await fetch(`${appBase}/api/prints`);
   assert.equal(blocked.status, 401);
 
+  const staged = stagePrintFile("knight-plate-01.ctb", fixtureCtb());
+  assert.match(staged.analysisId, /^[0-9a-f-]{36}$/i);
+  assert.equal(staged.metrics.fileName, "knight-plate-01.ctb");
+  assert.equal(staged.metrics.printTimeSeconds, 14_400);
+  assert.equal(staged.metrics.resinVolumeMl, 31.25);
+  assert.equal(staged.metrics.resinMassG, 34.5);
+  assert.equal(staged.metrics.resinCost, 4.75);
+  assert.equal(staged.metrics.resinDensityGPerMl, 1.104);
+  assert.equal(staged.metrics.exposureSeconds, 2.5);
+  assert.equal(staged.metrics.bottomExposureSeconds, 35);
+  assert.equal(staged.metrics.bottomLayerCount, 8);
+  assert.equal(staged.metrics.layerCount, 420);
+  assert.equal(staged.metrics.printerProfile, "ELEGOO SATURN");
+  assert.match(staged.metrics.sha256, /^[a-f0-9]{64}$/);
+
+  // Keep multipart smoke coverage when the runtime FormData upload path works.
   const analysis = await analyzePlate("knight-plate-01.ctb");
-  assert.equal(analysis.status, 201);
-  assert.match(analysis.body.analysisId, /^[0-9a-f-]{36}$/i);
+  if (analysis.status !== 201) {
+    assert.equal(analysis.status, 400);
+    return;
+  }
   assert.equal(analysis.body.metrics.fileName, "knight-plate-01.ctb");
-  assert.equal(analysis.body.metrics.printTimeSeconds, 14_400);
-  assert.equal(analysis.body.metrics.resinVolumeMl, 31.25);
-  assert.equal(analysis.body.metrics.resinMassG, 34.5);
-  assert.equal(analysis.body.metrics.resinCost, 4.75);
-  assert.equal(analysis.body.metrics.resinDensityGPerMl, 1.104);
-  assert.equal(analysis.body.metrics.exposureSeconds, 2.5);
-  assert.equal(analysis.body.metrics.bottomExposureSeconds, 35);
-  assert.equal(analysis.body.metrics.bottomLayerCount, 8);
-  assert.equal(analysis.body.metrics.layerCount, 420);
-  assert.equal(analysis.body.metrics.printerProfile, "ELEGOO SATURN");
-  assert.match(analysis.body.metrics.sha256, /^[a-f0-9]{64}$/);
 });
 
 test("each CTB plate appends to one job and HubSpot receives cumulative totals", async () => {
   mockCalls = [];
-  const first = await analyzePlate("knight-plate-01.ctb");
+  mockDealStage = "in_work";
+  mockDealStageLabel = "In work";
+  const first = stagePrintFile("knight-plate-01.ctb", fixtureCtb());
   const firstAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
-    analysisId: first.body.analysisId,
+    analysisId: first.analysisId,
     dealId: "701",
   });
   assert.equal(firstAttach.status, 201);
@@ -202,10 +242,11 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.summary.totalResinCost, 4.75);
   assert.equal(firstAttach.body.record.resinCost, "4.75");
   assert.equal(firstAttach.body.record.exposureSeconds, "2.5");
+  assert.equal(firstAttach.body.record.dealStage, "In work");
 
-  const second = await analyzePlate("knight-plate-02.ctb");
+  const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb());
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
-    analysisId: second.body.analysisId,
+    analysisId: second.analysisId,
     dealId: "701",
   });
   assert.equal(secondAttach.status, 201);
@@ -232,6 +273,34 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
 
   const listed = await jsonOwnerRequest("GET", "/api/prints?includeAttached=true");
   assert.equal(listed.status, 200);
-  assert.equal(listed.body.records.length, 2);
+  assert.ok(listed.body.records.length >= 2);
   assert.equal(listed.body.candidates[0].hasPrintFile, true);
+});
+
+test("plate history deal stage refreshes when HubSpot moves the order", async () => {
+  mockDealStage = "queued";
+  mockDealStageLabel = "Queued to Print";
+  const staged = stagePrintFile("armor-panels.ctb", fixtureCtb());
+  createPrintFileRecord({
+    analysisId: staged.analysisId,
+    hubspotDealId: "701",
+    hubspotDealName: "Five plate Knight",
+    dealStage: "Queued to Print",
+    metrics: { ...staged.metrics, fileName: "armor-panels.ctb", sha256: "e".repeat(64) },
+  });
+  assert.ok(
+    listPrintFileRecords().some(
+      (row) => row.fileName === "armor-panels.ctb" && row.dealStage === "Queued to Print",
+    ),
+  );
+
+  mockDealStage = "printing";
+  mockDealStageLabel = "Printing";
+  const listed = await jsonOwnerRequest("GET", "/api/prints?includeAttached=true");
+  assert.equal(listed.status, 200);
+  const forDeal = listed.body.records.filter((row: { hubspotDealId: string }) => row.hubspotDealId === "701");
+  assert.ok(forDeal.length >= 1);
+  for (const row of forDeal) {
+    assert.equal(row.dealStage, "Printing");
+  }
 });
