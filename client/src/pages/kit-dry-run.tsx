@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { printsDealHref, readHashQueryParam } from "@/lib/workflow";
 import {
   bindKitToDeal,
-  buildKitBitsFromFileNames,
+  buildKitBitsFromImports,
   createKitFromBits,
   createPlate,
   createSampleKit,
@@ -38,6 +38,7 @@ import {
   type KitTracker,
 } from "@/lib/kit-dry-run";
 import { loadKitFromStorage, saveKitToStorage } from "@/lib/kit-persistence";
+import { fetchKitFromServer, saveKitToServer } from "@/lib/kit-api";
 import {
   collectKitFilesFromDataTransfer,
   collectKitFilesFromFileList,
@@ -111,8 +112,11 @@ export default function KitDryRunPage() {
   const [dragActive, setDragActive] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Pick a Print Order (or use Sample), import the STL kit, then make plates. Progress saves in this browser.",
+    "Pick a Print Order (or use Sample), import the STL kit, then make plates. Progress saves to the server when unlocked.",
   );
+  const [serverSync, setServerSync] = useState<"idle" | "loading" | "saving" | "error">("idle");
+  const skipNextServerSave = useRef(false);
+  const serverLoadToken = useRef(0);
 
   const prints = useQuery<PrintsListResponse>({
     queryKey: ["/api/prints", ownerCode, "kits"],
@@ -126,6 +130,82 @@ export default function KitDryRunPage() {
   useEffect(() => {
     saveKitToStorage(kit);
   }, [kit]);
+
+  /** Prefer SQLite when unlocked + deal-bound; migrate browser cache once if server is empty. */
+  useEffect(() => {
+    const dealId = (kit.hubspotDealId || "").trim();
+    if (!isUnlocked || !dealId) return;
+
+    const token = ++serverLoadToken.current;
+    let cancelled = false;
+    setServerSync("loading");
+
+    void (async () => {
+      try {
+        const remote = await fetchKitFromServer(dealId, headers);
+        if (cancelled || token !== serverLoadToken.current) return;
+
+        if (remote && remote.bits.length + remote.plates.length > 0) {
+          skipNextServerSave.current = true;
+          setKit({
+            ...remote,
+            hubspotDealId: dealId,
+            hubspotDealName: remote.hubspotDealName || kit.hubspotDealName || remote.name,
+          });
+          setNote(`Loaded kit from server for ${remote.hubspotDealName || dealId}.`);
+        } else {
+          const local = loadKitFromStorage(dealId);
+          if (local && local.bits.length + local.plates.length > 0) {
+            skipNextServerSave.current = true;
+            const migrated = bindKitToDeal(local, {
+              dealId,
+              dealName: local.hubspotDealName || kit.hubspotDealName || `Print Order ${dealId}`,
+            });
+            setKit(migrated);
+            try {
+              await saveKitToServer(migrated, headers);
+              if (!cancelled) setNote(`Migrated browser kit to server for ${migrated.hubspotDealName}.`);
+            } catch {
+              if (!cancelled) setNote("Loaded browser kit; server save will retry on the next change.");
+            }
+          }
+        }
+        if (!cancelled && token === serverLoadToken.current) setServerSync("idle");
+      } catch {
+        if (!cancelled && token === serverLoadToken.current) {
+          setServerSync("error");
+          setNote("Could not reach kit storage — working from this browser until the server is back.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally only re-run when unlock / deal binding changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnlocked, kit.hubspotDealId, ownerCode]);
+
+  /** Debounced SQLite save for deal-bound kits. */
+  useEffect(() => {
+    const dealId = (kit.hubspotDealId || "").trim();
+    if (!isUnlocked || !dealId) return;
+    if (skipNextServerSave.current) {
+      skipNextServerSave.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setServerSync("saving");
+      void saveKitToServer(kit, headers)
+        .then(() => setServerSync("idle"))
+        .catch(() => setServerSync("error"));
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+    // headers is derived from ownerCode; avoid re-saving on unrelated session draft changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kit, isUnlocked, ownerCode]);
 
   useEffect(() => {
     const applyDealFromHash = () => {
@@ -179,12 +259,14 @@ export default function KitDryRunPage() {
   const selectDeal = (deal: PrintFileCandidateDeal) => {
     const saved = loadKitFromStorage(deal.dealId);
     if (saved) {
+      skipNextServerSave.current = true;
       updateKit(bindKitToDeal(saved, { dealId: deal.dealId, dealName: deal.dealName }));
-      setNote(`Loaded saved kit for ${deal.dealName}.`);
+      setNote(`Loading kit for ${deal.dealName}…`);
     } else if (kit.bits.length > 0 && !kit.hubspotDealId) {
       updateKit(bindKitToDeal(kit, { dealId: deal.dealId, dealName: deal.dealName }));
       setNote(`Bound current kit to ${deal.dealName}. Import/CTB attach will use this Print Order.`);
     } else {
+      skipNextServerSave.current = true;
       updateKit(emptyKitForDeal({ dealId: deal.dealId, dealName: deal.dealName }));
       setStlByBitId({});
       setNote(`Selected ${deal.dealName}. Import the STL kit folder or zip for this order.`);
@@ -203,10 +285,7 @@ export default function KitDryRunPage() {
       return;
     }
     const kitName = inferKitNameFromImports(imports);
-    const bits = buildKitBitsFromFileNames(
-      imports.map((item) => item.fileName),
-      kitName,
-    );
+    const bits = buildKitBitsFromImports(imports, kitName);
     const fileByName = new Map(imports.map((item) => [item.fileName.toLowerCase(), item.file]));
     const nextFiles: Record<string, File> = {};
     for (const bit of bits) {
@@ -367,7 +446,15 @@ export default function KitDryRunPage() {
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {dealBound
-                  ? "Kit progress is saved for this deal in this browser. Making a plate with a CTB file also attaches it in HubSpot."
+                  ? `Kit progress saves to the server for this Print Order${
+                      serverSync === "saving"
+                        ? " (saving…)"
+                        : serverSync === "loading"
+                          ? " (loading…)"
+                          : serverSync === "error"
+                            ? " (server unreachable — browser cache still works)"
+                            : ""
+                    }. Making a plate with a CTB file also attaches it in HubSpot.`
                   : "Select an open Print Order to bind this kit, or keep working on the sample."}
               </p>
             </div>
@@ -460,8 +547,9 @@ export default function KitDryRunPage() {
             <div>
               <p className="text-sm font-semibold tracking-tight">{kit.name}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Nested subfolders and .zip archives are opened in the browser. RAR/7z are not supported —
-                convert those to .zip first. Nothing uploads.
+                Nested subfolders and .zip archives are opened in the browser. When a kit has multiple
+                part folders (or zips), bits are grouped by those folders. RAR/7z are not supported —
+                convert those to .zip first. Nothing uploads until you attach a CTB plate.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

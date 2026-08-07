@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildKitBitsFromFileNames,
+  buildKitBitsFromImports,
   bindKitToDeal,
   createPlate,
   createSampleKit,
@@ -27,6 +28,32 @@ test("build kit bits from folder-style STL names", () => {
   assert.equal(bits.length, 2);
   assert.equal(bits[0]!.group, "Head");
   assert.equal(bits[0]!.status, "needed");
+});
+
+test("multi-folder imports group bits by subfolder / zip", () => {
+  const bits = buildKitBitsFromImports(
+    [
+      { fileName: "18 Head.stl", relativePath: "Kit/Head/18 Head.stl", folderGroup: "Head" },
+      { fileName: "39 Thigh Left.stl", relativePath: "Kit/Legs/39 Thigh Left.stl", folderGroup: "Legs" },
+      { fileName: "60 Arm.stl", relativePath: "Kit/Arms/60 Arm.stl", folderGroup: "Arms" },
+    ],
+    "Kit",
+  );
+  assert.equal(bits.length, 3);
+  assert.equal(bits[0]!.group, "Head");
+  assert.equal(bits[1]!.group, "Legs");
+  assert.equal(bits[2]!.group, "Arms");
+});
+
+test("flat imports keep filename heuristic groups", () => {
+  const bits = buildKitBitsFromImports(
+    [
+      { fileName: "18 Head.stl", relativePath: "Kit/18 Head.stl", folderGroup: "Kit" },
+      { fileName: "19 Face Plate.stl", relativePath: "Kit/19 Face Plate.stl", folderGroup: "Kit" },
+    ],
+    "Kit",
+  );
+  assert.equal(bits.every((bit) => bit.group === "Head"), true);
 });
 
 test("collectStlFilesFromFileList keeps unique basenames", () => {

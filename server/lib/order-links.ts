@@ -258,6 +258,18 @@ CREATE INDEX IF NOT EXISTS resin_bottle_consumptions_bottle_idx
   ON resin_bottle_consumptions (bottle_id, created_at DESC);
 `;
 
+const CREATE_KITS_SQL = `
+CREATE TABLE IF NOT EXISTS kits (
+  hubspot_deal_id TEXT PRIMARY KEY,
+  hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL,
+  kit_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS kits_updated_at_idx ON kits (updated_at DESC);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -376,6 +388,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_PRODUCTS_SQL);
   sqlite.exec(CREATE_RESIN_BOTTLES_SQL);
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
+  sqlite.exec(CREATE_KITS_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);

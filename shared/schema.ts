@@ -836,6 +836,21 @@ export const printFileRecords = sqliteTable("print_file_records", {
 
 export type PrintFileRecord = typeof printFileRecords.$inferSelect;
 
+/**
+ * One kit document per HubSpot Print Order.
+ * `kitJson` stores the full client KitTracker (bits, plates, QC).
+ */
+export const kits = sqliteTable("kits", {
+  hubspotDealId: text("hubspot_deal_id").primaryKey(),
+  hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  name: text("name").notNull(),
+  kitJson: text("kit_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type KitRow = typeof kits.$inferSelect;
+
 export interface PrintFileCandidateDeal {
   dealId: string;
   dealName: string;
@@ -1069,6 +1084,43 @@ export const attachPrintFileSchema = z.object({
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
+
+const kitBitStatusSchema = z.enum(["needed", "on_plate", "good", "reprint"]);
+
+const kitBitSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  fileName: z.string().trim().min(1).max(400),
+  label: z.string().trim().min(1).max(400),
+  group: z.string().trim().min(1).max(200),
+  status: kitBitStatusSchema,
+  plateId: z.string().trim().max(200).nullable(),
+});
+
+const kitPlateSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  ctbFileName: z.string().trim().max(400).default(""),
+  createdAt: z.string().trim().min(1),
+  bitIds: z.array(z.string().trim().min(1).max(200)).max(500),
+  printFileRecordId: z.number().int().positive().nullable().optional(),
+});
+
+export const kitTrackerSchema = z.object({
+  name: z.string().trim().min(1).max(300),
+  hubspotDealId: z.string().trim().max(40).nullable().optional(),
+  hubspotDealName: z.string().trim().max(300).nullable().optional(),
+  bits: z.array(kitBitSchema).max(2_000),
+  plates: z.array(kitPlateSchema).max(500),
+  updatedAt: z.string().trim().optional(),
+});
+
+export type KitTrackerDocument = z.infer<typeof kitTrackerSchema>;
+
+export const upsertKitSchema = z.object({
+  kit: kitTrackerSchema,
+});
+
+export type UpsertKitInput = z.infer<typeof upsertKitSchema>;
 
 export const upsertResinProfileSchema = z.object({
   name: trimmed(200).min(2, "Enter the resin name"),

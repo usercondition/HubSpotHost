@@ -173,6 +173,51 @@ export function buildKitBitsFromFileNames(files: string[], idPrefix = "kit"): Ki
   return bitsFromFileList(files, idPrefix.replace(/\W+/g, "-").toLowerCase() || "kit");
 }
 
+export type KitImportBitSource = {
+  fileName: string;
+  relativePath?: string;
+  archivePath?: string;
+  /** Structural group from folder/zip path when available. */
+  folderGroup?: string;
+};
+
+/**
+ * Build bits from a folder/zip import.
+ * When 2+ subfolders (or zips) hold the STLs, use those as bit groups.
+ * Flat kits still use filename heuristics (Head / Legs / etc.).
+ */
+export function buildKitBitsFromImports(
+  imports: KitImportBitSource[],
+  idPrefix = "kit",
+): KitBit[] {
+  const prefix = idPrefix.replace(/\W+/g, "-").toLowerCase() || "kit";
+  const structural = imports
+    .map((item) => (item.folderGroup || "").trim())
+    .filter(Boolean);
+  const uniqueStructural = new Set(structural);
+  const useStructural = uniqueStructural.size >= 2;
+
+  const seen = new Set<string>();
+  const bits: KitBit[] = [];
+  for (const item of imports) {
+    const fileName = (item.fileName.split(/[/\\]/).pop() || item.fileName).trim();
+    if (!fileName) continue;
+    const key = fileName.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const folderGroup = (item.folderGroup || "").trim();
+    bits.push({
+      id: `${prefix}-${bits.length + 1}-${key.replace(/[^a-z0-9]+/g, "-")}`,
+      fileName,
+      label: labelFromFileName(fileName),
+      group: useStructural && folderGroup ? folderGroup : groupForFileName(fileName),
+      status: "needed",
+      plateId: null,
+    });
+  }
+  return bits;
+}
+
 export function createSampleKit(): KitTracker {
   return {
     name: "Acastus Knight Porphyrion",

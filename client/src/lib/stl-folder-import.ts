@@ -15,6 +15,12 @@ export type ImportedStlFile = {
   source: "folder" | "zip";
   /** Archive path when source is zip (e.g. Kit/Parts.zip → nested/a.stl). */
   archivePath?: string;
+  /**
+   * Immediate parent folder or zip container for this STL
+   * (e.g. Kit/Head/18.stl → "Head", Delivery.zip/Legs/a.stl → "Legs").
+   * Empty when the STL sits flat at the kit root.
+   */
+  folderGroup?: string;
 };
 
 export type KitImportSummary = {
@@ -24,6 +30,8 @@ export type KitImportSummary = {
   duplicatesSkipped: number;
   looseStlCount: number;
   zipStlCount: number;
+  /** Distinct structural groups (subfolders / zip containers) with bit counts. */
+  folderGroups: Array<{ group: string; count: number }>;
 };
 
 const MAX_ZIP_DEPTH = 3;
@@ -54,7 +62,44 @@ function emptySummary(): KitImportSummary {
     duplicatesSkipped: 0,
     looseStlCount: 0,
     zipStlCount: 0,
+    folderGroups: [],
   };
+}
+
+function cleanSegment(segment: string): string {
+  return segment.replace(/\.zip$/i, "").replace(/@.*$/, "").trim();
+}
+
+/**
+ * Infer a human group from the path so multi-folder / multi-zip kits stay organized.
+ * Prefers the immediate parent directory; falls back to the enclosing zip name.
+ */
+export function inferFolderGroup(relativePath: string, archivePath?: string): string {
+  const parts = relativePath.split(/[/\\]/).map(cleanSegment).filter(Boolean);
+  if (parts.length >= 2) {
+    const parent = parts[parts.length - 2]!;
+    // Skip generic bucket names that don't help the operator
+    if (parent && !/^(stl|stls|files|models|mesh|meshes|3d|objects)$/i.test(parent)) {
+      return parent;
+    }
+  }
+  if (archivePath) {
+    const archiveName = cleanSegment(baseName(archivePath));
+    if (archiveName) return archiveName;
+  }
+  return "";
+}
+
+function finalizeFolderGroups(summary: KitImportSummary): void {
+  const counts = new Map<string, number>();
+  for (const item of summary.imports) {
+    const group = item.folderGroup?.trim();
+    if (!group) continue;
+    counts.set(group, (counts.get(group) ?? 0) + 1);
+  }
+  summary.folderGroups = Array.from(counts.entries())
+    .map(([group, count]) => ({ group, count }))
+    .sort((a, b) => a.group.localeCompare(b.group, undefined, { numeric: true }));
 }
 
 function sortImports(imports: ImportedStlFile[]): ImportedStlFile[] {
@@ -77,18 +122,22 @@ function rememberUnsupported(summary: KitImportSummary, relativePath: string): v
 }
 
 function addImport(summary: KitImportSummary, item: ImportedStlFile): void {
-  const key = item.fileName.toLowerCase();
+  const withGroup: ImportedStlFile = {
+    ...item,
+    folderGroup: item.folderGroup ?? inferFolderGroup(item.relativePath, item.archivePath),
+  };
+  const key = withGroup.fileName.toLowerCase();
   const existingIndex = summary.imports.findIndex((row) => row.fileName.toLowerCase() === key);
   if (existingIndex >= 0) {
     const existing = summary.imports[existingIndex]!;
-    if (preferIncoming(existing, item)) {
-      summary.imports[existingIndex] = item;
+    if (preferIncoming(existing, withGroup)) {
+      summary.imports[existingIndex] = withGroup;
     }
     summary.duplicatesSkipped += 1;
     return;
   }
-  summary.imports.push(item);
-  if (item.source === "folder") summary.looseStlCount += 1;
+  summary.imports.push(withGroup);
+  if (withGroup.source === "folder") summary.looseStlCount += 1;
   else summary.zipStlCount += 1;
 }
 
@@ -174,6 +223,7 @@ function collectKitFilesFromFileListSync(list: FileList | File[]): KitImportSumm
     });
   }
   summary.imports = sortImports(summary.imports);
+  finalizeFolderGroups(summary);
   return summary;
 }
 
@@ -213,6 +263,7 @@ export async function collectKitFilesFromFileList(
   summary.imports = sortImports(summary.imports);
   summary.archivesOpened.sort((a, b) => a.localeCompare(b));
   summary.unsupportedArchives.sort((a, b) => a.localeCompare(b));
+  finalizeFolderGroups(summary);
   return summary;
 }
 
@@ -256,6 +307,17 @@ export function formatKitImportNote(summary: KitImportSummary, kitName: string):
   if (summary.archivesOpened.length > 0) {
     parts.push(
       `opened ${summary.archivesOpened.length} archive${summary.archivesOpened.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (summary.folderGroups.length >= 2) {
+    const preview = summary.folderGroups
+      .slice(0, 4)
+      .map((row) => `${row.group} (${row.count})`)
+      .join(", ");
+    parts.push(
+      `grouped by ${summary.folderGroups.length} folders/zips: ${preview}${
+        summary.folderGroups.length > 4 ? "…" : ""
+      }`,
     );
   }
   if (summary.duplicatesSkipped > 0) {
