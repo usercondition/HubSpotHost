@@ -335,6 +335,9 @@ export function formatKitImportNote(summary: KitImportSummary, kitName: string):
 /**
  * Collect File entries from a drop that may include directories and zips.
  * Uses webkitGetAsEntry when available (recursive subfolders).
+ *
+ * Important: call this (or {@link beginKitImportFromDataTransfer}) synchronously
+ * during the drop event — browsers clear DataTransfer after the handler returns.
  */
 export async function collectStlFilesFromDataTransfer(
   dataTransfer: DataTransfer,
@@ -343,13 +346,54 @@ export async function collectStlFilesFromDataTransfer(
   return summary.imports;
 }
 
+type CapturedDropItem =
+  | { kind: "entry"; entry: FileSystemEntry }
+  | { kind: "file"; file: File };
+
+/** Snapshot drop payloads before the browser clears DataTransfer. */
+export function captureDataTransferItems(dataTransfer: DataTransfer): CapturedDropItem[] {
+  const items = Array.from(dataTransfer.items || []);
+  const captured: CapturedDropItem[] = [];
+
+  for (const item of items) {
+    const entry =
+      typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+    if (entry) {
+      captured.push({ kind: "entry", entry });
+      continue;
+    }
+    if (item.kind === "file") {
+      const file = item.getAsFile();
+      if (file) captured.push({ kind: "file", file });
+    }
+  }
+
+  if (captured.length === 0 && dataTransfer.files?.length) {
+    for (const file of Array.from(dataTransfer.files)) {
+      captured.push({ kind: "file", file });
+    }
+  }
+
+  return captured;
+}
+
+export function beginKitImportFromDataTransfer(
+  dataTransfer: DataTransfer,
+): Promise<KitImportSummary> {
+  const captured = captureDataTransferItems(dataTransfer);
+  return collectKitFilesFromCapturedItems(captured);
+}
+
 export async function collectKitFilesFromDataTransfer(
   dataTransfer: DataTransfer,
 ): Promise<KitImportSummary> {
-  const items = Array.from(dataTransfer.items || []);
-  if (items.length === 0 && dataTransfer.files?.length) {
-    return collectKitFilesFromFileList(dataTransfer.files);
-  }
+  return collectKitFilesFromCapturedItems(captureDataTransferItems(dataTransfer));
+}
+
+async function collectKitFilesFromCapturedItems(
+  captured: CapturedDropItem[],
+): Promise<KitImportSummary> {
+  if (captured.length === 0) return emptySummary();
 
   const files: File[] = [];
 
@@ -380,17 +424,10 @@ export async function collectKitFilesFromDataTransfer(
     }
   }
 
-  for (const item of items) {
-    const entry = item.webkitGetAsEntry?.() ?? null;
-    if (entry) await walkEntry(entry);
-    else if (item.kind === "file") {
-      const file = item.getAsFile();
-      if (file) files.push(file);
-    }
+  for (const item of captured) {
+    if (item.kind === "entry") await walkEntry(item.entry);
+    else files.push(item.file);
   }
 
-  if (files.length === 0 && dataTransfer.files?.length) {
-    return collectKitFilesFromFileList(dataTransfer.files);
-  }
   return collectKitFilesFromFileList(files);
 }

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { zipSync } from "fflate";
 import {
   collectKitFilesFromFileList,
+  collectKitFilesFromDataTransfer,
   collectStlFilesFromFileList,
+  captureDataTransferItems,
   formatKitImportNote,
   inferFolderGroup,
   inferKitNameFromImports,
@@ -92,4 +94,32 @@ test("archive helpers recognize zip vs unsupported types", () => {
   assert.equal(isUnsupportedArchiveName("Parts.rar"), true);
   assert.equal(isUnsupportedArchiveName("Parts.7z"), true);
   assert.equal(isUnsupportedArchiveName("Parts.zip"), false);
+});
+
+test("zip drop capture keeps File handles before DataTransfer clears", async () => {
+  const archive = zipFile("KitParts.zip", {
+    "18 Head.stl": new Uint8Array([1, 2, 3]),
+    "19 Face.stl": new Uint8Array([4, 5, 6]),
+  });
+
+  const items = [
+    {
+      kind: "file",
+      webkitGetAsEntry: () => null,
+      getAsFile: () => archive,
+    },
+  ];
+  const dataTransfer = {
+    items,
+    files: [archive],
+  } as unknown as DataTransfer;
+
+  const captured = captureDataTransferItems(dataTransfer);
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]!.kind, "file");
+
+  const summary = await collectKitFilesFromDataTransfer(dataTransfer);
+  assert.equal(summary.imports.length, 2);
+  assert.equal(summary.zipStlCount, 2);
+  assert.match(formatKitImportNote(summary, "KitParts"), /from zip/);
 });

@@ -23,12 +23,13 @@ import { printsDealHref, readHashQueryParam } from "@/lib/workflow";
 import {
   bindKitToDeal,
   buildKitBitsFromImports,
+  createEmptyKit,
   createKitFromBits,
   createPlate,
-  createSampleKit,
   emptyKitForDeal,
   groupSummaries,
   inventory,
+  isLegacySampleKit,
   isPrintable,
   markBitGood,
   markBitReprint,
@@ -37,10 +38,10 @@ import {
   type KitBit,
   type KitTracker,
 } from "@/lib/kit-dry-run";
-import { loadKitFromStorage, saveKitToStorage } from "@/lib/kit-persistence";
+import { clearKitStorage, loadKitFromStorage, saveKitToStorage } from "@/lib/kit-persistence";
 import { fetchKitFromServer, saveKitToServer } from "@/lib/kit-api";
 import {
-  collectKitFilesFromDataTransfer,
+  beginKitImportFromDataTransfer,
   collectKitFilesFromFileList,
   formatKitImportNote,
   inferKitNameFromImports,
@@ -53,6 +54,17 @@ type PrintsListResponse = {
   candidates: PrintFileCandidateDeal[];
   records: PrintFileRecord[];
 };
+
+function initialKit(): KitTracker {
+  const dealId = readHashQueryParam("dealId");
+  if (dealId) {
+    return loadKitFromStorage(dealId) ?? emptyKitForDeal({ dealId, dealName: `Print Order ${dealId}` });
+  }
+  const saved = loadKitFromStorage(null);
+  if (saved && !isLegacySampleKit(saved)) return saved;
+  if (saved && isLegacySampleKit(saved)) clearKitStorage(null);
+  return createEmptyKit();
+}
 
 function statusLabel(bit: KitBit, plateName?: string | null): string {
   switch (bit.status) {
@@ -79,8 +91,8 @@ function plateStatusMessage(
 }
 
 /**
- * Kit tracker bound to a HubSpot Print Order (or local sample).
- * Import STL kit → select bits → make plate (optional real CTB attach) → QC.
+ * Kit tracker bound to a HubSpot Print Order.
+ * Import STL kit → select bits → make plate (optional CTB attach) → QC.
  */
 export default function KitDryRunPage() {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -89,21 +101,15 @@ export default function KitDryRunPage() {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Kits unlocked",
-    successDescription: "Bind kits to open Print Orders and attach CTB plates from here.",
+    successDescription: "You can link kits to Print Orders and attach plate files.",
   });
 
-  const [kit, setKit] = useState<KitTracker>(() => {
-    const dealId = readHashQueryParam("dealId");
-    if (dealId) {
-      return loadKitFromStorage(dealId) ?? emptyKitForDeal({ dealId, dealName: `Print Order ${dealId}` });
-    }
-    return loadKitFromStorage(null) ?? createSampleKit();
-  });
+  const [kit, setKit] = useState<KitTracker>(() => initialKit());
   const [groupFilter, setGroupFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [plateName, setPlateName] = useState("Plate 1");
-  const [ctbFileName, setCtbFileName] = useState("Acastus_P1.ctb");
+  const [ctbFileName, setCtbFileName] = useState("Plate_1.ctb");
   const [ctbFile, setCtbFile] = useState<File | null>(null);
   const [attachBusy, setAttachBusy] = useState(false);
   const [activePlateId, setActivePlateId] = useState<string | null>(null);
@@ -112,7 +118,7 @@ export default function KitDryRunPage() {
   const [dragActive, setDragActive] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Pick a Print Order (or use Sample), import the STL kit, then make plates. Progress saves to the server when unlocked.",
+    "Choose a Print Order, then drop a kit folder or .zip to load the parts.",
   );
   const [serverSync, setServerSync] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const skipNextServerSave = useRef(false);
@@ -311,6 +317,7 @@ export default function KitDryRunPage() {
 
   const runImport = async (loader: () => Promise<KitImportSummary>) => {
     setImportBusy(true);
+    setNote("Reading kit files…");
     try {
       applyImport(await loader());
     } catch (error) {
@@ -320,10 +327,38 @@ export default function KitDryRunPage() {
     }
   };
 
-  const onDropFolder = async (event: React.DragEvent<HTMLElement>) => {
+  /**
+   * Snapshot the drop synchronously, then process.
+   * Do not make this async — browsers clear DataTransfer when the drop handler returns.
+   */
+  const onDropKitFiles = (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setDragActive(false);
-    await runImport(() => collectKitFilesFromDataTransfer(event.dataTransfer));
+    const pending = beginKitImportFromDataTransfer(event.dataTransfer);
+    void runImport(() => pending);
+  };
+
+  const onDragEnterKit = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer.types.includes("Files")) setDragActive(true);
+  };
+
+  const onDragOverKit = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer.types.includes("Files")) {
+      event.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    }
+  };
+
+  const onDragLeaveKit = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    setDragActive(false);
   };
 
   const toggleBit = (bit: KitBit) => {
@@ -414,7 +449,7 @@ export default function KitDryRunPage() {
     <div data-testid="page-kit-dry-run">
       <PageHeader
         title="Kits"
-        subtitle="Bind a Print Order, import the STL kit, make plates (with optional CTB attach), then QC bits."
+        subtitle="Track which parts still need printing for a job, then build plates and mark QC."
         actions={
           <StatusPill
             tone={counts.remaining === 0 && counts.total > 0 ? "good" : "warn"}
@@ -425,11 +460,20 @@ export default function KitDryRunPage() {
         }
       />
 
-      <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
+      <div
+        className={cn(
+          "mx-auto max-w-5xl space-y-5 p-4 md:p-6 transition-colors",
+          dragActive ? "rounded-lg bg-primary/5 ring-2 ring-primary/30 ring-inset" : "",
+        )}
+        onDragEnter={onDragEnterKit}
+        onDragOver={onDragOverKit}
+        onDragLeave={onDragLeaveKit}
+        onDrop={onDropKitFiles}
+      >
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock Kits"
-            description="Owner code unlocks Print Order binding and live CTB attach. Sample kits work without it."
+            description="Enter the owner code to link kits to Print Orders and attach plate files to HubSpot."
             buttonLabel="Unlock Kits"
             testIdPrefix="kits"
             pending={unlock.isPending}
@@ -442,20 +486,20 @@ export default function KitDryRunPage() {
             <div>
               <p className="rule-label">Print Order</p>
               <h2 className="mt-1 text-base font-semibold tracking-tight">
-                {dealBound ? kit.hubspotDealName || kit.name : "Local sample / unbound kit"}
+                {dealBound ? kit.hubspotDealName || kit.name : "No order selected"}
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {dealBound
-                  ? `Kit progress saves to the server for this Print Order${
+                  ? `This kit is linked to the HubSpot job above. Progress saves automatically${
                       serverSync === "saving"
                         ? " (saving…)"
                         : serverSync === "loading"
                           ? " (loading…)"
                           : serverSync === "error"
-                            ? " (server unreachable — browser cache still works)"
+                            ? " (server unreachable — this browser still keeps a copy)"
                             : ""
-                    }. Making a plate with a CTB file also attaches it in HubSpot.`
-                  : "Select an open Print Order to bind this kit, or keep working on the sample."}
+                    }. Adding a CTB when you make a plate also records it on that order.`
+                  : "Pick which HubSpot Print Order this kit belongs to. Kit progress and plate files then save against that job."}
               </p>
             </div>
             {dealBound ? (
@@ -497,7 +541,7 @@ export default function KitDryRunPage() {
               ) : null}
             </div>
           ) : (
-            <p className="mt-3 text-xs text-muted-foreground">Unlock to list open Print Orders from HubSpot.</p>
+            <p className="mt-3 text-xs text-muted-foreground">Unlock to choose an open Print Order.</p>
           )}
         </section>
 
@@ -529,27 +573,16 @@ export default function KitDryRunPage() {
             dragActive ? "border-primary bg-primary/10" : "border-border bg-card",
           )}
           data-testid="panel-folder-import"
-          onDragEnter={(e) => {
-            e.preventDefault();
-            setDragActive(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragActive(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            if (e.currentTarget === e.target) setDragActive(false);
-          }}
-          onDrop={onDropFolder}
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold tracking-tight">{kit.name}</p>
+              <p className="text-sm font-semibold tracking-tight">
+                {kit.bits.length > 0 ? kit.name : "Import kit files"}
+              </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Nested subfolders and .zip archives are opened in the browser. When a kit has multiple
-                part folders (or zips), bits are grouped by those folders. RAR/7z are not supported —
-                convert those to .zip first. Nothing uploads until you attach a CTB plate.
+                Drop a folder or .zip anywhere on this page (or use the buttons). Each .stl becomes a
+                part to print. Subfolders or separate zips become groups. RAR/7z are not supported —
+                zip those first.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -609,19 +642,33 @@ export default function KitDryRunPage() {
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  updateKit(createSampleKit());
+                  clearKitStorage(kit.hubspotDealId);
+                  updateKit(
+                    kit.hubspotDealId
+                      ? emptyKitForDeal({
+                          dealId: kit.hubspotDealId,
+                          dealName: kit.hubspotDealName || kit.name || "Print Order",
+                        })
+                      : createEmptyKit(),
+                  );
                   setStlByBitId({});
                   setSelected(new Set());
                   setActivePlateId(null);
                   setPreviewBitId(null);
                   setCtbFile(null);
-                  setNote("Reset to Acastus sample kit (unbound from HubSpot).");
-                  window.location.hash = "#/kit-dry-run";
+                  setCtbFileName("Plate_1.ctb");
+                  setPlateName("Plate 1");
+                  setGroupFilter("all");
+                  setNote(
+                    kit.hubspotDealId
+                      ? "Cleared kit parts for this order. Drop a folder or .zip to import again."
+                      : "Cleared. Choose a Print Order, then drop a folder or .zip.",
+                  );
                 }}
-                data-testid="button-reset-sample-kit"
+                data-testid="button-clear-kit"
               >
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                Sample
+                Clear
               </Button>
             </div>
           </div>
@@ -632,8 +679,13 @@ export default function KitDryRunPage() {
             <div className="rounded-md border border-card-border bg-card p-4" data-testid="panel-bit-inventory">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <p className="rule-label">Inventory</p>
-                  <h2 className="mt-1 text-base font-semibold tracking-tight">Bits still to print</h2>
+                  <p className="rule-label">Parts</p>
+                  <h2 className="mt-1 text-base font-semibold tracking-tight">
+                    {kit.bits.length === 0 ? "No parts loaded yet" : "Parts still to print"}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Select the parts for the next plate. After printing, mark each good or reprint.
+                  </p>
                 </div>
                 <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
                   <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -641,7 +693,7 @@ export default function KitDryRunPage() {
                     className="pl-8"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Filter bits"
+                    placeholder="Filter by name"
                     data-testid="input-kit-bit-filter"
                   />
                 </div>
@@ -660,6 +712,11 @@ export default function KitDryRunPage() {
               </div>
 
               <ul className="mt-3 max-h-[28rem] space-y-1 overflow-y-auto" data-testid="list-kit-bits">
+                {kit.bits.length === 0 ? (
+                  <li className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                    Drop a kit folder or .zip to load parts.
+                  </li>
+                ) : null}
                 {visibleBits.map((bit) => {
                   const printable = isPrintable(bit);
                   const checked = selected.has(bit.id);
@@ -729,12 +786,14 @@ export default function KitDryRunPage() {
                     id="plate-name"
                     value={plateName}
                     onChange={(event) => setPlateName(event.target.value)}
+                    placeholder="e.g. Plate 1"
                     data-testid="input-plate-name"
                   />
+                  <p className="text-[0.6875rem] text-muted-foreground">Label for this print run.</p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium" htmlFor="ctb-name">
-                    {dealBound ? "CTB file (attach on make)" : "CTB file name (optional)"}
+                    {dealBound ? "Plate file (.ctb / .ultx)" : "Plate file name (optional)"}
                   </label>
                   {dealBound ? (
                     <>
@@ -762,6 +821,9 @@ export default function KitDryRunPage() {
                         <Upload className="mr-1.5 h-3.5 w-3.5" />
                         <span className="truncate">{ctbFile ? ctbFile.name : "Choose .ctb / .ultx"}</span>
                       </Button>
+                      <p className="text-[0.6875rem] text-muted-foreground">
+                        Optional. Attaches to the Print Order when you make the plate.
+                      </p>
                     </>
                   ) : (
                     <Input
@@ -786,8 +848,7 @@ export default function KitDryRunPage() {
               </div>
               {dealBound ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  With a CTB selected, Make plate analyzes and attaches it to this Print Order, then logs the bits for QC.
-                  Without a CTB, only the bit plate is recorded locally.
+                  Make plate records the selected parts. If you also chose a plate file, it is analyzed and saved on this Print Order.
                 </p>
               ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
@@ -823,11 +884,16 @@ export default function KitDryRunPage() {
                   <h2 className="mt-1 text-base font-semibold tracking-tight">
                     {activePlate.name}
                     <span className="ml-2 text-sm font-normal text-muted-foreground">
-                      {activePlateBits.length} bit{activePlateBits.length === 1 ? "" : "s"}
+                      {activePlateBits.length} part{activePlateBits.length === 1 ? "" : "s"}
                       {activeAwaitingQc > 0 ? ` · ${activeAwaitingQc} awaiting QC` : ""}
                     </span>
                   </h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{activePlate.ctbFileName}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {activePlate.ctbFileName || "No plate file attached"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    After the printer finishes, mark each part good or reprint.
+                  </p>
                   <ul className="mt-3 space-y-1.5" data-testid="list-plate-bits">
                     {activePlateBits.map((bit) => (
                       <li
