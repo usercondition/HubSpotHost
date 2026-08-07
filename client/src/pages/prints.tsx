@@ -26,11 +26,13 @@ import { readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
+import { PlateBitsPanel, type PlateBitSummary } from "@/components/plate-bits-panel";
 import type {
   PrintFileCandidateDeal,
   PrintFileMetrics,
   PrintFileOrderSummary,
   PrintFileRecord,
+  PrintPlateBit,
   ResinProfile,
 } from "@shared/schema";
 
@@ -52,10 +54,15 @@ interface ResinProfileResponse {
   canRefreshAmazon: boolean;
 }
 
+type PrintFileRecordWithBits = PrintFileRecord & {
+  bits: PrintPlateBit[];
+  bitSummary: PlateBitSummary;
+};
+
 interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
-  records: PrintFileRecord[];
+  records: PrintFileRecordWithBits[];
   includeAttached: boolean;
   resin?: ResinProfileResponse;
 }
@@ -637,55 +644,68 @@ export default function Prints() {
 
             <Panel
               title="Recent plate history"
-              description="Local attach log for each plate. Order stage follows the live HubSpot Print Order as it moves."
+              description="Each attached CTB is a plate. Drop the .stl parts that were on that plate to track good vs reprint."
             >
               {prints.data.records.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-[54rem] text-left text-xs">
-                    <thead className="border-b border-border text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-2 font-medium">Print Order</th>
-                        <th className="px-2 py-2 font-medium">Plate file</th>
-                        <th className="px-2 py-2 font-medium">Time</th>
-                        <th className="px-2 py-2 font-medium">Resin</th>
-                        <th className="px-2 py-2 font-medium">Slicer cost</th>
-                        <th className="px-2 py-2 font-medium">Exposure</th>
-                        <th className="px-2 py-2 font-medium">Synced</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prints.data.records.map((record) => (
-                        <tr key={record.id} className="border-b border-border/70 last:border-b-0" data-testid={`row-print-record-${record.id}`}>
-                          <td className="px-2 py-3">
-                            <p className="font-medium">{record.hubspotDealName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{record.dealStage}</p>
-                          </td>
-                          <td className="max-w-56 px-2 py-3">
-                            <p className="truncate font-medium" title={record.fileName}>{record.fileName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}</p>
-                          </td>
-                          <td className="px-2 py-3 numeric">{formatHours(record.printTimeSeconds)}</td>
-                          <td className="px-2 py-3 numeric">{formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}</td>
-                          <td className="px-2 py-3 numeric">{formatMoney(record.resinCost)}</td>
-                          <td className="px-2 py-3 numeric">
-                            {formatNumber(record.exposureSeconds, " s")}
-                            {record.bottomExposureSeconds ? ` / ${formatNumber(record.bottomExposureSeconds, " s bot")}` : ""}
-                          </td>
-                          <td className="px-2 py-3">
-                            <p className="font-medium text-chart-4">HubSpot synced</p>
-                            <p className="mt-0.5 text-muted-foreground">{localDate(record.hubspotSyncedAt)}</p>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="space-y-3" data-testid="list-print-records">
+                  {prints.data.records.map((record) => (
+                    <article
+                      key={record.id}
+                      className="rounded-md border border-card-border bg-card p-4"
+                      data-testid={`row-print-record-${record.id}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold tracking-tight">{record.hubspotDealName}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{record.dealStage}</p>
+                          <p className="mt-2 truncate text-sm font-medium" title={record.fileName}>
+                            {record.fileName}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                          <div>
+                            <p className="text-muted-foreground">Time</p>
+                            <p className="numeric font-medium">{formatHours(record.printTimeSeconds)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Resin</p>
+                            <p className="numeric font-medium">
+                              {formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Slicer cost</p>
+                            <p className="numeric font-medium">{formatMoney(record.resinCost)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Synced</p>
+                            <p className="font-medium text-chart-4">{localDate(record.hubspotSyncedAt)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <PlateBitsPanel
+                        recordId={record.id}
+                        bits={record.bits ?? []}
+                        bitSummary={
+                          record.bitSummary ?? { total: 0, onPlate: 0, good: 0, reprint: 0 }
+                        }
+                        headers={headers}
+                        onChanged={() => {
+                          queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+                        }}
+                      />
+                    </article>
+                  ))}
                 </div>
               ) : (
                 <div className="py-7 text-center">
                   <Layers3 className="mx-auto h-5 w-5 text-muted-foreground" />
                   <p className="mt-2 text-sm font-medium">No plates attached yet</p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                    Your first completed attachment will create the plate history and running totals for that Print Order.
+                    Attach a CTB first. Then drop the .stl parts that were on that plate to track QC.
                   </p>
                 </div>
               )}

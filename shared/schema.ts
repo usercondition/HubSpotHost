@@ -837,6 +837,37 @@ export const printFileRecords = sqliteTable("print_file_records", {
 export type PrintFileRecord = typeof printFileRecords.$inferSelect;
 
 /**
+ * Parts the operator says were on a specific attached plate (CTB).
+ * Names come from dropped .stl files — the CTB itself has no part names.
+ */
+export const PRINT_PLATE_BIT_STATUSES = ["on_plate", "good", "reprint"] as const;
+export type PrintPlateBitStatus = (typeof PRINT_PLATE_BIT_STATUSES)[number];
+
+export const printPlateBits = sqliteTable("print_plate_bits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  printFileRecordId: integer("print_file_record_id").notNull(),
+  fileName: text("file_name").notNull(),
+  label: text("label").notNull(),
+  status: text("status").notNull().default("on_plate"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PrintPlateBit = typeof printPlateBits.$inferSelect;
+
+export const addPrintPlateBitsSchema = z.object({
+  fileNames: z.array(z.string().trim().min(1).max(400)).min(1).max(500),
+});
+
+export type AddPrintPlateBitsInput = z.infer<typeof addPrintPlateBitsSchema>;
+
+export const updatePrintPlateBitStatusSchema = z.object({
+  status: z.enum(PRINT_PLATE_BIT_STATUSES),
+});
+
+export type UpdatePrintPlateBitStatusInput = z.infer<typeof updatePrintPlateBitStatusSchema>;
+
+/**
  * One kit document per HubSpot Print Order.
  * `kitJson` stores the full client KitTracker (bits, plates, QC).
  */

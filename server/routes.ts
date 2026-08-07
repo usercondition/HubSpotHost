@@ -67,6 +67,13 @@ import {
   syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
+  addBitsToRecord,
+  deleteBit,
+  listBitsForRecords,
+  summarizeBits,
+  updateBitStatus,
+} from "./lib/plate-bits";
+import {
   addPrinterLifecycleEvent,
   assignPrinterProfile,
   buildPrinterFleetSnapshot,
@@ -125,6 +132,8 @@ import {
   dismissAttentionSchema,
   ATTENTION_ISSUE_KEYS,
   attachPrintFileSchema,
+  addPrintPlateBitsSchema,
+  updatePrintPlateBitStatusSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
   createPrinterLifecycleEventSchema,
@@ -1198,10 +1207,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .filter((deal) => includeAttached || !deal.hasPrintFile)
         .sort((a, b) => a.stage.localeCompare(b.stage) || a.dealName.localeCompare(b.dealName));
 
+      const records = listPrintFileRecords();
+      const bitsByRecord = listBitsForRecords(records.map((row) => row.id));
+      const recordsWithBits = records.map((record) => {
+        const bits = bitsByRecord.get(record.id) ?? [];
+        return {
+          ...record,
+          bits,
+          bitSummary: summarizeBits(bits),
+        };
+      });
+
       return res.json({
         ok: true,
         candidates,
-        records: listPrintFileRecords(),
+        records: recordsWithBits,
         includeAttached,
         resin: resinProfileView(),
       });
@@ -1212,6 +1232,57 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         error: error instanceof Error ? error.message : "Could not load active Print Orders",
       });
     }
+  });
+
+  /** Add .stl part names the operator says were on this attached plate. */
+  app.post("/api/prints/:recordId/bits", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    if (!Number.isInteger(recordId) || recordId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate." });
+    }
+    const parsed = addPrintPlateBitsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = addBitsToRecord(recordId, parsed.data.fileNames);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      bits: result.bits,
+      added: result.added,
+      bitSummary: summarizeBits(result.bits),
+    });
+  });
+
+  app.patch("/api/prints/:recordId/bits/:bitId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    const bitId = Number(req.params.bitId);
+    if (!Number.isInteger(recordId) || recordId < 1 || !Number.isInteger(bitId) || bitId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate part." });
+    }
+    const parsed = updatePrintPlateBitStatusSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = updateBitStatus(recordId, bitId, parsed.data.status);
+    if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+    const bits = listBitsForRecords([recordId]).get(recordId) ?? [];
+    return res.json({ ok: true, bit: result.bit, bits, bitSummary: summarizeBits(bits) });
+  });
+
+  app.delete("/api/prints/:recordId/bits/:bitId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    const bitId = Number(req.params.bitId);
+    if (!Number.isInteger(recordId) || recordId < 1 || !Number.isInteger(bitId) || bitId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate part." });
+    }
+    const result = deleteBit(recordId, bitId);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    const bits = listBitsForRecords([recordId]).get(recordId) ?? [];
+    return res.json({ ok: true, deleted: result.deleted, bits, bitSummary: summarizeBits(bits) });
   });
 
   /**
