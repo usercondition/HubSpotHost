@@ -695,6 +695,7 @@ export default function Prints() {
                         headers={headers}
                         onChanged={() => {
                           queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+                          queryClient.invalidateQueries({ queryKey: ["/api/order-parts/summaries"] });
                         }}
                       />
                     </article>

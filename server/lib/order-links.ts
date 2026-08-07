@@ -162,6 +162,24 @@ CREATE INDEX IF NOT EXISTS print_plate_bits_record_idx
   ON print_plate_bits (print_file_record_id, id);
 `;
 
+const CREATE_ORDER_PARTS_SQL = `
+CREATE TABLE IF NOT EXISTS order_parts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hubspot_deal_id TEXT NOT NULL,
+  hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  file_name TEXT NOT NULL,
+  label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'needed',
+  print_file_record_id INTEGER,
+  print_plate_bit_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (hubspot_deal_id, file_name)
+);
+CREATE INDEX IF NOT EXISTS order_parts_deal_idx
+  ON order_parts (hubspot_deal_id, status);
+`;
+
 const CREATE_RESIN_PROFILES_SQL = `
 CREATE TABLE IF NOT EXISTS resin_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,6 +415,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   sqlite.exec(CREATE_PRINT_PLATE_BITS_SQL);
+  sqlite.exec(CREATE_ORDER_PARTS_SQL);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   sqlite.exec(CREATE_PRINTERS_SQL);
   sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);

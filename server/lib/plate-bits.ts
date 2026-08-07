@@ -10,6 +10,11 @@ import {
   type PrintPlateBitStatus,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
+import {
+  releaseOrderPartFromDeletedPlateBit,
+  syncOrderPartFromPlateBitStatus,
+  syncOrderPartsFromPlateBits,
+} from "./order-parts";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -79,15 +84,20 @@ export function addBitsToRecord(
     return { ok: false, error: "Choose a valid plate." };
   }
   const record = getDb()
-    .select({ id: printFileRecords.id })
+    .select({
+      id: printFileRecords.id,
+      hubspotDealId: printFileRecords.hubspotDealId,
+      hubspotDealName: printFileRecords.hubspotDealName,
+    })
     .from(printFileRecords)
     .where(eq(printFileRecords.id, printFileRecordId))
     .get();
   if (!record) return { ok: false, error: "That plate was not found." };
 
-  const existing = new Set(
+  const existingKeys = new Set(
     listBitsForRecord(printFileRecordId).map((bit) => bit.fileName.toLowerCase()),
   );
+  const droppedKeys = new Set<string>();
   const stamp = nowIso();
   let added = 0;
 
@@ -95,8 +105,9 @@ export function addBitsToRecord(
     const fileName = normalizeStlFileName(raw);
     if (!fileName) continue;
     const key = fileName.toLowerCase();
-    if (existing.has(key)) continue;
-    existing.add(key);
+    droppedKeys.add(key);
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
     getDb()
       .insert(printPlateBits)
       .values({
@@ -116,7 +127,17 @@ export function addBitsToRecord(
     if (!hadStl) return { ok: false, error: "Drop .stl files (part files), not the CTB." };
   }
 
-  return { ok: true, bits: listBitsForRecord(printFileRecordId), added };
+  const bits = listBitsForRecord(printFileRecordId);
+  if (droppedKeys.size > 0) {
+    syncOrderPartsFromPlateBits({
+      hubspotDealId: record.hubspotDealId,
+      hubspotDealName: record.hubspotDealName,
+      printFileRecordId,
+      bits: bits.filter((bit) => droppedKeys.has(bit.fileName.toLowerCase())),
+    });
+  }
+
+  return { ok: true, bits, added };
 }
 
 export function updateBitStatus(
@@ -140,6 +161,8 @@ export function updateBitStatus(
     .returning()
     .get();
 
+  syncOrderPartFromPlateBitStatus({ printFileRecordId, bit: updated });
+
   return { ok: true, bit: updated };
 }
 
@@ -147,6 +170,17 @@ export function deleteBit(
   printFileRecordId: number,
   bitId: number,
 ): { ok: true; deleted: boolean } | { ok: false; error: string } {
+  const existing = getDb()
+    .select()
+    .from(printPlateBits)
+    .where(
+      and(eq(printPlateBits.id, bitId), eq(printPlateBits.printFileRecordId, printFileRecordId)),
+    )
+    .get();
+  if (!existing) return { ok: true, deleted: false };
+
+  releaseOrderPartFromDeletedPlateBit(bitId);
+
   const result = getDb()
     .delete(printPlateBits)
     .where(

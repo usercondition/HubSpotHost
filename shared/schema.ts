@@ -868,6 +868,41 @@ export const updatePrintPlateBitStatusSchema = z.object({
 export type UpdatePrintPlateBitStatusInput = z.infer<typeof updatePrintPlateBitStatusSchema>;
 
 /**
+ * Master parts checklist for a HubSpot Print Order.
+ * Plates subtract from this list as STLs are linked to attached CTBs.
+ */
+export const ORDER_PART_STATUSES = ["needed", "on_plate", "good", "reprint"] as const;
+export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
+
+export const orderParts = sqliteTable("order_parts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  hubspotDealId: text("hubspot_deal_id").notNull(),
+  hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  fileName: text("file_name").notNull(),
+  label: text("label").notNull(),
+  status: text("status").notNull().default("needed"),
+  printFileRecordId: integer("print_file_record_id"),
+  printPlateBitId: integer("print_plate_bit_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type OrderPart = typeof orderParts.$inferSelect;
+
+export const importOrderPartsSchema = z.object({
+  fileNames: z.array(z.string().trim().min(1).max(400)).min(1).max(2_000),
+  dealName: z.string().trim().max(300).optional(),
+});
+
+export type ImportOrderPartsInput = z.infer<typeof importOrderPartsSchema>;
+
+export const updateOrderPartStatusSchema = z.object({
+  status: z.enum(ORDER_PART_STATUSES),
+});
+
+export type UpdateOrderPartStatusInput = z.infer<typeof updateOrderPartStatusSchema>;
+
+/**
  * One kit document per HubSpot Print Order.
  * `kitJson` stores the full client KitTracker (bits, plates, QC).
  */
