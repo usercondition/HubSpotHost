@@ -4,9 +4,11 @@ import {
   buildKitBitsFromFileNames,
   buildKitBitsFromImports,
   bindKitToDeal,
+  createEmptyKit,
   createPlate,
   createSampleKit,
   inventory,
+  isLegacySampleKit,
   markBitGood,
   markBitReprint,
   markPlateAllGood,
@@ -21,6 +23,14 @@ test("sample kit loads Acastus bits as needed inventory", () => {
   assert.equal(counts.needed, counts.total);
   assert.equal(counts.remaining, counts.total);
   assert.equal(counts.good, 0);
+  assert.equal(isLegacySampleKit(kit), true);
+});
+
+test("empty kit starts with no bits", () => {
+  const kit = createEmptyKit();
+  assert.equal(kit.bits.length, 0);
+  assert.equal(kit.plates.length, 0);
+  assert.equal(isLegacySampleKit(kit), false);
 });
 
 test("build kit bits from folder-style STL names", () => {

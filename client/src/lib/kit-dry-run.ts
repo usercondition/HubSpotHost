@@ -229,6 +229,24 @@ export function createSampleKit(): KitTracker {
   };
 }
 
+/** Blank unbound kit — start here and import STLs for a real order. */
+export function createEmptyKit(name = "New kit"): KitTracker {
+  return {
+    name: name.trim() || "New kit",
+    hubspotDealId: null,
+    hubspotDealName: null,
+    bits: [],
+    plates: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Legacy demo kit left in browser storage from earlier builds. */
+export function isLegacySampleKit(kit: KitTracker): boolean {
+  if (kit.hubspotDealId) return false;
+  return /acastus/i.test(kit.name) || kit.bits.some((bit) => bit.id.startsWith("acastus-"));
+}
+
 export function createKitFromBits(
   name: string,
   bits: KitBit[],
