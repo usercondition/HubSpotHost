@@ -86,7 +86,7 @@ test("folder STLs win over zip duplicates and unsupported archives are reported"
   assert.equal(summary.imports[0]!.source, "folder");
   assert.equal(summary.duplicatesSkipped, 1);
   assert.deepEqual(summary.unsupportedArchives, ["Kit/old.rar"]);
-  assert.match(formatKitImportNote(summary, "Kit"), /Unsupported/);
+  assert.match(formatKitImportNote(summary, "Kit"), /Skipped:.*old\.rar/i);
 });
 
 test("archive helpers recognize zip vs unsupported types", () => {

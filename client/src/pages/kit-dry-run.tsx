@@ -123,6 +123,8 @@ export default function KitDryRunPage() {
   const [serverSync, setServerSync] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const skipNextServerSave = useRef(false);
   const serverLoadToken = useRef(0);
+  /** Bumped on every local kit edit so in-flight server loads cannot clobber imports. */
+  const kitRevision = useRef(0);
 
   const prints = useQuery<PrintsListResponse>({
     queryKey: ["/api/prints", ownerCode, "kits"],
@@ -143,6 +145,7 @@ export default function KitDryRunPage() {
     if (!isUnlocked || !dealId) return;
 
     const token = ++serverLoadToken.current;
+    const revisionAtStart = kitRevision.current;
     let cancelled = false;
     setServerSync("loading");
 
@@ -150,6 +153,11 @@ export default function KitDryRunPage() {
       try {
         const remote = await fetchKitFromServer(dealId, headers);
         if (cancelled || token !== serverLoadToken.current) return;
+        // User imported / edited while this request was in flight — keep their work.
+        if (revisionAtStart !== kitRevision.current) {
+          setServerSync("idle");
+          return;
+        }
 
         if (remote && remote.bits.length + remote.plates.length > 0) {
           skipNextServerSave.current = true;
@@ -162,6 +170,10 @@ export default function KitDryRunPage() {
         } else {
           const local = loadKitFromStorage(dealId);
           if (local && local.bits.length + local.plates.length > 0) {
+            if (revisionAtStart !== kitRevision.current) {
+              setServerSync("idle");
+              return;
+            }
             skipNextServerSave.current = true;
             const migrated = bindKitToDeal(local, {
               dealId,
@@ -170,7 +182,9 @@ export default function KitDryRunPage() {
             setKit(migrated);
             try {
               await saveKitToServer(migrated, headers);
-              if (!cancelled) setNote(`Migrated browser kit to server for ${migrated.hubspotDealName}.`);
+              if (!cancelled && revisionAtStart === kitRevision.current) {
+                setNote(`Migrated browser kit to server for ${migrated.hubspotDealName}.`);
+              }
             } catch {
               if (!cancelled) setNote("Loaded browser kit; server save will retry on the next change.");
             }
@@ -234,6 +248,7 @@ export default function KitDryRunPage() {
   }, [prints.data?.candidates]);
 
   const updateKit = (next: KitTracker) => {
+    kitRevision.current += 1;
     setKit({ ...next, updatedAt: new Date().toISOString() });
   };
 
@@ -287,6 +302,7 @@ export default function KitDryRunPage() {
   const applyImport = (summary: KitImportSummary) => {
     const { imports } = summary;
     if (imports.length === 0) {
+      setActivePlateId(null);
       setNote(formatKitImportNote(summary, "kit"));
       return;
     }
@@ -325,6 +341,15 @@ export default function KitDryRunPage() {
     } finally {
       setImportBusy(false);
     }
+  };
+
+  /** Copy files first — FileList is live and empties when the input is reset. */
+  const importFromFiles = (files: File[]) => {
+    if (files.length === 0) {
+      setNote("No files selected. Choose a folder with .stl files or a .zip kit.");
+      return;
+    }
+    void runImport(() => collectKitFilesFromFileList(files));
   };
 
   /**
@@ -545,20 +570,38 @@ export default function KitDryRunPage() {
           )}
         </section>
 
-        {plateBanner ? (
-          <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
-            {plateBanner}
-          </p>
-        ) : note ? (
-          <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
-            {note}
-          </p>
-        ) : null}
-        {plateBanner && note && !note.includes("selected —") && !note.startsWith("Created ") ? (
-          <p className="text-sm text-muted-foreground" data-testid="text-kit-action-note">
-            {note}
-          </p>
-        ) : null}
+        {(note || plateBanner || importBusy) && (
+          <div className="space-y-2" data-testid="panel-kit-notes">
+            {importBusy ? (
+              <p
+                className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-foreground"
+                data-testid="text-kit-import-busy"
+              >
+                Reading kit files…
+              </p>
+            ) : null}
+            {note ? (
+              <p
+                className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+                data-testid="text-kit-note"
+              >
+                {note}
+              </p>
+            ) : null}
+            {plateBanner && note && !note.includes("selected —") && !note.startsWith("Created ") && !note.startsWith("Loaded ") && !note.startsWith("Reading ") ? (
+              <p className="text-sm text-muted-foreground" data-testid="text-kit-action-note">
+                {plateBanner}
+              </p>
+            ) : plateBanner && !note ? (
+              <p
+                className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+                data-testid="text-kit-note"
+              >
+                {plateBanner}
+              </p>
+            ) : null}
+          </div>
+        )}
 
         <section className="grid gap-3 sm:grid-cols-4" data-testid="panel-kit-inventory">
           <InvStat label="Needed" value={counts.needed} />
@@ -593,11 +636,11 @@ export default function KitDryRunPage() {
                 multiple
                 // @ts-expect-error webkitdirectory is supported in Chromium
                 webkitdirectory=""
+                {...({ directory: "" } as Record<string, string>)}
                 onChange={(event) => {
-                  const list = event.target.files;
+                  const files = Array.from(event.target.files || []);
                   event.target.value = "";
-                  if (!list) return;
-                  void runImport(() => collectKitFilesFromFileList(list));
+                  importFromFiles(files);
                 }}
                 data-testid="input-kit-folder"
               />
@@ -605,13 +648,12 @@ export default function KitDryRunPage() {
                 ref={zipInputRef}
                 type="file"
                 className="hidden"
-                accept=".zip,application/zip"
+                accept=".zip,application/zip,application/x-zip-compressed"
                 multiple
                 onChange={(event) => {
-                  const list = event.target.files;
+                  const files = Array.from(event.target.files || []);
                   event.target.value = "";
-                  if (!list) return;
-                  void runImport(() => collectKitFilesFromFileList(list));
+                  importFromFiles(files);
                 }}
                 data-testid="input-kit-zip"
               />
