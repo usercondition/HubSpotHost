@@ -855,12 +855,6 @@ export const printPlateBits = sqliteTable("print_plate_bits", {
 
 export type PrintPlateBit = typeof printPlateBits.$inferSelect;
 
-export const addPrintPlateBitsSchema = z.object({
-  fileNames: z.array(z.string().trim().min(1).max(400)).min(1).max(500),
-});
-
-export type AddPrintPlateBitsInput = z.infer<typeof addPrintPlateBitsSchema>;
-
 export const updatePrintPlateBitStatusSchema = z.object({
   status: z.enum(PRINT_PLATE_BIT_STATUSES),
 });
@@ -870,6 +864,7 @@ export type UpdatePrintPlateBitStatusInput = z.infer<typeof updatePrintPlateBitS
 /**
  * Master parts checklist for a HubSpot Print Order.
  * Plates subtract from this list as STLs are linked to attached CTBs.
+ * `itemGroup` separates multiple products on the same order (Acastus vs Valiant).
  */
 export const ORDER_PART_STATUSES = ["needed", "on_plate", "good", "reprint"] as const;
 export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
@@ -878,6 +873,7 @@ export const orderParts = sqliteTable("order_parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   hubspotDealId: text("hubspot_deal_id").notNull(),
   hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  itemGroup: text("item_group").notNull().default("Kit"),
   fileName: text("file_name").notNull(),
   label: text("label").notNull(),
   status: text("status").notNull().default("needed"),
@@ -889,9 +885,22 @@ export const orderParts = sqliteTable("order_parts", {
 
 export type OrderPart = typeof orderParts.$inferSelect;
 
+export const orderPartImportEntrySchema = z.object({
+  fileName: z.string().trim().min(1).max(400),
+  itemGroup: z.string().trim().max(200).optional(),
+  relativePath: z.string().trim().max(800).optional(),
+  archivePath: z.string().trim().max(800).optional(),
+});
+
 export const importOrderPartsSchema = z.object({
-  fileNames: z.array(z.string().trim().min(1).max(400)).min(1).max(2_000),
+  /** @deprecated Prefer `parts` — kept for older clients. */
+  fileNames: z.array(z.string().trim().min(1).max(400)).max(2_000).optional(),
+  parts: z.array(orderPartImportEntrySchema).max(2_000).optional(),
   dealName: z.string().trim().max(300).optional(),
+  /** When set, all imported files join this item (e.g. second product on the order). */
+  defaultItemGroup: z.string().trim().max(200).optional(),
+}).refine((value) => (value.parts?.length ?? 0) + (value.fileNames?.length ?? 0) > 0, {
+  message: "Add at least one part file.",
 });
 
 export type ImportOrderPartsInput = z.infer<typeof importOrderPartsSchema>;
@@ -901,6 +910,26 @@ export const updateOrderPartStatusSchema = z.object({
 });
 
 export type UpdateOrderPartStatusInput = z.infer<typeof updateOrderPartStatusSchema>;
+
+export const addPrintPlateBitsSchema = z.object({
+  /** @deprecated Prefer `parts`. */
+  fileNames: z.array(z.string().trim().min(1).max(400)).max(500).optional(),
+  parts: z
+    .array(
+      z.object({
+        fileName: z.string().trim().min(1).max(400),
+        itemGroup: z.string().trim().max(200).optional(),
+        relativePath: z.string().trim().max(800).optional(),
+        archivePath: z.string().trim().max(800).optional(),
+      }),
+    )
+    .max(500)
+    .optional(),
+}).refine((value) => (value.parts?.length ?? 0) + (value.fileNames?.length ?? 0) > 0, {
+  message: "Add at least one .stl file.",
+});
+
+export type AddPrintPlateBitsInput = z.infer<typeof addPrintPlateBitsSchema>;
 
 /**
  * One kit document per HubSpot Print Order.

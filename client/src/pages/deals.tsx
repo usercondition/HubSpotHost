@@ -22,6 +22,7 @@ import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import {
   OrderPartsDialog,
+  formatPartsBadge,
   type OrderPartSummary,
 } from "@/components/order-parts-dialog";
 import { formatMoney, formatLocalDate } from "@/lib/format";
@@ -429,9 +430,7 @@ function DealCard({
               )}
               data-testid={`badge-deal-parts-${deal.dealId}`}
             >
-              {partsSummary.remaining === 0
-                ? `${partsSummary.good}/${partsSummary.total} parts done`
-                : `${partsSummary.remaining} parts left`}
+              {formatPartsBadge(partsSummary)}
             </span>
           ) : null}
         </div>

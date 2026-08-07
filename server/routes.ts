@@ -1256,7 +1256,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) {
       return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     }
-    const result = addBitsToRecord(recordId, parsed.data.fileNames);
+    const parts = [
+      ...(parsed.data.parts || []),
+      ...(parsed.data.fileNames || []).map((fileName) => ({ fileName })),
+    ];
+    const result = addBitsToRecord(recordId, parts);
     if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
     return res.json({
       ok: true,

@@ -1,16 +1,20 @@
 /**
  * Master parts checklist per HubSpot Print Order.
- * Import the full kit once; plate STL drops move parts needed → on_plate → good/reprint.
+ * Multiple products on one order are separated by `itemGroup`.
+ * Plate STL drops move parts needed → on_plate → good/reprint.
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
   orderParts,
   printFileRecords,
+  type ImportOrderPartsInput,
   type OrderPart,
   type OrderPartStatus,
   type PrintPlateBit,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
+
+export const DEFAULT_ITEM_GROUP = "Kit";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -18,6 +22,10 @@ function nowIso(): string {
 
 function baseName(path: string): string {
   return path.split(/[/\\]/).pop() || path;
+}
+
+function cleanSegment(segment: string): string {
+  return segment.replace(/\.zip$/i, "").replace(/@.*$/, "").trim();
 }
 
 function labelFromFileName(fileName: string): string {
@@ -30,6 +38,88 @@ function normalizeStlFileName(raw: string): string | null {
   return name;
 }
 
+export function normalizeItemGroup(raw: string | null | undefined): string {
+  const value = (raw || "").trim();
+  return value || DEFAULT_ITEM_GROUP;
+}
+
+/**
+ * Infer product item groups from paths/zips.
+ * Multiple top-level roots or zip names → separate items.
+ * A single shared tree stays one item (does not split Head/Legs part folders).
+ */
+export function inferItemGroupFromPath(
+  relativePath: string,
+  archivePath?: string,
+): string {
+  const pathParts = relativePath
+    .split(/[/\\]/)
+    .map(cleanSegment)
+    .filter(Boolean);
+  // Drop the filename
+  if (pathParts.length > 0 && /\.stl$/i.test(pathParts[pathParts.length - 1] || "")) {
+    pathParts.pop();
+  }
+
+  if (archivePath) {
+    const archiveParts = archivePath
+      .split(/[/\\]/)
+      .map(cleanSegment)
+      .filter(Boolean);
+    const zipName = archiveParts[archiveParts.length - 1] || "";
+    if (zipName) return zipName;
+  }
+
+  if (pathParts.length >= 1) return pathParts[0]!;
+  return "";
+}
+
+export function resolveImportItemGroups(
+  entries: Array<{ fileName: string; relativePath?: string; itemGroup?: string; archivePath?: string }>,
+  defaultItemGroup?: string,
+): Array<{ fileName: string; itemGroup: string }> {
+  if (defaultItemGroup?.trim()) {
+    const forced = normalizeItemGroup(defaultItemGroup);
+    return entries
+      .map((entry) => {
+        const fileName = normalizeStlFileName(entry.fileName || entry.relativePath || "");
+        if (!fileName) return null;
+        return { fileName, itemGroup: forced };
+      })
+      .filter((row): row is { fileName: string; itemGroup: string } => Boolean(row));
+  }
+
+  const prepared = entries
+    .map((entry) => {
+      const fileName = normalizeStlFileName(entry.fileName || entry.relativePath || "");
+      if (!fileName) return null;
+      const explicit = entry.itemGroup?.trim();
+      const inferred = inferItemGroupFromPath(entry.relativePath || fileName, entry.archivePath);
+      return { fileName, explicit, inferred };
+    })
+    .filter((row): row is { fileName: string; explicit: string | undefined; inferred: string } => Boolean(row));
+
+  const inferredRoots = new Set(prepared.map((row) => row.inferred).filter(Boolean));
+  const useInferred = inferredRoots.size >= 2;
+
+  return prepared.map((row) => ({
+    fileName: row.fileName,
+    itemGroup: normalizeItemGroup(
+      row.explicit || (useInferred ? row.inferred : row.inferred || DEFAULT_ITEM_GROUP),
+    ),
+  }));
+}
+
+export type OrderPartItemGroupSummary = {
+  itemGroup: string;
+  total: number;
+  needed: number;
+  onPlate: number;
+  good: number;
+  reprint: number;
+  remaining: number;
+};
+
 export type OrderPartSummary = {
   hubspotDealId: string;
   hubspotDealName: string;
@@ -39,13 +129,43 @@ export type OrderPartSummary = {
   good: number;
   reprint: number;
   remaining: number;
+  itemGroups: OrderPartItemGroupSummary[];
 };
 
-export function summarizeOrderParts(parts: OrderPart[]): Omit<OrderPartSummary, "hubspotDealId" | "hubspotDealName"> {
+export function summarizeOrderParts(
+  parts: OrderPart[],
+): Omit<OrderPartSummary, "hubspotDealId" | "hubspotDealName"> {
   const needed = parts.filter((part) => part.status === "needed").length;
   const onPlate = parts.filter((part) => part.status === "on_plate").length;
   const good = parts.filter((part) => part.status === "good").length;
   const reprint = parts.filter((part) => part.status === "reprint").length;
+
+  const byGroup = new Map<string, OrderPart[]>();
+  for (const part of parts) {
+    const key = normalizeItemGroup(part.itemGroup);
+    const list = byGroup.get(key) ?? [];
+    list.push(part);
+    byGroup.set(key, list);
+  }
+
+  const itemGroups: OrderPartItemGroupSummary[] = Array.from(byGroup.entries())
+    .map(([itemGroup, groupParts]) => {
+      const gNeeded = groupParts.filter((part) => part.status === "needed").length;
+      const gOnPlate = groupParts.filter((part) => part.status === "on_plate").length;
+      const gGood = groupParts.filter((part) => part.status === "good").length;
+      const gReprint = groupParts.filter((part) => part.status === "reprint").length;
+      return {
+        itemGroup,
+        total: groupParts.length,
+        needed: gNeeded,
+        onPlate: gOnPlate,
+        good: gGood,
+        reprint: gReprint,
+        remaining: gNeeded + gReprint,
+      };
+    })
+    .sort((a, b) => a.itemGroup.localeCompare(b.itemGroup));
+
   return {
     total: parts.length,
     needed,
@@ -53,6 +173,7 @@ export function summarizeOrderParts(parts: OrderPart[]): Omit<OrderPartSummary, 
     good,
     reprint,
     remaining: needed + reprint,
+    itemGroups,
   };
 }
 
@@ -63,7 +184,7 @@ export function listOrderParts(dealId: string): OrderPart[] {
     .select()
     .from(orderParts)
     .where(eq(orderParts.hubspotDealId, id))
-    .orderBy(asc(orderParts.fileName), asc(orderParts.id))
+    .orderBy(asc(orderParts.itemGroup), asc(orderParts.fileName), asc(orderParts.id))
     .all();
 }
 
@@ -111,32 +232,41 @@ export function listOrderPartSummaries(limit = 300): OrderPartSummary[] {
     .slice(0, Math.max(1, Math.min(limit, 500)));
 }
 
+function partKey(itemGroup: string, fileName: string): string {
+  return `${normalizeItemGroup(itemGroup).toLowerCase()}::${fileName.toLowerCase()}`;
+}
+
 export function importOrderParts(
   dealId: string,
-  input: { fileNames: string[]; dealName?: string },
+  input: ImportOrderPartsInput,
 ): { ok: true; parts: OrderPart[]; added: number; summary: ReturnType<typeof summarizeOrderParts> } | { ok: false; error: string } {
   const id = dealId.trim();
   if (!/^[0-9]{1,20}$/.test(id)) return { ok: false, error: "Select a valid Print Order." };
 
   const dealName = (input.dealName || "").trim() || `Print Order ${id}`;
+  const rawEntries = [
+    ...(input.parts || []),
+    ...(input.fileNames || []).map((fileName) => ({ fileName })),
+  ];
+  const resolved = resolveImportItemGroups(rawEntries, input.defaultItemGroup);
+
   const existing = new Map(
-    listOrderParts(id).map((part) => [part.fileName.toLowerCase(), part] as const),
+    listOrderParts(id).map((part) => [partKey(part.itemGroup, part.fileName), part] as const),
   );
   const stamp = nowIso();
   let added = 0;
 
-  for (const raw of input.fileNames) {
-    const fileName = normalizeStlFileName(raw);
-    if (!fileName) continue;
-    const key = fileName.toLowerCase();
+  for (const entry of resolved) {
+    const key = partKey(entry.itemGroup, entry.fileName);
     if (existing.has(key)) continue;
     getDb()
       .insert(orderParts)
       .values({
         hubspotDealId: id,
         hubspotDealName: dealName,
-        fileName,
-        label: labelFromFileName(fileName),
+        itemGroup: entry.itemGroup,
+        fileName: entry.fileName,
+        label: labelFromFileName(entry.fileName),
         status: "needed",
         printFileRecordId: null,
         printPlateBitId: null,
@@ -148,12 +278,11 @@ export function importOrderParts(
     added += 1;
   }
 
-  if (added === 0 && input.fileNames.length > 0) {
-    const hadStl = input.fileNames.some((name) => Boolean(normalizeStlFileName(name)));
+  if (added === 0 && rawEntries.length > 0) {
+    const hadStl = rawEntries.some((entry) => Boolean(normalizeStlFileName(entry.fileName)));
     if (!hadStl) return { ok: false, error: "Drop .stl files (or a zip of them) to build the parts list." };
   }
 
-  // Keep deal name fresh on existing rows when provided
   if (input.dealName?.trim()) {
     getDb()
       .update(orderParts)
@@ -222,6 +351,27 @@ export function clearOrderParts(dealId: string): number {
   return Number(result.changes ?? 0);
 }
 
+function pickOrderPartForPlateBit(
+  existing: OrderPart[],
+  fileName: string,
+  itemHint?: string,
+): OrderPart | undefined {
+  const matches = existing.filter((part) => part.fileName.toLowerCase() === fileName.toLowerCase());
+  if (matches.length === 0) return undefined;
+  if (matches.length === 1) return matches[0];
+
+  const hint = normalizeItemGroup(itemHint).toLowerCase();
+  const byHint = matches.find((part) => normalizeItemGroup(part.itemGroup).toLowerCase() === hint);
+  if (byHint) return byHint;
+
+  // Prefer parts that still need work when the name collides across items
+  return (
+    matches.find((part) => part.status === "needed" || part.status === "reprint") ||
+    matches.find((part) => part.status === "on_plate") ||
+    matches[0]
+  );
+}
+
 /**
  * When STLs are dropped onto a plate, mark matching order parts on_plate
  * (or create them if the order list was not imported yet).
@@ -231,6 +381,8 @@ export function syncOrderPartsFromPlateBits(input: {
   hubspotDealName?: string;
   printFileRecordId: number;
   bits: PrintPlateBit[];
+  /** Optional per-filename item hints from folder/zip path. */
+  itemHints?: Record<string, string>;
 }): void {
   const dealId = input.hubspotDealId.trim();
   if (!dealId || input.bits.length === 0) return;
@@ -240,17 +392,21 @@ export function syncOrderPartsFromPlateBits(input: {
     `Print Order ${dealId}`;
   const stamp = nowIso();
   const existing = listOrderParts(dealId);
-  const byName = new Map(existing.map((part) => [part.fileName.toLowerCase(), part]));
+  const existingGroups = new Set(existing.map((part) => normalizeItemGroup(part.itemGroup)));
 
   for (const bit of input.bits) {
-    const key = bit.fileName.toLowerCase();
-    const current = byName.get(key);
+    const hint = input.itemHints?.[bit.fileName.toLowerCase()];
+    const current = pickOrderPartForPlateBit(existing, bit.fileName, hint);
     if (!current) {
+      const itemGroup = normalizeItemGroup(
+        hint || (existingGroups.size === 1 ? Array.from(existingGroups)[0] : DEFAULT_ITEM_GROUP),
+      );
       getDb()
         .insert(orderParts)
         .values({
           hubspotDealId: dealId,
           hubspotDealName: dealName,
+          itemGroup,
           fileName: bit.fileName,
           label: bit.label || labelFromFileName(bit.fileName),
           status: bit.status === "good" ? "good" : bit.status === "reprint" ? "reprint" : "on_plate",
@@ -263,14 +419,7 @@ export function syncOrderPartsFromPlateBits(input: {
       continue;
     }
 
-    // Don't pull a finished good part back unless plate says reprint
-    if (current.status === "good" && bit.status !== "reprint" && bit.status !== "on_plate") {
-      continue;
-    }
-    if (current.status === "good" && bit.status === "on_plate") {
-      // Re-plating a previously good part (rare) — leave good
-      continue;
-    }
+    if (current.status === "good" && bit.status === "on_plate") continue;
 
     const nextStatus: OrderPartStatus =
       bit.status === "good" ? "good" : bit.status === "reprint" ? "reprint" : "on_plate";
@@ -311,10 +460,7 @@ export function syncOrderPartFromPlateBitStatus(input: {
     .get();
 
   const byName =
-    linked ||
-    listOrderParts(record.hubspotDealId).find(
-      (part) => part.fileName.toLowerCase() === input.bit.fileName.toLowerCase(),
-    );
+    linked || pickOrderPartForPlateBit(listOrderParts(record.hubspotDealId), input.bit.fileName);
 
   if (!byName) {
     syncOrderPartsFromPlateBits({
