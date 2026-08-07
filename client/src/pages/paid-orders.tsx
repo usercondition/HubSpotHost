@@ -27,7 +27,12 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import type { PaidOrderAnalysis, PaidOrderCreateResult, PaidOrderDraft } from "@shared/schema";
+import type {
+  PaidOrderAnalysis,
+  PaidOrderCreateResult,
+  PaidOrderDraft,
+  ReturningBuyerProfile,
+} from "@shared/schema";
 
 type LineDraft = { id: string; productName: string; amount: string };
 
@@ -77,6 +82,7 @@ export default function PaidOrders() {
   const [conversation, setConversation] = useState("");
   const [assistHints, setAssistHints] = useState<PaidOrderAnalysis | null>(null);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
+  const [buyerHint, setBuyerHint] = useState<string | null>(null);
 
   const lineTotal = useMemo(() => {
     return lines.reduce((sum, line) => {
@@ -85,6 +91,48 @@ export default function PaidOrders() {
     }, 0);
   }, [lines]);
 
+  const lookupBuyer = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest(
+        "POST",
+        "/api/buyers/lookup",
+        { email: contact.email.trim() },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; buyer: ReturningBuyerProfile };
+    },
+    onSuccess: ({ buyer }) => {
+      if (!buyer.found) {
+        setBuyerHint("No matching HubSpot contact or prior intake for that email.");
+        toast({ title: "No returning buyer found" });
+        return;
+      }
+      setContact((current) => ({
+        ...current,
+        fullName: current.fullName || buyer.fullName,
+        marketplaceUsername: current.marketplaceUsername || buyer.username,
+        phone: current.phone || buyer.phone,
+        address: current.address || buyer.address,
+        city: current.city || buyer.city,
+        state: current.state || buyer.state,
+        postalCode: current.postalCode || buyer.postalCode,
+        country: current.country || buyer.country || current.country,
+      }));
+      setBuyerHint(
+        `Prefill from ${buyer.source}${buyer.priorOrders ? ` · ${buyer.priorOrders} prior intake(s)` : ""}${
+          buyer.hubspotContactId ? ` · contact ${buyer.hubspotContactId}` : ""
+        }`,
+      );
+      toast({ title: "Returning buyer loaded", description: "Blank fields were filled from HubSpot / prior intake." });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Buyer lookup failed",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
 
   const analyze = useMutation({
     mutationFn: async () => {
@@ -398,9 +446,31 @@ export default function PaidOrders() {
                   label="Email"
                   id="email"
                   value={contact.email}
-                  onChange={(value) => updateContact("email", value)}
+                  onChange={(value) => {
+                    updateContact("email", value);
+                    setBuyerHint(null);
+                  }}
                   type="email"
                 />
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="w-full"
+                    disabled={!contact.email.includes("@") || lookupBuyer.isPending}
+                    onClick={() => lookupBuyer.mutate()}
+                    data-testid="button-lookup-returning-buyer"
+                  >
+                    {lookupBuyer.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                    Prefill returning buyer
+                  </Button>
+                </div>
+                {buyerHint ? (
+                  <p className="sm:col-span-2 text-xs text-muted-foreground" data-testid="text-buyer-lookup-hint">
+                    {buyerHint}
+                  </p>
+                ) : null}
                 <Field
                   label="Phone"
                   id="phone"

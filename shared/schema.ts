@@ -830,6 +830,8 @@ export const printFileRecords = sqliteTable("print_file_records", {
   resolutionX: integer("resolution_x"),
   resolutionY: integer("resolution_y"),
   printerProfile: text("printer_profile"),
+  /** Explicit fleet assignment; wins over slicer profile matching when set. */
+  assignedPrinterId: integer("assigned_printer_id"),
   hubspotSyncedAt: text("hubspot_synced_at").notNull(),
   attachedAt: text("attached_at").notNull(),
 });
@@ -1390,4 +1392,330 @@ export interface CreatedOrderLink {
   /** Returned exactly once. Never stored, never logged. */
   token: string;
   url: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Production ops: fulfillment, failures, queue contracts              */
+/* ------------------------------------------------------------------ */
+
+export const FULFILLMENT_CHECKLIST_KEYS = [
+  "addressVerified",
+  "costsEntered",
+  "labelBought",
+  "trackingPasted",
+  "packingDone",
+] as const;
+
+export type FulfillmentChecklistKey = (typeof FULFILLMENT_CHECKLIST_KEYS)[number];
+
+export const FULFILLMENT_CHECKLIST_LABELS: Record<FulfillmentChecklistKey, string> = {
+  addressVerified: "Address verified",
+  costsEntered: "Actual costs entered",
+  labelBought: "Pirate Ship label bought",
+  trackingPasted: "Tracking pasted on deal",
+  packingDone: "Packed & ready",
+};
+
+/** Local ship-ready checklist per HubSpot deal (CRM stage stays in HubSpot). */
+export const fulfillmentChecklists = sqliteTable("fulfillment_checklists", {
+  hubspotDealId: text("hubspot_deal_id").primaryKey(),
+  addressVerified: integer("address_verified", { mode: "boolean" }).notNull().default(false),
+  costsEntered: integer("costs_entered", { mode: "boolean" }).notNull().default(false),
+  labelBought: integer("label_bought", { mode: "boolean" }).notNull().default(false),
+  trackingPasted: integer("tracking_pasted", { mode: "boolean" }).notNull().default(false),
+  packingDone: integer("packing_done", { mode: "boolean" }).notNull().default(false),
+  trackingNumber: text("tracking_number").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  updatedAt: text("updated_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export type FulfillmentChecklist = typeof fulfillmentChecklists.$inferSelect;
+
+export const PRODUCTION_FAILURE_TYPES = [
+  "print_fail",
+  "support_fail",
+  "fep_damage",
+  "resin_issue",
+  "qc_reject",
+  "other",
+] as const;
+
+export type ProductionFailureType = (typeof PRODUCTION_FAILURE_TYPES)[number];
+
+export const PRODUCTION_FAILURE_LABELS: Record<ProductionFailureType, string> = {
+  print_fail: "Print failed",
+  support_fail: "Supports failed",
+  fep_damage: "FEP / film damage",
+  resin_issue: "Resin issue",
+  qc_reject: "QC reject / reprint",
+  other: "Other",
+};
+
+/** Shop-floor reprint / failure log tied to deals and optional plates/printers. */
+export const productionFailures = sqliteTable("production_failures", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  hubspotDealId: text("hubspot_deal_id").notNull(),
+  hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  failureType: text("failure_type").notNull().$type<ProductionFailureType>(),
+  printerId: integer("printer_id"),
+  printFileRecordId: integer("print_file_record_id"),
+  resinMassG: text("resin_mass_g").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  occurredAt: text("occurred_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export type ProductionFailure = typeof productionFailures.$inferSelect;
+
+export const updateFulfillmentChecklistSchema = z.object({
+  addressVerified: z.boolean().optional(),
+  costsEntered: z.boolean().optional(),
+  labelBought: z.boolean().optional(),
+  trackingPasted: z.boolean().optional(),
+  packingDone: z.boolean().optional(),
+  trackingNumber: trimmed(120).optional(),
+  notes: trimmed(2_000).optional(),
+});
+
+export type UpdateFulfillmentChecklistInput = z.infer<typeof updateFulfillmentChecklistSchema>;
+
+export const updateDealCostsSchema = z.object({
+  material: z
+    .string()
+    .trim()
+    .default("")
+    .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid material cost"),
+  labor: z
+    .string()
+    .trim()
+    .default("")
+    .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid labor cost"),
+  packaging: z
+    .string()
+    .trim()
+    .default("")
+    .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid packaging cost"),
+  shipping: z
+    .string()
+    .trim()
+    .default("")
+    .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid shipping cost"),
+  /** When true and writes are allowed, HubSpot receives the PATCH + margin recalc. */
+  liveWrite: z.boolean().optional().default(true),
+});
+
+export type UpdateDealCostsInput = z.infer<typeof updateDealCostsSchema>;
+
+export const advanceDealStageSchema = z.object({
+  stageId: z.string().trim().min(1, "Choose a pipeline stage"),
+  liveWrite: z.boolean().optional().default(true),
+});
+
+export type AdvanceDealStageInput = z.infer<typeof advanceDealStageSchema>;
+
+export const assignPlatePrinterSchema = z.object({
+  recordId: z.coerce.number().int().positive("Choose a plate"),
+  printerId: z.union([z.coerce.number().int().positive("Choose a fleet printer"), z.null()]),
+});
+
+export type AssignPlatePrinterInput = z.infer<typeof assignPlatePrinterSchema>;
+
+export const createProductionFailureSchema = z.object({
+  dealId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{1,20}$/, "Select a valid Print Order"),
+  dealName: trimmed(250).default(""),
+  failureType: z.enum(PRODUCTION_FAILURE_TYPES),
+  printerId: z.coerce.number().int().positive().optional().nullable(),
+  printFileRecordId: z.coerce.number().int().positive().optional().nullable(),
+  resinMassG: trimmed(40).default(""),
+  notes: trimmed(2_000).default(""),
+  occurredAt: z
+    .string()
+    .trim()
+    .min(1, "Enter when this happened")
+    .refine((value) => Number.isFinite(new Date(value).getTime()), "Enter a valid date/time")
+    .optional(),
+});
+
+export type CreateProductionFailureInput = z.infer<typeof createProductionFailureSchema>;
+
+export interface FulfillmentChecklistView {
+  dealId: string;
+  addressVerified: boolean;
+  costsEntered: boolean;
+  labelBought: boolean;
+  trackingPasted: boolean;
+  packingDone: boolean;
+  trackingNumber: string;
+  notes: string;
+  completedCount: number;
+  totalCount: number;
+  readyPercent: number;
+  shipReady: boolean;
+  updatedAt: string | null;
+}
+
+export interface ProductionQueueItem {
+  dealId: string;
+  dealName: string;
+  stageId: string;
+  stage: string;
+  amount: number;
+  closeDate: string | null;
+  contactName: string | null;
+  hasPlates: boolean;
+  plateCount: number;
+  totalPrintTimeSeconds: number | null;
+  assignedPrinterIds: number[];
+  assignedPrinterNames: string[];
+  unassignedPlateCount: number;
+  kitNeeded: number;
+  kitReprint: number;
+  costsIncomplete: boolean;
+  fulfillment: FulfillmentChecklistView;
+  bucket: "next_print" | "in_production" | "ship_ready" | "blocked";
+  priorityScore: number;
+}
+
+export interface ProductionQueueResponse {
+  generatedAt: string;
+  hubspotPortalId: string | null;
+  stages: Array<{ id: string; label: string; closed: boolean }>;
+  printers: Array<{ id: number; name: string; status: string }>;
+  nextPrint: ProductionQueueItem[];
+  inProduction: ProductionQueueItem[];
+  shipReady: ProductionQueueItem[];
+  blocked: ProductionQueueItem[];
+  recentFailures: Array<{
+    id: number;
+    dealId: string;
+    dealName: string;
+    failureType: ProductionFailureType;
+    notes: string;
+    occurredAt: string;
+    printerId: number | null;
+  }>;
+  summary: {
+    nextPrint: number;
+    inProduction: number;
+    shipReady: number;
+    blocked: number;
+    openOrders: number;
+  };
+}
+
+export interface DealCostFields {
+  amount: number;
+  material: string;
+  labor: string;
+  packaging: string;
+  shipping: string;
+  grossProfit: number | null;
+  marginPercentage: number | null;
+  costsComplete: boolean;
+}
+
+export interface PackingSlipLine {
+  kind: "deal" | "kit_bit" | "plate";
+  label: string;
+  detail: string;
+  status?: string;
+}
+
+export interface PackingSlip {
+  dealId: string;
+  dealName: string;
+  amount: number;
+  stage: string;
+  contact: {
+    id: string | null;
+    name: string;
+    email: string;
+    phone: string;
+    addressLines: string[];
+  };
+  lines: PackingSlipLine[];
+  kitSummary: { total: number; good: number; needed: number; reprint: number } | null;
+  plateCount: number;
+  checklist: FulfillmentChecklistView;
+  generatedAt: string;
+}
+
+export interface DealOpsDetail {
+  dealId: string;
+  dealName: string;
+  stageId: string;
+  stage: string;
+  amount: number;
+  closeDate: string | null;
+  costs: DealCostFields;
+  checklist: FulfillmentChecklistView;
+  plates: Array<{
+    id: number;
+    fileName: string;
+    printerProfile: string | null;
+    assignedPrinterId: number | null;
+    assignedPrinterName: string | null;
+    printTimeSeconds: number | null;
+    resinMassG: number | null;
+    attachedAt: string;
+  }>;
+  packingSlip: PackingSlip;
+  failures: Array<{
+    id: number;
+    failureType: ProductionFailureType;
+    notes: string;
+    resinMassG: string;
+    printerId: number | null;
+    printFileRecordId: number | null;
+    occurredAt: string;
+  }>;
+  stages: Array<{ id: string; label: string; closed: boolean }>;
+  printers: Array<{ id: number; name: string; status: string }>;
+  hubspotPortalId: string | null;
+  writeGate: {
+    dryRun: boolean;
+    allowWrites: boolean;
+    liveWriteReady: boolean;
+  };
+}
+
+export interface ReturningBuyerProfile {
+  found: boolean;
+  source: "hubspot" | "intake" | "both" | null;
+  email: string;
+  fullName: string;
+  phone: string;
+  username: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  hubspotContactId: string | null;
+  priorOrders: number;
+}
+
+export interface ResinReorderSuggestion {
+  productId: number;
+  name: string;
+  brand: string;
+  sealedCount: number;
+  openRemainingGrams: number;
+  bottleMassG: number;
+  gramsPerDay: number;
+  daysOfStock: number | null;
+  suggestedBuyCount: number;
+  urgency: "critical" | "soon" | "watch" | "ok";
+  reason: string;
+}
+
+export interface ResinReorderResponse {
+  generatedAt: string;
+  lookbackDays: number;
+  suggestions: ResinReorderSuggestion[];
+  buyNow: ResinReorderSuggestion[];
 }

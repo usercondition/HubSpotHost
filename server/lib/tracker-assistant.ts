@@ -39,6 +39,10 @@ function printsHref(dealId: string): string {
   return `/prints?dealId=${encodeURIComponent(dealId)}`;
 }
 
+function queueHref(dealId: string): string {
+  return `/queue?dealId=${encodeURIComponent(dealId)}`;
+}
+
 function hubspotDealHref(dealId: string, portalId: string | null): string | null {
   const portal = String(portalId ?? "").trim();
   if (!portal || !dealId) return null;
@@ -180,11 +184,10 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         usedFacts,
       };
     }
-    lines.push(`${costIssues.length} order${costIssues.length === 1 ? "" : "s"} need cost fields filled in HubSpot:`);
+    lines.push(`${costIssues.length} order${costIssues.length === 1 ? "" : "s"} need cost fields filled (Queue → deal ops writes HubSpot):`);
     for (const item of costIssues.slice(0, 5)) {
       lines.push(`• ${item.dealName} — ${item.detail}`);
-      const href = hubspotDealHref(item.dealId, snapshot.hubspotPortalId);
-      if (href) actions.push({ label: `HubSpot · ${item.dealName.slice(0, 24)}`, href, external: true });
+      actions.push({ label: `Enter costs · ${item.dealName.slice(0, 24)}`, href: queueHref(item.dealId) });
     }
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 4), usedFacts };
   }
@@ -279,9 +282,8 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     }
   }
   if (costIssues.length > 0) {
-    priorities.push(`${priorities.length + 1}. Fill missing costs on ${costIssues.length} deal${costIssues.length === 1 ? "" : "s"} in HubSpot.`);
-    const href = hubspotDealHref(costIssues[0]!.dealId, snapshot.hubspotPortalId);
-    if (href) actions.push({ label: "Update costs", href, external: true });
+    priorities.push(`${priorities.length + 1}. Fill missing costs on ${costIssues.length} deal${costIssues.length === 1 ? "" : "s"} in Queue.`);
+    actions.push({ label: "Enter costs", href: queueHref(costIssues[0]!.dealId) });
   }
   if (snapshot.intake.awaitingClient > 0) {
     priorities.push(

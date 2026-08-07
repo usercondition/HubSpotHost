@@ -14,6 +14,7 @@ import {
   Lock,
   Moon,
   Layers3,
+  ListOrdered,
   Printer,
   ShoppingBag,
   Settings2,
@@ -114,6 +115,7 @@ export function Mark({ className }: { className?: string }) {
 
 const NAV = [
   { href: "/", label: "Home", title: "Command Center", icon: Home, testId: "link-nav-home", group: "Work" },
+  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Work" },
   { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Work" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Work" },
   {

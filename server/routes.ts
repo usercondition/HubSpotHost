@@ -127,9 +127,14 @@ import {
   attachPrintFileSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
+  assignPlatePrinterSchema,
+  advanceDealStageSchema,
   createPrinterLifecycleEventSchema,
+  createProductionFailureSchema,
   openResinBottleSchema,
   setActiveResinBottleSchema,
+  updateDealCostsSchema,
+  updateFulfillmentChecklistSchema,
   updatePrinterSchema,
   upsertResinProductSchema,
   upsertResinProfileSchema,
@@ -140,7 +145,19 @@ import {
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
+  type PerformanceResponse,
 } from "../shared/schema";
+import { lookupReturningBuyer } from "./lib/buyers";
+import {
+  advanceDealStage,
+  assignPlateToPrinter,
+  buildDealOpsDetail,
+  updateDealCosts,
+} from "./lib/deal-ops";
+import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
+import { getFulfillmentChecklist, upsertFulfillmentChecklist } from "./lib/fulfillment";
+import { buildProductionQueue } from "./lib/production-queue";
+import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
@@ -906,6 +923,155 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const deleted = deleteKitForDeal(dealId);
     return res.json({ ok: true, deleted });
+  });
+
+  /** Shop-floor production queue: next print, in production, ship-ready, blocked. */
+  app.get("/api/production-queue", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const [deals, stages, portalId] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
+      ]);
+      const attachedIds = attachedPrintFileDealIds();
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        attachedPrintDealIds: attachedIds,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
+        hubspotPortalId: portalId,
+      }) as PerformanceResponse;
+      return res.json({ ok: true, ...buildProductionQueue(snapshot) });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not build production queue",
+      });
+    }
+  });
+
+  app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const result = await buildDealOpsDetail(String(req.params.dealId || ""));
+    if ("error" in result) {
+      return res.status(result.status ?? 400).json({ ok: false, error: result.error });
+    }
+    return res.json({ ok: true, ...result });
+  });
+
+  app.patch("/api/deal-ops/:dealId/costs", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = updateDealCostsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = await updateDealCosts(String(req.params.dealId || ""), parsed.data);
+    if (!result.ok) {
+      return res.status(result.status ?? 400).json({ ok: false, error: result.error });
+    }
+    return res.json(result);
+  });
+
+  app.post("/api/deal-ops/:dealId/stage", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = advanceDealStageSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = await advanceDealStage(String(req.params.dealId || ""), parsed.data);
+    if (!result.ok) {
+      return res.status(result.status ?? 400).json({ ok: false, error: result.error });
+    }
+    return res.json(result);
+  });
+
+  app.get("/api/fulfillment/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    return res.json({ ok: true, checklist: getFulfillmentChecklist(dealId) });
+  });
+
+  app.patch("/api/fulfillment/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    const parsed = updateFulfillmentChecklistSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = upsertFulfillmentChecklist(dealId, parsed.data);
+    if ("error" in result) {
+      return res.status(400).json({ ok: false, error: result.error });
+    }
+    return res.json({ ok: true, checklist: result });
+  });
+
+  app.post("/api/plates/assign-printer", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = assignPlatePrinterSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = assignPlateToPrinter(parsed.data);
+    if (!result.ok) {
+      return res.status(400).json({ ok: false, error: result.error });
+    }
+    return res.json(result);
+  });
+
+  app.get("/api/failures", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, failures: listProductionFailures(50).map(failureSummary) });
+  });
+
+  app.post("/api/failures", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = createProductionFailureSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const row = createProductionFailure(parsed.data);
+    return res.status(201).json({ ok: true, failure: failureSummary(row) });
+  });
+
+  app.get("/api/resin-reorder", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      ensureDefaultResinInventory();
+      const snapshot = buildResinInventorySnapshot();
+      return res.json({ ok: true, ...buildResinReorderSuggestions(snapshot) });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not compute resin reorder cues",
+      });
+    }
+  });
+
+  /** Returning buyer prefill from HubSpot contact + local intake history. */
+  app.post("/api/buyers/lookup", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const email =
+      req.body && typeof req.body === "object" && typeof (req.body as { email?: unknown }).email === "string"
+        ? (req.body as { email: string }).email
+        : "";
+    if (!email.trim() || !email.includes("@")) {
+      return res.status(400).json({ ok: false, error: "Enter a buyer email to look up." });
+    }
+    try {
+      const profile = await lookupReturningBuyer(email);
+      return res.json({ ok: true, buyer: profile });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Buyer lookup failed",
+      });
+    }
   });
 
   /** Sealed stock + open bottles + per-bottle economics from plate consumption. */

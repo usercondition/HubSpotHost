@@ -18,6 +18,7 @@ import Prints from "@/pages/prints";
 import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
 import KitDryRunPage from "@/pages/kit-dry-run";
+import ProductionQueuePage from "@/pages/queue";
 import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
 
@@ -28,6 +29,7 @@ function ShellRoutes() {
       <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/deals" component={DealsPage} />
           <Route path="/orders" component={OrderLinks} />
           <Route path="/operations" component={Operations} />

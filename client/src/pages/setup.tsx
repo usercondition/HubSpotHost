@@ -66,13 +66,18 @@ const ENDPOINTS = [
   { method: "POST", path: "/api/recalculate/:dealId", note: "Manual recalculation, accepts ?dryRun=" },
   { method: "GET", path: "/api/calculations", note: "Last 100 audited attempts" },
   { method: "GET", path: "/api/order-links", note: "Owner intake queue (owner code)" },
+  { method: "GET", path: "/api/production-queue", note: "Next print / ship-ready buckets (owner code)" },
+  { method: "GET", path: "/api/deal-ops/:dealId", note: "Costs, stage, packing slip, failures (owner code)" },
   { method: "GET", path: "/api/prints", note: "Print-file candidates and plate history (owner code)" },
   { method: "GET", path: "/api/supplies", note: "Supply ledger (owner code)" },
   { method: "GET", path: "/api/performance", note: "Daily performance snapshot (owner code)" },
+  { method: "POST", path: "/api/buyers/lookup", note: "Returning-buyer prefill from HubSpot + intake" },
+  { method: "GET", path: "/api/resin-reorder", note: "Resin burn-rate buy cues (owner code)" },
 ];
 
 const DAILY_ROUTES = [
   { path: "/#/", note: "Command center — today’s work strip and daily path" },
+  { path: "/#/queue", note: "Production queue — next print, ops panel, ship checklist" },
   { path: "/#/orders", note: "Paid order intake links and review queue" },
   { path: "/#/prints", note: "Attach Chitubox plates; deep-link with ?dealId=" },
   { path: "/#/supplies", note: "Amazon/receipt supply ledger" },

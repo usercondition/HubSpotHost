@@ -15,9 +15,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { hubspotDealHref, hubspotDealsListHref, kitsDealHref, printsDealHref } from "@/lib/workflow";
+import { hubspotDealHref, hubspotDealsListHref, kitsDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
+import { DealOpsPanel } from "@/components/deal-ops-panel";
 import { StatusPill } from "@/components/primitives";
 import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ export default function DealsPage() {
     successDescription: "Live HubSpot stages and open print jobs, without leaving Print Operations.",
   });
   const [showClosedStages, setShowClosedStages] = useState(false);
+  const [opsDealId, setOpsDealId] = useState<string | null>(null);
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -97,7 +99,7 @@ export default function DealsPage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Orders"
-        subtitle="At-a-glance Print Orders board — same stages as HubSpot."
+        subtitle="Print Orders board — advance stages and enter costs from Queue without leaving Print Ops."
         actions={
           <>
             {isUnlocked ? (
@@ -198,7 +200,7 @@ export default function DealsPage() {
                 <div>
                   <p className="text-sm font-semibold tracking-tight">Print Orders</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Read-only glance · drag stages in HubSpot
+                    Same stages as HubSpot · open a card’s Ops panel to move stage or enter costs
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -261,7 +263,12 @@ export default function DealsPage() {
                           </div>
                         ) : (
                           column.deals.map((deal) => (
-                            <DealCard key={deal.dealId} deal={deal} portalId={portalId} />
+                            <DealCard
+                              key={deal.dealId}
+                              deal={deal}
+                              portalId={portalId}
+                              onOpenOps={() => setOpsDealId(deal.dealId)}
+                            />
                           ))
                         )}
                       </div>
@@ -277,6 +284,14 @@ export default function DealsPage() {
                 </div>
               </div>
             </section>
+
+            {opsDealId ? (
+              <DealOpsPanel
+                dealId={opsDealId}
+                headers={headers}
+                onClose={() => setOpsDealId(null)}
+              />
+            ) : null}
 
             {snapshot.summary.activeOrders === 0 ? (
               <p className="text-sm text-muted-foreground" data-testid="empty-deals">
@@ -318,9 +333,11 @@ function SummaryStat({
 function DealCard({
   deal,
   portalId,
+  onOpenOps,
 }: {
   deal: BoardDeal;
   portalId: string | null;
+  onOpenOps: () => void;
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
@@ -378,6 +395,14 @@ function DealCard({
       )}
 
       <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-2">
+        <button
+          type="button"
+          onClick={onOpenOps}
+          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
+          data-testid={`button-deal-ops-${deal.dealId}`}
+        >
+          Ops / stage
+        </button>
         {deal.needsPlates ? (
           <Link
             href={printsDealHref(deal.dealId)}
@@ -396,16 +421,13 @@ function DealCard({
           Kit bits
         </Link>
         {deal.needsCosts ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href={queueDealHref(deal.dealId)}
             className="hs-link inline-flex items-center gap-1 text-xs font-medium"
             data-testid={`link-deal-costs-${deal.dealId}`}
           >
-            Update costs
-            <ExternalLink className="h-3 w-3" />
-          </a>
+            Enter costs
+          </Link>
         ) : null}
         <a
           href={href}

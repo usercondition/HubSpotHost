@@ -206,6 +206,41 @@ The service needs a publicly reachable HTTPS URL before HubSpot can call it. A p
 
 HubSpot manages subscriptions for standalone legacy private apps in the private-app settings rather than through its API. The service accepts CRM v1 webhook signatures and v3 signatures when present. When `HUBSPOT_WEBHOOK_SECRET` is set, unsigned, invalid, or stale signed requests are rejected.
 
+### Getting the most out of HubSpot + Print Ops
+
+Keep HubSpot as the CRM of record. Use Print Ops as the shop-floor control loop. A practical split:
+
+| Stay in HubSpot | Do in Print Ops |
+|---|---|
+| Contact timeline, emails, notes, tasks | Paid intake gatekeeping + buyer prefill |
+| Pipeline definitions & reporting dashboards | Production **Queue** (next print / in production / ship-ready) |
+| Marketing & quotes | Plate attach, kit QC, printer assignment |
+| Long-term customer history | Ship-ready checklist + packing slip |
+| Closed-won analytics | Actual cost entry that writes HubSpot cost properties |
+
+**Recommended HubSpot private-app scopes**
+
+- `crm.objects.contacts.read` / `crm.objects.contacts.write`
+- `crm.objects.deals.read` / `crm.objects.deals.write`
+- `crm.schemas.deals.read` (pipeline stages)
+- `crm.objects.deals` associations to contacts
+- Account info (for portal deep links)
+
+**Properties Print Ops already uses**
+
+- Inputs (webhook + Queue cost form): `amount`, `print_material_cost`, `print_labor_cost`, `print_packaging_cost`, `print_actual_shipping_cost`
+- Outputs (automation only): `print_gross_profit`, `print_margin_percentage`
+- Planning (from CTB/ULTX attach): `print_slice_*`, `print_estimated_*`, `print_plate_count`, `print_printer_profile`, …
+
+**Workflow tips**
+
+1. Keep Print Orders stages short and shop-floor meaningful (e.g. Deposit Received → Queued → Printing → QC → Ready to Ship → Shipped). Advance them from the Queue / Orders **Ops** panel so HubSpot stays accurate without tab-hopping.
+2. Enter actual costs in Queue once postage and packaging are known — the webhook still recalculates GP/margin when properties change in HubSpot.
+3. Put shipping address on the **Contact** (Print Ops already does this on approve). Use the packing slip + Pirate Ship link from Queue; paste tracking into the checklist (and optionally a HubSpot note/property if you add one).
+4. Use HubSpot lists or workflows for “deposit received > 48h with no activity” reminders; Print Ops attention covers plates/costs/stale for the daily loop.
+5. Avoid a second CRM. Returning-buyer prefill reads HubSpot Contacts by email and fills gaps from local intake history only.
+6. Do **not** auto-allocate supply receipts onto deal costs — keep the Supplies ledger as a management view so material costs are not double-counted.
+
 ## Endpoints
 
 | Endpoint | Use |
@@ -222,6 +257,15 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `PATCH /api/order-links/:id` | Protected. Owner corrections while the intake is pending review. |
 | `POST /api/order-links/:id/expire` | Protected. Manually expires a link. |
 | `POST /api/order-links/:id/create-order` | Protected. The only HubSpot-writing route in this flow. Requires `paymentVerified: true`. |
+| `GET /api/production-queue` | Protected. Next print / in production / ship-ready / blocked buckets. |
+| `GET /api/deal-ops/:dealId` | Protected. Costs, checklist, plates, packing slip, failures for one deal. |
+| `PATCH /api/deal-ops/:dealId/costs` | Protected. Writes HubSpot cost inputs (gated) and recalculates margin. |
+| `POST /api/deal-ops/:dealId/stage` | Protected. Advances Print Orders `dealstage` (gated). |
+| `PATCH /api/fulfillment/:dealId` | Protected. Local ship-ready checklist. |
+| `POST /api/plates/assign-printer` | Protected. Explicit plate → fleet printer assignment. |
+| `GET/POST /api/failures` | Protected. Reprint / failure log. |
+| `GET /api/resin-reorder` | Protected. Burn-rate “what to buy next” cues. |
+| `POST /api/buyers/lookup` | Protected. Returning-buyer prefill from HubSpot + local intake. |
 | `POST /api/tracker-assistant` | Protected. Read-only ops briefing / Q&A over live Performance + intake. |
 | `POST /api/owner-digest/send` | Protected. Sends the live tracker briefing to Telegram immediately. |
 | `POST /api/cron/owner-digest` | Secured by `OWNER_DIGEST_CRON_SECRET`. Daily digest entrypoint (skips if already sent today unless `force: true`). |

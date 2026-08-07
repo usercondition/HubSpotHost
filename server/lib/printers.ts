@@ -478,8 +478,12 @@ export function buildPrinterFleetSnapshot(): PrinterFleetSnapshot {
   const profileMaps = listPrinterProfileMaps();
   const jobsByPrinter = new Map<number, PrintFileRecord[]>();
   const unassigned: PrintFileRecord[] = [];
+  const fleetIds = new Set(fleet.map((printer) => printer.id));
   for (const record of records) {
-    const printerId = matchPrinterId(record.printerProfile, fleet, profileMaps);
+    const printerId =
+      record.assignedPrinterId != null && fleetIds.has(record.assignedPrinterId)
+        ? record.assignedPrinterId
+        : matchPrinterId(record.printerProfile, fleet, profileMaps);
     if (printerId == null) {
       unassigned.push(record);
       continue;

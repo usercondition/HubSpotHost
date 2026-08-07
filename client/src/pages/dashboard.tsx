@@ -252,6 +252,9 @@ function TodaysWork() {
               <Link href="/deals" className="text-xs font-medium text-primary hover:underline" data-testid="link-todays-all-deals">
                 Board
               </Link>
+              <Link href="/queue" className="text-xs font-medium text-primary hover:underline" data-testid="link-todays-queue">
+                Queue
+              </Link>
             </div>
           </div>
           <ul className="divide-y divide-border rounded-md border border-border">

@@ -270,6 +270,40 @@ CREATE TABLE IF NOT EXISTS kits (
 CREATE INDEX IF NOT EXISTS kits_updated_at_idx ON kits (updated_at DESC);
 `;
 
+const CREATE_FULFILLMENT_CHECKLISTS_SQL = `
+CREATE TABLE IF NOT EXISTS fulfillment_checklists (
+  hubspot_deal_id TEXT PRIMARY KEY,
+  address_verified INTEGER NOT NULL DEFAULT 0,
+  costs_entered INTEGER NOT NULL DEFAULT 0,
+  label_bought INTEGER NOT NULL DEFAULT 0,
+  tracking_pasted INTEGER NOT NULL DEFAULT 0,
+  packing_done INTEGER NOT NULL DEFAULT 0,
+  tracking_number TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
+const CREATE_PRODUCTION_FAILURES_SQL = `
+CREATE TABLE IF NOT EXISTS production_failures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hubspot_deal_id TEXT NOT NULL,
+  hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  failure_type TEXT NOT NULL,
+  printer_id INTEGER,
+  print_file_record_id INTEGER,
+  resin_mass_g TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  occurred_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS production_failures_deal_idx
+  ON production_failures (hubspot_deal_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS production_failures_occurred_idx
+  ON production_failures (occurred_at DESC);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -287,6 +321,7 @@ const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["bottom_lift_distance_mm", "TEXT"],
   ["bottom_lift_speed_mm_per_min", "TEXT"],
   ["retract_speed_mm_per_min", "TEXT"],
+  ["assigned_printer_id", "INTEGER"],
 ];
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
@@ -389,6 +424,8 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_BOTTLES_SQL);
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   sqlite.exec(CREATE_KITS_SQL);
+  sqlite.exec(CREATE_FULFILLMENT_CHECKLISTS_SQL);
+  sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);

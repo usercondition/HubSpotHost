@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Scale,
+  ShoppingBag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
-import type { ResinBottleEconomics, ResinInventorySnapshot } from "@shared/schema";
+import type { ResinBottleEconomics, ResinInventorySnapshot, ResinReorderResponse } from "@shared/schema";
 
 function money(value: number): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -56,6 +57,15 @@ export default function ResinInventoryPage() {
     },
   });
 
+  const reorder = useQuery<ResinReorderResponse & { ok: true }>({
+    queryKey: ["/api/resin-reorder", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/resin-reorder", undefined, { headers });
+      return (await response.json()) as ResinReorderResponse & { ok: true };
+    },
+  });
+
 
   const product =
     inventory.data?.products.find((row) => row.id === selectedProductId) ??
@@ -83,6 +93,7 @@ export default function ResinInventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/resin-inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/resin-reorder"] });
       toast({ title: "Bottle cost saved", description: "Economics will use this unit cost for open bottles going forward." });
     },
     onError: (error: Error) => {
@@ -230,6 +241,55 @@ export default function ResinInventoryPage() {
               <StatCard label="Resin used" value={grams(inventory.data.totals.resinUsedGrams)} hint={`Material cost ${money(inventory.data.totals.materialCostUsedUsd)}`} icon={Scale} testId="metric-resin-used" />
               <StatCard label="Deal revenue on bottles" value={money(inventory.data.totals.attributedDealRevenueUsd)} hint="Quoted amounts on deals that consumed these bottles" icon={CheckCircle2} testId="metric-resin-revenue" />
             </section>
+
+            {reorder.data ? (
+              <Panel
+                title="What to buy next"
+                description={`Burn rate over the last ${reorder.data.lookbackDays} days from plate consumption. Suggestions stay separate from HubSpot deal costs.`}
+              >
+                {reorder.data.buyNow.length === 0 && reorder.data.suggestions.every((item) => item.urgency === "ok") ? (
+                  <p className="text-sm text-muted-foreground" data-testid="text-resin-reorder-clear">
+                    Stock looks fine for current burn — no urgent resin buys.
+                  </p>
+                ) : (
+                  <ul className="space-y-2" data-testid="list-resin-reorder">
+                    {reorder.data.suggestions
+                      .filter((item) => item.urgency !== "ok" || item.suggestedBuyCount > 0)
+                      .map((item) => (
+                        <li
+                          key={item.productId}
+                          className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-border px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">
+                              {item.name}{" "}
+                              <span className="text-muted-foreground">· {item.brand}</span>
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{item.reason}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {item.gramsPerDay.toFixed(0)} g/day · sealed {item.sealedCount}
+                              {item.daysOfStock != null && item.daysOfStock < 900
+                                ? ` · ~${item.daysOfStock} days left`
+                                : ""}
+                            </p>
+                          </div>
+                          <StatusPill
+                            tone={
+                              item.urgency === "critical" ? "bad" : item.urgency === "soon" ? "warn" : "neutral"
+                            }
+                            icon={item.suggestedBuyCount > 0 ? ShoppingBag : Package}
+                            label={
+                              item.suggestedBuyCount > 0
+                                ? `Buy ${item.suggestedBuyCount}`
+                                : item.urgency
+                            }
+                          />
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </Panel>
+            ) : null}
 
             {product ? (
               <Panel

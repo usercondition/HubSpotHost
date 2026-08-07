@@ -19,6 +19,10 @@ export function kitsDealHref(dealId: string): string {
   return `/kit-dry-run?dealId=${encodeURIComponent(dealId)}`;
 }
 
+export function queueDealHref(dealId: string): string {
+  return `/queue?dealId=${encodeURIComponent(dealId)}`;
+}
+
 export function hubspotAppHref(): string {
   return "https://app.hubspot.com/";
 }
@@ -62,9 +66,9 @@ export function attentionNextStep(item: {
   }
   if (issue.includes("cost")) {
     return {
-      href: hubspotDealHref(item.dealId, item.portalId),
-      label: "Update costs in HubSpot",
-      external: true,
+      href: queueDealHref(item.dealId),
+      label: "Enter costs in Queue",
+      external: false,
     };
   }
   return {
