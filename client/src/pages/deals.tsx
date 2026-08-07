@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
+import { hubspotDealHref, hubspotDealsListHref, kitsDealHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
@@ -388,6 +388,13 @@ function DealCard({
             Attach plates
           </Link>
         ) : null}
+        <Link
+          href={kitsDealHref(deal.dealId)}
+          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
+          data-testid={`link-deal-kit-${deal.dealId}`}
+        >
+          Kit bits
+        </Link>
         {deal.needsCosts ? (
           <a
             href={href}

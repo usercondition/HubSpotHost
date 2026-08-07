@@ -21,12 +21,18 @@ export type KitPlate = {
   ctbFileName: string;
   createdAt: string;
   bitIds: string[];
+  /** HubSpot/local print_file_records id when this plate was attached. */
+  printFileRecordId?: number | null;
 };
 
 export type KitTracker = {
   name: string;
+  /** Open Print Order this kit belongs to (null = local dry-run). */
+  hubspotDealId?: string | null;
+  hubspotDealName?: string | null;
   bits: KitBit[];
   plates: KitPlate[];
+  updatedAt?: string;
 };
 
 const ACASTUS_FILES = [
@@ -170,16 +176,50 @@ export function buildKitBitsFromFileNames(files: string[], idPrefix = "kit"): Ki
 export function createSampleKit(): KitTracker {
   return {
     name: "Acastus Knight Porphyrion",
+    hubspotDealId: null,
+    hubspotDealName: null,
     bits: bitsFromFileList(ACASTUS_FILES, "acastus"),
     plates: [],
+    updatedAt: new Date().toISOString(),
   };
 }
 
-export function createKitFromBits(name: string, bits: KitBit[]): KitTracker {
+export function createKitFromBits(
+  name: string,
+  bits: KitBit[],
+  binding?: { hubspotDealId?: string | null; hubspotDealName?: string | null },
+): KitTracker {
   return {
     name: name.trim() || "Imported kit",
+    hubspotDealId: binding?.hubspotDealId ?? null,
+    hubspotDealName: binding?.hubspotDealName ?? null,
     bits,
     plates: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function bindKitToDeal(
+  kit: KitTracker,
+  deal: { dealId: string; dealName: string },
+): KitTracker {
+  return {
+    ...kit,
+    hubspotDealId: deal.dealId,
+    hubspotDealName: deal.dealName,
+    name: kit.name.trim() || deal.dealName,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function emptyKitForDeal(deal: { dealId: string; dealName: string }): KitTracker {
+  return {
+    name: deal.dealName,
+    hubspotDealId: deal.dealId,
+    hubspotDealName: deal.dealName,
+    bits: [],
+    plates: [],
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -231,7 +271,12 @@ export function groupSummaries(kit: KitTracker): Array<{
 
 export function createPlate(
   kit: KitTracker,
-  input: { name: string; ctbFileName: string; bitIds: string[] },
+  input: {
+    name: string;
+    ctbFileName: string;
+    bitIds: string[];
+    printFileRecordId?: number | null;
+  },
 ): { ok: true; kit: KitTracker; plateId: string } | { ok: false; error: string } {
   const name = input.name.trim() || "Plate";
   const ctbFileName = input.ctbFileName.trim() || `${name.replace(/\s+/g, "_")}.ctb`;
@@ -254,6 +299,7 @@ export function createPlate(
     ctbFileName,
     createdAt: new Date().toISOString(),
     bitIds: uniqueIds,
+    printFileRecordId: input.printFileRecordId ?? null,
   };
 
   return {
@@ -265,6 +311,7 @@ export function createPlate(
       bits: kit.bits.map((bit) =>
         uniqueIds.includes(bit.id) ? { ...bit, status: "on_plate", plateId } : bit,
       ),
+      updatedAt: new Date().toISOString(),
     },
   };
 }

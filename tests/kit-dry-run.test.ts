@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildKitBitsFromFileNames,
+  bindKitToDeal,
   createPlate,
   createSampleKit,
   inventory,
@@ -9,6 +10,7 @@ import {
   markBitReprint,
   markPlateAllGood,
 } from "../client/src/lib/kit-dry-run";
+import { parsePersistedKit } from "../client/src/lib/kit-persistence";
 import { collectStlFilesFromFileList, inferKitNameFromImports } from "../client/src/lib/stl-folder-import";
 
 test("sample kit loads Acastus bits as needed inventory", () => {
@@ -48,11 +50,13 @@ test("plate flow: needed → on plate → good / reprint → reprint selectable 
     name: "P1",
     ctbFileName: "P1.ctb",
     bitIds: torsoBits.slice(0, 3).map((bit) => bit.id),
+    printFileRecordId: 42,
   });
   assert.equal(plated.ok, true);
   if (!plated.ok) return;
   kit = plated.kit;
   assert.equal(inventory(kit).onPlate, 3);
+  assert.equal(kit.plates[0]?.printFileRecordId, 42);
 
   const good = markBitGood(kit, torsoBits[0]!.id);
   assert.equal(good.ok, true);
@@ -84,3 +88,21 @@ test("plate flow: needed → on plate → good / reprint → reprint selectable 
   });
   assert.equal(again.ok, true);
 });
+
+test("bindKitToDeal keeps inventory and stores deal ids", () => {
+  const sample = createSampleKit();
+  const bound = bindKitToDeal(sample, { dealId: "deal-9", dealName: "Acastus - Buyer" });
+  assert.equal(bound.hubspotDealId, "deal-9");
+  assert.equal(bound.hubspotDealName, "Acastus - Buyer");
+  assert.equal(bound.bits.length, sample.bits.length);
+
+  const roundTrip = parsePersistedKit({
+    version: 1,
+    savedAt: new Date().toISOString(),
+    kit: bound,
+  });
+  assert.ok(roundTrip);
+  assert.equal(roundTrip!.hubspotDealId, "deal-9");
+  assert.equal(roundTrip!.bits.length, bound.bits.length);
+});
+
