@@ -5,6 +5,7 @@ import {
   collectKitFilesFromFileList,
   collectStlFilesFromFileList,
   formatKitImportNote,
+  inferFolderGroup,
   inferKitNameFromImports,
   isUnsupportedArchiveName,
   isZipFileName,
@@ -26,6 +27,28 @@ test("collectStlFilesFromFileList keeps unique basenames from nested paths", () 
   const imports = collectStlFilesFromFileList(files);
   assert.equal(imports.length, 2);
   assert.equal(inferKitNameFromImports(imports), "Acastus Kit");
+  assert.equal(imports[0]!.folderGroup, "Head");
+});
+
+test("inferFolderGroup uses parent folder or zip container", () => {
+  assert.equal(inferFolderGroup("Kit/Head/18 Head.stl"), "Head");
+  assert.equal(inferFolderGroup("Delivery.zip/Legs/39.stl", "Delivery.zip"), "Legs");
+  assert.equal(inferFolderGroup("Parts.zip/18 Head.stl", "Parts.zip"), "Parts");
+  assert.equal(inferFolderGroup("18 Head.stl"), "");
+});
+
+test("multi-folder import summary lists folder groups", async () => {
+  const head = new File([new Uint8Array([1])], "18 Head.stl", { type: "model/stl" });
+  const leg = new File([new Uint8Array([2])], "39 Thigh.stl", { type: "model/stl" });
+  Object.defineProperty(head, "webkitRelativePath", { value: "Kit/Head/18 Head.stl" });
+  Object.defineProperty(leg, "webkitRelativePath", { value: "Kit/Legs/39 Thigh.stl" });
+  const summary = await collectKitFilesFromFileList([head, leg]);
+  assert.equal(summary.folderGroups.length, 2);
+  assert.deepEqual(
+    summary.folderGroups.map((row) => row.group).sort(),
+    ["Head", "Legs"],
+  );
+  assert.match(formatKitImportNote(summary, "Kit"), /grouped by 2 folders/);
 });
 
 test("zip and nested zip STLs are extracted for kit import", async () => {

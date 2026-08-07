@@ -50,6 +50,12 @@ import { CtbParseError } from "./lib/ctb";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
+  deleteKitForDeal,
+  getKitForDeal,
+  listKitSummaries,
+  upsertKitForDeal,
+} from "./lib/kits";
+import {
   attachedPrintFileDealIds,
   buildPrintFileOrderSummary,
   createPrintFileRecord,
@@ -128,6 +134,7 @@ import {
   upsertResinProductSchema,
   upsertResinProfileSchema,
   reviewEditSchema,
+  upsertKitSchema,
   intakeLineExtendedAmount,
   lineItemsForIntake,
   type PrintFileCandidateDeal,
@@ -846,6 +853,59 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ...resinProfileView(),
       });
     }
+  });
+
+  /**
+   * Durable kit inventory per HubSpot Print Order (bits + plates + QC).
+   * Client still keeps a localStorage cache; SQLite is the shared source of truth.
+   */
+  app.get("/api/kits", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, kits: listKitSummaries() });
+  });
+
+  app.get("/api/kits/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const result = getKitForDeal(dealId);
+    return res.json({
+      ok: true,
+      kit: result.kit,
+      summary: result.summary,
+    });
+  });
+
+  app.put("/api/kits/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const parsed = upsertKitSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = upsertKitForDeal(dealId, {
+      kit: parsed.data.kit,
+      dealName: parsed.data.kit.hubspotDealName || undefined,
+    });
+    if (!result.ok) {
+      return res.status(400).json({ ok: false, error: result.error });
+    }
+    return res.json({ ok: true, kit: result.kit, summary: result.summary });
+  });
+
+  app.delete("/api/kits/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const deleted = deleteKitForDeal(dealId);
+    return res.json({ ok: true, deleted });
   });
 
   /** Sealed stock + open bottles + per-bottle economics from plate consumption. */
