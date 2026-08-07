@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileUp,
   Loader2,
+  Package,
   RefreshCw,
   Store,
   UserRound,
@@ -19,6 +20,10 @@ import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/wor
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
+import {
+  OrderPartsDialog,
+  type OrderPartSummary,
+} from "@/components/order-parts-dialog";
 import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -40,6 +45,7 @@ export default function DealsPage() {
     successDescription: "Live HubSpot stages and open print jobs, without leaving Print Operations.",
   });
   const [showClosedStages, setShowClosedStages] = useState(false);
+  const [partsDeal, setPartsDeal] = useState<{ dealId: string; dealName: string } | null>(null);
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -49,6 +55,23 @@ export default function DealsPage() {
       return (await response.json()) as PerformanceResponse;
     },
   });
+
+  const partSummaries = useQuery<{ ok: true; summaries: OrderPartSummary[] }>({
+    queryKey: ["/api/order-parts/summaries", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/order-parts/summaries", undefined, { headers });
+      return (await response.json()) as { ok: true; summaries: OrderPartSummary[] };
+    },
+  });
+
+  const summaryByDeal = useMemo(() => {
+    const map = new Map<string, OrderPartSummary>();
+    for (const row of partSummaries.data?.summaries ?? []) {
+      map.set(row.hubspotDealId, row);
+    }
+    return map;
+  }, [partSummaries.data?.summaries]);
 
   const snapshot = performance.data;
   const portalId = snapshot?.hubspotPortalId ?? null;
@@ -261,7 +284,15 @@ export default function DealsPage() {
                           </div>
                         ) : (
                           column.deals.map((deal) => (
-                            <DealCard key={deal.dealId} deal={deal} portalId={portalId} />
+                            <DealCard
+                              key={deal.dealId}
+                              deal={deal}
+                              portalId={portalId}
+                              partsSummary={summaryByDeal.get(deal.dealId) ?? null}
+                              onOpenParts={() =>
+                                setPartsDeal({ dealId: deal.dealId, dealName: deal.dealName })
+                              }
+                            />
                           ))
                         )}
                       </div>
@@ -289,6 +320,16 @@ export default function DealsPage() {
           </>
         )}
       </div>
+
+      <OrderPartsDialog
+        dealId={partsDeal?.dealId ?? null}
+        dealName={partsDeal?.dealName ?? ""}
+        open={Boolean(partsDeal)}
+        onOpenChange={(next) => {
+          if (!next) setPartsDeal(null);
+        }}
+        headers={headers}
+      />
     </div>
   );
 }
@@ -318,9 +359,13 @@ function SummaryStat({
 function DealCard({
   deal,
   portalId,
+  partsSummary,
+  onOpenParts,
 }: {
   deal: BoardDeal;
   portalId: string | null;
+  partsSummary: OrderPartSummary | null;
+  onOpenParts: () => void;
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
@@ -362,7 +407,7 @@ function DealCard({
         ) : null}
       </dl>
 
-      {(deal.needsPlates || deal.needsCosts) && (
+      {(deal.needsPlates || deal.needsCosts || partsSummary) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {deal.needsPlates ? (
             <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-primary">
@@ -374,10 +419,34 @@ function DealCard({
               Costs incomplete
             </span>
           ) : null}
+          {partsSummary && partsSummary.total > 0 ? (
+            <span
+              className={cn(
+                "rounded border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
+                partsSummary.remaining === 0
+                  ? "border-chart-4/30 bg-chart-4/10 text-chart-4"
+                  : "border-border bg-muted text-muted-foreground",
+              )}
+              data-testid={`badge-deal-parts-${deal.dealId}`}
+            >
+              {partsSummary.remaining === 0
+                ? `${partsSummary.good}/${partsSummary.total} parts done`
+                : `${partsSummary.remaining} parts left`}
+            </span>
+          ) : null}
         </div>
       )}
 
       <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-2">
+        <button
+          type="button"
+          onClick={onOpenParts}
+          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
+          data-testid={`button-deal-parts-${deal.dealId}`}
+        >
+          <Package className="h-3 w-3" />
+          Parts
+        </button>
         {deal.needsPlates ? (
           <Link
             href={printsDealHref(deal.dealId)}

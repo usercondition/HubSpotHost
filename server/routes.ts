@@ -74,6 +74,15 @@ import {
   updateBitStatus,
 } from "./lib/plate-bits";
 import {
+  clearOrderParts,
+  deleteOrderPart,
+  getOrderPartsView,
+  importOrderParts,
+  listOrderPartSummaries,
+  summarizeOrderParts,
+  updateOrderPartStatus,
+} from "./lib/order-parts";
+import {
   addPrinterLifecycleEvent,
   assignPrinterProfile,
   buildPrinterFleetSnapshot,
@@ -134,6 +143,8 @@ import {
   attachPrintFileSchema,
   addPrintPlateBitsSchema,
   updatePrintPlateBitStatusSchema,
+  importOrderPartsSchema,
+  updateOrderPartStatusSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
   createPrinterLifecycleEventSchema,
@@ -1283,6 +1294,99 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
     const bits = listBitsForRecords([recordId]).get(recordId) ?? [];
     return res.json({ ok: true, deleted: result.deleted, bits, bitSummary: summarizeBits(bits) });
+  });
+
+  /** Master parts checklist for a Print Order (Orders board → Parts). */
+  app.get("/api/order-parts/summaries", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, summaries: listOrderPartSummaries() });
+  });
+
+  app.get("/api/orders/:dealId/parts", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const view = getOrderPartsView(dealId);
+    return res.json({ ok: true, ...view });
+  });
+
+  app.post("/api/orders/:dealId/parts/import", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const parsed = importOrderPartsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = importOrderParts(dealId, parsed.data);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      parts: result.parts,
+      added: result.added,
+      summary: result.summary,
+    });
+  });
+
+  app.patch("/api/orders/:dealId/parts/:partId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    const partId = Number(req.params.partId);
+    if (!/^[0-9]{1,20}$/.test(dealId) || !Number.isInteger(partId) || partId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid order part." });
+    }
+    const parsed = updateOrderPartStatusSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = updateOrderPartStatus(dealId, partId, parsed.data.status);
+    if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      part: result.part,
+      parts: result.parts,
+      summary: result.summary,
+    });
+  });
+
+  app.delete("/api/orders/:dealId/parts/:partId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    const partId = Number(req.params.partId);
+    if (!/^[0-9]{1,20}$/.test(dealId) || !Number.isInteger(partId) || partId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid order part." });
+    }
+    const result = deleteOrderPart(dealId, partId);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      deleted: result.deleted,
+      parts: result.parts,
+      summary: result.summary,
+    });
+  });
+
+  app.delete("/api/orders/:dealId/parts", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const deleted = clearOrderParts(dealId);
+    return res.json({
+      ok: true,
+      dealId,
+      deleted,
+      parts: [],
+      summary: summarizeOrderParts([]),
+    });
   });
 
   /**
