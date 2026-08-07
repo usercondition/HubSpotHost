@@ -64,8 +64,12 @@ export function PlateBitsPanel({
     setNote("Reading part files…");
     try {
       const collected = await collectKitFilesFromFileList(files);
-      const fileNames = collected.imports.map((item) => item.fileName);
-      if (fileNames.length === 0) {
+      const parts = collected.imports.map((item) => ({
+        fileName: item.fileName,
+        relativePath: item.relativePath,
+        archivePath: item.archivePath,
+      }));
+      if (parts.length === 0) {
         setNote(
           collected.unsupportedArchives.length > 0
             ? `No .stl files found. ${collected.unsupportedArchives.slice(0, 2).join("; ")}`
@@ -76,7 +80,7 @@ export function PlateBitsPanel({
       const response = await apiRequest(
         "POST",
         `/api/prints/${recordId}/bits`,
-        { fileNames },
+        { parts },
         { headers },
       );
       const body = (await response.json()) as BitsResponse;
@@ -104,15 +108,19 @@ export function PlateBitsPanel({
     void (async () => {
       try {
         const collected = await pending;
-        const fileNames = collected.imports.map((item) => item.fileName);
-        if (fileNames.length === 0) {
+        const parts = collected.imports.map((item) => ({
+          fileName: item.fileName,
+          relativePath: item.relativePath,
+          archivePath: item.archivePath,
+        }));
+        if (parts.length === 0) {
           setNote("No .stl files found. Drop the part files that were on this plate.");
           return;
         }
         const response = await apiRequest(
           "POST",
           `/api/prints/${recordId}/bits`,
-          { fileNames },
+          { parts },
           { headers },
         );
         const body = (await response.json()) as BitsResponse;

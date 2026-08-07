@@ -1,5 +1,6 @@
 /**
  * Order parts checklist dialog — import full kit, track needed → plate → good/reprint.
+ * Multiple products on one order are shown as separate item groups.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -20,6 +21,16 @@ import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import type { OrderPart, OrderPartStatus } from "@shared/schema";
 
+export type OrderPartItemGroupSummary = {
+  itemGroup: string;
+  total: number;
+  needed: number;
+  onPlate: number;
+  good: number;
+  reprint: number;
+  remaining: number;
+};
+
 export type OrderPartSummary = {
   hubspotDealId: string;
   hubspotDealName: string;
@@ -29,6 +40,7 @@ export type OrderPartSummary = {
   good: number;
   reprint: number;
   remaining: number;
+  itemGroups: OrderPartItemGroupSummary[];
 };
 
 type PartsResponse = {
@@ -53,6 +65,20 @@ function statusLabel(status: string): string {
   }
 }
 
+export function formatPartsBadge(summary: OrderPartSummary): string {
+  if (summary.remaining === 0) {
+    return `${summary.good}/${summary.total} parts done`;
+  }
+  const groups = summary.itemGroups ?? [];
+  if (groups.length >= 2) {
+    const open = groups.filter((group) => group.remaining > 0);
+    if (open.length === 0) return `${summary.good}/${summary.total} parts done`;
+    const label = open.map((group) => `${group.itemGroup} ${group.remaining}`).join(" · ");
+    return label.length > 42 ? `${label.slice(0, 40)}…` : label;
+  }
+  return `${summary.remaining} parts left`;
+}
+
 export function OrderPartsDialog({
   dealId,
   dealName,
@@ -68,6 +94,7 @@ export function OrderPartsDialog({
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filter, setFilter] = useState("");
+  const [itemName, setItemName] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
   const partsQuery = useQuery<PartsResponse>({
@@ -87,6 +114,7 @@ export function OrderPartsDialog({
   useEffect(() => {
     if (!open) {
       setFilter("");
+      setItemName("");
       setNote(null);
     }
   }, [open]);
@@ -94,18 +122,23 @@ export function OrderPartsDialog({
   const importParts = useMutation({
     mutationFn: async (files: File[]) => {
       const collected = await collectKitFilesFromFileList(files);
-      const fileNames = collected.imports.map((item) => item.fileName);
-      if (fileNames.length === 0) {
+      const parts = collected.imports.map((item) => ({
+        fileName: item.fileName,
+        relativePath: item.relativePath,
+        archivePath: item.archivePath,
+      }));
+      if (parts.length === 0) {
         throw new Error(
           collected.unsupportedArchives.length > 0
             ? `No .stl files found. ${collected.unsupportedArchives.slice(0, 2).join("; ")}`
             : "No .stl files found. Drop a kit folder or .zip of parts.",
         );
       }
+      const defaultItemGroup = itemName.trim() || undefined;
       const response = await apiRequest(
         "POST",
         `/api/orders/${encodeURIComponent(dealId!)}/parts/import`,
-        { fileNames, dealName },
+        { parts, dealName, defaultItemGroup },
         { headers },
       );
       return (await response.json()) as PartsResponse;
@@ -113,11 +146,19 @@ export function OrderPartsDialog({
     onSuccess: (body) => {
       queryClient.setQueryData(["/api/orders", dealId, "parts"], body);
       queryClient.invalidateQueries({ queryKey: ["/api/order-parts/summaries"] });
+      const groups = body.summary.itemGroups ?? [];
+      const groupNote =
+        groups.length >= 2
+          ? ` across ${groups.length} items (${groups.map((g) => g.itemGroup).join(", ")})`
+          : groups[0]?.itemGroup && groups[0].itemGroup !== "Kit"
+            ? ` under “${groups[0].itemGroup}”`
+            : "";
       setNote(
         body.added
-          ? `Added ${body.added} part${body.added === 1 ? "" : "s"} to this order.`
+          ? `Added ${body.added} part${body.added === 1 ? "" : "s"} to this order${groupNote}.`
           : "Those parts were already on this order.",
       );
+      setItemName("");
     },
     onError: (error: Error) => {
       setNote(error.message.replace(/^\d+:\s*/, ""));
@@ -184,9 +225,25 @@ export function OrderPartsDialog({
     const q = filter.trim().toLowerCase();
     if (!q) return parts;
     return parts.filter(
-      (part) => part.label.toLowerCase().includes(q) || part.fileName.toLowerCase().includes(q),
+      (part) =>
+        part.label.toLowerCase().includes(q) ||
+        part.fileName.toLowerCase().includes(q) ||
+        (part.itemGroup || "").toLowerCase().includes(q),
     );
   }, [parts, filter]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, OrderPart[]>();
+    for (const part of visible) {
+      const key = (part.itemGroup || "Kit").trim() || "Kit";
+      const list = map.get(key) ?? [];
+      list.push(part);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [visible]);
+
+  const showGroupHeaders = (summary?.itemGroups?.length ?? 0) >= 2 || grouped.length >= 2;
 
   const busy =
     importParts.isPending || patchStatus.isPending || removePart.isPending || clearAll.isPending;
@@ -200,8 +257,8 @@ export function OrderPartsDialog({
         <DialogHeader>
           <DialogTitle data-testid="text-order-parts-title">Parts for this order</DialogTitle>
           <DialogDescription>
-            {dealName}. Import the full kit once. As you drop STLs onto attached plates in Prints,
-            those parts move off the needed list until everything is accounted for.
+            {dealName}. Import each product kit once. As you drop STLs onto attached plates in
+            Prints, those parts move off the needed list until everything is accounted for.
           </DialogDescription>
         </DialogHeader>
 
@@ -218,78 +275,104 @@ export function OrderPartsDialog({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept=".stl,.zip,model/stl,application/zip"
-            multiple
-            // @ts-expect-error webkitdirectory is supported in Chromium
-            webkitdirectory=""
-            onChange={(event) => {
-              const files = Array.from(event.target.files || []);
-              event.target.value = "";
-              if (files.length) importParts.mutate(files);
-            }}
-            data-testid="input-order-parts-folder"
+        {summary && (summary.itemGroups?.length ?? 0) >= 2 ? (
+          <div className="flex flex-wrap gap-1.5" data-testid="panel-order-parts-items">
+            {summary.itemGroups.map((group) => (
+              <span
+                key={group.itemGroup}
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
+                  group.remaining === 0
+                    ? "border-chart-4/30 bg-chart-4/10 text-chart-4"
+                    : "border-border bg-muted text-muted-foreground",
+                )}
+              >
+                {group.itemGroup}: {group.remaining === 0 ? "done" : `${group.remaining} left`}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <Input
+            value={itemName}
+            onChange={(event) => setItemName(event.target.value)}
+            placeholder="Item name (optional — set when adding a second product)"
+            data-testid="input-order-parts-item-name"
           />
-          <input
-            type="file"
-            className="hidden"
-            id="order-parts-zip"
-            accept=".stl,.zip,model/stl,application/zip"
-            multiple
-            onChange={(event) => {
-              const files = Array.from(event.target.files || []);
-              event.target.value = "";
-              if (files.length) importParts.mutate(files);
-            }}
-            data-testid="input-order-parts-zip"
-          />
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || !dealId}
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="button-import-order-parts-folder"
-          >
-            {importParts.isPending ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Import kit folder
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !dealId}
-            onClick={() => document.getElementById("order-parts-zip")?.click()}
-            data-testid="button-import-order-parts-zip"
-          >
-            Import zip / STLs
-          </Button>
-          {dealId ? (
-            <Button asChild type="button" size="sm" variant="ghost">
-              <Link href={printsDealHref(dealId)} data-testid="link-order-parts-prints">
-                Open Prints
-              </Link>
-            </Button>
-          ) : null}
-          {parts.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".stl,.zip,model/stl,application/zip"
+              multiple
+              // @ts-expect-error webkitdirectory is supported in Chromium
+              webkitdirectory=""
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = "";
+                if (files.length) importParts.mutate(files);
+              }}
+              data-testid="input-order-parts-folder"
+            />
+            <input
+              type="file"
+              className="hidden"
+              id="order-parts-zip"
+              accept=".stl,.zip,model/stl,application/zip"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = "";
+                if (files.length) importParts.mutate(files);
+              }}
+              data-testid="input-order-parts-zip"
+            />
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => clearAll.mutate()}
-              data-testid="button-clear-order-parts"
+              disabled={busy || !dealId}
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-import-order-parts-folder"
             >
-              Clear list
+              {importParts.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Upload className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Import kit folder
             </Button>
-          ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy || !dealId}
+              onClick={() => document.getElementById("order-parts-zip")?.click()}
+              data-testid="button-import-order-parts-zip"
+            >
+              Import zip / STLs
+            </Button>
+            {dealId ? (
+              <Button asChild type="button" size="sm" variant="ghost">
+                <Link href={printsDealHref(dealId)} data-testid="link-order-parts-prints">
+                  Open Prints
+                </Link>
+              </Button>
+            ) : null}
+            {parts.length > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => clearAll.mutate()}
+                data-testid="button-clear-order-parts"
+              >
+                Clear list
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {note ? (
@@ -305,7 +388,8 @@ export function OrderPartsDialog({
             <Package className="mx-auto h-5 w-5 text-muted-foreground" />
             <p className="mt-2 text-sm font-medium">No parts list yet</p>
             <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-              Import the kit folder or zip for this client order. Then attach plates and drop the
+              Import the kit folder or zip for this client order. For multi-item orders, import each
+              product separately (optionally name the item above). Then attach plates and drop the
               STLs that were on each plate — they subtract from this list.
             </p>
           </div>
@@ -317,50 +401,69 @@ export function OrderPartsDialog({
               placeholder="Filter parts"
               data-testid="input-order-parts-filter"
             />
-            <ul className="max-h-[24rem] space-y-1 overflow-y-auto" data-testid="list-order-parts">
-              {visible.map((part) => (
-                <li
-                  key={part.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/80 px-2.5 py-1.5 text-sm"
-                  data-testid={`row-order-part-${part.id}`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{part.label}</p>
-                    <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-                      {statusLabel(part.status)}
+            <ul className="max-h-[24rem] space-y-3 overflow-y-auto" data-testid="list-order-parts">
+              {grouped.map(([groupName, groupParts]) => (
+                <li key={groupName} className="space-y-1">
+                  {showGroupHeaders ? (
+                    <p
+                      className="sticky top-0 z-10 bg-background/95 px-0.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
+                      data-testid={`heading-order-parts-${groupName}`}
+                    >
+                      {groupName}
+                      <span className="ml-1.5 font-normal normal-case tracking-normal">
+                        ({groupParts.length})
+                      </span>
                     </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={part.status === "good" ? "default" : "outline"}
-                      disabled={busy}
-                      onClick={() => patchStatus.mutate({ partId: part.id, status: "good" })}
-                    >
-                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                      Good
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={part.status === "reprint" ? "default" : "outline"}
-                      disabled={busy}
-                      onClick={() => patchStatus.mutate({ partId: part.id, status: "reprint" })}
-                    >
-                      <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                      Reprint
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => removePart.mutate(part.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  ) : null}
+                  <ul className="space-y-1">
+                    {groupParts.map((part) => (
+                      <li
+                        key={part.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/80 px-2.5 py-1.5 text-sm"
+                        data-testid={`row-order-part-${part.id}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{part.label}</p>
+                          <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+                            {statusLabel(part.status)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={part.status === "good" ? "default" : "outline"}
+                            disabled={busy}
+                            onClick={() => patchStatus.mutate({ partId: part.id, status: "good" })}
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Good
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={part.status === "reprint" ? "default" : "outline"}
+                            disabled={busy}
+                            onClick={() =>
+                              patchStatus.mutate({ partId: part.id, status: "reprint" })
+                            }
+                          >
+                            <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                            Reprint
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => removePart.mutate(part.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>

@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS order_parts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   hubspot_deal_id TEXT NOT NULL,
   hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  item_group TEXT NOT NULL DEFAULT 'Kit',
   file_name TEXT NOT NULL,
   label TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'needed',
@@ -174,11 +175,52 @@ CREATE TABLE IF NOT EXISTS order_parts (
   print_plate_bit_id INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (hubspot_deal_id, file_name)
+  UNIQUE (hubspot_deal_id, item_group, file_name)
 );
 CREATE INDEX IF NOT EXISTS order_parts_deal_idx
   ON order_parts (hubspot_deal_id, status);
 `;
+
+/** Upgrade early order_parts tables that lacked item_group / used the old unique key. */
+function ensureOrderPartsSchema(sqlite: Database.Database): void {
+  const table = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'order_parts'")
+    .get() as { name: string } | undefined;
+  if (!table) return;
+
+  const columns = (
+    sqlite.prepare("PRAGMA table_info(order_parts)").all() as Array<{ name: string }>
+  ).map((row) => row.name);
+  if (columns.includes("item_group")) return;
+
+  sqlite.exec(`
+    CREATE TABLE order_parts_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hubspot_deal_id TEXT NOT NULL,
+      hubspot_deal_name TEXT NOT NULL DEFAULT '',
+      item_group TEXT NOT NULL DEFAULT 'Kit',
+      file_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'needed',
+      print_file_record_id INTEGER,
+      print_plate_bit_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (hubspot_deal_id, item_group, file_name)
+    );
+    INSERT INTO order_parts_v2 (
+      id, hubspot_deal_id, hubspot_deal_name, item_group, file_name, label, status,
+      print_file_record_id, print_plate_bit_id, created_at, updated_at
+    )
+    SELECT
+      id, hubspot_deal_id, hubspot_deal_name, 'Kit', file_name, label, status,
+      print_file_record_id, print_plate_bit_id, created_at, updated_at
+    FROM order_parts;
+    DROP TABLE order_parts;
+    ALTER TABLE order_parts_v2 RENAME TO order_parts;
+    CREATE INDEX IF NOT EXISTS order_parts_deal_idx ON order_parts (hubspot_deal_id, status);
+  `);
+}
 
 const CREATE_RESIN_PROFILES_SQL = `
 CREATE TABLE IF NOT EXISTS resin_profiles (
@@ -416,6 +458,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
   sqlite.exec(CREATE_PRINT_PLATE_BITS_SQL);
   sqlite.exec(CREATE_ORDER_PARTS_SQL);
+  ensureOrderPartsSchema(sqlite);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   sqlite.exec(CREATE_PRINTERS_SQL);
   sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);

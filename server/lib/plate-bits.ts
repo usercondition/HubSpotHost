@@ -11,6 +11,9 @@ import {
 } from "../../shared/schema";
 import { getDb } from "./order-links";
 import {
+  inferItemGroupFromPath,
+  listOrderParts,
+  normalizeItemGroup,
   releaseOrderPartFromDeletedPlateBit,
   syncOrderPartFromPlateBitStatus,
   syncOrderPartsFromPlateBits,
@@ -32,6 +35,40 @@ function normalizeStlFileName(raw: string): string | null {
   const name = baseName(raw).trim();
   if (!name || !/\.stl$/i.test(name)) return null;
   return name;
+}
+
+/**
+ * Soft item hint for plate drops. Prefer explicit / zip names, or a path
+ * segment that already matches an order item — never invent Head/Legs groups.
+ */
+function resolvePlateItemHint(
+  entry: {
+    fileName: string;
+    itemGroup?: string;
+    relativePath?: string;
+    archivePath?: string;
+  },
+  existingGroups: Set<string>,
+): string | undefined {
+  if (entry.itemGroup?.trim()) return entry.itemGroup.trim();
+
+  const inferred = inferItemGroupFromPath(
+    entry.relativePath || entry.fileName,
+    entry.archivePath,
+  ).trim();
+  if (!inferred) return undefined;
+
+  if (entry.archivePath?.trim()) return inferred;
+  if (existingGroups.has(inferred.toLowerCase())) return inferred;
+
+  const segments = (entry.relativePath || "")
+    .split(/[/\\]/)
+    .map((segment) => segment.replace(/\.zip$/i, "").replace(/@.*$/, "").trim())
+    .filter(Boolean);
+  for (const segment of segments) {
+    if (existingGroups.has(segment.toLowerCase())) return segment;
+  }
+  return undefined;
 }
 
 export function listBitsForRecord(printFileRecordId: number): PrintPlateBit[] {
@@ -78,7 +115,14 @@ export function summarizeBits(bits: PrintPlateBit[]): {
 
 export function addBitsToRecord(
   printFileRecordId: number,
-  fileNames: string[],
+  input:
+    | string[]
+    | Array<{
+        fileName: string;
+        itemGroup?: string;
+        relativePath?: string;
+        archivePath?: string;
+      }>,
 ): { ok: true; bits: PrintPlateBit[]; added: number } | { ok: false; error: string } {
   if (!Number.isInteger(printFileRecordId) || printFileRecordId < 1) {
     return { ok: false, error: "Choose a valid plate." };
@@ -94,18 +138,28 @@ export function addBitsToRecord(
     .get();
   if (!record) return { ok: false, error: "That plate was not found." };
 
+  const entries = (Array.isArray(input) ? input : []).map((row) =>
+    typeof row === "string" ? { fileName: row } : row,
+  );
+  const existingGroups = new Set(
+    listOrderParts(record.hubspotDealId).map((part) => normalizeItemGroup(part.itemGroup).toLowerCase()),
+  );
+
   const existingKeys = new Set(
     listBitsForRecord(printFileRecordId).map((bit) => bit.fileName.toLowerCase()),
   );
   const droppedKeys = new Set<string>();
+  const itemHints: Record<string, string> = {};
   const stamp = nowIso();
   let added = 0;
 
-  for (const raw of fileNames) {
-    const fileName = normalizeStlFileName(raw);
+  for (const entry of entries) {
+    const fileName = normalizeStlFileName(entry.fileName);
     if (!fileName) continue;
     const key = fileName.toLowerCase();
     droppedKeys.add(key);
+    const hint = resolvePlateItemHint(entry, existingGroups);
+    if (hint) itemHints[key] = hint;
     if (existingKeys.has(key)) continue;
     existingKeys.add(key);
     getDb()
@@ -122,8 +176,8 @@ export function addBitsToRecord(
     added += 1;
   }
 
-  if (added === 0 && fileNames.length > 0) {
-    const hadStl = fileNames.some((name) => Boolean(normalizeStlFileName(name)));
+  if (added === 0 && entries.length > 0) {
+    const hadStl = entries.some((entry) => Boolean(normalizeStlFileName(entry.fileName)));
     if (!hadStl) return { ok: false, error: "Drop .stl files (part files), not the CTB." };
   }
 
@@ -134,6 +188,7 @@ export function addBitsToRecord(
       hubspotDealName: record.hubspotDealName,
       printFileRecordId,
       bits: bits.filter((bit) => droppedKeys.has(bit.fileName.toLowerCase())),
+      itemHints,
     });
   }
 
