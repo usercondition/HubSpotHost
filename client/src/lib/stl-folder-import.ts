@@ -147,18 +147,31 @@ async function extractStlsFromZip(
   summary: KitImportSummary,
   depth: number,
 ): Promise<void> {
-  if (depth > MAX_ZIP_DEPTH) return;
+  if (depth > MAX_ZIP_DEPTH) {
+    rememberUnsupported(summary, `${archivePath} (nested too deep)`);
+    return;
+  }
   if (zipFile.size > MAX_ZIP_BYTES) {
     rememberUnsupported(summary, `${archivePath} (too large)`);
+    return;
+  }
+  if (zipFile.size === 0) {
+    rememberUnsupported(summary, `${archivePath} (empty file)`);
     return;
   }
 
   let entries: Record<string, Uint8Array>;
   try {
     const bytes = new Uint8Array(await zipFile.arrayBuffer());
+    if (bytes.byteLength < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+      rememberUnsupported(summary, `${archivePath} (not a zip file)`);
+      return;
+    }
+    // Do not use unzipSync filter — fflate throws on store/LZMA entries when filtered.
     entries = unzipSync(bytes);
-  } catch {
-    rememberUnsupported(summary, `${archivePath} (could not open)`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "could not open";
+    rememberUnsupported(summary, `${archivePath} (${reason})`);
     return;
   }
 
@@ -166,13 +179,19 @@ async function extractStlsFromZip(
     summary.archivesOpened.push(archivePath);
   }
 
+  let stlOrZipSeen = 0;
   for (const [entryPath, data] of Object.entries(entries)) {
-    if (!data || entryPath.endsWith("/")) continue;
-    const fileName = baseName(entryPath);
-    const relativePath = `${archivePath}/${entryPath}`.replace(/\/+/g, "/");
+    if (!data) continue;
+    const normalized = entryPath.replace(/\\/g, "/");
+    if (normalized.endsWith("/")) continue;
+    if (normalized.startsWith("__MACOSX/") || normalized.includes("/__MACOSX/")) continue;
+    const fileName = baseName(normalized);
+    const relativePath = `${archivePath}/${normalized}`.replace(/\/+/g, "/");
 
     if (isStlFileName(fileName)) {
-      const file = new File([data], fileName, { type: "model/stl" });
+      stlOrZipSeen += 1;
+      const copy = new Uint8Array(data);
+      const file = new File([copy], fileName, { type: "model/stl" });
       addImport(summary, {
         fileName,
         relativePath,
@@ -185,7 +204,9 @@ async function extractStlsFromZip(
     }
 
     if (isZipFileName(fileName)) {
-      const nested = new File([data], fileName, { type: "application/zip" });
+      stlOrZipSeen += 1;
+      const copy = new Uint8Array(data);
+      const nested = new File([copy], fileName, { type: "application/zip" });
       await extractStlsFromZip(nested, relativePath, summary, depth + 1);
       continue;
     }
@@ -193,6 +214,10 @@ async function extractStlsFromZip(
     if (isUnsupportedArchiveName(fileName)) {
       rememberUnsupported(summary, relativePath);
     }
+  }
+
+  if (stlOrZipSeen === 0 && summary.imports.every((row) => row.archivePath !== archivePath)) {
+    rememberUnsupported(summary, `${archivePath} (no .stl files inside)`);
   }
 }
 
@@ -287,17 +312,16 @@ export function inferKitNameFromImports(imports: ImportedStlFile[]): string {
 
 export function formatKitImportNote(summary: KitImportSummary, kitName: string): string {
   if (summary.imports.length === 0) {
-    const unsupported =
-      summary.unsupportedArchives.length > 0
-        ? ` Found unsupported archive(s): ${summary.unsupportedArchives.slice(0, 3).join(", ")}${
-            summary.unsupportedArchives.length > 3 ? "…" : ""
-          }. Use .zip (or loose .stl folders).`
-        : "";
-    return `No .stl files found in folders or .zip archives.${unsupported}`;
+    if (summary.unsupportedArchives.length > 0) {
+      return `Could not load parts. ${summary.unsupportedArchives
+        .slice(0, 4)
+        .join("; ")}${summary.unsupportedArchives.length > 4 ? "…" : ""}. Use a .zip (or a folder of .stl files).`;
+    }
+    return "No .stl files found. Choose a folder that contains .stl parts, or a .zip of those parts.";
   }
 
   const parts: string[] = [
-    `Loaded ${summary.imports.length} bit${summary.imports.length === 1 ? "" : "s"} from “${kitName}”`,
+    `Loaded ${summary.imports.length} part${summary.imports.length === 1 ? "" : "s"} from “${kitName}”`,
   ];
   if (summary.looseStlCount > 0 && summary.zipStlCount > 0) {
     parts.push(`${summary.looseStlCount} from folders, ${summary.zipStlCount} from zip`);
@@ -323,11 +347,11 @@ export function formatKitImportNote(summary: KitImportSummary, kitName: string):
   if (summary.duplicatesSkipped > 0) {
     parts.push(`skipped ${summary.duplicatesSkipped} duplicate name${summary.duplicatesSkipped === 1 ? "" : "s"}`);
   }
-  let note = `${parts.join(" · ")}. Select bits that still need printing, then make a plate.`;
+  let note = `${parts.join(" · ")}. Select parts that still need printing, then make a plate.`;
   if (summary.unsupportedArchives.length > 0) {
-    note += ` Unsupported (not opened): ${summary.unsupportedArchives
+    note += ` Skipped: ${summary.unsupportedArchives
       .slice(0, 4)
-      .join(", ")}${summary.unsupportedArchives.length > 4 ? "…" : ""} — convert to .zip if needed.`;
+      .join(", ")}${summary.unsupportedArchives.length > 4 ? "…" : ""}.`;
   }
   return note;
 }
