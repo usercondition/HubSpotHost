@@ -15,6 +15,10 @@ export function printsDealHref(dealId: string): string {
   return `/prints?dealId=${encodeURIComponent(dealId)}`;
 }
 
+export function kitsDealHref(dealId: string): string {
+  return `/kit-dry-run?dealId=${encodeURIComponent(dealId)}`;
+}
+
 export function hubspotAppHref(): string {
   return "https://app.hubspot.com/";
 }

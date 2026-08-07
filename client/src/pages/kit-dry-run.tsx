@@ -1,7 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  ExternalLink,
   FolderOpen,
+  Link2,
   Package,
   RotateCcw,
   Search,
@@ -12,12 +16,17 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import { StlPreview } from "@/components/stl-preview";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { printsDealHref, readHashQueryParam } from "@/lib/workflow";
 import {
+  bindKitToDeal,
   buildKitBitsFromFileNames,
   createKitFromBits,
   createPlate,
   createSampleKit,
+  emptyKitForDeal,
   groupSummaries,
   inventory,
   isPrintable,
@@ -28,6 +37,7 @@ import {
   type KitBit,
   type KitTracker,
 } from "@/lib/kit-dry-run";
+import { loadKitFromStorage, saveKitToStorage } from "@/lib/kit-persistence";
 import {
   collectKitFilesFromDataTransfer,
   collectKitFilesFromFileList,
@@ -35,6 +45,13 @@ import {
   inferKitNameFromImports,
   type KitImportSummary,
 } from "@/lib/stl-folder-import";
+import type { PrintFileCandidateDeal, PrintFileRecord } from "@shared/schema";
+
+type PrintsListResponse = {
+  ok: true;
+  candidates: PrintFileCandidateDeal[];
+  records: PrintFileRecord[];
+};
 
 function statusLabel(bit: KitBit, plateName?: string | null): string {
   switch (bit.status) {
@@ -61,26 +78,78 @@ function plateStatusMessage(
 }
 
 /**
- * Simple kit tracker: inventory of bits + plates.
- * Select what still needs printing → make a plate → mark good or reprint.
+ * Kit tracker bound to a HubSpot Print Order (or local sample).
+ * Import STL kit → select bits → make plate (optional real CTB attach) → QC.
  */
 export default function KitDryRunPage() {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const zipInputRef = useRef<HTMLInputElement | null>(null);
-  const [kit, setKit] = useState<KitTracker>(() => createSampleKit());
+  const ctbInputRef = useRef<HTMLInputElement | null>(null);
+  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: "Kits unlocked",
+    successDescription: "Bind kits to open Print Orders and attach CTB plates from here.",
+  });
+
+  const [kit, setKit] = useState<KitTracker>(() => {
+    const dealId = readHashQueryParam("dealId");
+    if (dealId) {
+      return loadKitFromStorage(dealId) ?? emptyKitForDeal({ dealId, dealName: `Print Order ${dealId}` });
+    }
+    return loadKitFromStorage(null) ?? createSampleKit();
+  });
   const [groupFilter, setGroupFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [plateName, setPlateName] = useState("Plate 1");
   const [ctbFileName, setCtbFileName] = useState("Acastus_P1.ctb");
+  const [ctbFile, setCtbFile] = useState<File | null>(null);
+  const [attachBusy, setAttachBusy] = useState(false);
   const [activePlateId, setActivePlateId] = useState<string | null>(null);
   const [stlByBitId, setStlByBitId] = useState<Record<string, File>>({});
   const [previewBitId, setPreviewBitId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [note, setNote] = useState<string | null>(
-    "Drop a kit folder or .zip (subfolders and zips inside are opened). Previews stay in this tab.",
+    "Pick a Print Order (or use Sample), import the STL kit, then make plates. Progress saves in this browser.",
   );
+
+  const prints = useQuery<PrintsListResponse>({
+    queryKey: ["/api/prints", ownerCode, "kits"],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/prints?includeAttached=true", undefined, { headers });
+      return (await response.json()) as PrintsListResponse;
+    },
+  });
+
+  useEffect(() => {
+    saveKitToStorage(kit);
+  }, [kit]);
+
+  useEffect(() => {
+    const applyDealFromHash = () => {
+      const dealId = readHashQueryParam("dealId");
+      if (!dealId) return;
+      setKit((current) => {
+        if (current.hubspotDealId === dealId) return current;
+        const saved = loadKitFromStorage(dealId);
+        if (saved) return saved;
+        const candidate = prints.data?.candidates.find((row) => row.dealId === dealId);
+        return emptyKitForDeal({
+          dealId,
+          dealName: candidate?.dealName || `Print Order ${dealId}`,
+        });
+      });
+    };
+    applyDealFromHash();
+    window.addEventListener("hashchange", applyDealFromHash);
+    return () => window.removeEventListener("hashchange", applyDealFromHash);
+  }, [prints.data?.candidates]);
+
+  const updateKit = (next: KitTracker) => {
+    setKit({ ...next, updatedAt: new Date().toISOString() });
+  };
 
   const counts = inventory(kit);
   const groups = groupSummaries(kit);
@@ -93,6 +162,7 @@ export default function KitDryRunPage() {
   const plateBanner = activePlate
     ? plateStatusMessage(activePlate.name, activePlateBits.length, activeAwaitingQc)
     : null;
+  const dealBound = Boolean(kit.hubspotDealId);
 
   const visibleBits = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -105,6 +175,26 @@ export default function KitDryRunPage() {
 
   const printableVisible = visibleBits.filter(isPrintable);
   const selectedCount = printableVisible.filter((bit) => selected.has(bit.id)).length;
+
+  const selectDeal = (deal: PrintFileCandidateDeal) => {
+    const saved = loadKitFromStorage(deal.dealId);
+    if (saved) {
+      updateKit(bindKitToDeal(saved, { dealId: deal.dealId, dealName: deal.dealName }));
+      setNote(`Loaded saved kit for ${deal.dealName}.`);
+    } else if (kit.bits.length > 0 && !kit.hubspotDealId) {
+      updateKit(bindKitToDeal(kit, { dealId: deal.dealId, dealName: deal.dealName }));
+      setNote(`Bound current kit to ${deal.dealName}. Import/CTB attach will use this Print Order.`);
+    } else {
+      updateKit(emptyKitForDeal({ dealId: deal.dealId, dealName: deal.dealName }));
+      setStlByBitId({});
+      setNote(`Selected ${deal.dealName}. Import the STL kit folder or zip for this order.`);
+    }
+    setSelected(new Set());
+    setActivePlateId(null);
+    setPreviewBitId(null);
+    setCtbFile(null);
+    window.location.hash = `#/kit-dry-run?dealId=${encodeURIComponent(deal.dealId)}`;
+  };
 
   const applyImport = (summary: KitImportSummary) => {
     const { imports } = summary;
@@ -123,7 +213,12 @@ export default function KitDryRunPage() {
       const file = fileByName.get(bit.fileName.toLowerCase());
       if (file) nextFiles[bit.id] = file;
     }
-    setKit(createKitFromBits(kitName, bits));
+    updateKit(
+      createKitFromBits(kitName, bits, {
+        hubspotDealId: kit.hubspotDealId,
+        hubspotDealName: kit.hubspotDealName,
+      }),
+    );
     setStlByBitId(nextFiles);
     setSelected(new Set());
     setActivePlateId(null);
@@ -131,6 +226,7 @@ export default function KitDryRunPage() {
     setPreviewBitId(bits[0]?.id ?? null);
     setPlateName("Plate 1");
     setCtbFileName(`${kitName.replace(/[^\w]+/g, "_").slice(0, 28)}_P1.ctb`);
+    setCtbFile(null);
     setNote(formatKitImportNote(summary, kitName));
   };
 
@@ -161,24 +257,67 @@ export default function KitDryRunPage() {
     });
   };
 
-  const makePlate = () => {
+  const makePlate = async () => {
+    if (selectedCount === 0) {
+      setNote("Select at least one bit that still needs printing.");
+      return;
+    }
+
+    let nextCtbName = ctbFile?.name || ctbFileName;
+    let printFileRecordId: number | null = null;
+
+    if (ctbFile && kit.hubspotDealId) {
+      if (!isUnlocked) {
+        setNote("Unlock owner tools to attach this CTB to the Print Order.");
+        return;
+      }
+      setAttachBusy(true);
+      try {
+        const form = new FormData();
+        form.append("file", ctbFile);
+        const analyzed = await apiRequest("POST", "/api/prints/analyze", form, { headers });
+        const staged = (await analyzed.json()) as { ok: true; analysisId: string };
+        const attached = await apiRequest(
+          "POST",
+          "/api/prints/attach",
+          { analysisId: staged.analysisId, dealId: kit.hubspotDealId },
+          { headers },
+        );
+        const body = (await attached.json()) as { ok: true; record: PrintFileRecord; message: string };
+        nextCtbName = body.record.fileName;
+        printFileRecordId = body.record.id;
+        queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      } catch (error) {
+        setNote(error instanceof Error ? error.message.replace(/^\d+:\s*/, "") : "Could not attach CTB to HubSpot");
+        setAttachBusy(false);
+        return;
+      } finally {
+        setAttachBusy(false);
+      }
+    }
+
     const result = createPlate(kit, {
       name: plateName,
-      ctbFileName,
+      ctbFileName: nextCtbName,
       bitIds: Array.from(selected),
+      printFileRecordId,
     });
     if (!result.ok) {
       setNote(result.error);
       return;
     }
-    setKit(result.kit);
+    updateKit(result.kit);
     setSelected(new Set());
     setActivePlateId(result.plateId);
     setPlateName(`Plate ${result.kit.plates.length + 1}`);
+    setCtbFile(null);
     const created = result.kit.plates.find((plate) => plate.id === result.plateId);
     setNote(
       created
-        ? `Created ${created.name} with ${created.bitIds.length} bits.`
+        ? printFileRecordId
+          ? `Created ${created.name} with ${created.bitIds.length} bits and attached ${created.ctbFileName} to HubSpot.`
+          : `Created ${created.name} with ${created.bitIds.length} bits.`
         : "Plate created.",
     );
   };
@@ -196,10 +335,10 @@ export default function KitDryRunPage() {
     <div data-testid="page-kit-dry-run">
       <PageHeader
         title="Kits"
-        subtitle="Import nested kit folders and .zip archives, then track bits plate by plate."
+        subtitle="Bind a Print Order, import the STL kit, make plates (with optional CTB attach), then QC bits."
         actions={
           <StatusPill
-            tone={counts.remaining === 0 ? "good" : "warn"}
+            tone={counts.remaining === 0 && counts.total > 0 ? "good" : "warn"}
             icon={Package}
             label={`${counts.good}/${counts.total} good · ${counts.remaining} left`}
             testId="status-kit-inventory"
@@ -208,6 +347,73 @@ export default function KitDryRunPage() {
       />
 
       <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock Kits"
+            description="Owner code unlocks Print Order binding and live CTB attach. Sample kits work without it."
+            buttonLabel="Unlock Kits"
+            testIdPrefix="kits"
+            pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
+          />
+        ) : null}
+
+        <section className="rounded-md border border-card-border bg-card p-4" data-testid="panel-kit-deal">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="rule-label">Print Order</p>
+              <h2 className="mt-1 text-base font-semibold tracking-tight">
+                {dealBound ? kit.hubspotDealName || kit.name : "Local sample / unbound kit"}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {dealBound
+                  ? "Kit progress is saved for this deal in this browser. Making a plate with a CTB file also attaches it in HubSpot."
+                  : "Select an open Print Order to bind this kit, or keep working on the sample."}
+              </p>
+            </div>
+            {dealBound ? (
+              <Link
+                href={printsDealHref(kit.hubspotDealId!)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                data-testid="link-kit-open-prints"
+              >
+                Open Print files
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            ) : null}
+          </div>
+
+          {isUnlocked ? (
+            <div className="mt-3 flex flex-wrap gap-2" data-testid="list-kit-deal-candidates">
+              {(prints.data?.candidates ?? []).slice(0, 12).map((deal) => {
+                const active = kit.hubspotDealId === deal.dealId;
+                return (
+                  <Button
+                    key={deal.dealId}
+                    type="button"
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    onClick={() => selectDeal(deal)}
+                    data-testid={`button-kit-deal-${deal.dealId}`}
+                  >
+                    <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                    <span className="max-w-[14rem] truncate">{deal.dealName}</span>
+                    <span className="ml-1.5 text-[0.65rem] opacity-80">{deal.stage}</span>
+                  </Button>
+                );
+              })}
+              {prints.isLoading ? (
+                <p className="text-xs text-muted-foreground">Loading Print Orders…</p>
+              ) : null}
+              {!prints.isLoading && (prints.data?.candidates.length ?? 0) === 0 ? (
+                <p className="text-xs text-muted-foreground">No open Print Orders found.</p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">Unlock to list open Print Orders from HubSpot.</p>
+          )}
+        </section>
+
         {plateBanner ? (
           <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="text-kit-note">
             {plateBanner}
@@ -315,12 +521,14 @@ export default function KitDryRunPage() {
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  setKit(createSampleKit());
+                  updateKit(createSampleKit());
                   setStlByBitId({});
                   setSelected(new Set());
                   setActivePlateId(null);
                   setPreviewBitId(null);
-                  setNote("Reset to Acastus sample kit.");
+                  setCtbFile(null);
+                  setNote("Reset to Acastus sample kit (unbound from HubSpot).");
+                  window.location.hash = "#/kit-dry-run";
                 }}
                 data-testid="button-reset-sample-kit"
               >
@@ -438,27 +646,62 @@ export default function KitDryRunPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium" htmlFor="ctb-name">
-                    CTB file (optional)
+                    {dealBound ? "CTB file (attach on make)" : "CTB file name (optional)"}
                   </label>
-                  <Input
-                    id="ctb-name"
-                    value={ctbFileName}
-                    onChange={(event) => setCtbFileName(event.target.value)}
-                    data-testid="input-ctb-name"
-                  />
+                  {dealBound ? (
+                    <>
+                      <input
+                        ref={ctbInputRef}
+                        type="file"
+                        className="hidden"
+                        accept=".ctb,.ultx,application/octet-stream"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] ?? null;
+                          event.target.value = "";
+                          setCtbFile(file);
+                          if (file) setCtbFileName(file.name);
+                        }}
+                        data-testid="input-kit-ctb-file"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="w-full justify-start"
+                        onClick={() => ctbInputRef.current?.click()}
+                        data-testid="button-choose-kit-ctb"
+                      >
+                        <Upload className="mr-1.5 h-3.5 w-3.5" />
+                        <span className="truncate">{ctbFile ? ctbFile.name : "Choose .ctb / .ultx"}</span>
+                      </Button>
+                    </>
+                  ) : (
+                    <Input
+                      id="ctb-name"
+                      value={ctbFileName}
+                      onChange={(event) => setCtbFileName(event.target.value)}
+                      data-testid="input-ctb-name"
+                    />
+                  )}
                 </div>
                 <div className="flex items-end">
                   <Button
                     type="button"
-                    disabled={selectedCount === 0}
-                    onClick={makePlate}
+                    disabled={selectedCount === 0 || attachBusy}
+                    onClick={() => void makePlate()}
                     data-testid="button-make-plate"
                   >
                     <Upload className="mr-1.5 h-3.5 w-3.5" />
-                    Make plate ({selectedCount})
+                    {attachBusy ? "Attaching…" : `Make plate (${selectedCount})`}
                   </Button>
                 </div>
               </div>
+              {dealBound ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  With a CTB selected, Make plate analyzes and attaches it to this Print Order, then logs the bits for QC.
+                  Without a CTB, only the bit plate is recorded locally.
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -517,7 +760,7 @@ export default function KitDryRunPage() {
                                   setNote(result.error);
                                   return;
                                 }
-                                setKit(result.kit);
+                                updateKit(result.kit);
                               }}
                               data-testid={`button-mark-good-${bit.id}`}
                             >
@@ -536,7 +779,7 @@ export default function KitDryRunPage() {
                                   setNote(result.error);
                                   return;
                                 }
-                                setKit(result.kit);
+                                updateKit(result.kit);
                                 setNote(`${bit.label} marked for reprint — select it for the next plate.`);
                               }}
                               data-testid={`button-mark-reprint-${bit.id}`}
@@ -560,7 +803,7 @@ export default function KitDryRunPage() {
                           setNote(result.error);
                           return;
                         }
-                        setKit(result.kit);
+                        updateKit(result.kit);
                         setNote(`Marked ${result.count} bits good on ${activePlate.name}.`);
                       }}
                       data-testid="button-mark-plate-all-good"
@@ -595,7 +838,10 @@ export default function KitDryRunPage() {
                         data-testid={`button-select-plate-${plate.id}`}
                       >
                         {plate.name}
-                        <span className="ml-2 text-xs text-muted-foreground">{plate.bitIds.length} bits</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {plate.bitIds.length} bits
+                          {plate.printFileRecordId ? " · HubSpot" : ""}
+                        </span>
                       </button>
                     </li>
                   ))}
