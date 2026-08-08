@@ -16,11 +16,15 @@
  *      - built-in Blueprint asset password `heygears008` (used by Studio UI zips;
  *        plate ULTX files usually use a Codex-derived password instead)
  * 3. Harvest print time / resin / exposure / machine keys from plaintext
- * 4. Fall back to ASCII scans for any unencrypted sidecar-style containers
- * 5. Infer a printer profile from the file name when the archive stays sealed
+ * 4. When the archive stays sealed, fill time/resin/layers from Blueprint
+ *    Slice.log `Output: {…}` / `material cost` lines (`ULTX_SLICE_LOG` file or
+ *    logs directory). Password is not logged in production Slice.log.
+ * 5. Fall back to ASCII scans for any unencrypted sidecar-style containers
+ * 6. Infer a printer profile from the file name when the archive stays sealed
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import zlib from "node:zlib";
 import type { PrintFileMetrics } from "../../shared/schema";
 
@@ -138,26 +142,215 @@ export function extractPasswordsFromSliceLog(text: string): string[] {
   return found;
 }
 
-function readSliceLogPasswords(): string[] {
-  const logPath = process.env.ULTX_SLICE_LOG?.trim();
-  if (!logPath) return [];
-  try {
-    if (!fs.existsSync(logPath)) return [];
-    // Slice.log can be large; only the trailing window is needed for recent passwords.
-    const stat = fs.statSync(logPath);
-    const maxBytes = 2 * 1024 * 1024;
-    const fd = fs.openSync(logPath, "r");
+/** Metrics Blueprint writes to Slice.log after a successful plate slice. */
+export interface SliceLogUltxMetrics {
+  sliceFileName: string;
+  uuid: string | null;
+  printTimeSeconds: number | null;
+  resinMassG: number | null;
+  resinVolumeMl: number | null;
+  layerCount: number | null;
+}
+
+const SLICE_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const MAX_SLICE_LOG_READ_BYTES = 8 * 1024 * 1024;
+
+function basenameLower(fileName: string): string {
+  return fileName.replace(/^.*[/\\]/, "").trim().toLowerCase();
+}
+
+function extractUuid(text: string): string | null {
+  const match = text.match(SLICE_UUID_RE);
+  return match ? match[0]!.toLowerCase() : null;
+}
+
+/**
+ * Parse Blueprint Slice.log for per-plate `Output: {…}` JSON and
+ * `material cost` / Techbag volume lines. Production logs include estimates
+ * but not the WinZip AES password.
+ */
+export function extractUltxMetricsFromSliceLog(text: string): SliceLogUltxMetrics[] {
+  type Acc = SliceLogUltxMetrics & { order: number };
+  const byKey = new Map<string, Acc>();
+  let order = 0;
+
+  const upsert = (partial: Partial<SliceLogUltxMetrics> & { sliceFileName?: string; uuid?: string | null }) => {
+    const uuid = partial.uuid?.toLowerCase() || extractUuid(partial.sliceFileName || "") || null;
+    const sliceFileName = partial.sliceFileName?.trim() || (uuid ? `Slice-${uuid}.ultx` : "");
+    if (!sliceFileName && !uuid) return;
+    const key = uuid || basenameLower(sliceFileName);
+    const prev = byKey.get(key);
+    // First non-null wins — Output JSON is parsed before material-cost ms lines so
+    // printEstimateTime (exact UI seconds) is not overwritten by round(ms/1000).
+    const next: Acc = {
+      sliceFileName: sliceFileName || prev?.sliceFileName || "",
+      uuid: uuid || prev?.uuid || null,
+      printTimeSeconds: prev?.printTimeSeconds ?? partial.printTimeSeconds ?? null,
+      resinMassG: prev?.resinMassG ?? partial.resinMassG ?? null,
+      resinVolumeMl: prev?.resinVolumeMl ?? partial.resinVolumeMl ?? null,
+      layerCount: prev?.layerCount ?? partial.layerCount ?? null,
+      order: prev?.order ?? order++,
+    };
+    if (partial.sliceFileName) next.sliceFileName = partial.sliceFileName.trim();
+    byKey.set(key, next);
+  };
+
+  for (const match of text.matchAll(/\[Slice\]\s*Output:\s*(\{[\s\S]*?\})(?:\||$)/gim)) {
+    const raw = match[1];
+    if (!raw) continue;
     try {
-      const size = Math.min(stat.size, maxBytes);
-      const buf = Buffer.alloc(size);
-      fs.readSync(fd, buf, 0, size, Math.max(0, stat.size - size));
-      return extractPasswordsFromSliceLog(buf.toString("utf8"));
-    } finally {
-      fs.closeSync(fd);
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const sliceFileName = typeof parsed.sliceFileName === "string" ? parsed.sliceFileName : "";
+      const uuid = extractUuid(sliceFileName) || extractUuid(String(parsed.previewFilePath ?? ""));
+      const printEstimateTime = asNumber(parsed.printEstimateTime);
+      const materials = asNumber(parsed.printEstimateMaterials);
+      const layers = asNumber(parsed.numberOfSlices);
+      // printEstimateTime is seconds (UI clock); ignore sliceTotalTime (slicer wall-clock ms).
+      upsert({
+        sliceFileName: sliceFileName || undefined,
+        uuid,
+        printTimeSeconds: printEstimateTime != null ? Math.round(printEstimateTime) : null,
+        resinMassG: materials != null ? reasonable(materials, 0.01, 100_000, 3) : null,
+        layerCount: layers != null ? Math.floor(layers) : null,
+      });
+    } catch {
+      /* ignore malformed Output JSON */
     }
-  } catch {
-    return [];
   }
+
+  for (const match of text.matchAll(
+    /\[Slice\]\s*material\s+cost:\s*(\d+(?:\.\d+)?)\s*g\s*,\s*print\s+time\s+cost:\s*(\d+(?:\.\d+)?)\s*ms[^\n]*/gim,
+  )) {
+    const mass = asNumber(match[1]);
+    const timeMs = asNumber(match[2]);
+    const uuid = extractUuid(match[0] || "");
+    upsert({
+      uuid,
+      resinMassG: mass != null ? reasonable(mass, 0.01, 100_000, 3) : null,
+      printTimeSeconds: timeMs != null ? Math.round(timeMs / 1000) : null,
+    });
+  }
+
+  for (const match of text.matchAll(/\[Slice\]\s*Techbag\s+file\s+volume:\s*(\d+(?:\.\d+)?)[^\n]*/gim)) {
+    const volume = asNumber(match[1]);
+    const uuid = extractUuid(match[0] || "");
+    upsert({
+      uuid,
+      resinVolumeMl: volume != null ? reasonable(volume, 0.01, 100_000, 3) : null,
+    });
+  }
+
+  return [...byKey.values()]
+    .sort((a, b) => a.order - b.order)
+    .map(({ order: _order, ...rest }) => rest);
+}
+
+/** Prefer exact name, then UUID, then a unique layer-count match. */
+export function matchSliceLogMetrics(
+  entries: SliceLogUltxMetrics[],
+  fileName: string,
+  layerCount?: number | null,
+): SliceLogUltxMetrics | null {
+  if (!entries.length) return null;
+  const base = basenameLower(fileName);
+  const fileUuid = extractUuid(fileName);
+
+  const exact = [...entries].reverse().find((entry) => basenameLower(entry.sliceFileName) === base);
+  if (exact) return exact;
+
+  if (fileUuid) {
+    const byUuid = [...entries].reverse().find((entry) => entry.uuid === fileUuid);
+    if (byUuid) return byUuid;
+  }
+
+  if (layerCount != null && layerCount > 0) {
+    const layerMatches = entries.filter((entry) => entry.layerCount === layerCount);
+    if (layerMatches.length === 1) return layerMatches[0]!;
+  }
+
+  return null;
+}
+
+function readTextFileTail(filePath: string, maxBytes: number): string {
+  const stat = fs.statSync(filePath);
+  const size = Math.min(stat.size, maxBytes);
+  if (size <= 0) return "";
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(size);
+    fs.readSync(fd, buf, 0, size, Math.max(0, stat.size - size));
+    return buf.toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Collect Slice.log text from `ULTX_SLICE_LOG` (file path or logs directory). */
+export function readUltxSliceLogText(): string {
+  const logPath = process.env.ULTX_SLICE_LOG?.trim();
+  if (!logPath) return "";
+  try {
+    if (!fs.existsSync(logPath)) return "";
+    const stat = fs.statSync(logPath);
+    if (stat.isFile()) {
+      return readTextFileTail(logPath, MAX_SLICE_LOG_READ_BYTES);
+    }
+    if (!stat.isDirectory()) return "";
+
+    const files: string[] = [];
+    const walk = (dir: string, depth: number) => {
+      if (depth > 4 || files.length >= 40) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (entry.isFile() && /^slice(?:-.*)?\.log$/i.test(entry.name)) {
+          files.push(full);
+        }
+      }
+    };
+    walk(logPath, 0);
+    // Prefer newest Slice.log files — Output lines for recent plates land there.
+    files.sort((a, b) => {
+      try {
+        return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+      } catch {
+        return 0;
+      }
+    });
+    const chunks: string[] = [];
+    let remaining = MAX_SLICE_LOG_READ_BYTES;
+    for (const file of files) {
+      if (remaining <= 0) break;
+      const text = readTextFileTail(file, Math.min(2 * 1024 * 1024, remaining));
+      if (!text) continue;
+      chunks.push(text);
+      remaining -= Buffer.byteLength(text, "utf8");
+    }
+    return chunks.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function readSliceLogPasswords(): string[] {
+  const text = readUltxSliceLogText();
+  return text ? extractPasswordsFromSliceLog(text) : [];
+}
+
+function readSliceLogMetricsForFile(
+  fileName: string,
+  layerCount?: number | null,
+): SliceLogUltxMetrics | null {
+  const text = readUltxSliceLogText();
+  if (!text) return null;
+  return matchSliceLogMetrics(extractUltxMetricsFromSliceLog(text), fileName, layerCount);
 }
 
 function collectZipPasswordCandidates(explicit?: string | null): Array<string | null> {
@@ -532,9 +725,19 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
   const timePhrase = text.match(/\b(?:time\s*cost|print\s*time)\s*[:=]?\s*(\d{1,3}:[0-5]\d:[0-5]\d)\b/i);
   if (timePhrase) entries.push({ key: "TimeCost", value: timePhrase[1]! });
 
+  // Avoid matching Blueprint slicer timings (sliceTotalTime / compressTime / calcMValueTime).
   let printTimeSeconds = pickNumber(
     entries,
-    [/printtime/, /timecost/, /estimatedtime/, /totaltime/, /durationsec/, /^time$/],
+    [
+      /^printtime/,
+      /printtimecost/,
+      /printestimatetime/,
+      /^timecost$/,
+      /estimatedprinttime/,
+      /^estimatedtime$/,
+      /durationsec/,
+      /^time$/,
+    ],
     1,
     7 * 24 * 3600,
   );
@@ -543,7 +746,12 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
     printTimeSeconds = Math.round(printTimeMinutes * 60);
   }
 
-  const layerCount = pickNumber(entries, [/layercount/, /layers$/, /totallayers/, /numlayers/, /slicecount/], 1, 2_000_000);
+  const layerCount = pickNumber(
+    entries,
+    [/layercount/, /layers$/, /totallayers/, /numlayers/, /slicecount/, /numberofslices/],
+    1,
+    2_000_000,
+  );
 
   // Blueprint UI "resinConsumption" is typically volume; materialWeight is grams.
   // Slice.log also emits "Techbag file volume: <ml>".
@@ -555,7 +763,7 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
   );
   let resinMassG = pickNumber(
     entries,
-    [/materialweight/, /resinmass/, /weightg/, /resing/, /^weight$/],
+    [/materialweight/, /printestimatematerials/, /resinmass/, /weightg/, /resing/, /^weight$/],
     0.01,
     100_000,
   );
@@ -568,7 +776,8 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
     resinVolumeMl = resinGeneric;
   }
 
-  const resinCost = pickNumber(entries, [/resincost/, /materialcost/, /^cost$/], 0.01, 100_000);
+  // "material cost: 43.5 g" is mass, not currency — only accept currency-like keys here.
+  const resinCost = pickNumber(entries, [/resincost/, /materialpricecost/, /^cost$/], 0.01, 100_000);
 
   let layerHeightMm = pickNumber(entries, [/layerheight/, /layerthickness/, /layerheightmm/], 0.001, 1);
   // Blueprint `layerPrecision` is often microns (e.g. 30 → 0.03 mm).
@@ -749,6 +958,34 @@ export function parseUltxFile(
   const cdLayers = countUltxLayersFromMembers(members);
   if (cdLayers != null) {
     metrics.layerCount = cdLayers;
+  }
+
+  // Sealed AES plates: pull print estimates from Blueprint Slice.log when configured.
+  const sealedMissingEstimates =
+    metrics.printTimeSeconds == null || metrics.resinMassG == null || metrics.resinVolumeMl == null;
+  if (sealedMissingEstimates) {
+    const fromLog = readSliceLogMetricsForFile(fileName, metrics.layerCount);
+    if (fromLog) {
+      const beforeTime = metrics.printTimeSeconds;
+      const beforeMass = metrics.resinMassG;
+      const beforeVolume = metrics.resinVolumeMl;
+      metrics = mergeMetrics(metrics, {
+        printTimeSeconds: fromLog.printTimeSeconds,
+        resinMassG: fromLog.resinMassG,
+        resinVolumeMl: fromLog.resinVolumeMl,
+        layerCount: metrics.layerCount ?? fromLog.layerCount,
+      });
+      const filled =
+        (beforeTime == null && metrics.printTimeSeconds != null) ||
+        (beforeMass == null && metrics.resinMassG != null) ||
+        (beforeVolume == null && metrics.resinVolumeMl != null);
+      if (filled) {
+        const sealed = /metadata sealed|AES-encrypted/i.test(metrics.formatRevision || "");
+        metrics.formatRevision = sealed
+          ? `${metrics.formatRevision} · estimates from Slice.log`
+          : `HeyGears ULTX · estimates from Slice.log · ${metrics.layerCount ?? "?"} layers`;
+      }
+    }
   }
 
   if (metrics.layerCount != null && metrics.layerHeightMm != null && metrics.modelHeightMm == null) {

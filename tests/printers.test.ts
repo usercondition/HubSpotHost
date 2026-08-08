@@ -34,6 +34,8 @@ const {
   listUltxZipMembers,
   countUltxLayersFromMembers,
   extractPasswordsFromSliceLog,
+  extractUltxMetricsFromSliceLog,
+  matchSliceLogMetrics,
   BLUEPRINT_ASSET_ZIP_PASSWORD,
 } = await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
@@ -290,6 +292,57 @@ test("ULTX scrapes Codex zip passwords from Blueprint Slice.log lines", () => {
   );
   assert.deepEqual(passwords, ["ab12cd34ef"]);
   assert.equal(BLUEPRINT_ASSET_ZIP_PASSWORD, "heygears008");
+});
+
+test("ULTX harvests print estimates from Blueprint Slice.log Output JSON", () => {
+  const sliceLog = [
+    '1786060093550|info|ALG|[Slice] Techbag file volume: 33.51452|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:13:550',
+    '1786060094161|info|ALG|[Slice] material cost: 43.568876 g, print time cost: 12457725 ms|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:14:161',
+    '1786060108784|info|ALG|[Slice] Output: {"calcMValueTime":12714,"compressTime":12891,"numberOfSlices":1113,"printEstimateMaterials":43.568875999999996,"printEstimateTime":12457,"sliceFileName":"Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx","sliceTime":35453,"sliceTotalTime":63421}|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:28:784',
+    '1786060028480|info|ALG|[Slice] Output: {"numberOfSlices":2073,"printEstimateMaterials":138.0576704,"printEstimateTime":22921,"sliceFileName":"Slice-54265a30-b458-467a-865e-be177354167c.ultx","sliceTotalTime":127340}|54265a30-b458-467a-865e-be177354167c|16:47:08:480',
+  ].join("\n");
+
+  const entries = extractUltxMetricsFromSliceLog(sliceLog);
+  assert.equal(entries.length, 2);
+
+  const byName = matchSliceLogMetrics(
+    entries,
+    "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx",
+  );
+  assert.ok(byName);
+  assert.equal(byName!.printTimeSeconds, 12457);
+  assert.equal(byName!.resinMassG, 43.569);
+  assert.equal(byName!.resinVolumeMl, 33.515);
+  assert.equal(byName!.layerCount, 1113);
+
+  const byUuid = matchSliceLogMetrics(entries, "P_plate-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.rs.ultx");
+  assert.equal(byUuid?.printTimeSeconds, 12457);
+
+  const byLayers = matchSliceLogMetrics(entries, "mystery-plate.ultx", 2073);
+  assert.equal(byLayers?.resinMassG, 138.058);
+  assert.equal(byLayers?.printTimeSeconds, 22921);
+
+  const prev = process.env.ULTX_SLICE_LOG;
+  const logFile = path.join(os.tmpdir(), `slice-log-${crypto.randomUUID()}.log`);
+  fs.writeFileSync(logFile, sliceLog, "utf8");
+  process.env.ULTX_SLICE_LOG = logFile;
+  try {
+    const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx"));
+    // Sealed AES fixture has 5 layers — force a UUID filename match instead.
+    const renamed = Buffer.from(buffer);
+    const metrics = parseUltxFile("Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx", renamed, {
+      password: null,
+    });
+    assert.equal(metrics.layerCount, 5); // ZIP PNG inventory wins over log layer count
+    assert.equal(metrics.printTimeSeconds, 12457);
+    assert.equal(metrics.resinMassG, 43.569);
+    assert.equal(metrics.resinVolumeMl, 33.515);
+    assert.match(metrics.formatRevision, /Slice\.log/i);
+  } finally {
+    if (prev === undefined) delete process.env.ULTX_SLICE_LOG;
+    else process.env.ULTX_SLICE_LOG = prev;
+    fs.unlinkSync(logFile);
+  }
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {
