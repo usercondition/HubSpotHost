@@ -418,11 +418,14 @@ export default function Prints() {
   const importLogsFolder = async (fileList: ArrayLike<File> | null) => {
     if (!fileList || fileList.length === 0) return;
     const hadPendingUltx = Boolean(pendingUltxRef.current && awaitingLogsRefreshRef.current);
+    // Claim the pending ULTX immediately so the cancel/focus timeout cannot race.
+    if (hadPendingUltx) {
+      awaitingLogsRefreshRef.current = false;
+      setAwaitingLogsRefresh(false);
+    }
     setLinkingLogs(true);
     try {
       const cache = await importBlueprintLogsFromFileList(fileList);
-      awaitingLogsRefreshRef.current = false;
-      setAwaitingLogsRefresh(false);
       setLogsLink({
         supported: true,
         ready: true,
