@@ -1,18 +1,19 @@
 /**
  * Pull Blueprint Studio Slice.log text for sealed .ultx analyzes.
  *
- * Chrome/Edge block File System Access on AppData ("contains system files"),
- * so the primary path is a one-shot webkitdirectory import that caches Slice.log
- * contents in IndexedDB. Live directory handles remain as an optional fallback
- * for non-AppData copies of the logs tree.
+ * Chrome blocks File System Access on AppData, and folder <input webkitdirectory>
+ * often returns an empty FileList for those paths too. Reliable options:
+ *   1) Drag the `logs` folder from File Explorer onto Prints (drag-drop is allowed)
+ *   2) Copy/symlink logs outside AppData, then Import logs folder
+ *   3) Pick one or more Slice.log files directly (file picker can open AppData files)
  */
 
 const DB_NAME = "hubspot-blueprint-logs-v1";
 const STORE_NAME = "handles";
 const HANDLE_KEY = "logsDirectory";
 const IMPORT_KEY = "logsImportCache";
-const MAX_WALK_DEPTH = 4;
-const MAX_SLICE_LOG_FILES = 40;
+const MAX_WALK_DEPTH = 8;
+const MAX_SLICE_LOG_FILES = 60;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
@@ -43,6 +44,13 @@ export type BlueprintLogsStatus =
 /** @deprecated Use BlueprintLogsStatus */
 export type LinkedLogsStatus = BlueprintLogsStatus;
 
+export type SliceLogScanResult = {
+  candidates: SliceLogCandidate[];
+  totalFiles: number;
+  logNamedFiles: number;
+  sampleNames: string[];
+};
+
 export function supportsBlueprintLogsFolderAccess(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
 }
@@ -50,6 +58,18 @@ export function supportsBlueprintLogsFolderAccess(): boolean {
 export function isBlueprintSliceLogName(fileName: string): boolean {
   const base = fileName.replace(/^.*[/\\]/, "").toLowerCase();
   return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base);
+}
+
+export function looksLikeBlueprintSliceLogText(text: string): boolean {
+  if (!text) return false;
+  return (
+    text.includes("[Slice]") ||
+    text.includes("printEstimateTime") ||
+    text.includes("printEstimateMaterials") ||
+    text.includes("numberOfSlices") ||
+    /material cost:/i.test(text) ||
+    /Techbag file volume:/i.test(text)
+  );
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -119,31 +139,46 @@ function depthOfRelativePath(path: string): number {
   return normalized.split("/").length - 1;
 }
 
-/** Pull Slice.log files out of a webkitdirectory FileList (works for AppData). */
-export async function collectSliceLogsFromFileList(
+function relativePathOf(file: File): string {
+  return (file.webkitRelativePath || file.name).replace(/\\/g, "/");
+}
+
+/** Scan a FileList (folder import, Explorer drag-drop, or multi file pick). */
+export async function scanSliceLogsFromFileList(
   files: ArrayLike<File>,
-): Promise<SliceLogCandidate[]> {
+): Promise<SliceLogScanResult> {
   const list = Array.from(files);
-  const sliceFiles = list
+  const sampleNames = list.slice(0, 6).map((file) => relativePathOf(file) || file.name);
+  const logNamedFiles = list.filter((file) => /\.log$/i.test(file.name)).length;
+
+  const preferred = list
     .filter((file) => {
-      const rel = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
+      const rel = relativePathOf(file);
       if (depthOfRelativePath(rel) > MAX_WALK_DEPTH) return false;
-      return isBlueprintSliceLogName(file.name);
+      return isBlueprintSliceLogName(file.name) || /\.log$/i.test(file.name);
     })
-    .sort((a, b) => b.lastModified - a.lastModified)
+    .sort((a, b) => {
+      const aSlice = isBlueprintSliceLogName(a.name) ? 1 : 0;
+      const bSlice = isBlueprintSliceLogName(b.name) ? 1 : 0;
+      if (aSlice !== bSlice) return bSlice - aSlice;
+      return b.lastModified - a.lastModified;
+    })
     .slice(0, MAX_SLICE_LOG_FILES);
 
   const candidates: SliceLogCandidate[] = [];
-  for (const file of sliceFiles) {
+  for (const file of preferred) {
     try {
       if (file.size <= 0 || file.size > MAX_FILE_BYTES * 4) continue;
       let text = await file.text();
       if (byteLengthUtf8(text) > MAX_FILE_BYTES) {
         text = text.slice(-MAX_FILE_BYTES);
       }
-      if (!text.includes("[Slice]")) continue;
+      const nameMatch = isBlueprintSliceLogName(file.name);
+      // Named Slice.log: keep non-empty text even if markers are sparse.
+      if (!text.trim()) continue;
+      if (!nameMatch && !looksLikeBlueprintSliceLogText(text)) continue;
       candidates.push({
-        relativePath: (file.webkitRelativePath || file.name).replace(/\\/g, "/"),
+        relativePath: relativePathOf(file),
         text,
         lastModified: file.lastModified,
       });
@@ -151,32 +186,77 @@ export async function collectSliceLogsFromFileList(
       /* skip unreadable entries */
     }
   }
-  return candidates;
+
+  return {
+    candidates,
+    totalFiles: list.length,
+    logNamedFiles,
+    sampleNames,
+  };
+}
+
+/** @deprecated Prefer scanSliceLogsFromFileList */
+export async function collectSliceLogsFromFileList(
+  files: ArrayLike<File>,
+): Promise<SliceLogCandidate[]> {
+  return (await scanSliceLogsFromFileList(files)).candidates;
 }
 
 function rootLabelFromFiles(files: ArrayLike<File>): string {
   const first = Array.from(files)[0];
-  const rel = (first?.webkitRelativePath || "").replace(/\\/g, "/");
+  const rel = relativePathOf(first ?? new File([], "logs"));
   const root = rel.split("/")[0];
   return root || "logs";
 }
 
-export async function importBlueprintLogsFromFileList(
-  files: ArrayLike<File>,
-): Promise<ImportedLogsCache> {
-  const candidates = await collectSliceLogsFromFileList(files);
-  if (!candidates.length) {
-    throw new Error(
-      "No Slice.log files found in that folder. Pick Blueprint Studio\\logs (the folder that contains project subfolders).",
+export function describeSliceLogImportFailure(scan: SliceLogScanResult): string {
+  if (scan.totalFiles === 0) {
+    return (
+      "Chrome returned no files from that folder (AppData is often blocked). " +
+      "Drag the logs folder from File Explorer onto this page, or copy it to Desktop and import that copy, " +
+      "or use Add Slice.log and pick files from a project subfolder."
     );
   }
+  if (scan.logNamedFiles === 0) {
+    const samples = scan.sampleNames.length ? ` Saw: ${scan.sampleNames.join(", ")}` : "";
+    return (
+      `No .log files in that selection (${scan.totalFiles} file(s)).` +
+      ` Pick Blueprint Studio\\logs (project subfolders with Slice.log), or drag that folder here.` +
+      samples
+    );
+  }
+  return (
+    `Found ${scan.logNamedFiles} .log file(s) among ${scan.totalFiles}, but none looked like Blueprint Slice.log.` +
+    ` Open a project folder under logs and use Add Slice.log, or drag the logs folder from Explorer.`
+  );
+}
+
+export async function importBlueprintLogsFromFileList(
+  files: ArrayLike<File>,
+  options?: { merge?: boolean },
+): Promise<ImportedLogsCache> {
+  const scan = await scanSliceLogsFromFileList(files);
+  if (!scan.candidates.length) {
+    throw new Error(describeSliceLogImportFailure(scan));
+  }
+
+  let candidates = scan.candidates;
+  if (options?.merge) {
+    const existing = await getImportedBlueprintLogsCache();
+    if (existing?.candidates.length) {
+      const byPath = new Map<string, SliceLogCandidate>();
+      for (const candidate of existing.candidates) byPath.set(candidate.relativePath, candidate);
+      for (const candidate of scan.candidates) byPath.set(candidate.relativePath, candidate);
+      candidates = [...byPath.values()].sort((a, b) => b.lastModified - a.lastModified);
+    }
+  }
+
   const cache: ImportedLogsCache = {
     rootLabel: rootLabelFromFiles(files),
     importedAt: Date.now(),
-    candidates,
+    candidates: candidates.slice(0, MAX_SLICE_LOG_FILES),
   };
   await idbSet(IMPORT_KEY, cache);
-  // Prefer import over a stale AppData directory handle that Chrome cannot re-open.
   await idbDelete(HANDLE_KEY);
   return cache;
 }
@@ -329,7 +409,7 @@ export async function collectSliceLogsFromDirectory(
       if (byteLengthUtf8(text) > MAX_FILE_BYTES) {
         text = text.slice(-MAX_FILE_BYTES);
       }
-      if (!text.includes("[Slice]")) continue;
+      if (!looksLikeBlueprintSliceLogText(text) && !text.trim()) continue;
       candidates.push({
         relativePath: file.relativePath,
         text,
@@ -342,9 +422,7 @@ export async function collectSliceLogsFromDirectory(
   return candidates;
 }
 
-function bundleToUploadFile(
-  bundle: { relativePath: string; text: string },
-): File {
+function bundleToUploadFile(bundle: { relativePath: string; text: string }): File {
   return new File([bundle.text], bundle.relativePath.replace(/^.*[/\\]/, "") || "Slice.log", {
     type: "text/plain",
   });
