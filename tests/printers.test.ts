@@ -92,21 +92,10 @@ function fixtureCtb(machineName = "Mighty 8K NEWX1"): Buffer {
   return file;
 }
 
-function fixtureUltxZip(): Buffer {
-  const json = Buffer.from(
-    JSON.stringify({
-      machineName: "HeyGears Reflex Turbo",
-      printTime: 3600,
-      layerCount: 800,
-      resinVolume: 42.5,
-      resinMass: 46.2,
-      layerHeight: 0.05,
-      exposureTime: 2.2,
-    }),
-    "utf8",
-  );
-  const name = Buffer.from("printinfo.json", "utf8");
-  const compressed = zlib.deflateRawSync(json);
+function zipTextMember(fileName: string, contents: string): Buffer {
+  const payload = Buffer.from(contents, "utf8");
+  const name = Buffer.from(fileName, "utf8");
+  const compressed = zlib.deflateRawSync(payload);
   const local = Buffer.alloc(30 + name.length + compressed.length);
   local.writeUInt32LE(0x04034b50, 0);
   local.writeUInt16LE(20, 4);
@@ -116,12 +105,27 @@ function fixtureUltxZip(): Buffer {
   local.writeUInt16LE(0, 12);
   local.writeUInt32LE(0, 14);
   local.writeUInt32LE(compressed.length, 18);
-  local.writeUInt32LE(json.length, 22);
+  local.writeUInt32LE(payload.length, 22);
   local.writeUInt16LE(name.length, 26);
   local.writeUInt16LE(0, 28);
   name.copy(local, 30);
   compressed.copy(local, 30 + name.length);
   return local;
+}
+
+function fixtureUltxZip(): Buffer {
+  return zipTextMember(
+    "printinfo.json",
+    JSON.stringify({
+      machineName: "HeyGears Reflex Turbo",
+      printTime: 3600,
+      layerCount: 800,
+      resinVolume: 42.5,
+      resinMass: 46.2,
+      layerHeight: 0.05,
+      exposureTime: 2.2,
+    }),
+  );
 }
 
 before(async () => {
@@ -244,6 +248,32 @@ test("ULTX AES archive yields layer count without password and full metrics with
   assert.equal(opened.printerProfile, "Reflex RS");
   assert.equal(opened.resinCostLabel, "Open Material");
   assert.match(opened.formatRevision, /decrypted/i);
+});
+
+test("ULTX harvests Blueprint Slice.log / UI-style phrases with spaced keys", () => {
+  // Simulate decrypted parameters.ini + Slice.log fragments from Blueprint AppCache.
+  const dump = [
+    "Time Cost: 03:27:37",
+    "materialWeight: 44g",
+    "Techbag file volume: 161.701311",
+    "layerThickness=0.03",
+    "platformSizeX=228.1",
+    "platformSizeY=128.3",
+    "platformSizeZ=228",
+    "Use open material",
+    'openMaterialConfig={"normalLayerExposure":1300,"firstLayerExposure":10000}',
+  ].join("\n");
+  const metrics = parseUltxFile("P_demo-Plate01.rs.ultx", zipTextMember("parameters.ini", dump));
+  assert.equal(metrics.printTimeSeconds, 3 * 3600 + 27 * 60 + 37);
+  assert.equal(metrics.resinMassG, 44);
+  assert.equal(metrics.resinVolumeMl, 161.701);
+  assert.equal(metrics.layerHeightMm, 0.03);
+  assert.equal(metrics.buildVolumeXmm, 228.1);
+  assert.equal(metrics.buildVolumeYmm, 128.3);
+  assert.equal(metrics.buildVolumeZmm, 228);
+  assert.equal(metrics.resinCostLabel, "Open Material");
+  assert.equal(metrics.exposureSeconds, 1.3);
+  assert.equal(metrics.bottomExposureSeconds, 10);
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {

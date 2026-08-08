@@ -444,12 +444,22 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
   const objects = collectJsonObjects(text);
   const entries = objects.flatMap((object) => flattenKeys(object));
 
-  // Also harvest simple key=value / key: value lines (ini + Blueprint dumps).
+  // Also harvest simple key=value / key: value lines (ini + Blueprint dumps / Slice.log).
+  // Allow spaces in keys so "Time Cost: 03:27:37" and "Techbag file volume: 161.7" match.
   for (const line of text.split(/\r?\n/).slice(0, 4_000)) {
-    const match = line.match(/^\s*([A-Za-z0-9_./-]{2,80})\s*[:=]\s*(.+?)\s*$/);
+    const match = line.match(/^\s*([A-Za-z0-9_./][A-Za-z0-9_./ -]{1,79})\s*[:=]\s*(.+?)\s*$/);
     if (!match) continue;
-    entries.push({ key: match[1]!, value: match[2]! });
+    entries.push({ key: match[1]!.trim(), value: match[2]! });
   }
+
+  // Free-form Blueprint log phrases that are not strict key/value pairs.
+  if (/\bUse\s+open\s+material\b/i.test(text)) {
+    entries.push({ key: "useOpenMaterial", value: 1 });
+  }
+  const massPhrase = text.match(/\b(?:material\s*weight|resin(?:\s*consumption)?)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*g\b/i);
+  if (massPhrase) entries.push({ key: "materialWeight", value: massPhrase[1]! });
+  const timePhrase = text.match(/\b(?:time\s*cost|print\s*time)\s*[:=]?\s*(\d{1,3}:[0-5]\d:[0-5]\d)\b/i);
+  if (timePhrase) entries.push({ key: "TimeCost", value: timePhrase[1]! });
 
   let printTimeSeconds = pickNumber(
     entries,
@@ -465,9 +475,10 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
   const layerCount = pickNumber(entries, [/layercount/, /layers$/, /totallayers/, /numlayers/, /slicecount/], 1, 2_000_000);
 
   // Blueprint UI "resinConsumption" is typically volume; materialWeight is grams.
+  // Slice.log also emits "Techbag file volume: <ml>".
   let resinVolumeMl = pickNumber(
     entries,
-    [/resinconsumption/, /resinvolume/, /volume_?ml/, /resinml/, /techbag.*volume/, /^volume$/],
+    [/resinconsumption/, /resinvolume/, /volume_?ml/, /resinml/, /techbag.*volume/, /filevolume/, /^volume$/],
     0.01,
     100_000,
   );
@@ -530,6 +541,10 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
   const resX = resolutionX != null && resolutionX < 2 ? null : resolutionX != null ? Math.floor(resolutionX) : null;
   const resY = resolutionY != null && resolutionY < 2 ? null : resolutionY != null ? Math.floor(resolutionY) : null;
 
+  const buildVolumeXmm = pickNumber(entries, [/buildvolumex/, /platformsizex/, /formatx/], 1, 2000);
+  const buildVolumeYmm = pickNumber(entries, [/buildvolumey/, /platformsizey/, /formaty/], 1, 2000);
+  const buildVolumeZmm = pickNumber(entries, [/buildvolumez/, /platformsizez/, /formatz/], 1, 2000);
+
   const machine =
     pickString(entries, [/machinename/, /printername/, /printermodel/, /devicename/, /printerprofile/]) || null;
 
@@ -555,6 +570,9 @@ function harvestFromText(text: string): Partial<PrintFileMetrics> {
     bottomLayerCount: bottomLayerCount != null ? Math.floor(bottomLayerCount) : null,
     resolutionX: resX,
     resolutionY: resY,
+    buildVolumeXmm,
+    buildVolumeYmm,
+    buildVolumeZmm,
     printerProfile: machine,
   };
 }
