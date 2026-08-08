@@ -173,6 +173,8 @@ export function createPrintFileRecord(input: {
   hubspotDealName: string;
   dealStage: string;
   metrics: PrintFileMetrics;
+  /** Physical fleet printer override when the CTB only has a shared model name. */
+  fleetPrinterId?: number | null;
 }): PrintFileRecord {
   const { metrics } = input;
   const attachedAt = nowIso();
@@ -210,6 +212,7 @@ export function createPrintFileRecord(input: {
       resolutionX: metrics.resolutionX,
       resolutionY: metrics.resolutionY,
       printerProfile: metrics.printerProfile,
+      fleetPrinterId: input.fleetPrinterId ?? null,
       hubspotSyncedAt: attachedAt,
       attachedAt,
     })

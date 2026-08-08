@@ -11,6 +11,7 @@ import {
   printerProfileMaps,
   printers,
   printFileRecords,
+  type AssignPrintFilePrinterInput,
   type AssignPrinterProfileInput,
   type CreatePrinterLifecycleEventInput,
   type Printer,
@@ -239,7 +240,8 @@ export function listPrinterProfileMaps(): PrinterProfileMap[] {
 }
 
 export function assignPrinterProfile(input: AssignPrinterProfileInput): {
-  map: PrinterProfileMap;
+  map: PrinterProfileMap | null;
+  stamped: number;
   fleet: PrinterFleetSnapshot;
 } | null {
   const fleetRows = ensureDefaultPrinters();
@@ -249,47 +251,85 @@ export function assignPrinterProfile(input: AssignPrinterProfileInput): {
   const profileLabel = input.profile.trim() || "(blank machine name)";
   const profileKey = normalizePrinterKey(profileLabel) || "(blank)";
   const now = nowIso();
-  const existing = getDb()
-    .select()
-    .from(printerProfileMaps)
-    .where(eq(printerProfileMaps.profileKey, profileKey))
-    .get();
+  const sharedModel = isSharedModelPrinterProfile(profileLabel, fleetRows);
+  // Shared model names (Mighty 8K across NEWX1/2/3) must not become a permanent
+  // global map — stamp existing plates only unless the caller insists.
+  const applyGlobally = input.applyToAllPlates !== false && !sharedModel;
 
-  let map: PrinterProfileMap;
-  if (existing) {
-    map = getDb()
-      .update(printerProfileMaps)
-      .set({
-        profileLabel,
-        printerId: input.printerId,
-        updatedAt: now,
-      })
-      .where(eq(printerProfileMaps.id, existing.id))
-      .returning()
-      .get();
-  } else {
-    map = getDb()
-      .insert(printerProfileMaps)
-      .values({
-        profileKey,
-        profileLabel,
-        printerId: input.printerId,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning()
-      .get();
+  let stamped = 0;
+  const openPlates = getDb()
+    .select()
+    .from(printFileRecords)
+    .orderBy(desc(printFileRecords.attachedAt), desc(printFileRecords.id))
+    .limit(2_000)
+    .all()
+    .filter((record) => {
+      const key = normalizePrinterKey(record.printerProfile?.trim() || "(blank machine name)") || "(blank)";
+      return key === profileKey && record.fleetPrinterId == null;
+    });
+  for (const record of openPlates) {
+    getDb()
+      .update(printFileRecords)
+      .set({ fleetPrinterId: printer.id })
+      .where(eq(printFileRecords.id, record.id))
+      .run();
+    stamped += 1;
   }
 
-  // Also keep the chosen machine's alias list aware of this label for visibility.
-  const merged = mergeAliasLists(parseAliases(printer.aliasesJson), [profileLabel]);
-  getDb()
-    .update(printers)
-    .set({ aliasesJson: JSON.stringify(merged), updatedAt: now })
-    .where(eq(printers.id, printer.id))
-    .run();
+  let map: PrinterProfileMap | null = null;
+  if (applyGlobally) {
+    const existing = getDb()
+      .select()
+      .from(printerProfileMaps)
+      .where(eq(printerProfileMaps.profileKey, profileKey))
+      .get();
 
-  return { map, fleet: buildPrinterFleetSnapshot() };
+    if (existing) {
+      map = getDb()
+        .update(printerProfileMaps)
+        .set({
+          profileLabel,
+          printerId: input.printerId,
+          updatedAt: now,
+        })
+        .where(eq(printerProfileMaps.id, existing.id))
+        .returning()
+        .get();
+    } else {
+      map = getDb()
+        .insert(printerProfileMaps)
+        .values({
+          profileKey,
+          profileLabel,
+          printerId: input.printerId,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
+        .get();
+    }
+
+    // Also keep the chosen machine's alias list aware of this label for visibility.
+    const merged = mergeAliasLists(parseAliases(printer.aliasesJson), [profileLabel]);
+    getDb()
+      .update(printers)
+      .set({ aliasesJson: JSON.stringify(merged), updatedAt: now })
+      .where(eq(printers.id, printer.id))
+      .run();
+  }
+
+  return { map, stamped, fleet: buildPrinterFleetSnapshot() };
+}
+
+/** True when a token looks like a unit tag (NEWX1, OLD) rather than a model word (8K). */
+export function isDistinctivePrinterToken(token: string): boolean {
+  const key = normalizePrinterKey(token);
+  if (!key) return false;
+  // Bare resolution tokens (8k, 12k) are model family, not a physical unit id.
+  if (/^\d+k$/.test(key)) return false;
+  // NEWX1 / mega8k-style unit tags: require a letter prefix before digits.
+  if (/^[a-z]+\d+[a-z0-9]*$/.test(key)) return true;
+  return /^(new|old|turbo|heygears|reflex|rs)$/.test(key);
 }
 
 export function matchTokens(profile: string, candidate: string): boolean {
@@ -309,7 +349,19 @@ export function matchTokens(profile: string, candidate: string): boolean {
     }
   }
 
-  return profileKey.includes(candidateKey) || candidateKey.includes(profileKey);
+  // Profile contains the alias (profile is more specific): OK.
+  if (profileKey.includes(candidateKey)) return true;
+
+  // Alias contains the profile (alias is more specific): only match when the
+  // slicer string itself carries a distinctive unit token. Otherwise bare
+  // "Mighty 8K" / "Phrozen Sonic Mighty 8K" would latch onto NEWX1 via
+  // "Mighty 8K NEWX1".contains("mighty 8k").
+  if (candidateKey.includes(profileKey)) {
+    const profileHasDistinctive = profileKey.split(" ").some(isDistinctivePrinterToken);
+    return profileHasDistinctive;
+  }
+
+  return false;
 }
 
 /** Resolve a slicer machine string to a fleet printer id, or null if unmatched. */
@@ -343,6 +395,69 @@ export function matchPrinterId(
     if (matchTokens(profile, entry.alias)) return entry.printerId;
   }
   return null;
+}
+
+/**
+ * Prefer an explicit per-plate fleet printer id; otherwise fall back to slicer
+ * profile / alias matching.
+ */
+export function resolvePrinterIdForRecord(
+  record: Pick<PrintFileRecord, "fleetPrinterId" | "printerProfile">,
+  fleet: Printer[],
+  profileMaps: PrinterProfileMap[] = listPrinterProfileMaps(),
+): number | null {
+  if (record.fleetPrinterId != null && fleet.some((printer) => printer.id === record.fleetPrinterId)) {
+    return record.fleetPrinterId;
+  }
+  return matchPrinterId(record.printerProfile, fleet, profileMaps);
+}
+
+/**
+ * Slicer labels that are shared across multiple fleet units (e.g. three Mighty 8Ks)
+ * cannot be auto-mapped — the operator must pick the physical printer per plate.
+ */
+export function isSharedModelPrinterProfile(
+  printerProfile: string | null | undefined,
+  fleet: Printer[] = ensureDefaultPrinters(),
+): boolean {
+  const profileKey = normalizePrinterKey(printerProfile);
+  if (!profileKey) return true;
+  if (profileKey.split(" ").some(isDistinctivePrinterToken)) return false;
+
+  const active = fleet.filter((printer) => printer.status !== "retired");
+  const matchingModels = new Map<string, number>();
+  for (const printer of active) {
+    const modelKey = normalizePrinterKey(printer.model);
+    if (!modelKey) continue;
+    const modelTokens = modelKey.split(" ").filter((token) => token.length >= 2);
+    const overlap = modelTokens.filter((token) => profileKey.split(" ").includes(token)).length;
+    if (overlap >= Math.min(2, modelTokens.length) || profileKey.includes(modelKey)) {
+      matchingModels.set(modelKey, (matchingModels.get(modelKey) ?? 0) + 1);
+    }
+  }
+  return Array.from(matchingModels.values()).some((count) => count > 1);
+}
+
+export function assignPrintFilePrinter(
+  input: AssignPrintFilePrinterInput,
+): { record: PrintFileRecord; fleet: PrinterFleetSnapshot } | null {
+  const printer = getPrinter(input.printerId);
+  if (!printer) return null;
+  const existing = getDb()
+    .select()
+    .from(printFileRecords)
+    .where(eq(printFileRecords.id, input.recordId))
+    .get();
+  if (!existing) return null;
+
+  const record = getDb()
+    .update(printFileRecords)
+    .set({ fleetPrinterId: printer.id })
+    .where(eq(printFileRecords.id, input.recordId))
+    .returning()
+    .get();
+  if (!record) return null;
+  return { record, fleet: buildPrinterFleetSnapshot() };
 }
 
 function toJobSummary(record: PrintFileRecord): PrinterJobSummary {
@@ -479,7 +594,7 @@ export function buildPrinterFleetSnapshot(): PrinterFleetSnapshot {
   const jobsByPrinter = new Map<number, PrintFileRecord[]>();
   const unassigned: PrintFileRecord[] = [];
   for (const record of records) {
-    const printerId = matchPrinterId(record.printerProfile, fleet, profileMaps);
+    const printerId = resolvePrinterIdForRecord(record, fleet, profileMaps);
     if (printerId == null) {
       unassigned.push(record);
       continue;

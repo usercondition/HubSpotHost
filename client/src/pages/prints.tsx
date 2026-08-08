@@ -75,10 +75,19 @@ interface PrintsResponse {
   resin?: ResinProfileResponse;
 }
 
+interface PrinterMatchInfo {
+  matchedPrinterId: number | null;
+  requiresPrinterChoice: boolean;
+  sharedModelProfile?: boolean;
+  slicerProfile: string | null;
+  printers: Array<{ id: number; name: string; model: string }>;
+}
+
 interface StagedPrintFile {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
+  printerMatch?: PrinterMatchInfo;
 }
 
 function formatHours(seconds: number | null | undefined): string {
@@ -249,6 +258,7 @@ export default function Prints() {
   const [logsLink, setLogsLink] = useState<BlueprintLogsStatus>({ supported: true, ready: false });
   const [linkingLogs, setLinkingLogs] = useState(false);
   const [awaitingLogsRefresh, setAwaitingLogsRefresh] = useState(false);
+  const [attachPrinterId, setAttachPrinterId] = useState("");
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
@@ -382,16 +392,29 @@ export default function Prints() {
       }
       if (appliedLog) form.append("sliceLog", appliedLog);
       const response = await apiRequest("POST", "/api/prints/analyze", form, { headers });
-      return (await response.json()) as { ok: true; sliceLogApplied?: boolean } & StagedPrintFile;
+      return (await response.json()) as {
+        ok: true;
+        sliceLogApplied?: boolean;
+        printerMatch?: PrinterMatchInfo;
+      } & StagedPrintFile;
     },
-    onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied }) => {
-      setStaged({ analysisId, metrics, expiresAt });
+    onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
+      setStaged({ analysisId, metrics, expiresAt, printerMatch });
+      if (printerMatch?.requiresPrinterChoice) {
+        setAttachPrinterId("");
+      } else if (printerMatch?.matchedPrinterId) {
+        setAttachPrinterId(String(printerMatch.matchedPrinterId));
+      } else {
+        setAttachPrinterId("");
+      }
       const fromLog = /estimates from slice\.log/i.test(metrics.formatRevision || "");
       toast({
         title: fromLog || sliceLogApplied ? "Plate data extracted from Slice.log" : "Plate data extracted",
-        description: fromLog
-          ? "Time and resin came from the Blueprint Slice.log. Choose the matching Print Order, then attach."
-          : "Choose the matching Print Order, then attach the production plan.",
+        description: printerMatch?.requiresPrinterChoice
+          ? "Chitubox only reported a shared model name — choose which physical printer ran this plate before attaching."
+          : fromLog
+            ? "Time and resin came from the Blueprint Slice.log. Choose the matching Print Order, then attach."
+            : "Choose the matching Print Order, then attach the production plan.",
       });
     },
     onError: (error: Error) => {
@@ -508,10 +531,22 @@ export default function Prints() {
   const attach = useMutation({
     mutationFn: async () => {
       if (!staged) throw new Error("Analyze a CTB file before attaching it");
+      const needsPrinter =
+        staged.printerMatch?.requiresPrinterChoice ||
+        (!staged.printerMatch?.matchedPrinterId && !attachPrinterId);
+      if (needsPrinter && !attachPrinterId) {
+        throw new Error(
+          "Choose which physical printer ran this plate (Chitubox did not embed NEWX1/NEWX2/NEWX3).",
+        );
+      }
       const response = await apiRequest(
         "POST",
         "/api/prints/attach",
-        { analysisId: staged.analysisId, dealId },
+        {
+          analysisId: staged.analysisId,
+          dealId,
+          ...(attachPrinterId ? { printerId: Number(attachPrinterId) } : {}),
+        },
         { headers },
       );
       return (await response.json()) as {
@@ -523,9 +558,11 @@ export default function Prints() {
     },
     onSuccess: ({ summary, message }) => {
       setStaged(null);
+      setAttachPrinterId("");
       setIncludeAttached(true);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
       toast({
         title: `Plate ${summary.plateCount} attached`,
         description: `${message} Running time: ${formatHours(summary.totalPrintTimeSeconds)}.`,
@@ -1017,13 +1054,53 @@ export default function Prints() {
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />
+                {staged.printerMatch ? (
+                  <div
+                    className="space-y-2 rounded-lg border border-border bg-muted/30 p-4"
+                    data-testid="panel-attach-printer"
+                  >
+                    <Label htmlFor="attach-printer-select">Which printer ran this plate?</Label>
+                    <select
+                      id="attach-printer-select"
+                      value={attachPrinterId}
+                      onChange={(event) => setAttachPrinterId(event.target.value)}
+                      className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      data-testid="select-attach-printer"
+                    >
+                      <option value="">
+                        {staged.printerMatch.requiresPrinterChoice
+                          ? "Choose NEWX1 / NEWX2 / NEWX3 / …"
+                          : "Use auto-matched printer"}
+                      </option>
+                      {staged.printerMatch.printers.map((printer) => (
+                        <option key={printer.id} value={String(printer.id)}>
+                          {printer.name}
+                          {staged.printerMatch?.matchedPrinterId === printer.id ? " · matched" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Slicer reported{" "}
+                      <span className="font-medium text-foreground">
+                        {staged.printerMatch.slicerProfile || "no machine name"}
+                      </span>
+                      . Chitubox often writes only the model (Mighty 8K), not your custom NEWX names — pick the
+                      physical unit so Printers hours stay accurate. Tip: rename each machine in Chitubox to include
+                      NEWX1 / NEWX2 / NEWX3 so future plates auto-match.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="flex flex-col justify-between gap-3 rounded-lg border border-card-border bg-card p-4 sm:flex-row sm:items-center">
                   <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
                     These figures describe the complete build plate. Do not use them as the order’s actual material cost when a plate contains more than one customer’s work.
                   </p>
                   <Button
                     onClick={() => attach.mutate()}
-                    disabled={!dealId || attach.isPending}
+                    disabled={
+                      !dealId ||
+                      attach.isPending ||
+                      Boolean(staged.printerMatch?.requiresPrinterChoice && !attachPrinterId)
+                    }
                     data-testid="button-attach-print-file"
                   >
                     {attach.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PackageCheck className="mr-2 h-4 w-4" />}

@@ -257,12 +257,19 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   mockCalls = [];
   mockDealStage = "in_work";
   mockDealStageLabel = "In work";
+  // Fixture CTB uses "ELEGOO SATURN" — unmatched fleet profile needs an explicit printer.
+  const fleet = await jsonOwnerRequest("GET", "/api/printers");
+  assert.equal(fleet.status, 200);
+  const printerId = fleet.body.printers[0]?.printerId as number;
+  assert.ok(printerId);
+
   const first = stagePrintFile("knight-plate-01.ctb", fixtureCtb());
   const firstAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: first.analysisId,
     dealId: "701",
+    printerId,
   });
-  assert.equal(firstAttach.status, 201);
+  assert.equal(firstAttach.status, 201, firstAttach.body?.error || "attach failed");
   assert.equal(firstAttach.body.summary.plateCount, 1);
   assert.equal(firstAttach.body.summary.totalPrintTimeSeconds, 14_400);
   assert.equal(firstAttach.body.summary.totalResinVolumeMl, 31.25);
@@ -270,11 +277,13 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.record.resinCost, "4.75");
   assert.equal(firstAttach.body.record.exposureSeconds, "2.5");
   assert.equal(firstAttach.body.record.dealStage, "In work");
+  assert.equal(firstAttach.body.record.fleetPrinterId, printerId);
 
   const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb());
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
+    printerId,
   });
   assert.equal(secondAttach.status, 201);
   assert.equal(secondAttach.body.summary.plateCount, 2);

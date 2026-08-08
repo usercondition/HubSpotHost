@@ -84,10 +84,13 @@ import {
 } from "./lib/order-parts";
 import {
   addPrinterLifecycleEvent,
+  assignPrintFilePrinter,
   assignPrinterProfile,
   buildPrinterFleetSnapshot,
   ensureDefaultPrinters,
   getPrinter,
+  isSharedModelPrinterProfile,
+  matchPrinterId,
   updatePrinter,
 } from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
@@ -147,6 +150,7 @@ import {
   updateOrderPartStatusSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
+  assignPrintFilePrinterSchema,
   createPrinterLifecycleEventSchema,
   openResinBottleSchema,
   setActiveResinBottleSchema,
@@ -1471,10 +1475,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           });
         }
         const staged = stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
+        const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
+        const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
+        // Shared model names (Mighty 8K without NEWX#) do not auto-match after
+        // matchTokens was tightened — operator must pick the physical unit.
+        const requiresPrinterChoice = matchedPrinterId == null;
         return res.status(201).json({
           ok: true,
           ...staged,
           sliceLogApplied: Boolean(sliceLogText),
+          printerMatch: {
+            matchedPrinterId,
+            requiresPrinterChoice,
+            sharedModelProfile: isSharedModelPrinterProfile(staged.metrics.printerProfile, fleet),
+            slicerProfile: staged.metrics.printerProfile,
+            printers: fleet.map((printer) => ({
+              id: printer.id,
+              name: printer.name,
+              model: printer.model,
+            })),
+          },
         });
       } catch (error) {
         const message =
@@ -1541,7 +1561,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   /**
    * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Historical and future plates with that label then roll into that machine.
+   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
+   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
    */
   app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -1553,11 +1574,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!result) {
       return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
     }
+    const label = parsed.data.profile.trim();
+    const message = result.map
+      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
+      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
     return res.json({
       ok: true,
       map: result.map,
+      stamped: result.stamped,
       fleet: result.fleet,
-      message: `Assigned “${result.map.profileLabel}” to that printer. Matching plates now count toward its usage.`,
+      message,
+    });
+  });
+
+  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
+  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = assignPrintFilePrinter(parsed.data);
+    if (!result) {
+      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
+    }
+    return res.json({
+      ok: true,
+      record: result.record,
+      fleet: result.fleet,
+      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
     });
   });
 
@@ -1602,6 +1647,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      const fleet = ensureDefaultPrinters();
+      const autoMatchedId = matchPrinterId(staged.metrics.printerProfile, fleet);
+      const requestedPrinterId = parsed.data.printerId ?? null;
+      if (requestedPrinterId != null && !getPrinter(requestedPrinterId)) {
+        return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
+      }
+      if (autoMatchedId == null && requestedPrinterId == null) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Choose which physical printer ran this plate. Chitubox only embedded a shared model name (e.g. Mighty 8K), not NEWX1/NEWX2/NEWX3.",
+        });
+      }
+      const fleetPrinterId = requestedPrinterId ?? autoMatchedId;
+
       const attachedAt = new Date().toISOString();
       const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
       await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
@@ -1611,6 +1671,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         hubspotDealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
         dealStage: stage?.label || deal.properties.dealstage || "No stage",
         metrics: staged.metrics,
+        fleetPrinterId,
       });
       markPrintFileAnalysisUsed(parsed.data.analysisId);
 

@@ -830,6 +830,8 @@ export const printFileRecords = sqliteTable("print_file_records", {
   resolutionX: integer("resolution_x"),
   resolutionY: integer("resolution_y"),
   printerProfile: text("printer_profile"),
+  /** Explicit fleet printer for this plate — wins over slicer profile matching. */
+  fleetPrinterId: integer("fleet_printer_id"),
   hubspotSyncedAt: text("hubspot_synced_at").notNull(),
   attachedAt: text("attached_at").notNull(),
 });
@@ -1134,6 +1136,11 @@ export type UpdatePrinterInput = z.infer<typeof updatePrinterSchema>;
 export const assignPrinterProfileSchema = z.object({
   profile: trimmed(200).min(1, "Choose an unassigned machine name"),
   printerId: z.coerce.number().int().positive("Choose a fleet printer"),
+  /**
+   * When true, map this slicer label onto one printer for all plates.
+   * Leave false/omit for shared model names (Mighty 8K) — use per-plate assign instead.
+   */
+  applyToAllPlates: z.boolean().optional().default(true),
 });
 
 export type AssignPrinterProfileInput = z.infer<typeof assignPrinterProfileSchema>;
@@ -1176,9 +1183,21 @@ export const attachPrintFileSchema = z.object({
     .string()
     .trim()
     .regex(/^[0-9]{1,20}$/, "Select a valid active Print Order"),
+  /**
+   * Physical fleet printer that ran this plate. Required when Chitubox only
+   * embeds a shared model name (e.g. Mighty 8K) shared by NEWX1/2/3.
+   */
+  printerId: z.coerce.number().int().positive("Choose which printer ran this plate").optional(),
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
+
+export const assignPrintFilePrinterSchema = z.object({
+  recordId: z.coerce.number().int().positive("Choose a plate record"),
+  printerId: z.coerce.number().int().positive("Choose a fleet printer"),
+});
+
+export type AssignPrintFilePrinterInput = z.infer<typeof assignPrintFilePrinterSchema>;
 
 const kitBitStatusSchema = z.enum(["needed", "on_plate", "good", "reprint"]);
 

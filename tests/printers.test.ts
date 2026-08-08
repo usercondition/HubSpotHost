@@ -27,6 +27,9 @@ const {
   buildPrinterFleetSnapshot,
   addPrinterLifecycleEvent,
   assignPrinterProfile,
+  assignPrintFilePrinter,
+  isSharedModelPrinterProfile,
+  resolvePrinterIdForRecord,
 } = await import("../server/lib/printers");
 const {
   parseUltxFile,
@@ -187,12 +190,42 @@ test("machine-name matching prefers distinctive aliases like NEWX1", () => {
   const heygears = fleet.find((printer) => printer.name === "HeyGears Reflex Turbo")!;
 
   assert.equal(matchPrinterId("Mighty 8K NEWX1", fleet), newx1.id);
+  assert.equal(matchPrinterId("NEWX2", fleet), fleet.find((p) => p.name === "Mighty 8K NEWX2")!.id);
   assert.equal(matchPrinterId("ELEGOO Mega 8K", fleet), mega.id);
   assert.equal(matchPrinterId("Phrozen Sonic Mega 8K S", fleet), mega.id);
   assert.equal(matchPrinterId("Phrozen Sonic Mega 8K", fleet), mega.id);
   assert.equal(matchPrinterId("Reflex RS Turbo", fleet), heygears.id);
   assert.equal(matchPrinterId("totally unknown box", fleet), null);
+  // Shared model-only names must NOT latch onto NEWX1 via substring containment.
+  assert.equal(matchPrinterId("Mighty 8K", fleet), null);
+  assert.equal(matchPrinterId("Phrozen Sonic Mighty 8K", fleet), null);
+  assert.equal(isSharedModelPrinterProfile("Mighty 8K", fleet), true);
+  assert.equal(isSharedModelPrinterProfile("Mighty 8K NEWX1", fleet), false);
   assert.equal(normalizePrinterKey("Mighty  8K!!! NEWX1"), "mighty 8k newx1");
+});
+
+test("per-plate fleet printer assignment attributes shared Mighty 8K hours", () => {
+  const fleet = ensureDefaultPrinters();
+  const newx2 = fleet.find((printer) => printer.name === "Mighty 8K NEWX2")!;
+  const staged = stagePrintFile("shared-mighty.ctb", fixtureCtb("Phrozen Sonic Mighty 8K"));
+  const record = createPrintFileRecord({
+    analysisId: staged.analysisId,
+    hubspotDealId: "9002",
+    hubspotDealName: "Shared Mighty plate",
+    dealStage: "In work",
+    metrics: staged.metrics,
+  });
+  assert.equal(matchPrinterId(record.printerProfile, fleet), null);
+  assert.equal(resolvePrinterIdForRecord(record, fleet), null);
+
+  const assigned = assignPrintFilePrinter({ recordId: record.id, printerId: newx2.id });
+  assert.ok(assigned);
+  assert.equal(assigned!.record.fleetPrinterId, newx2.id);
+  const snapshot = buildPrinterFleetSnapshot();
+  const usage = snapshot.printers.find((printer) => printer.printerId === newx2.id);
+  assert.ok(usage);
+  assert.ok(usage!.recentJobs.some((job) => job.recordId === record.id));
+  assert.ok(usage!.totalPrintHours > 0);
 });
 
 test("manual profile assignment maps odd labels onto a fleet printer", () => {
