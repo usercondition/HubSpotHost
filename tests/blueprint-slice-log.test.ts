@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assembleSliceLogBundle,
+  collectSliceLogsFromFileList,
   isBlueprintSliceLogName,
 } from "../client/src/lib/blueprint-slice-log";
 
@@ -53,4 +54,24 @@ test("assembleSliceLogBundle prefers a log that mentions the plate UUID", () => 
   );
   assert.equal(byUuid?.relativePath, "match/Slice.log");
   assert.match(byUuid!.text, /12457/);
+});
+
+test("collectSliceLogsFromFileList keeps Slice.log under depth budget", async () => {
+  const makeFile = (relativePath: string, body: string, lastModified: number) => {
+    const name = relativePath.replace(/^.*\//, "");
+    const file = new File([body], name, { type: "text/plain", lastModified });
+    Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+    return file;
+  };
+
+  const candidates = await collectSliceLogsFromFileList([
+    makeFile("logs/proj-a/Slice.log", '[Slice] Output: {"printEstimateTime":10}', 2),
+    makeFile("logs/proj-b/notes.txt", "not a slice log", 3),
+    makeFile("logs/deep/a/b/c/d/e/Slice.log", '[Slice] Output: {"printEstimateTime":99}', 4),
+    makeFile("logs/proj-c/Slice.log", "missing marker", 5),
+  ]);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.relativePath, "logs/proj-a/Slice.log");
+  assert.match(candidates[0]!.text, /printEstimateTime":10/);
 });

@@ -26,10 +26,9 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   buildSliceLogUploadFromLinkedFolder,
   getLinkedBlueprintLogsStatus,
-  linkBlueprintLogsDirectory,
-  supportsBlueprintLogsFolderAccess,
+  importBlueprintLogsFromFileList,
   unlinkBlueprintLogsDirectory,
-  type LinkedLogsStatus,
+  type BlueprintLogsStatus,
 } from "@/lib/blueprint-slice-log";
 import { readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
@@ -233,6 +232,7 @@ export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sliceLogInputRef = useRef<HTMLInputElement>(null);
+  const logsFolderInputRef = useRef<HTMLInputElement>(null);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
@@ -243,11 +243,7 @@ export default function Prints() {
   const [dealId, setDealId] = useState(() => readHashQueryParam("dealId") ?? "");
   const [dragging, setDragging] = useState(false);
   const [sliceLogName, setSliceLogName] = useState<string | null>(() => readRememberedSliceLog()?.name ?? null);
-  const [logsLink, setLogsLink] = useState<LinkedLogsStatus>(() =>
-    supportsBlueprintLogsFolderAccess()
-      ? { supported: true, linked: false }
-      : { supported: false, linked: false, reason: "Folder linking needs Chrome or Edge." },
-  );
+  const [logsLink, setLogsLink] = useState<BlueprintLogsStatus>({ supported: true, ready: false });
   const [linkingLogs, setLinkingLogs] = useState(false);
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
@@ -404,24 +400,30 @@ export default function Prints() {
     },
   });
 
-  const linkLogsFolder = async () => {
+  const importLogsFolder = async (fileList: FileList | null) => {
+    if (!fileList?.length) return;
     setLinkingLogs(true);
     try {
-      const handle = await linkBlueprintLogsDirectory();
-      setLogsLink({ supported: true, linked: true, name: handle.name });
+      const cache = await importBlueprintLogsFromFileList(fileList);
+      setLogsLink({
+        supported: true,
+        ready: true,
+        source: "import",
+        name: cache.rootLabel,
+        fileCount: cache.candidates.length,
+        importedAt: cache.importedAt,
+      });
       toast({
-        title: "Blueprint logs folder linked",
-        description: `Drop a .ultx plate and Slice.log will be pulled from “${handle.name}” automatically.`,
+        title: "Blueprint logs imported",
+        description: `Cached ${cache.candidates.length} Slice.log file(s) from “${cache.rootLabel}”. Drop a .ultx plate to auto-fill time and resin. Re-import after new slices.`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Folder was not linked";
-      if (!/abort/i.test(message)) {
-        toast({
-          title: "Could not link Blueprint logs",
-          description: message.slice(0, 220),
-          variant: "destructive",
-        });
-      }
+      const message = error instanceof Error ? error.message : "Logs were not imported";
+      toast({
+        title: "Could not import Blueprint logs",
+        description: message.slice(0, 240),
+        variant: "destructive",
+      });
     } finally {
       setLinkingLogs(false);
     }
@@ -640,7 +642,7 @@ export default function Prints() {
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
               <Panel
                 title="1. Analyze one sliced plate"
-                description="Drop a .ctb/.ultx plate. For HeyGears, link the Blueprint logs folder once (Chrome/Edge) — later .ultx drops pull the matching Slice.log automatically."
+                description="Drop a .ctb/.ultx plate. For HeyGears, import Blueprint Studio\\logs (Chrome blocks live AppData links) — then .ultx drops pull matching Slice.log metrics."
               >
                 <input
                   ref={fileInputRef}
@@ -667,6 +669,24 @@ export default function Prints() {
                     event.currentTarget.value = "";
                   }}
                   data-testid="input-slice-log"
+                />
+                <input
+                  ref={(element) => {
+                    logsFolderInputRef.current = element;
+                    if (element) {
+                      element.setAttribute("webkitdirectory", "");
+                      element.setAttribute("directory", "");
+                    }
+                  }}
+                  id="blueprint-logs-folder-input"
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => {
+                    void importLogsFolder(event.target.files);
+                    event.currentTarget.value = "";
+                  }}
+                  data-testid="input-blueprint-logs-folder"
                 />
                 <button
                   type="button"
@@ -695,65 +715,71 @@ export default function Prints() {
                   <span className="mt-3 text-sm font-medium">
                     {analyze.isPending
                       ? "Reading slice data…"
-                      : logsLink.linked
-                        ? "Drop a .ultx plate — Slice.log is pulled from the linked folder"
-                        : "Drop a .ctb / .ultx plate (link Blueprint logs for automatic ULTX metrics)"}
+                      : logsLink.ready
+                        ? "Drop a .ultx plate — Slice.log metrics come from the imported logs"
+                        : "Drop a .ctb / .ultx plate (import Blueprint logs for automatic ULTX metrics)"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Layer count comes from the ULTX archive listing. Time and resin come from Blueprint Slice.log Output lines. Link the Studio logs folder once, or drop Slice.log manually as a fallback.
+                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Chrome blocks live access to AppData, so import <span className="font-medium text-foreground">Blueprint Studio\logs</span> (re-import after new slices), or add Slice.log manually.
                   </span>
                 </button>
-                {logsLink.supported ? (
-                  <div
-                    className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
-                    data-testid="status-blueprint-logs-link"
-                  >
-                    <span className="text-muted-foreground">
-                      {logsLink.linked ? (
-                        <>
-                          Linked logs folder:{" "}
-                          <span className="font-medium text-foreground">{logsLink.name}</span>
-                        </>
-                      ) : (
-                        <>Link <span className="font-medium text-foreground">Blueprint Studio\logs</span> once so .ultx drops auto-attach Slice.log.</>
-                      )}
-                    </span>
-                    <div className="flex flex-wrap gap-2">
+                <div
+                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+                  data-testid="status-blueprint-logs-link"
+                >
+                  <span className="text-muted-foreground">
+                    {logsLink.ready && logsLink.source === "import" ? (
+                      <>
+                        Imported logs:{" "}
+                        <span className="font-medium text-foreground">{logsLink.name}</span>
+                        {" · "}
+                        {logsLink.fileCount} Slice.log
+                        {" · "}
+                        {new Date(logsLink.importedAt).toLocaleString()}
+                      </>
+                    ) : logsLink.ready && logsLink.source === "directory" ? (
+                      <>
+                        Linked logs folder:{" "}
+                        <span className="font-medium text-foreground">{logsLink.name}</span>
+                      </>
+                    ) : (
+                      <>
+                        Import <span className="font-medium text-foreground">%APPDATA%\Blueprint Studio\logs</span> so
+                        .ultx drops auto-attach Slice.log (Chrome cannot live-link AppData).
+                      </>
+                    )}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      disabled={linkingLogs || analyze.isPending}
+                      onClick={() => logsFolderInputRef.current?.click()}
+                      data-testid="button-import-blueprint-logs"
+                    >
+                      {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import logs" : "Import logs folder"}
+                    </button>
+                    {logsLink.ready ? (
                       <button
                         type="button"
-                        className="text-primary underline-offset-2 hover:underline"
+                        className="text-muted-foreground underline-offset-2 hover:underline"
                         disabled={linkingLogs || analyze.isPending}
-                        onClick={() => void linkLogsFolder()}
-                        data-testid="button-link-blueprint-logs"
-                      >
-                        {linkingLogs ? "Linking…" : logsLink.linked ? "Relink folder" : "Link logs folder"}
-                      </button>
-                      {logsLink.linked ? (
-                        <button
-                          type="button"
-                          className="text-muted-foreground underline-offset-2 hover:underline"
-                          disabled={linkingLogs || analyze.isPending}
-                          onClick={() => {
-                            void unlinkBlueprintLogsDirectory().then(() => {
-                              setLogsLink({ supported: true, linked: false });
-                              toast({
-                                title: "Blueprint logs unlinked",
-                                description: "ULTX analyzes will need a manual Slice.log again.",
-                              });
+                        onClick={() => {
+                          void unlinkBlueprintLogsDirectory().then(() => {
+                            setLogsLink({ supported: true, ready: false });
+                            toast({
+                              title: "Blueprint logs cleared",
+                              description: "ULTX analyzes will need a fresh import or a manual Slice.log.",
                             });
-                          }}
-                          data-testid="button-unlink-blueprint-logs"
-                        >
-                          Unlink
-                        </button>
-                      ) : null}
-                    </div>
+                          });
+                        }}
+                        data-testid="button-unlink-blueprint-logs"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
                   </div>
-                ) : (
-                  <p className="mt-3 text-xs text-muted-foreground" data-testid="text-blueprint-logs-unsupported">
-                    Automatic folder linking needs Chrome or Edge. You can still use Add Slice.log below.
-                  </p>
-                )}
+                </div>
                 {sliceLogName ? (
                   <div
                     className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
@@ -786,18 +812,16 @@ export default function Prints() {
                     <FilePlus2 className="mr-2 h-4 w-4" />
                     Browse for a plate
                   </Button>
-                  {logsLink.supported ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void linkLogsFolder()}
-                      disabled={analyze.isPending || linkingLogs}
-                      data-testid="button-link-blueprint-logs-outline"
-                    >
-                      <FolderOpen className="mr-2 h-4 w-4" />
-                      {logsLink.linked ? "Relink logs folder" : "Link logs folder"}
-                    </Button>
-                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => logsFolderInputRef.current?.click()}
+                    disabled={analyze.isPending || linkingLogs}
+                    data-testid="button-import-blueprint-logs-outline"
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import logs" : "Import logs folder"}
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
