@@ -63,37 +63,63 @@ function parseMetrics(value: string): PrintFileMetrics | null {
   }
 }
 
-function parseSliceBuffer(fileName: string, buffer: Buffer): PrintFileMetrics {
+export interface StagePrintFileOptions {
+  /** Blueprint Slice.log text — used for sealed HeyGears .ultx time/resin recovery. */
+  sliceLogText?: string | null;
+}
+
+function parseSliceBuffer(
+  fileName: string,
+  buffer: Buffer,
+  options?: StagePrintFileOptions,
+): PrintFileMetrics {
   const ext = extensionOf(fileName);
-  if (ext === "ultx") return parseUltxFile(fileName, buffer);
+  if (ext === "ultx") return parseUltxFile(fileName, buffer, { sliceLogText: options?.sliceLogText });
   if (ext === "ctb") return parseCtbFile(fileName, buffer);
   throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
 }
 
-function parseSlicePath(fileName: string, filePath: string): PrintFileMetrics {
+function parseSlicePath(
+  fileName: string,
+  filePath: string,
+  options?: StagePrintFileOptions,
+): PrintFileMetrics {
   const ext = extensionOf(fileName);
-  if (ext === "ultx") return parseUltxFileFromPath(fileName, filePath);
+  if (ext === "ultx") {
+    return parseUltxFileFromPath(fileName, filePath, { sliceLogText: options?.sliceLogText });
+  }
   if (ext === "ctb") return parseCtbFileFromPath(fileName, filePath);
   throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
 }
 
-export function stagePrintFile(fileName: string, buffer: Buffer): {
-  analysisId: string;
-  metrics: PrintFileMetrics;
-  expiresAt: string;
-} {
-  return stageParsedPrintFile(fileName, enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer)));
-}
-
-/** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
-export function stagePrintFileFromPath(fileName: string, filePath: string): {
+export function stagePrintFile(
+  fileName: string,
+  buffer: Buffer,
+  options?: StagePrintFileOptions,
+): {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
   return stageParsedPrintFile(
     fileName,
-    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath)),
+    enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options)),
+  );
+}
+
+/** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
+export function stagePrintFileFromPath(
+  fileName: string,
+  filePath: string,
+  options?: StagePrintFileOptions,
+): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
+  return stageParsedPrintFile(
+    fileName,
+    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options)),
   );
 }
 

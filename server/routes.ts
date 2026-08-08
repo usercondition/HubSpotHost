@@ -164,16 +164,38 @@ import {
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
+const SLICE_LOG_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
+
 const printFileUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, os.tmpdir()),
     filename: (_req, file, cb) => {
       const extension = path.extname(file.originalname || "").toLowerCase() || ".ctb";
-      cb(null, `ctb-upload-${crypto.randomUUID()}${extension}`);
+      const prefix = /\.log$/i.test(extension) ? "slice-log" : "ctb-upload";
+      cb(null, `${prefix}-${crypto.randomUUID()}${extension}`);
     },
   }),
-  limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
+  limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 2 },
 });
+
+function isSliceLogUploadName(fileName: string): boolean {
+  const base = path.basename(fileName || "").toLowerCase();
+  return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base);
+}
+
+function readOptionalSliceLogUpload(file: Express.Multer.File | undefined): string | null {
+  if (!file?.path) return null;
+  try {
+    const stat = fs.statSync(file.path);
+    if (stat.size <= 0 || stat.size > SLICE_LOG_UPLOAD_MAX_BYTES) return null;
+    if (!isSliceLogUploadName(file.originalname) && path.extname(file.originalname).toLowerCase() !== ".log") {
+      return null;
+    }
+    return fs.readFileSync(file.path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 function extensionForSupplyUpload(file: Express.Multer.File): string {
   const fromName = path.extname(file.originalname || "").toLowerCase();
@@ -1394,9 +1416,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
-   * The CTB bytes only exist for the duration of this request. The response
-   * contains a short-lived analysis ID; no file binary is ever written to
-   * Railway storage or sent to HubSpot.
+   * Slice bytes only exist for the duration of this request. Optional
+   * `sliceLog` is a Blueprint Slice.log used to recover sealed ULTX estimates.
+   * The response contains a short-lived analysis ID; no plate binary is kept.
    */
   app.post(
     "/api/prints/analyze",
@@ -1404,10 +1426,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (rejectUnsecuredIntake(req, res)) return;
       next();
     },
-    printFileUpload.single("file"),
+    printFileUpload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "sliceLog", maxCount: 1 },
+    ]),
     (req: Request, res: Response) => {
-      const file = req.file;
+      const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
+      const file = files?.file?.[0];
+      const sliceLogFile = files?.sliceLog?.[0];
       if (!file?.path) {
+        removeTempUpload(sliceLogFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
@@ -1415,6 +1443,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
+        removeTempUpload(sliceLogFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
@@ -1422,8 +1451,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       try {
-        const staged = stagePrintFileFromPath(file.originalname, file.path);
-        return res.status(201).json({ ok: true, ...staged });
+        const sliceLogText = readOptionalSliceLogUpload(sliceLogFile);
+        if (sliceLogFile?.path && !sliceLogText) {
+          return res.status(400).json({
+            ok: false,
+            error: "Slice.log must be a Blueprint log file under 8 MB",
+          });
+        }
+        const staged = stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
+        return res.status(201).json({
+          ok: true,
+          ...staged,
+          sliceLogApplied: Boolean(sliceLogText),
+        });
       } catch (error) {
         const message =
           error instanceof CtbParseError || error instanceof UltxParseError
@@ -1432,6 +1472,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ ok: false, error: message });
       } finally {
         removeTempUpload(file.path);
+        removeTempUpload(sliceLogFile?.path);
       }
     },
   );

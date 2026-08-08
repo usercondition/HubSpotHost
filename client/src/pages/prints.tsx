@@ -190,9 +190,40 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   );
 }
 
+const SLICE_LOG_MEMORY_KEY = "hubspot-print-slice-log-v1";
+const SLICE_LOG_MEMORY_MAX_CHARS = 2 * 1024 * 1024;
+
+function isSliceLogFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return name === "slice.log" || /^slice(?:-.*)?\.log$/.test(name);
+}
+
+function isPlateFile(file: File): boolean {
+  return /\.(ctb|ultx)$/i.test(file.name);
+}
+
+function readRememberedSliceLog(): { name: string; text: string } | null {
+  try {
+    const raw = sessionStorage.getItem(SLICE_LOG_MEMORY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { name?: string; text?: string };
+    if (!parsed?.text || !parsed?.name) return null;
+    return { name: parsed.name, text: parsed.text };
+  } catch {
+    return null;
+  }
+}
+
+function rememberSliceLog(name: string, text: string): void {
+  const clipped =
+    text.length > SLICE_LOG_MEMORY_MAX_CHARS ? text.slice(text.length - SLICE_LOG_MEMORY_MAX_CHARS) : text;
+  sessionStorage.setItem(SLICE_LOG_MEMORY_KEY, JSON.stringify({ name, text: clipped, savedAt: Date.now() }));
+}
+
 export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sliceLogInputRef = useRef<HTMLInputElement>(null);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
@@ -202,6 +233,7 @@ export default function Prints() {
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
   const [dealId, setDealId] = useState(() => readHashQueryParam("dealId") ?? "");
   const [dragging, setDragging] = useState(false);
+  const [sliceLogName, setSliceLogName] = useState<string | null>(() => readRememberedSliceLog()?.name ?? null);
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
@@ -302,17 +334,30 @@ export default function Prints() {
 
 
   const analyze = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
       const form = new FormData();
       form.append("file", file);
+      if (sliceLog) form.append("sliceLog", sliceLog);
+      else if (/\.ultx$/i.test(file.name)) {
+        const remembered = readRememberedSliceLog();
+        if (remembered) {
+          form.append(
+            "sliceLog",
+            new File([remembered.text], remembered.name || "Slice.log", { type: "text/plain" }),
+          );
+        }
+      }
       const response = await apiRequest("POST", "/api/prints/analyze", form, { headers });
-      return (await response.json()) as { ok: true } & StagedPrintFile;
+      return (await response.json()) as { ok: true; sliceLogApplied?: boolean } & StagedPrintFile;
     },
-    onSuccess: ({ analysisId, metrics, expiresAt }) => {
+    onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied }) => {
       setStaged({ analysisId, metrics, expiresAt });
+      const fromLog = /estimates from slice\.log/i.test(metrics.formatRevision || "");
       toast({
-        title: "Plate data extracted",
-        description: "Choose the matching Print Order, then attach the production plan.",
+        title: fromLog || sliceLogApplied ? "Plate data extracted from Slice.log" : "Plate data extracted",
+        description: fromLog
+          ? "Time and resin came from the Blueprint Slice.log. Choose the matching Print Order, then attach."
+          : "Choose the matching Print Order, then attach the production plan.",
       });
     },
     onError: (error: Error) => {
@@ -360,10 +405,48 @@ export default function Prints() {
     },
   });
 
-  const acceptFile = (file: File | undefined) => {
-    if (!file) return;
+  const saveSliceLogFile = async (file: File) => {
+    const text = await file.text();
+    if (!text.trim()) {
+      toast({
+        title: "Slice.log was empty",
+        description: "Pick the Blueprint project Slice.log that contains Output lines for this plate.",
+        variant: "destructive",
+      });
+      return;
+    }
+    rememberSliceLog(file.name, text);
+    setSliceLogName(file.name);
+    toast({
+      title: "Slice.log ready",
+      description: "It will be applied automatically the next time you analyze a .ultx plate.",
+    });
+  };
+
+  const acceptFiles = async (incoming: FileList | File[] | null | undefined) => {
+    const files = incoming ? Array.from(incoming) : [];
+    if (!files.length) return;
+
+    const plate = files.find(isPlateFile);
+    const sliceLog = files.find(isSliceLogFile) ?? null;
+
+    if (sliceLog) {
+      await saveSliceLogFile(sliceLog);
+    }
+
+    if (!plate) {
+      if (!sliceLog) {
+        toast({
+          title: "Unrecognized file",
+          description: "Drop a .ctb / .ultx plate, or a Blueprint Slice.log.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
     setStaged(null);
-    analyze.mutate(file);
+    analyze.mutate({ file: plate, sliceLog });
   };
 
   const candidates = prints.data?.candidates ?? [];
@@ -498,18 +581,35 @@ export default function Prints() {
             </Panel>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb or HeyGears .ultx file. The raw file is read in memory and then discarded.">
+              <Panel
+                title="1. Analyze one sliced plate"
+                description="Drop a .ctb/.ultx plate. For HeyGears, also drop Blueprint Slice.log once — it is remembered and applied automatically to later .ultx plates."
+              >
                 <input
                   ref={fileInputRef}
                   id="print-file-input"
                   type="file"
-                  accept=".ctb,.ultx,application/octet-stream"
+                  multiple
+                  accept=".ctb,.ultx,.log,application/octet-stream,text/plain"
                   className="sr-only"
                   onChange={(event) => {
-                    acceptFile(event.target.files?.[0]);
+                    void acceptFiles(event.target.files);
                     event.currentTarget.value = "";
                   }}
                   data-testid="input-print-file"
+                />
+                <input
+                  ref={sliceLogInputRef}
+                  id="slice-log-input"
+                  type="file"
+                  accept=".log,text/plain"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void saveSliceLogFile(file);
+                    event.currentTarget.value = "";
+                  }}
+                  data-testid="input-slice-log"
                 />
                 <button
                   type="button"
@@ -523,7 +623,7 @@ export default function Prints() {
                   onDrop={(event) => {
                     event.preventDefault();
                     setDragging(false);
-                    acceptFile(event.dataTransfer.files?.[0]);
+                    void acceptFiles(event.dataTransfer.files);
                   }}
                   className={`flex min-h-40 w-full flex-col items-center justify-center rounded-md border border-dashed px-5 text-center transition-colors ${
                     dragging ? "border-primary bg-primary/10" : "border-border bg-muted/35 hover:bg-muted/60"
@@ -536,23 +636,57 @@ export default function Prints() {
                     <FileUp className="h-5 w-5 text-primary" />
                   )}
                   <span className="mt-3 text-sm font-medium">
-                    {analyze.isPending ? "Reading slice data…" : "Drop a .ctb or .ultx file here"}
+                    {analyze.isPending
+                      ? "Reading slice data…"
+                      : "Drop a .ctb / .ultx plate, or Slice.log + plate together"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX plates are AES-encrypted — layer count is recovered from the archive listing; time/resin need a decrypt password when metadata is sealed.
+                    Layer count comes from the ULTX archive listing. Time and resin for sealed HeyGears plates come from Blueprint Slice.log Output lines — drop that log once and it auto-applies to later .ultx uploads in this browser session.
                   </span>
                 </button>
-                <Button
-                  className="mt-3"
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={analyze.isPending}
-                  data-testid="button-browse-print-file"
-                >
-                  <FilePlus2 className="mr-2 h-4 w-4" />
-                  Browse for a slice file
-                </Button>
+                {sliceLogName ? (
+                  <div
+                    className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+                    data-testid="status-slice-log-ready"
+                  >
+                    <span className="text-muted-foreground">
+                      Slice.log ready: <span className="font-medium text-foreground">{sliceLogName}</span> (auto-applied to .ultx)
+                    </span>
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      onClick={() => {
+                        sessionStorage.removeItem(SLICE_LOG_MEMORY_KEY);
+                        setSliceLogName(null);
+                      }}
+                      data-testid="button-clear-slice-log"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={analyze.isPending}
+                    data-testid="button-browse-print-file"
+                  >
+                    <FilePlus2 className="mr-2 h-4 w-4" />
+                    Browse for a plate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => sliceLogInputRef.current?.click()}
+                    disabled={analyze.isPending}
+                    data-testid="button-browse-slice-log"
+                  >
+                    <FileUp className="mr-2 h-4 w-4" />
+                    {sliceLogName ? "Replace Slice.log" : "Add Slice.log"}
+                  </Button>
+                </div>
               </Panel>
 
               <Panel title="2. Choose the Print Order" description="Only active orders without a local plate record are listed by default.">
@@ -625,7 +759,7 @@ export default function Prints() {
                     {staged.metrics.formatRevision.toLowerCase().includes("estimates from slice.log")
                       ? `Filled time/resin from Blueprint Slice.log (${staged.metrics.formatRevision}).`
                       : staged.metrics.formatRevision.toLowerCase().includes("sealed")
-                        ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing. On the HubSpotHost server, set ULTX_SLICE_LOG to the Blueprint Studio logs folder and redeploy/restart, then re-analyze.`
+                        ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Drop the matching Blueprint Slice.log above (or with the plate) — it is remembered for later .ultx uploads in this session.`
                         : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
                   </p>
                 ) : null}
