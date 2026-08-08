@@ -28,8 +28,14 @@ const {
   addPrinterLifecycleEvent,
   assignPrinterProfile,
 } = await import("../server/lib/printers");
-const { parseUltxFile, extractZipTextMembers, listUltxZipMembers, countUltxLayersFromMembers } =
-  await import("../server/lib/ultx");
+const {
+  parseUltxFile,
+  extractZipTextMembers,
+  listUltxZipMembers,
+  countUltxLayersFromMembers,
+  extractPasswordsFromSliceLog,
+  BLUEPRINT_ASSET_ZIP_PASSWORD,
+} = await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
 const { registerRoutes } = await import("../server/routes");
 
@@ -274,6 +280,16 @@ test("ULTX harvests Blueprint Slice.log / UI-style phrases with spaced keys", ()
   assert.equal(metrics.resinCostLabel, "Open Material");
   assert.equal(metrics.exposureSeconds, 1.3);
   assert.equal(metrics.bottomExposureSeconds, 10);
+});
+
+test("ULTX scrapes Codex zip passwords from Blueprint Slice.log lines", () => {
+  const passwords = extractPasswordsFromSliceLog(
+    ["[Slice] Use open material", "[Slice] password: ab12cd34ef", "[Slice] password: ab12cd34ef", "noise"].join(
+      "\n",
+    ),
+  );
+  assert.deepEqual(passwords, ["ab12cd34ef"]);
+  assert.equal(BLUEPRINT_ASSET_ZIP_PASSWORD, "heygears008");
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {

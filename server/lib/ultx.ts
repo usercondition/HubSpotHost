@@ -8,8 +8,13 @@
  *
  * Recovery strategy:
  * 1. Walk the ZIP central directory for layer filenames + member inventory
- * 2. When `ULTX_ZIP_PASSWORD` (or an explicit password) is set, decrypt text
- *    members (`parameters.ini`, `buildscript.ini`, json/xml/cfg) via WinZip AES
+ * 2. Decrypt text members (`parameters.ini`, `buildscript.ini`, `.pp`/`.ucfg`)
+ *    via WinZip AES using the first working password from:
+ *      - explicit `options.password`
+ *      - `ULTX_ZIP_PASSWORD`
+ *      - `[Slice] password: …` lines in `ULTX_SLICE_LOG` (Blueprint Slice.log)
+ *      - built-in Blueprint asset password `heygears008` (used by Studio UI zips;
+ *        plate ULTX files usually use a Codex-derived password instead)
  * 3. Harvest print time / resin / exposure / machine keys from plaintext
  * 4. Fall back to ASCII scans for any unencrypted sidecar-style containers
  * 5. Infer a printer profile from the file name when the archive stays sealed
@@ -114,6 +119,72 @@ function emptyMetrics(fileName: string, buffer: Buffer, revision: string): Print
 
 function looksLikeZip(buffer: Buffer): boolean {
   return buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+}
+
+/** Password Blueprint's Electron UI uses for some encrypted studio asset zips. */
+export const BLUEPRINT_ASSET_ZIP_PASSWORD = "heygears008";
+
+/** Pull zip passwords logged by Blueprint while slicing (`[Slice] password: …`). */
+export function extractPasswordsFromSliceLog(text: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const match of text.matchAll(/\[Slice\]\s*password\s*:\s*(.+?)\s*$/gim)) {
+    const value = match[1]?.trim();
+    if (!value || value === "{}" || value === "null" || value === "undefined") continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    found.push(value);
+  }
+  return found;
+}
+
+function readSliceLogPasswords(): string[] {
+  const logPath = process.env.ULTX_SLICE_LOG?.trim();
+  if (!logPath) return [];
+  try {
+    if (!fs.existsSync(logPath)) return [];
+    // Slice.log can be large; only the trailing window is needed for recent passwords.
+    const stat = fs.statSync(logPath);
+    const maxBytes = 2 * 1024 * 1024;
+    const fd = fs.openSync(logPath, "r");
+    try {
+      const size = Math.min(stat.size, maxBytes);
+      const buf = Buffer.alloc(size);
+      fs.readSync(fd, buf, 0, size, Math.max(0, stat.size - size));
+      return extractPasswordsFromSliceLog(buf.toString("utf8"));
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
+}
+
+function collectZipPasswordCandidates(explicit?: string | null): Array<string | null> {
+  const ordered: Array<string | null> = [];
+  const seen = new Set<string>();
+  const push = (value: string | null | undefined) => {
+    if (value === undefined) return;
+    if (value === null) {
+      if (!seen.has("__null__")) {
+        seen.add("__null__");
+        ordered.push(null);
+      }
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    ordered.push(trimmed);
+  };
+
+  if (explicit !== undefined) push(explicit);
+  push(process.env.ULTX_ZIP_PASSWORD);
+  for (const fromLog of readSliceLogPasswords()) push(fromLog);
+  push(BLUEPRINT_ASSET_ZIP_PASSWORD);
+  // Always attempt a sealed/no-password pass last so layer-count recovery still runs.
+  push(null);
+  return ordered;
 }
 
 function readZipPassword(): string | null {
@@ -612,16 +683,27 @@ export function parseUltxFile(
     throw new UltxParseError("The ULTX file is empty");
   }
 
-  const password = options?.password === undefined ? readZipPassword() : options.password;
+  const passwordCandidates = collectZipPasswordCandidates(
+    options && "password" in options ? options.password : undefined,
+  );
   let metrics = emptyMetrics(fileName, buffer, "HeyGears ULTX (best-effort)");
   const texts: string[] = [];
   let members: UltxZipMember[] = [];
+  let usedPassword: string | null = null;
 
   if (looksLikeZip(buffer)) {
     members = listUltxZipMembers(buffer);
     const layerCount = countUltxLayersFromMembers(members);
     const encryptedCount = members.filter((member) => member.encrypted || member.method === 99).length;
-    const decrypted = extractZipTextMembers(buffer, password);
+
+    let decrypted: string[] = [];
+    for (const candidate of passwordCandidates) {
+      decrypted = extractZipTextMembers(buffer, candidate);
+      if (decrypted.length) {
+        usedPassword = candidate;
+        break;
+      }
+    }
     texts.push(...decrypted);
 
     if (layerCount != null) {
@@ -632,7 +714,8 @@ export function parseUltxFile(
       if (encryptedCount === members.length && !decrypted.length) {
         metrics.formatRevision = `HeyGears ULTX AES-encrypted zip · ${members.length} members · ${layerCount ?? 0} layers (metadata sealed)`;
       } else if (encryptedCount && decrypted.length) {
-        metrics.formatRevision = `HeyGears ULTX AES zip · decrypted ${decrypted.length} metadata member${decrypted.length === 1 ? "" : "s"} · ${layerCount ?? "?"} layers`;
+        const via = usedPassword === BLUEPRINT_ASSET_ZIP_PASSWORD ? "via heygears008" : "decrypted";
+        metrics.formatRevision = `HeyGears ULTX AES zip · ${via} ${decrypted.length} metadata member${decrypted.length === 1 ? "" : "s"} · ${layerCount ?? "?"} layers`;
       } else if (decrypted.length) {
         metrics.formatRevision = `HeyGears ULTX zip · ${decrypted.length} metadata member${decrypted.length === 1 ? "" : "s"}`;
       } else {
@@ -640,7 +723,14 @@ export function parseUltxFile(
       }
     } else {
       // Truncated local-header-only fixtures.
-      texts.push(...extractZipTextMembers(buffer, password));
+      for (const candidate of passwordCandidates) {
+        const legacy = extractZipTextMembers(buffer, candidate);
+        if (legacy.length) {
+          texts.push(...legacy);
+          usedPassword = candidate;
+          break;
+        }
+      }
       metrics = {
         ...metrics,
         formatRevision: texts.length

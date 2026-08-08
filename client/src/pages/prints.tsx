@@ -617,7 +617,7 @@ export default function Prints() {
                 staged.metrics.formatRevision.toLowerCase().includes("sealed") ? (
                   <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
                     {staged.metrics.formatRevision.toLowerCase().includes("sealed")
-                      ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing; set ULTX_ZIP_PASSWORD to unlock time/resin fields.`
+                      ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing. Blueprint logs the zip password as "[Slice] password: …" in Slice.log — set ULTX_ZIP_PASSWORD (or ULTX_SLICE_LOG) to unlock time/resin.`
                       : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
                   </p>
                 ) : null}
