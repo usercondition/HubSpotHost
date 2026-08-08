@@ -233,6 +233,9 @@ export default function Prints() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sliceLogInputRef = useRef<HTMLInputElement>(null);
   const logsFolderInputRef = useRef<HTMLInputElement>(null);
+  /** ULTX waiting while the user re-picks Blueprint logs (AppData cannot auto-refresh). */
+  const pendingUltxRef = useRef<File | null>(null);
+  const awaitingLogsRefreshRef = useRef(false);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
@@ -245,6 +248,7 @@ export default function Prints() {
   const [sliceLogName, setSliceLogName] = useState<string | null>(() => readRememberedSliceLog()?.name ?? null);
   const [logsLink, setLogsLink] = useState<BlueprintLogsStatus>({ supported: true, ready: false });
   const [linkingLogs, setLinkingLogs] = useState(false);
+  const [awaitingLogsRefresh, setAwaitingLogsRefresh] = useState(false);
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
@@ -400,11 +404,25 @@ export default function Prints() {
     },
   });
 
+  const finishPendingUltxAnalyze = () => {
+    const pending = pendingUltxRef.current;
+    pendingUltxRef.current = null;
+    awaitingLogsRefreshRef.current = false;
+    setAwaitingLogsRefresh(false);
+    if (pending) {
+      setStaged(null);
+      analyze.mutate({ file: pending, sliceLog: null });
+    }
+  };
+
   const importLogsFolder = async (fileList: ArrayLike<File> | null) => {
     if (!fileList || fileList.length === 0) return;
+    const hadPendingUltx = Boolean(pendingUltxRef.current && awaitingLogsRefreshRef.current);
     setLinkingLogs(true);
     try {
       const cache = await importBlueprintLogsFromFileList(fileList);
+      awaitingLogsRefreshRef.current = false;
+      setAwaitingLogsRefresh(false);
       setLogsLink({
         supported: true,
         ready: true,
@@ -413,20 +431,75 @@ export default function Prints() {
         fileCount: cache.candidates.length,
         importedAt: cache.importedAt,
       });
-      toast({
-        title: "Blueprint logs imported",
-        description: `Cached ${cache.candidates.length} Slice.log file(s) from “${cache.rootLabel}”. Drop a .ultx plate to auto-fill time and resin. Re-import after new slices.`,
-      });
+      if (hadPendingUltx) {
+        toast({
+          title: "Logs refreshed",
+          description: `Cached ${cache.candidates.length} Slice.log file(s). Analyzing the plate…`,
+        });
+        finishPendingUltxAnalyze();
+      } else {
+        toast({
+          title: "Blueprint logs refreshed",
+          description: `Cached ${cache.candidates.length} Slice.log file(s) from “${cache.rootLabel}”. Drop a .ultx when ready.`,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Logs were not imported";
       toast({
-        title: "Could not import Blueprint logs",
+        title: "Could not refresh Blueprint logs",
         description: message.slice(0, 240),
         variant: "destructive",
       });
+      // Still analyze the waiting plate with whatever cache we already have.
+      if (hadPendingUltx) finishPendingUltxAnalyze();
     } finally {
       setLinkingLogs(false);
     }
+  };
+
+  /** AppData imports are snapshots — ask for a fresh folder pick before each .ultx when possible. */
+  const promptLogsRefreshThenAnalyze = (plate: File, sliceLog: File | null) => {
+    if (sliceLog || !/\.ultx$/i.test(plate.name)) {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog });
+      return;
+    }
+    // Live directory handles re-read on analyze; no picker needed.
+    if (logsLink.ready && logsLink.source === "directory") {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog: null });
+      return;
+    }
+
+    const input = logsFolderInputRef.current;
+    if (!input) {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog: null });
+      return;
+    }
+
+    pendingUltxRef.current = plate;
+    awaitingLogsRefreshRef.current = true;
+    setAwaitingLogsRefresh(true);
+    toast({
+      title: "Refresh Blueprint logs",
+      description: "Select Blueprint Studio\\logs again for the latest Slice.log. Cancel to use the last import.",
+    });
+
+    const onWindowFocus = () => {
+      window.removeEventListener("focus", onWindowFocus);
+      window.setTimeout(() => {
+        if (!awaitingLogsRefreshRef.current) return;
+        // Folder picker was cancelled — continue with the existing cache.
+        finishPendingUltxAnalyze();
+      }, 400);
+    };
+    window.addEventListener("focus", onWindowFocus);
+    input.click();
+  };
+
+  const openLogsRefreshPicker = () => {
+    logsFolderInputRef.current?.click();
   };
 
   const attach = useMutation({
@@ -525,8 +598,7 @@ export default function Prints() {
       return;
     }
 
-    setStaged(null);
-    analyze.mutate({ file: plate, sliceLog: sliceLogs[0] ?? null });
+    promptLogsRefreshThenAnalyze(plate, sliceLogs[0] ?? null);
   };
 
   const candidates = prints.data?.candidates ?? [];
@@ -740,16 +812,18 @@ export default function Prints() {
                     <FileUp className="h-5 w-5 text-primary" />
                   )}
                   <span className="mt-3 text-sm font-medium">
-                    {analyze.isPending
-                      ? "Reading slice data…"
-                      : logsLink.ready
-                        ? "Drop a .ultx plate — Slice.log metrics come from the imported logs"
-                        : "Drop a .ctb / .ultx plate, or drag the Blueprint logs folder here"}
+                    {awaitingLogsRefresh || linkingLogs
+                      ? "Refreshing Blueprint logs…"
+                      : analyze.isPending
+                        ? "Reading slice data…"
+                        : logsLink.ready
+                          ? "Drop a .ultx plate — you’ll be asked to refresh logs first"
+                          : "Drop a .ctb / .ultx plate, or drag the Blueprint logs folder here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Prefer dragging{" "}
-                    <span className="font-medium text-foreground">Blueprint Studio\logs</span> from File Explorer
-                    onto this drop zone — Chrome’s folder picker often returns nothing from AppData.
+                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Dropping a .ultx
+                    prompts a logs refresh (Chrome can’t watch AppData). Or drag{" "}
+                    <span className="font-medium text-foreground">Blueprint Studio\logs</span> from Explorer anytime.
                   </span>
                 </button>
                 <div
@@ -770,11 +844,12 @@ export default function Prints() {
                       <>
                         Linked logs folder:{" "}
                         <span className="font-medium text-foreground">{logsLink.name}</span>
+                        {" · live on each analyze"}
                       </>
                     ) : (
                       <>
                         Drag <span className="font-medium text-foreground">%APPDATA%\Blueprint Studio\logs</span> from
-                        Explorer onto the drop zone (or Add Slice.log from a project subfolder).
+                        Explorer onto the drop zone (or use Refresh logs).
                       </>
                     )}
                   </span>
@@ -783,10 +858,10 @@ export default function Prints() {
                       type="button"
                       className="text-primary underline-offset-2 hover:underline"
                       disabled={linkingLogs || analyze.isPending}
-                      onClick={() => logsFolderInputRef.current?.click()}
+                      onClick={() => openLogsRefreshPicker()}
                       data-testid="button-import-blueprint-logs"
                     >
-                      {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import copy…" : "Import copy…"}
+                      {linkingLogs ? "Refreshing…" : logsLink.ready ? "Refresh logs" : "Import logs"}
                     </button>
                     {logsLink.ready ? (
                       <button
@@ -844,12 +919,12 @@ export default function Prints() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => logsFolderInputRef.current?.click()}
+                    onClick={() => openLogsRefreshPicker()}
                     disabled={analyze.isPending || linkingLogs}
                     data-testid="button-import-blueprint-logs-outline"
                   >
                     <FolderOpen className="mr-2 h-4 w-4" />
-                    {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import copy…" : "Import folder copy…"}
+                    {linkingLogs ? "Refreshing…" : logsLink.ready ? "Refresh logs" : "Import logs"}
                   </Button>
                   <Button
                     type="button"
