@@ -36,6 +36,7 @@ const {
   extractPasswordsFromSliceLog,
   extractUltxMetricsFromSliceLog,
   matchSliceLogMetrics,
+  parseUltxExportStampMs,
   BLUEPRINT_ASSET_ZIP_PASSWORD,
 } = await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
@@ -321,6 +322,17 @@ test("ULTX harvests print estimates from Blueprint Slice.log Output JSON", () =>
   const byLayers = matchSliceLogMetrics(entries, "mystery-plate.ultx", 2073);
   assert.equal(byLayers?.resinMassG, 138.058);
   assert.equal(byLayers?.printTimeSeconds, 22921);
+
+  // Blueprint export names keep a local stamp, not the Slice-*.ultx uuid.
+  const exportName = "P_20260806_164828-Plate01.rs.ultx";
+  const stamp = parseUltxExportStampMs(exportName);
+  assert.ok(stamp);
+  // Align the first Output line's epoch prefix to the export stamp for the matcher.
+  const stampedLog = sliceLog.replace("1786060108784|", `${stamp}|`);
+  const stampedEntries = extractUltxMetricsFromSliceLog(stampedLog);
+  const byStamp = matchSliceLogMetrics(stampedEntries, exportName, 1113);
+  assert.equal(byStamp?.printTimeSeconds, 12457);
+  assert.equal(byStamp?.resinMassG, 43.569);
 
   const prev = process.env.ULTX_SLICE_LOG;
   const logFile = path.join(os.tmpdir(), `slice-log-${crypto.randomUUID()}.log`);

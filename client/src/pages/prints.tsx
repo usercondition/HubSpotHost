@@ -610,15 +610,23 @@ export default function Prints() {
                       Analysis expires at {localDate(staged.expiresAt)}. Verify the plate belongs to the selected order before attaching it.
                     </p>
                   </div>
-                  <StatusPill tone="good" icon={CheckCircle2} label="CTB analyzed" testId="status-ctb-analyzed" />
+                  <StatusPill
+                    tone="good"
+                    icon={CheckCircle2}
+                    label={staged.metrics.format === "ULTX" ? "ULTX analyzed" : "CTB analyzed"}
+                    testId="status-ctb-analyzed"
+                  />
                 </div>
                 {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ||
                 staged.metrics.formatRevision.toLowerCase().includes("decrypted") ||
-                staged.metrics.formatRevision.toLowerCase().includes("sealed") ? (
+                staged.metrics.formatRevision.toLowerCase().includes("sealed") ||
+                staged.metrics.formatRevision.toLowerCase().includes("slice.log") ? (
                   <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
-                    {staged.metrics.formatRevision.toLowerCase().includes("sealed")
-                      ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing. Point ULTX_SLICE_LOG at Blueprint’s logs folder (or a project Slice.log) to fill time/resin from Output estimates — the zip password is not written to production Slice.log.`
-                      : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
+                    {staged.metrics.formatRevision.toLowerCase().includes("estimates from slice.log")
+                      ? `Filled time/resin from Blueprint Slice.log (${staged.metrics.formatRevision}).`
+                      : staged.metrics.formatRevision.toLowerCase().includes("sealed")
+                        ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing. On the HubSpotHost server, set ULTX_SLICE_LOG to the Blueprint Studio logs folder and redeploy/restart, then re-analyze.`
+                        : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />

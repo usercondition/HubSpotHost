@@ -146,6 +146,8 @@ export function extractPasswordsFromSliceLog(text: string): string[] {
 export interface SliceLogUltxMetrics {
   sliceFileName: string;
   uuid: string | null;
+  /** Epoch ms from the Slice.log line prefix when present. */
+  loggedAtMs: number | null;
   printTimeSeconds: number | null;
   resinMassG: number | null;
   resinVolumeMl: number | null;
@@ -153,7 +155,11 @@ export interface SliceLogUltxMetrics {
 }
 
 const SLICE_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/** Blueprint export names: `P_20260806_232232-Plate01.rs.ultx`. */
+const EXPORT_STAMP_RE = /(?:^|[/\\])P_(\d{8})_(\d{6})(?:-|_|\.|$)/i;
 const MAX_SLICE_LOG_READ_BYTES = 8 * 1024 * 1024;
+/** How close an export stamp must be to a Slice.log Output line. */
+const EXPORT_STAMP_MATCH_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 function basenameLower(fileName: string): string {
   return fileName.replace(/^.*[/\\]/, "").trim().toLowerCase();
@@ -162,6 +168,41 @@ function basenameLower(fileName: string): string {
 function extractUuid(text: string): string | null {
   const match = text.match(SLICE_UUID_RE);
   return match ? match[0]!.toLowerCase() : null;
+}
+
+function lineLoggedAtMs(line: string): number | null {
+  const match = line.match(/^(\d{11,16})\|/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 1_000_000_000_000 ? value : null;
+}
+
+/** Local-time epoch ms for Blueprint `P_YYYYMMDD_HHMMSS-…` export filenames. */
+export function parseUltxExportStampMs(fileName: string): number | null {
+  const match = EXPORT_STAMP_RE.exec(fileName);
+  if (!match) return null;
+  const date = match[1]!;
+  const time = match[2]!;
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(4, 6));
+  const day = Number(date.slice(6, 8));
+  const hour = Number(time.slice(0, 2));
+  const minute = Number(time.slice(2, 4));
+  const second = Number(time.slice(4, 6));
+  if (
+    !Number.isFinite(year) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+  const ms = new Date(year, month - 1, day, hour, minute, second).getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**
@@ -174,70 +215,91 @@ export function extractUltxMetricsFromSliceLog(text: string): SliceLogUltxMetric
   const byKey = new Map<string, Acc>();
   let order = 0;
 
-  const upsert = (partial: Partial<SliceLogUltxMetrics> & { sliceFileName?: string; uuid?: string | null }) => {
+  const upsert = (
+    partial: Partial<SliceLogUltxMetrics> & { sliceFileName?: string; uuid?: string | null },
+    options?: { prefer?: boolean },
+  ) => {
     const uuid = partial.uuid?.toLowerCase() || extractUuid(partial.sliceFileName || "") || null;
     const sliceFileName = partial.sliceFileName?.trim() || (uuid ? `Slice-${uuid}.ultx` : "");
     if (!sliceFileName && !uuid) return;
     const key = uuid || basenameLower(sliceFileName);
     const prev = byKey.get(key);
-    // First non-null wins — Output JSON is parsed before material-cost ms lines so
-    // printEstimateTime (exact UI seconds) is not overwritten by round(ms/1000).
+    const prefer = options?.prefer === true;
+    // Output JSON uses prefer=true so printEstimateTime wins over rounded material-cost ms.
+    const pick = <T,>(incoming: T | null | undefined, existing: T | null | undefined): T | null => {
+      if (prefer) return (incoming ?? existing ?? null) as T | null;
+      return (existing ?? incoming ?? null) as T | null;
+    };
     const next: Acc = {
       sliceFileName: sliceFileName || prev?.sliceFileName || "",
       uuid: uuid || prev?.uuid || null,
-      printTimeSeconds: prev?.printTimeSeconds ?? partial.printTimeSeconds ?? null,
-      resinMassG: prev?.resinMassG ?? partial.resinMassG ?? null,
-      resinVolumeMl: prev?.resinVolumeMl ?? partial.resinVolumeMl ?? null,
-      layerCount: prev?.layerCount ?? partial.layerCount ?? null,
+      // Prefer the newest line timestamp (Output is usually last for a plate).
+      loggedAtMs: partial.loggedAtMs ?? prev?.loggedAtMs ?? null,
+      printTimeSeconds: pick(partial.printTimeSeconds, prev?.printTimeSeconds),
+      resinMassG: pick(partial.resinMassG, prev?.resinMassG),
+      resinVolumeMl: pick(partial.resinVolumeMl, prev?.resinVolumeMl),
+      layerCount: pick(partial.layerCount, prev?.layerCount),
       order: prev?.order ?? order++,
     };
     if (partial.sliceFileName) next.sliceFileName = partial.sliceFileName.trim();
     byKey.set(key, next);
   };
 
-  for (const match of text.matchAll(/\[Slice\]\s*Output:\s*(\{[\s\S]*?\})(?:\||$)/gim)) {
-    const raw = match[1];
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const sliceFileName = typeof parsed.sliceFileName === "string" ? parsed.sliceFileName : "";
-      const uuid = extractUuid(sliceFileName) || extractUuid(String(parsed.previewFilePath ?? ""));
-      const printEstimateTime = asNumber(parsed.printEstimateTime);
-      const materials = asNumber(parsed.printEstimateMaterials);
-      const layers = asNumber(parsed.numberOfSlices);
-      // printEstimateTime is seconds (UI clock); ignore sliceTotalTime (slicer wall-clock ms).
-      upsert({
-        sliceFileName: sliceFileName || undefined,
-        uuid,
-        printTimeSeconds: printEstimateTime != null ? Math.round(printEstimateTime) : null,
-        resinMassG: materials != null ? reasonable(materials, 0.01, 100_000, 3) : null,
-        layerCount: layers != null ? Math.floor(layers) : null,
-      });
-    } catch {
-      /* ignore malformed Output JSON */
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.includes("[Slice]")) continue;
+    const loggedAtMs = lineLoggedAtMs(line);
+
+    const outputMatch = line.match(/\[Slice\]\s*Output:\s*(\{.*\})(?:\||$)/i);
+    if (outputMatch?.[1]) {
+      try {
+        const parsed = JSON.parse(outputMatch[1]) as Record<string, unknown>;
+        const sliceFileName = typeof parsed.sliceFileName === "string" ? parsed.sliceFileName : "";
+        const uuid = extractUuid(sliceFileName) || extractUuid(String(parsed.previewFilePath ?? ""));
+        const printEstimateTime = asNumber(parsed.printEstimateTime);
+        const materials = asNumber(parsed.printEstimateMaterials);
+        const layers = asNumber(parsed.numberOfSlices);
+        // printEstimateTime is seconds (UI clock); ignore sliceTotalTime (slicer wall-clock ms).
+        upsert(
+          {
+            sliceFileName: sliceFileName || undefined,
+            uuid,
+            loggedAtMs,
+            printTimeSeconds: printEstimateTime != null ? Math.round(printEstimateTime) : null,
+            resinMassG: materials != null ? reasonable(materials, 0.01, 100_000, 3) : null,
+            layerCount: layers != null ? Math.floor(layers) : null,
+          },
+          { prefer: true },
+        );
+      } catch {
+        /* ignore malformed Output JSON */
+      }
+      continue;
     }
-  }
 
-  for (const match of text.matchAll(
-    /\[Slice\]\s*material\s+cost:\s*(\d+(?:\.\d+)?)\s*g\s*,\s*print\s+time\s+cost:\s*(\d+(?:\.\d+)?)\s*ms[^\n]*/gim,
-  )) {
-    const mass = asNumber(match[1]);
-    const timeMs = asNumber(match[2]);
-    const uuid = extractUuid(match[0] || "");
-    upsert({
-      uuid,
-      resinMassG: mass != null ? reasonable(mass, 0.01, 100_000, 3) : null,
-      printTimeSeconds: timeMs != null ? Math.round(timeMs / 1000) : null,
-    });
-  }
+    const materialMatch = line.match(
+      /\[Slice\]\s*material\s+cost:\s*(\d+(?:\.\d+)?)\s*g\s*,\s*print\s+time\s+cost:\s*(\d+(?:\.\d+)?)\s*ms/i,
+    );
+    if (materialMatch) {
+      const mass = asNumber(materialMatch[1]);
+      const timeMs = asNumber(materialMatch[2]);
+      upsert({
+        uuid: extractUuid(line),
+        loggedAtMs,
+        resinMassG: mass != null ? reasonable(mass, 0.01, 100_000, 3) : null,
+        printTimeSeconds: timeMs != null ? Math.round(timeMs / 1000) : null,
+      });
+      continue;
+    }
 
-  for (const match of text.matchAll(/\[Slice\]\s*Techbag\s+file\s+volume:\s*(\d+(?:\.\d+)?)[^\n]*/gim)) {
-    const volume = asNumber(match[1]);
-    const uuid = extractUuid(match[0] || "");
-    upsert({
-      uuid,
-      resinVolumeMl: volume != null ? reasonable(volume, 0.01, 100_000, 3) : null,
-    });
+    const volumeMatch = line.match(/\[Slice\]\s*Techbag\s+file\s+volume:\s*(\d+(?:\.\d+)?)/i);
+    if (volumeMatch) {
+      const volume = asNumber(volumeMatch[1]);
+      upsert({
+        uuid: extractUuid(line),
+        loggedAtMs,
+        resinVolumeMl: volume != null ? reasonable(volume, 0.01, 100_000, 3) : null,
+      });
+    }
   }
 
   return [...byKey.values()]
@@ -245,7 +307,7 @@ export function extractUltxMetricsFromSliceLog(text: string): SliceLogUltxMetric
     .map(({ order: _order, ...rest }) => rest);
 }
 
-/** Prefer exact name, then UUID, then a unique layer-count match. */
+/** Prefer exact name, UUID, export timestamp, then a unique layer-count match. */
 export function matchSliceLogMetrics(
   entries: SliceLogUltxMetrics[],
   fileName: string,
@@ -261,6 +323,32 @@ export function matchSliceLogMetrics(
   if (fileUuid) {
     const byUuid = [...entries].reverse().find((entry) => entry.uuid === fileUuid);
     if (byUuid) return byUuid;
+  }
+
+  const exportMs = parseUltxExportStampMs(fileName);
+  if (exportMs != null) {
+    const timed = entries
+      .filter((entry) => entry.loggedAtMs != null)
+      .map((entry) => ({
+        entry,
+        delta: Math.abs(entry.loggedAtMs! - exportMs),
+      }))
+      .filter((row) => row.delta <= EXPORT_STAMP_MATCH_WINDOW_MS)
+      .sort((a, b) => a.delta - b.delta);
+
+    if (timed.length) {
+      if (layerCount != null && layerCount > 0) {
+        const layerFit = timed.filter((row) => row.entry.layerCount === layerCount);
+        if (layerFit.length) return layerFit[0]!.entry;
+      }
+      // Unique nearest hit, or clear winner (>2× closer than runner-up).
+      if (timed.length === 1) return timed[0]!.entry;
+      if (timed[0]!.delta * 2 < timed[1]!.delta) return timed[0]!.entry;
+      if (layerCount != null && layerCount > 0) {
+        const uniqueLayer = entries.filter((entry) => entry.layerCount === layerCount);
+        if (uniqueLayer.length === 1) return uniqueLayer[0]!;
+      }
+    }
   }
 
   if (layerCount != null && layerCount > 0) {
@@ -963,7 +1051,9 @@ export function parseUltxFile(
   // Sealed AES plates: pull print estimates from Blueprint Slice.log when configured.
   const sealedMissingEstimates =
     metrics.printTimeSeconds == null || metrics.resinMassG == null || metrics.resinVolumeMl == null;
+  const sealed = /metadata sealed|AES-encrypted/i.test(metrics.formatRevision || "");
   if (sealedMissingEstimates) {
+    const sliceLogConfigured = Boolean(process.env.ULTX_SLICE_LOG?.trim());
     const fromLog = readSliceLogMetricsForFile(fileName, metrics.layerCount);
     if (fromLog) {
       const beforeTime = metrics.printTimeSeconds;
@@ -980,11 +1070,16 @@ export function parseUltxFile(
         (beforeMass == null && metrics.resinMassG != null) ||
         (beforeVolume == null && metrics.resinVolumeMl != null);
       if (filled) {
-        const sealed = /metadata sealed|AES-encrypted/i.test(metrics.formatRevision || "");
         metrics.formatRevision = sealed
           ? `${metrics.formatRevision} · estimates from Slice.log`
           : `HeyGears ULTX · estimates from Slice.log · ${metrics.layerCount ?? "?"} layers`;
+      } else if (sealed && sliceLogConfigured) {
+        metrics.formatRevision = `${metrics.formatRevision} · Slice.log set but no matching Output line`;
       }
+    } else if (sealed && !sliceLogConfigured) {
+      metrics.formatRevision = `${metrics.formatRevision} · set ULTX_SLICE_LOG for time/resin`;
+    } else if (sealed && sliceLogConfigured) {
+      metrics.formatRevision = `${metrics.formatRevision} · Slice.log set but no matching Output line`;
     }
   }
 
