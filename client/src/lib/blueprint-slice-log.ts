@@ -1,29 +1,47 @@
 /**
- * Link a local Blueprint Studio `logs` folder via the File System Access API
- * so sealed .ultx analyzes can pull Slice.log automatically in Chrome/Edge.
+ * Pull Blueprint Studio Slice.log text for sealed .ultx analyzes.
  *
- * The directory handle is stored in IndexedDB. Railway never sees the disk —
- * only the Slice.log text uploaded with each analyze request.
+ * Chrome/Edge block File System Access on AppData ("contains system files"),
+ * so the primary path is a one-shot webkitdirectory import that caches Slice.log
+ * contents in IndexedDB. Live directory handles remain as an optional fallback
+ * for non-AppData copies of the logs tree.
  */
 
 const DB_NAME = "hubspot-blueprint-logs-v1";
 const STORE_NAME = "handles";
 const HANDLE_KEY = "logsDirectory";
+const IMPORT_KEY = "logsImportCache";
 const MAX_WALK_DEPTH = 4;
 const MAX_SLICE_LOG_FILES = 40;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
-export type LinkedLogsStatus =
-  | { supported: false; linked: false; reason: string }
-  | { supported: true; linked: false }
-  | { supported: true; linked: true; name: string };
-
-type SliceLogCandidate = {
+export type SliceLogCandidate = {
   relativePath: string;
   text: string;
   lastModified: number;
 };
+
+export type ImportedLogsCache = {
+  rootLabel: string;
+  importedAt: number;
+  candidates: SliceLogCandidate[];
+};
+
+export type BlueprintLogsStatus =
+  | { supported: true; ready: false }
+  | {
+      supported: true;
+      ready: true;
+      source: "import";
+      name: string;
+      fileCount: number;
+      importedAt: number;
+    }
+  | { supported: true; ready: true; source: "directory"; name: string };
+
+/** @deprecated Use BlueprintLogsStatus */
+export type LinkedLogsStatus = BlueprintLogsStatus;
 
 export function supportsBlueprintLogsFolderAccess(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
@@ -90,6 +108,93 @@ async function idbDelete(key: string): Promise<void> {
   }
 }
 
+function byteLengthUtf8(text: string): number {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text).length;
+  return unescape(encodeURIComponent(text)).length;
+}
+
+function depthOfRelativePath(path: string): number {
+  const normalized = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized) return 0;
+  return normalized.split("/").length - 1;
+}
+
+/** Pull Slice.log files out of a webkitdirectory FileList (works for AppData). */
+export async function collectSliceLogsFromFileList(
+  files: ArrayLike<File>,
+): Promise<SliceLogCandidate[]> {
+  const list = Array.from(files);
+  const sliceFiles = list
+    .filter((file) => {
+      const rel = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
+      if (depthOfRelativePath(rel) > MAX_WALK_DEPTH) return false;
+      return isBlueprintSliceLogName(file.name);
+    })
+    .sort((a, b) => b.lastModified - a.lastModified)
+    .slice(0, MAX_SLICE_LOG_FILES);
+
+  const candidates: SliceLogCandidate[] = [];
+  for (const file of sliceFiles) {
+    try {
+      if (file.size <= 0 || file.size > MAX_FILE_BYTES * 4) continue;
+      let text = await file.text();
+      if (byteLengthUtf8(text) > MAX_FILE_BYTES) {
+        text = text.slice(-MAX_FILE_BYTES);
+      }
+      if (!text.includes("[Slice]")) continue;
+      candidates.push({
+        relativePath: (file.webkitRelativePath || file.name).replace(/\\/g, "/"),
+        text,
+        lastModified: file.lastModified,
+      });
+    } catch {
+      /* skip unreadable entries */
+    }
+  }
+  return candidates;
+}
+
+function rootLabelFromFiles(files: ArrayLike<File>): string {
+  const first = Array.from(files)[0];
+  const rel = (first?.webkitRelativePath || "").replace(/\\/g, "/");
+  const root = rel.split("/")[0];
+  return root || "logs";
+}
+
+export async function importBlueprintLogsFromFileList(
+  files: ArrayLike<File>,
+): Promise<ImportedLogsCache> {
+  const candidates = await collectSliceLogsFromFileList(files);
+  if (!candidates.length) {
+    throw new Error(
+      "No Slice.log files found in that folder. Pick Blueprint Studio\\logs (the folder that contains project subfolders).",
+    );
+  }
+  const cache: ImportedLogsCache = {
+    rootLabel: rootLabelFromFiles(files),
+    importedAt: Date.now(),
+    candidates,
+  };
+  await idbSet(IMPORT_KEY, cache);
+  // Prefer import over a stale AppData directory handle that Chrome cannot re-open.
+  await idbDelete(HANDLE_KEY);
+  return cache;
+}
+
+export async function getImportedBlueprintLogsCache(): Promise<ImportedLogsCache | null> {
+  try {
+    const cache = await idbGet<ImportedLogsCache>(IMPORT_KEY);
+    if (!cache?.candidates?.length) return null;
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearImportedBlueprintLogsCache(): Promise<void> {
+  await idbDelete(IMPORT_KEY);
+}
+
 async function ensureReadPermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
   const mode = { mode: "read" as const };
   if ((await handle.queryPermission(mode)) === "granted") return true;
@@ -122,24 +227,32 @@ export async function linkBlueprintLogsDirectory(): Promise<FileSystemDirectoryH
     throw new Error("Permission to read the Blueprint logs folder was denied.");
   }
   await idbSet(HANDLE_KEY, handle);
+  await idbDelete(IMPORT_KEY);
   return handle;
 }
 
 export async function unlinkBlueprintLogsDirectory(): Promise<void> {
   await idbDelete(HANDLE_KEY);
+  await idbDelete(IMPORT_KEY);
 }
 
-export async function getLinkedBlueprintLogsStatus(): Promise<LinkedLogsStatus> {
-  if (!supportsBlueprintLogsFolderAccess()) {
+export async function getLinkedBlueprintLogsStatus(): Promise<BlueprintLogsStatus> {
+  const imported = await getImportedBlueprintLogsCache();
+  if (imported) {
     return {
-      supported: false,
-      linked: false,
-      reason: "Folder linking needs Chrome or Edge.",
+      supported: true,
+      ready: true,
+      source: "import",
+      name: imported.rootLabel,
+      fileCount: imported.candidates.length,
+      importedAt: imported.importedAt,
     };
   }
   const handle = await getLinkedBlueprintLogsDirectory();
-  if (!handle) return { supported: true, linked: false };
-  return { supported: true, linked: true, name: handle.name };
+  if (handle) {
+    return { supported: true, ready: true, source: "directory", name: handle.name };
+  }
+  return { supported: true, ready: false };
 }
 
 async function walkSliceLogs(
@@ -159,11 +272,6 @@ async function walkSliceLogs(
       out.push({ relativePath: prefix ? `${prefix}/${name}` : name, handle: entry });
     }
   }
-}
-
-function byteLengthUtf8(text: string): number {
-  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text).length;
-  return unescape(encodeURIComponent(text)).length;
 }
 
 /** Prefer a log that mentions this plate; otherwise merge newest logs under the byte budget. */
@@ -234,16 +342,30 @@ export async function collectSliceLogsFromDirectory(
   return candidates;
 }
 
-/** Build a File to upload as `sliceLog`, or null when the linked folder has nothing useful. */
+function bundleToUploadFile(
+  bundle: { relativePath: string; text: string },
+): File {
+  return new File([bundle.text], bundle.relativePath.replace(/^.*[/\\]/, "") || "Slice.log", {
+    type: "text/plain",
+  });
+}
+
+/** Build a File to upload as `sliceLog` from live folder link or imported cache. */
 export async function buildSliceLogUploadFromLinkedFolder(
   plateFileName: string,
 ): Promise<File | null> {
   const dir = await getLinkedBlueprintLogsDirectory();
-  if (!dir) return null;
-  const candidates = await collectSliceLogsFromDirectory(dir);
-  const bundle = assembleSliceLogBundle(candidates, plateFileName);
-  if (!bundle?.text.trim()) return null;
-  return new File([bundle.text], bundle.relativePath.replace(/^.*[/\\]/, "") || "Slice.log", {
-    type: "text/plain",
-  });
+  if (dir) {
+    const candidates = await collectSliceLogsFromDirectory(dir);
+    const bundle = assembleSliceLogBundle(candidates, plateFileName);
+    if (bundle?.text.trim()) return bundleToUploadFile(bundle);
+  }
+
+  const imported = await getImportedBlueprintLogsCache();
+  if (imported?.candidates.length) {
+    const bundle = assembleSliceLogBundle(imported.candidates, plateFileName);
+    if (bundle?.text.trim()) return bundleToUploadFile(bundle);
+  }
+
+  return null;
 }
