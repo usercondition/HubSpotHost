@@ -180,18 +180,30 @@ const printFileUpload = multer({
 
 function isSliceLogUploadName(fileName: string): boolean {
   const base = path.basename(fileName || "").toLowerCase();
-  return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base);
+  return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base) || base.endsWith(".log");
 }
 
+/** Read Slice.log text; if oversized, keep the newest tail (Output lines land at the end). */
 function readOptionalSliceLogUpload(file: Express.Multer.File | undefined): string | null {
   if (!file?.path) return null;
   try {
     const stat = fs.statSync(file.path);
-    if (stat.size <= 0 || stat.size > SLICE_LOG_UPLOAD_MAX_BYTES) return null;
+    if (stat.size <= 0) return null;
     if (!isSliceLogUploadName(file.originalname) && path.extname(file.originalname).toLowerCase() !== ".log") {
       return null;
     }
-    return fs.readFileSync(file.path, "utf8");
+    if (stat.size <= SLICE_LOG_UPLOAD_MAX_BYTES) {
+      return fs.readFileSync(file.path, "utf8");
+    }
+    const fd = fs.openSync(file.path, "r");
+    try {
+      const start = stat.size - SLICE_LOG_UPLOAD_MAX_BYTES;
+      const buffer = Buffer.alloc(SLICE_LOG_UPLOAD_MAX_BYTES);
+      fs.readSync(fd, buffer, 0, SLICE_LOG_UPLOAD_MAX_BYTES, start);
+      return buffer.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch {
     return null;
   }
@@ -1455,7 +1467,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (sliceLogFile?.path && !sliceLogText) {
           return res.status(400).json({
             ok: false,
-            error: "Slice.log must be a Blueprint log file under 8 MB",
+            error: "Slice.log upload was empty or not a .log file. Re-import Blueprint logs and try again.",
           });
         }
         const staged = stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
