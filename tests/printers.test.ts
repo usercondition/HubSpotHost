@@ -28,7 +28,8 @@ const {
   addPrinterLifecycleEvent,
   assignPrinterProfile,
 } = await import("../server/lib/printers");
-const { parseUltxFile, extractZipTextMembers } = await import("../server/lib/ultx");
+const { parseUltxFile, extractZipTextMembers, listUltxZipMembers, countUltxLayersFromMembers } =
+  await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
 const { registerRoutes } = await import("../server/routes");
 
@@ -205,6 +206,44 @@ test("ULTX zip metadata is harvested into print metrics", () => {
   assert.equal(metrics.layerCount, 800);
   assert.equal(metrics.resinVolumeMl, 42.5);
   assert.equal(metrics.printerProfile, "HeyGears Reflex Turbo");
+});
+
+test("ULTX plaintext parameters.ini harvests Blueprint field names", () => {
+  const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-plaintext.ultx"));
+  const metrics = parseUltxFile("plate.ultx", buffer);
+  assert.equal(metrics.printTimeSeconds, 7200);
+  assert.equal(metrics.resinMassG, 88.5);
+  assert.equal(metrics.resinVolumeMl, 80);
+  // Layer PNGs win over the parameters.ini layerCount=400 placeholder.
+  assert.equal(metrics.layerCount, 10);
+  assert.equal(metrics.layerHeightMm, 0.05);
+  assert.equal(metrics.printerProfile, "HeyGears Reflex Turbo");
+  assert.equal(metrics.modelHeightMm, 0.5);
+});
+
+test("ULTX AES archive yields layer count without password and full metrics with password", () => {
+  const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx"));
+  const members = listUltxZipMembers(buffer);
+  assert.ok(members.length >= 7);
+  assert.equal(countUltxLayersFromMembers(members), 5);
+
+  const sealed = parseUltxFile("P_demo-Plate01.rs.ultx", buffer, { password: null });
+  assert.equal(sealed.layerCount, 5);
+  assert.equal(sealed.printTimeSeconds, null);
+  assert.equal(sealed.resinMassG, null);
+  assert.equal(sealed.printerProfile, "Reflex RS");
+  assert.match(sealed.formatRevision, /AES-encrypted|metadata sealed/i);
+
+  const opened = parseUltxFile("P_demo-Plate01.rs.ultx", buffer, { password: "heygears-test-pass" });
+  assert.equal(opened.printTimeSeconds, 12457);
+  assert.equal(opened.resinMassG, 44);
+  assert.equal(opened.resinVolumeMl, 40.2);
+  assert.equal(opened.layerHeightMm, 0.03);
+  assert.equal(opened.layerCount, 5);
+  assert.equal(opened.modelHeightMm, 0.15);
+  assert.equal(opened.printerProfile, "Reflex RS");
+  assert.equal(opened.resinCostLabel, "Open Material");
+  assert.match(opened.formatRevision, /decrypted/i);
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {

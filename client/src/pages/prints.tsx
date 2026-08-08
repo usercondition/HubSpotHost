@@ -539,7 +539,7 @@ export default function Prints() {
                     {analyze.isPending ? "Reading slice data…" : "Drop a .ctb or .ultx file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX uses a best-effort reader.
+                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX plates are AES-encrypted — layer count is recovered from the archive listing; time/resin need a decrypt password when metadata is sealed.
                   </span>
                 </button>
                 <Button
@@ -612,9 +612,13 @@ export default function Prints() {
                   </div>
                   <StatusPill tone="good" icon={CheckCircle2} label="CTB analyzed" testId="status-ctb-analyzed" />
                 </div>
-                {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ? (
+                {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ||
+                staged.metrics.formatRevision.toLowerCase().includes("decrypted") ||
+                staged.metrics.formatRevision.toLowerCase().includes("sealed") ? (
                   <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
-                    Encrypted Chitubox settings were decrypted in memory for this plate ({staged.metrics.formatRevision}).
+                    {staged.metrics.formatRevision.toLowerCase().includes("sealed")
+                      ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Layer count comes from the archive listing; set ULTX_ZIP_PASSWORD to unlock time/resin fields.`
+                      : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />
