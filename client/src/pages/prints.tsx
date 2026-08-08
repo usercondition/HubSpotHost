@@ -400,8 +400,8 @@ export default function Prints() {
     },
   });
 
-  const importLogsFolder = async (fileList: FileList | null) => {
-    if (!fileList?.length) return;
+  const importLogsFolder = async (fileList: ArrayLike<File> | null) => {
+    if (!fileList || fileList.length === 0) return;
     setLinkingLogs(true);
     try {
       const cache = await importBlueprintLogsFromFileList(fileList);
@@ -476,6 +476,20 @@ export default function Prints() {
     }
     rememberSliceLog(file.name, text);
     setSliceLogName(file.name);
+    // Also merge into the import cache so later plates can match other logs.
+    try {
+      const cache = await importBlueprintLogsFromFileList([file], { merge: true });
+      setLogsLink({
+        supported: true,
+        ready: true,
+        source: "import",
+        name: cache.rootLabel,
+        fileCount: cache.candidates.length,
+        importedAt: cache.importedAt,
+      });
+    } catch {
+      /* session memory still works */
+    }
     toast({
       title: "Slice.log ready",
       description: "It will be applied automatically the next time you analyze a .ultx plate.",
@@ -487,17 +501,24 @@ export default function Prints() {
     if (!files.length) return;
 
     const plate = files.find(isPlateFile);
-    const sliceLog = files.find(isSliceLogFile) ?? null;
+    const sliceLogs = files.filter(isSliceLogFile);
+    const folderDrop = files.some((file) => (file.webkitRelativePath || "").includes("/"));
 
-    if (sliceLog) {
-      await saveSliceLogFile(sliceLog);
+    // Explorer drag of Blueprint logs (or a multi-log drop) — Chrome allows this even for AppData.
+    if (!plate && (folderDrop || sliceLogs.length > 1)) {
+      await importLogsFolder(files as unknown as FileList);
+      return;
+    }
+
+    if (sliceLogs[0]) {
+      await saveSliceLogFile(sliceLogs[0]);
     }
 
     if (!plate) {
-      if (!sliceLog) {
+      if (!sliceLogs.length) {
         toast({
           title: "Unrecognized file",
-          description: "Drop a .ctb / .ultx plate, or a Blueprint Slice.log.",
+          description: "Drop a .ctb / .ultx plate, a Blueprint Slice.log, or the whole logs folder from Explorer.",
           variant: "destructive",
         });
       }
@@ -505,7 +526,7 @@ export default function Prints() {
     }
 
     setStaged(null);
-    analyze.mutate({ file: plate, sliceLog });
+    analyze.mutate({ file: plate, sliceLog: sliceLogs[0] ?? null });
   };
 
   const candidates = prints.data?.candidates ?? [];
@@ -642,7 +663,7 @@ export default function Prints() {
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
               <Panel
                 title="1. Analyze one sliced plate"
-                description="Drop a .ctb/.ultx plate. For HeyGears, import Blueprint Studio\\logs (Chrome blocks live AppData links) — then .ultx drops pull matching Slice.log metrics."
+                description="Drop a .ctb/.ultx plate. For HeyGears: drag Blueprint Studio\\logs from File Explorer onto this page (Chrome blocks AppData folder pickers)."
               >
                 <input
                   ref={fileInputRef}
@@ -661,11 +682,17 @@ export default function Prints() {
                   ref={sliceLogInputRef}
                   id="slice-log-input"
                   type="file"
+                  multiple
                   accept=".log,text/plain"
                   className="sr-only"
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void saveSliceLogFile(file);
+                    const picked = event.target.files;
+                    if (!picked?.length) return;
+                    if (picked.length === 1) {
+                      void saveSliceLogFile(picked[0]!);
+                    } else {
+                      void importLogsFolder(picked);
+                    }
                     event.currentTarget.value = "";
                   }}
                   data-testid="input-slice-log"
@@ -717,10 +744,12 @@ export default function Prints() {
                       ? "Reading slice data…"
                       : logsLink.ready
                         ? "Drop a .ultx plate — Slice.log metrics come from the imported logs"
-                        : "Drop a .ctb / .ultx plate (import Blueprint logs for automatic ULTX metrics)"}
+                        : "Drop a .ctb / .ultx plate, or drag the Blueprint logs folder here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Chrome blocks live access to AppData, so import <span className="font-medium text-foreground">Blueprint Studio\logs</span> (re-import after new slices), or add Slice.log manually.
+                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Prefer dragging{" "}
+                    <span className="font-medium text-foreground">Blueprint Studio\logs</span> from File Explorer
+                    onto this drop zone — Chrome’s folder picker often returns nothing from AppData.
                   </span>
                 </button>
                 <div
@@ -744,8 +773,8 @@ export default function Prints() {
                       </>
                     ) : (
                       <>
-                        Import <span className="font-medium text-foreground">%APPDATA%\Blueprint Studio\logs</span> so
-                        .ultx drops auto-attach Slice.log (Chrome cannot live-link AppData).
+                        Drag <span className="font-medium text-foreground">%APPDATA%\Blueprint Studio\logs</span> from
+                        Explorer onto the drop zone (or Add Slice.log from a project subfolder).
                       </>
                     )}
                   </span>
@@ -757,7 +786,7 @@ export default function Prints() {
                       onClick={() => logsFolderInputRef.current?.click()}
                       data-testid="button-import-blueprint-logs"
                     >
-                      {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import logs" : "Import logs folder"}
+                      {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import copy…" : "Import copy…"}
                     </button>
                     {logsLink.ready ? (
                       <button
@@ -820,7 +849,7 @@ export default function Prints() {
                     data-testid="button-import-blueprint-logs-outline"
                   >
                     <FolderOpen className="mr-2 h-4 w-4" />
-                    {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import logs" : "Import logs folder"}
+                    {linkingLogs ? "Importing…" : logsLink.ready ? "Re-import copy…" : "Import folder copy…"}
                   </Button>
                   <Button
                     type="button"
