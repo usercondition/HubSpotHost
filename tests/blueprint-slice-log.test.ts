@@ -59,7 +59,7 @@ test("assembleSliceLogBundle prefers a log that mentions the plate UUID", () => 
     ],
     "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx",
   );
-  assert.equal(byUuid?.relativePath, "match/Slice.log");
+  assert.equal(byUuid?.relativePath, "Slice.log");
   assert.match(byUuid!.text, /12457/);
 });
 
@@ -105,4 +105,17 @@ test("describeSliceLogImportFailure explains empty AppData picks", () => {
     }),
     /No \.log files/,
   );
+});
+
+test("assembleSliceLogBundle stays under upload budget and names Slice.log", () => {
+  const huge = `[Slice] Output: {"printEstimateTime":1,"sliceFileName":"Slice-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.ultx"}\n${"x".repeat(900_000)}`;
+  const candidates = Array.from({ length: 20 }, (_, index) => ({
+    relativePath: `logs/p${index}/Slice.log`,
+    lastModified: 100 - index,
+    text: huge.replace("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", `aaaaaaaa-bbbb-cccc-dddd-${String(index).padStart(12, "0")}`),
+  }));
+  const bundle = assembleSliceLogBundle(candidates, "P_20260806_232232-Plate01.rs.ultx");
+  assert.ok(bundle);
+  assert.equal(bundle!.relativePath, "Slice.log");
+  assert.ok(Buffer.byteLength(bundle!.text, "utf8") <= 6 * 1024 * 1024);
 });

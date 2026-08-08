@@ -14,8 +14,15 @@ const HANDLE_KEY = "logsDirectory";
 const IMPORT_KEY = "logsImportCache";
 const MAX_WALK_DEPTH = 8;
 const MAX_SLICE_LOG_FILES = 60;
+/** Per-file cap when reading into the import cache. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+/**
+ * Upload budget must stay under the server's 8 MiB Slice.log limit.
+ * Leave headroom for section headers and multipart framing.
+ */
+const MAX_TOTAL_BYTES = 6 * 1024 * 1024;
+/** When no plate-specific log matches, only merge this many newest logs. */
+const MAX_BUNDLE_LOGS = 12;
 
 export type SliceLogCandidate = {
   relativePath: string;
@@ -366,33 +373,54 @@ export function assembleSliceLogBundle(
     /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
   );
   const uuid = uuidMatch?.[0]?.toLowerCase() ?? null;
+  // P_YYYYMMDD_HHMMSS export names — match the stamp digits inside Output lines / paths.
+  const exportStamp = plateFileName.match(/P_(\d{8})_(\d{6})/i);
+  const exportToken = exportStamp ? `${exportStamp[1]}_${exportStamp[2]}`.toLowerCase() : null;
 
   const targeted = sorted.find((candidate) => {
     const lower = candidate.text.toLowerCase();
     if (uuid && lower.includes(uuid)) return true;
     if (base && lower.includes(`"slicefilename":"${base}"`)) return true;
     if (base.length > 12 && lower.includes(base)) return true;
+    if (exportToken && lower.includes(exportToken)) return true;
     return false;
   });
   if (targeted) {
-    return { relativePath: targeted.relativePath, text: targeted.text };
+    const text =
+      byteLengthUtf8(targeted.text) > MAX_TOTAL_BYTES
+        ? targeted.text.slice(-Math.floor(MAX_TOTAL_BYTES / 2))
+        : targeted.text;
+    return { relativePath: "Slice.log", text };
   }
+
+  // Prefer logs that actually contain estimate Output lines.
+  const withEstimates = sorted.filter(
+    (candidate) =>
+      candidate.text.includes("printEstimateTime") ||
+      candidate.text.includes("[Slice] Output:") ||
+      candidate.text.includes("material cost:"),
+  );
+  const pool = (withEstimates.length ? withEstimates : sorted).slice(0, MAX_BUNDLE_LOGS);
 
   const parts: string[] = [];
   let remaining = MAX_TOTAL_BYTES;
-  for (const candidate of sorted) {
-    if (remaining <= 0) break;
+  for (const candidate of pool) {
+    if (remaining <= 256) break;
+    const header = `----- ${candidate.relativePath} -----\n`;
+    const headerBytes = byteLengthUtf8(header) + 1; // joining newline
     let chunk = candidate.text;
-    const size = byteLengthUtf8(chunk);
-    if (size > remaining) {
-      chunk = chunk.slice(Math.max(0, chunk.length - remaining));
+    const budget = remaining - headerBytes;
+    if (budget <= 0) break;
+    if (byteLengthUtf8(chunk) > budget) {
+      chunk = chunk.slice(Math.max(0, chunk.length - budget));
     }
     if (!chunk.trim()) continue;
-    parts.push(`----- ${candidate.relativePath} -----\n${chunk}`);
-    remaining -= byteLengthUtf8(chunk);
+    const part = `${header}${chunk}`;
+    parts.push(part);
+    remaining -= byteLengthUtf8(part) + (parts.length > 1 ? 1 : 0);
   }
   if (!parts.length) return null;
-  return { relativePath: "Blueprint-logs-bundle.log", text: parts.join("\n") };
+  return { relativePath: "Slice.log", text: parts.join("\n") };
 }
 
 export async function collectSliceLogsFromDirectory(
@@ -423,7 +451,8 @@ export async function collectSliceLogsFromDirectory(
 }
 
 function bundleToUploadFile(bundle: { relativePath: string; text: string }): File {
-  return new File([bundle.text], bundle.relativePath.replace(/^.*[/\\]/, "") || "Slice.log", {
+  // Always use Slice.log so server name checks and session memory stay consistent.
+  return new File([bundle.text], "Slice.log", {
     type: "text/plain",
   });
 }
