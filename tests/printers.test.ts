@@ -355,6 +355,16 @@ test("ULTX harvests print estimates from Blueprint Slice.log Output JSON", () =>
     else process.env.ULTX_SLICE_LOG = prev;
     fs.unlinkSync(logFile);
   }
+
+  // Uploaded Slice.log text (analyze form) works without ULTX_SLICE_LOG.
+  delete process.env.ULTX_SLICE_LOG;
+  const uploaded = parseUltxFile(
+    "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx",
+    fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx")),
+    { password: null, sliceLogText: sliceLog },
+  );
+  assert.equal(uploaded.printTimeSeconds, 12457);
+  assert.equal(uploaded.resinMassG, 43.569);
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {

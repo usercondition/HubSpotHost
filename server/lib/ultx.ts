@@ -427,21 +427,38 @@ export function readUltxSliceLogText(): string {
   }
 }
 
-function readSliceLogPasswords(): string[] {
-  const text = readUltxSliceLogText();
+/** Prefer an uploaded Slice.log body; otherwise fall back to `ULTX_SLICE_LOG`. */
+export function resolveUltxSliceLogText(override?: string | null): string {
+  const uploaded = override?.trim();
+  if (uploaded) {
+    if (Buffer.byteLength(uploaded, "utf8") <= MAX_SLICE_LOG_READ_BYTES) return uploaded;
+    // Keep the newest tail — Output lines for recent plates are at the end.
+    let start = Math.max(0, uploaded.length - MAX_SLICE_LOG_READ_BYTES);
+    while (start < uploaded.length && uploaded[start] !== "\n") start += 1;
+    return uploaded.slice(start);
+  }
+  return readUltxSliceLogText();
+}
+
+function readSliceLogPasswords(sliceLogText?: string | null): string[] {
+  const text = resolveUltxSliceLogText(sliceLogText);
   return text ? extractPasswordsFromSliceLog(text) : [];
 }
 
 function readSliceLogMetricsForFile(
   fileName: string,
   layerCount?: number | null,
+  sliceLogText?: string | null,
 ): SliceLogUltxMetrics | null {
-  const text = readUltxSliceLogText();
+  const text = resolveUltxSliceLogText(sliceLogText);
   if (!text) return null;
   return matchSliceLogMetrics(extractUltxMetricsFromSliceLog(text), fileName, layerCount);
 }
 
-function collectZipPasswordCandidates(explicit?: string | null): Array<string | null> {
+function collectZipPasswordCandidates(
+  explicit?: string | null,
+  sliceLogText?: string | null,
+): Array<string | null> {
   const ordered: Array<string | null> = [];
   const seen = new Set<string>();
   const push = (value: string | null | undefined) => {
@@ -461,7 +478,7 @@ function collectZipPasswordCandidates(explicit?: string | null): Array<string | 
 
   if (explicit !== undefined) push(explicit);
   push(process.env.ULTX_ZIP_PASSWORD);
-  for (const fromLog of readSliceLogPasswords()) push(fromLog);
+  for (const fromLog of readSliceLogPasswords(sliceLogText)) push(fromLog);
   push(BLUEPRINT_ASSET_ZIP_PASSWORD);
   // Always attempt a sealed/no-password pass last so layer-count recovery still runs.
   push(null);
@@ -971,17 +988,25 @@ function mergeMetrics(base: PrintFileMetrics, patch: Partial<PrintFileMetrics>):
   } as PrintFileMetrics;
 }
 
+export interface ParseUltxOptions {
+  password?: string | null;
+  /** Blueprint Slice.log text uploaded with the plate (preferred over env path). */
+  sliceLogText?: string | null;
+}
+
 export function parseUltxFile(
   fileName: string,
   buffer: Buffer,
-  options?: { password?: string | null },
+  options?: ParseUltxOptions,
 ): PrintFileMetrics {
   if (!buffer.length) {
     throw new UltxParseError("The ULTX file is empty");
   }
 
+  const sliceLogText = options?.sliceLogText;
   const passwordCandidates = collectZipPasswordCandidates(
     options && "password" in options ? options.password : undefined,
+    sliceLogText,
   );
   let metrics = emptyMetrics(fileName, buffer, "HeyGears ULTX (best-effort)");
   const texts: string[] = [];
@@ -1048,13 +1073,15 @@ export function parseUltxFile(
     metrics.layerCount = cdLayers;
   }
 
-  // Sealed AES plates: pull print estimates from Blueprint Slice.log when configured.
+  // Sealed AES plates: pull print estimates from Blueprint Slice.log when available.
   const sealedMissingEstimates =
     metrics.printTimeSeconds == null || metrics.resinMassG == null || metrics.resinVolumeMl == null;
   const sealed = /metadata sealed|AES-encrypted/i.test(metrics.formatRevision || "");
   if (sealedMissingEstimates) {
-    const sliceLogConfigured = Boolean(process.env.ULTX_SLICE_LOG?.trim());
-    const fromLog = readSliceLogMetricsForFile(fileName, metrics.layerCount);
+    const sliceLogConfigured = Boolean(
+      sliceLogText?.trim() || process.env.ULTX_SLICE_LOG?.trim(),
+    );
+    const fromLog = readSliceLogMetricsForFile(fileName, metrics.layerCount, sliceLogText);
     if (fromLog) {
       const beforeTime = metrics.printTimeSeconds;
       const beforeMass = metrics.resinMassG;
@@ -1074,12 +1101,12 @@ export function parseUltxFile(
           ? `${metrics.formatRevision} · estimates from Slice.log`
           : `HeyGears ULTX · estimates from Slice.log · ${metrics.layerCount ?? "?"} layers`;
       } else if (sealed && sliceLogConfigured) {
-        metrics.formatRevision = `${metrics.formatRevision} · Slice.log set but no matching Output line`;
+        metrics.formatRevision = `${metrics.formatRevision} · Slice.log provided but no matching Output line`;
       }
     } else if (sealed && !sliceLogConfigured) {
-      metrics.formatRevision = `${metrics.formatRevision} · set ULTX_SLICE_LOG for time/resin`;
+      metrics.formatRevision = `${metrics.formatRevision} · drop Slice.log with the plate for time/resin`;
     } else if (sealed && sliceLogConfigured) {
-      metrics.formatRevision = `${metrics.formatRevision} · Slice.log set but no matching Output line`;
+      metrics.formatRevision = `${metrics.formatRevision} · Slice.log provided but no matching Output line`;
     }
   }
 
@@ -1110,7 +1137,7 @@ export function parseUltxFile(
 export function parseUltxFileFromPath(
   fileName: string,
   filePath: string,
-  options?: { password?: string | null },
+  options?: ParseUltxOptions,
 ): PrintFileMetrics {
   const buffer = fs.readFileSync(filePath);
   return parseUltxFile(fileName, buffer, options);
