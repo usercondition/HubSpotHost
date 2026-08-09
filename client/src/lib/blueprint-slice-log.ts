@@ -6,6 +6,11 @@
  *   1) Drag the `logs` folder from File Explorer onto Prints (drag-drop is allowed)
  *   2) Copy/symlink logs outside AppData, then Import logs folder
  *   3) Pick one or more Slice.log files directly (file picker can open AppData files)
+ *
+ * Future (deferred): a small Windows sync agent could watch
+ * `%APPDATA%\Blueprint Studio\logs` and POST new Slice.log files to Railway so
+ * multi-HeyGears fleets do not need browser re-import. Not built yet — keep the
+ * analyze `sliceLog` upload path as the server entry point when that lands.
  */
 
 const DB_NAME = "hubspot-blueprint-logs-v1";

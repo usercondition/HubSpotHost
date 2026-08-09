@@ -21,6 +21,10 @@
  *    logs directory). Password is not logged in production Slice.log.
  * 5. Fall back to ASCII scans for any unencrypted sidecar-style containers
  * 6. Infer a printer profile from the file name when the archive stays sealed
+ *
+ * Future (deferred): optional PC → Railway Slice.log sync agent for multi-HeyGears
+ * shops. Railway cannot read Windows AppData; a local watcher would POST logs into
+ * a server cache and reuse the existing uploaded-`sliceLogText` harvest path.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
