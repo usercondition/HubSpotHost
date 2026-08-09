@@ -839,11 +839,17 @@ export const printFileRecords = sqliteTable("print_file_records", {
 export type PrintFileRecord = typeof printFileRecords.$inferSelect;
 
 /**
- * Parts the operator says were on a specific attached plate (CTB).
- * Names come from dropped .stl files — the CTB itself has no part names.
+ * Parts the operator says were on a specific attached plate.
+ * Names come from dropped .stl files — the slice file itself has no part names.
  */
 export const PRINT_PLATE_BIT_STATUSES = ["on_plate", "good", "reprint"] as const;
 export type PrintPlateBitStatus = (typeof PRINT_PLATE_BIT_STATUSES)[number];
+
+export const PRINT_PLATE_BIT_STATUS_LABELS: Record<PrintPlateBitStatus, string> = {
+  on_plate: "On plate",
+  good: "Good",
+  reprint: "Reprint",
+};
 
 export const printPlateBits = sqliteTable("print_plate_bits", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -865,11 +871,29 @@ export type UpdatePrintPlateBitStatusInput = z.infer<typeof updatePrintPlateBitS
 
 /**
  * Master parts checklist for a HubSpot Print Order.
- * Plates subtract from this list as STLs are linked to attached CTBs.
+ * Plates subtract from this list as STLs are linked to attached plates.
  * `itemGroup` separates multiple products on the same order (Acastus vs Valiant).
  */
 export const ORDER_PART_STATUSES = ["needed", "on_plate", "good", "reprint"] as const;
 export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
+
+export const ORDER_PART_STATUS_LABELS: Record<OrderPartStatus, string> = {
+  needed: "Needed",
+  on_plate: "On plate",
+  good: "Good",
+  reprint: "Reprint",
+};
+
+/** Human label for order-part or plate-bit status codes. */
+export function partStatusLabel(status: string): string {
+  if ((ORDER_PART_STATUSES as readonly string[]).includes(status)) {
+    return ORDER_PART_STATUS_LABELS[status as OrderPartStatus];
+  }
+  if ((PRINT_PLATE_BIT_STATUSES as readonly string[]).includes(status)) {
+    return PRINT_PLATE_BIT_STATUS_LABELS[status as PrintPlateBitStatus];
+  }
+  return status;
+}
 
 export const orderParts = sqliteTable("order_parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),

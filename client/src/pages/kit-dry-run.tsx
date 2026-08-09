@@ -1,3 +1,8 @@
+/**
+ * PARKED page — route/nav removed from App/shell.
+ * Do not re-enable until attach shares Prints Slice.log + printer + plate-bits path.
+ * Live checklist/QC: Orders Parts + Prints plate bits.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";

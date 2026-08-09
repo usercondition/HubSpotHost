@@ -134,7 +134,7 @@ function resinCostHint(metrics: PrintFileMetrics): string {
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted CTB metrics">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted plate metrics">
         <StatCard label="Estimated plate time" value={formatHours(metrics.printTimeSeconds)} hint="Whole build plate" icon={Clock3} testId="metric-print-time" />
         <StatCard label="Resin volume" value={formatNumber(metrics.resinVolumeMl, " ml")} hint="Whole build plate" icon={Scale} testId="metric-resin-volume" />
         <StatCard label="Resin mass" value={formatNumber(metrics.resinMassG, " g")} hint={metrics.resinDensityGPerMl ? `${formatNumber(metrics.resinDensityGPerMl)} g/ml density` : "Whole build plate"} icon={PackageCheck} testId="metric-resin-mass" />
@@ -248,7 +248,7 @@ export default function Prints() {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
-    successDescription: 'Attach CTB plates and seed cost estimates on open Print Orders.',
+    successDescription: 'Attach slice plates and seed cost estimates on open Print Orders.',
   });
   const [includeAttached, setIncludeAttached] = useState(true);
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
@@ -647,8 +647,8 @@ export default function Prints() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Print information"
-        subtitle="Turn a sliced Chitubox plate into production metrics on the correct Print Order."
+        title="Prints"
+        subtitle="Analyze a .ctb / .ultx plate, attach metrics to a Print Order, then track part QC."
         actions={
           <>
             {ownerCode ? (
@@ -1120,7 +1120,7 @@ export default function Prints() {
 
             <Panel
               title="Recent plate history"
-              description="Each attached CTB is a plate. Drop the .stl parts that were on that plate to track good vs reprint."
+              description="Each attached slice file is a plate. Drop the .stl parts that were on that plate to track good vs reprint."
             >
               {prints.data.records.length ? (
                 <div className="space-y-3" data-testid="list-print-records">
@@ -1182,7 +1182,7 @@ export default function Prints() {
                   <Layers3 className="mx-auto h-5 w-5 text-muted-foreground" />
                   <p className="mt-2 text-sm font-medium">No plates attached yet</p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                    Attach a CTB first. Then drop the .stl parts that were on that plate to track QC.
+                    Attach a plate first. Then drop the .stl parts that were on that plate to track QC.
                   </p>
                 </div>
               )}

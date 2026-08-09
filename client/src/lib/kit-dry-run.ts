@@ -1,5 +1,6 @@
 /**
- * Simple kit tracker: bit inventory + plates.
+ * PARKED kit tracker (UI route removed).
+ * Live checklist/QC: Orders Parts + Prints plate bits.
  * Needed → on a plate → mark good or reprint → reprint goes back to needed.
  */
 

@@ -914,8 +914,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
-   * Durable kit inventory per HubSpot Print Order (bits + plates + QC).
-   * Client still keeps a localStorage cache; SQLite is the shared source of truth.
+   * PARKED Kits API — UI route/nav removed. Live parts/QC is Orders Parts +
+   * Prints plate bits. Keep these endpoints for stored kit JSON until Kits is
+   * rebuilt as a thin UI over that path (or data is migrated away).
    */
   app.get("/api/kits", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;

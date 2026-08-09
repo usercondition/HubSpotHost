@@ -35,7 +35,11 @@ function ShellRoutes() {
           <Route path="/prints" component={Prints} />
           <Route path="/printers" component={PrintersPage} />
           <Route path="/resin" component={ResinInventoryPage} />
-          {/* Kits UI parked — re-enable Route + nav when the workflow is clearer. */}
+          {/*
+            Kits UI parked: live parts/QC is Orders Parts + Prints plate bits.
+            Keep kit-dry-run.tsx /api/kits for a later thin rebuild; do not re-add
+            the route until attach uses the same Slice.log + printer + bits path.
+          */}
           <Route path="/performance" component={Performance} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />
