@@ -1,16 +1,19 @@
 /**
  * Active resin pricing for Print Operations plate estimates.
  *
- * Priority when a CTB has no embedded resin cost:
+ * Priority when a slice plate has no embedded resin cost:
  * 1. Active resin profile bottle price (Amazon refresh or manual)
- * 2. Recent Supplies "materials" purchases that look like resin
+ * 2. Open inventory bottle unit cost ($/g) — same economics attach consumes
+ * 3. Recent Supplies "materials" purchases that look like resin
  *
  * Estimates never overwrite HubSpot `print_material_cost`. Amazon live price
  * is best-effort HTML parsing and can fail when Amazon blocks or redesigns.
+ * Attach consumption still burns the open inventory bottle independently.
  */
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   lineItemsForSupplyPurchase,
+  resinBottles,
   resinProfiles,
   type PrintFileMetrics,
   type ResinCostSource,
@@ -309,9 +312,40 @@ export function resinRateFromSupplies(): ResinRate | null {
   };
 }
 
+/**
+ * $/g from the open inventory bottle (same unit cost attach burns).
+ * Queried here to avoid a circular import with resin-inventory.
+ */
+export function resinRateFromActiveBottle(): ResinRate | null {
+  const bottle = getDb()
+    .select()
+    .from(resinBottles)
+    .where(and(eq(resinBottles.isActive, 1), eq(resinBottles.status, "open")))
+    .get();
+  if (!bottle) return null;
+  const unitCost = positive(bottle.unitCostUsd);
+  const initialMass = positive(bottle.initialMassG);
+  if (unitCost === null || initialMass === null || initialMass <= 0) return null;
+  const usdPerGram = unitCost / initialMass;
+  if (!(usdPerGram > 0)) return null;
+  const bottleMassG = initialMass;
+  const bottleVolumeMl = bottleMassG / DEFAULT_RESIN_DENSITY_G_PER_ML;
+  return {
+    source: "inventory",
+    bottlePriceUsd: unitCost,
+    bottleMassG,
+    bottleVolumeMl,
+    label: `Open inventory bottle · $${unitCost.toFixed(2)} / ${bottleMassG} g`,
+    usdPerGram,
+    usdPerMl: unitCost / bottleVolumeMl,
+  };
+}
+
 export function resolveResinRate(): ResinRate | null {
   const fromProfile = rateFromProfile(ensureDefaultResinProfile());
   if (fromProfile && fromProfile.bottlePriceUsd > 0) return fromProfile;
+  const fromInventory = resinRateFromActiveBottle();
+  if (fromInventory) return fromInventory;
   return resinRateFromSupplies();
 }
 
@@ -376,10 +410,14 @@ export function enrichPrintFileMetricsWithResinCost(metrics: PrintFileMetrics): 
 
 export function resinProfileView(profile: ResinProfile = getActiveResinProfile()) {
   const rate = rateFromProfile(profile);
+  const inventory = resinRateFromActiveBottle();
   const supplies = resinRateFromSupplies();
   return {
     profile,
-    rate,
+    // Effective rate used by plate estimates (profile → inventory → supplies).
+    rate: rate && rate.bottlePriceUsd > 0 ? rate : inventory ?? supplies,
+    profileRate: rate,
+    inventoryRate: inventory,
     suppliesRate: supplies,
     amazonUrl: profile.amazonUrl || amazonUrlForAsin(profile.amazonAsin, DEFAULT_RESIN_URL),
     canRefreshAmazon: /^[A-Z0-9]{10}$/i.test(profile.amazonAsin.trim()),

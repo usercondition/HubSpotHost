@@ -26,16 +26,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
-import { ctbPrefixBlob, describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
+import { describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
 import {
   BLUEPRINT_STUDIO_LOGS_ENV_PATH,
   BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH,
-  buildSliceLogUploadFromLinkedFolder,
   getLinkedBlueprintLogsStatus,
   importBlueprintLogsFromFileList,
   unlinkBlueprintLogsDirectory,
   type BlueprintLogsStatus,
 } from "@/lib/blueprint-slice-log";
+import {
+  analyzePrintPlate,
+  attachPrintPlate,
+  assertAttachPrinterReady,
+  clearRememberedSliceLog,
+  initialAttachPrinterId,
+  isPlateFile,
+  isSliceLogFile,
+  readRememberedSliceLog,
+  rememberSliceLog,
+  type PrinterMatchInfo,
+} from "@/lib/print-attach";
 import { readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -51,7 +62,7 @@ import type {
 } from "@shared/schema";
 
 interface ResinRateView {
-  source: "amazon" | "supplies" | "manual";
+  source: "amazon" | "supplies" | "manual" | "inventory";
   bottlePriceUsd: number;
   bottleMassG: number;
   bottleVolumeMl: number | null;
@@ -64,6 +75,7 @@ interface ResinProfileResponse {
   profile: ResinProfile;
   rate: ResinRateView | null;
   suppliesRate: ResinRateView | null;
+  inventoryRate?: ResinRateView | null;
   amazonUrl: string;
   canRefreshAmazon: boolean;
 }
@@ -79,14 +91,6 @@ interface PrintsResponse {
   records: PrintFileRecordWithBits[];
   includeAttached: boolean;
   resin?: ResinProfileResponse;
-}
-
-interface PrinterMatchInfo {
-  matchedPrinterId: number | null;
-  requiresPrinterChoice: boolean;
-  sharedModelProfile?: boolean;
-  slicerProfile: string | null;
-  printers: Array<{ id: number; name: string; model: string }>;
 }
 
 interface StagedPrintFile {
@@ -134,7 +138,7 @@ function localDate(value: string): string {
 function resinCostHint(metrics: PrintFileMetrics): string {
   if (metrics.resinCostLabel) return metrics.resinCostLabel;
   if (metrics.resinCostSource === "ctb") return "From Chitubox resin price setting — not actual deal cost";
-  return "No resin price in the CTB and no active bottle rate yet";
+  return "No resin price in the slice file and no active bottle / profile rate yet";
 }
 
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
@@ -211,36 +215,6 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
       </section>
     </div>
   );
-}
-
-const SLICE_LOG_MEMORY_KEY = "hubspot-print-slice-log-v1";
-const SLICE_LOG_MEMORY_MAX_CHARS = 2 * 1024 * 1024;
-
-function isSliceLogFile(file: File): boolean {
-  const name = file.name.toLowerCase();
-  return name === "slice.log" || /^slice(?:-.*)?\.log$/.test(name);
-}
-
-function isPlateFile(file: File): boolean {
-  return /\.(ctb|ultx)$/i.test(file.name);
-}
-
-function readRememberedSliceLog(): { name: string; text: string } | null {
-  try {
-    const raw = sessionStorage.getItem(SLICE_LOG_MEMORY_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { name?: string; text?: string };
-    if (!parsed?.text || !parsed?.name) return null;
-    return { name: parsed.name, text: parsed.text };
-  } catch {
-    return null;
-  }
-}
-
-function rememberSliceLog(name: string, text: string): void {
-  const clipped =
-    text.length > SLICE_LOG_MEMORY_MAX_CHARS ? text.slice(text.length - SLICE_LOG_MEMORY_MAX_CHARS) : text;
-  sessionStorage.setItem(SLICE_LOG_MEMORY_KEY, JSON.stringify({ name, text: clipped, savedAt: Date.now() }));
 }
 
 export default function Prints() {
@@ -377,52 +351,16 @@ export default function Prints() {
 
 
   const analyze = useMutation({
-    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
-      const form = new FormData();
-      if (isCtbFileName(file.name)) {
-        const { blob, fullFileSize } = ctbPrefixBlob(file);
-        form.append("file", blob, file.name);
-        form.append("mode", "ctb-prefix");
-        form.append("fullFileSize", String(fullFileSize));
-      } else {
-        form.append("file", file);
-      }
-      let appliedLog: File | null = sliceLog ?? null;
-      if (!appliedLog && /\.ultx$/i.test(file.name)) {
-        appliedLog = await buildSliceLogUploadFromLinkedFolder(file.name);
-        if (!appliedLog) {
-          const remembered = readRememberedSliceLog();
-          if (remembered) {
-            appliedLog = new File([remembered.text], remembered.name || "Slice.log", {
-              type: "text/plain",
-            });
-          }
-        } else {
-          // Keep a session copy so re-analyzes work even if folder permission lapses mid-session.
-          void appliedLog.text().then((text) => {
-            rememberSliceLog(appliedLog!.name, text);
-            setSliceLogName(appliedLog!.name);
-          });
-        }
-      }
-      if (appliedLog) form.append("sliceLog", appliedLog);
-      const response = await apiRequest("POST", "/api/prints/analyze", form, { headers });
-      return (await response.json()) as {
-        ok: true;
-        sliceLogApplied?: boolean;
-        printerMatch?: PrinterMatchInfo;
-      } & StagedPrintFile;
-    },
+    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) =>
+      analyzePrintPlate(file, {
+        headers,
+        sliceLog,
+        onSliceLogApplied: (name) => setSliceLogName(name),
+      }),
     onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
       setAnalyzeStatus("");
       setStaged({ analysisId, metrics, expiresAt, printerMatch });
-      if (printerMatch?.requiresPrinterChoice) {
-        setAttachPrinterId("");
-      } else if (printerMatch?.matchedPrinterId) {
-        setAttachPrinterId(String(printerMatch.matchedPrinterId));
-      } else {
-        setAttachPrinterId("");
-      }
+      setAttachPrinterId(initialAttachPrinterId(printerMatch));
       const fromLog = /estimates from slice\.log/i.test(metrics.formatRevision || "");
       toast({
         title: fromLog || sliceLogApplied ? "Plate data extracted from Slice.log" : "Plate data extracted",
@@ -554,31 +492,14 @@ export default function Prints() {
 
   const attach = useMutation({
     mutationFn: async () => {
-      if (!staged) throw new Error("Analyze a CTB file before attaching it");
-      const needsPrinter =
-        staged.printerMatch?.requiresPrinterChoice ||
-        (!staged.printerMatch?.matchedPrinterId && !attachPrinterId);
-      if (needsPrinter && !attachPrinterId) {
-        throw new Error(
-          "Choose which physical printer ran this plate (Chitubox did not embed NEWX1/NEWX2/NEWX3).",
-        );
-      }
-      const response = await apiRequest(
-        "POST",
-        "/api/prints/attach",
-        {
-          analysisId: staged.analysisId,
-          dealId,
-          ...(attachPrinterId ? { printerId: Number(attachPrinterId) } : {}),
-        },
-        { headers },
-      );
-      return (await response.json()) as {
-        ok: true;
-        record: PrintFileRecord;
-        summary: PrintFileOrderSummary;
-        message: string;
-      };
+      if (!staged) throw new Error("Analyze a plate before attaching it");
+      assertAttachPrinterReady(staged.printerMatch, attachPrinterId);
+      return attachPrintPlate({
+        analysisId: staged.analysisId,
+        dealId,
+        printerId: attachPrinterId ? Number(attachPrinterId) : null,
+        headers,
+      });
     },
     onSuccess: ({ summary, message }) => {
       setStaged(null);
@@ -803,11 +724,13 @@ export default function Prints() {
               <p className="mt-3 text-xs leading-5 text-muted-foreground" data-testid="text-resin-rate-status">
                 {resin?.rate
                   ? `Active estimate rate: ${resin.rate.label}`
-                  : resin?.suppliesRate
-                    ? `No bottle price yet. Supplies fallback ready: ${resin.suppliesRate.label}`
-                    : "Save a bottle price or refresh Amazon to estimate plate cost when Chitubox leaves resin cost blank."}
+                  : resin?.inventoryRate
+                    ? `No profile bottle price. Open inventory bottle rate ready: ${resin.inventoryRate.label}`
+                    : resin?.suppliesRate
+                      ? `No bottle price yet. Supplies fallback ready: ${resin.suppliesRate.label}`
+                      : "Save a bottle price, open an inventory bottle, or refresh Amazon to estimate plate cost when the slicer leaves resin cost blank."}
                 {" "}
-                Amazon live price is best-effort and may be blocked; manual price always works.
+                Amazon live price is best-effort and may be blocked; manual price always works. Attach still burns the open inventory bottle.
               </p>
             </Panel>
 
@@ -1026,7 +949,7 @@ export default function Prints() {
                       type="button"
                       className="text-primary underline-offset-2 hover:underline"
                       onClick={() => {
-                        sessionStorage.removeItem(SLICE_LOG_MEMORY_KEY);
+                        clearRememberedSliceLog();
                         setSliceLogName(null);
                       }}
                       data-testid="button-clear-slice-log"
