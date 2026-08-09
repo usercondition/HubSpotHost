@@ -442,7 +442,7 @@ export interface OrderIntakeLineItem {
   quantity: number;
 }
 
-export type ResinCostSource = "ctb" | "ultx" | "amazon" | "supplies" | "manual";
+export type ResinCostSource = "ctb" | "ultx" | "amazon" | "supplies" | "manual" | "inventory";
 
 export function parseAmountNumber(value: string): number {
   return Number(String(value).replace(/[$,\s]/g, ""));

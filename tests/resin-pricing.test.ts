@@ -22,11 +22,16 @@ const {
   estimatePlateResinCost,
   parseAmazonProductPrice,
   refreshResinPriceFromAmazon,
+  resinRateFromActiveBottle,
   resinRateFromSupplies,
+  resolveResinRate,
   upsertActiveResinProfile,
   getActiveResinProfile,
 } = await import("../server/lib/resin-pricing");
 const { createSupplyPurchase } = await import("../server/lib/supplies");
+const { ensureDefaultResinInventory, openResinBottle, upsertResinProduct } = await import(
+  "../server/lib/resin-inventory"
+);
 const { encryptCtbSettingsBlock, parseCtbFile } = await import("../server/lib/ctb");
 const { stagePrintFile } = await import("../server/lib/print-files");
 
@@ -95,6 +100,45 @@ test("estimatePlateResinCost uses profile mass rate when CTB cost is missing", (
   assert.match(estimate.resinCostLabel || "", /ELEGOO/);
 });
 
+test("open inventory bottle rate is used when profile price is zero", () => {
+  upsertActiveResinProfile({
+    name: "ELEGOO ABS-Like 3.0 Space Grey",
+    amazonAsin: DEFAULT_RESIN_ASIN,
+    amazonUrl: `https://www.amazon.com/dp/${DEFAULT_RESIN_ASIN}`,
+    bottleMassG: 1000,
+    bottleVolumeMl: null,
+    bottlePriceUsd: "0",
+    notes: "",
+  });
+  const products = ensureDefaultResinInventory();
+  const product = upsertResinProduct({
+    name: products[0]!.name,
+    brand: "ELEGOO",
+    bottleMassG: 1000,
+    unitCostUsd: 40,
+    sealedCount: Math.max(1, products[0]!.sealedCount),
+    notes: "",
+  });
+  openResinBottle({ productId: product.id, makeActive: true, notes: "" });
+
+  const inventoryRate = resinRateFromActiveBottle();
+  assert.ok(inventoryRate);
+  assert.equal(inventoryRate?.source, "inventory");
+  assert.equal(inventoryRate?.usdPerGram, 0.04);
+
+  const resolved = resolveResinRate();
+  assert.equal(resolved?.source, "inventory");
+
+  const estimate = estimatePlateResinCost({
+    resinCost: null,
+    resinMassG: 100,
+    resinVolumeMl: null,
+    resinDensityGPerMl: null,
+  });
+  assert.equal(estimate.resinCostSource, "inventory");
+  assert.equal(estimate.resinCost, 4);
+});
+
 test("supplies resin purchases can provide a fallback rate", () => {
   upsertActiveResinProfile({
     name: "ELEGOO ABS-Like 3.0 Space Grey",
@@ -121,12 +165,17 @@ test("supplies resin purchases can provide a fallback rate", () => {
   assert.equal(rate?.source, "supplies");
   assert.ok((rate?.usdPerGram || 0) > 0);
 
-  const estimate = estimatePlateResinCost({
-    resinCost: null,
-    resinMassG: 100,
-    resinVolumeMl: null,
-    resinDensityGPerMl: null,
-  });
+  // Pass supplies rate explicitly — an open inventory bottle from a prior test
+  // would otherwise win resolveResinRate() ahead of supplies.
+  const estimate = estimatePlateResinCost(
+    {
+      resinCost: null,
+      resinMassG: 100,
+      resinVolumeMl: null,
+      resinDensityGPerMl: null,
+    },
+    rate,
+  );
   assert.equal(estimate.resinCostSource, "supplies");
   assert.equal(estimate.resinCost, 4);
 });
