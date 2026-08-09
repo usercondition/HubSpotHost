@@ -124,6 +124,10 @@ Prefer **Intake** when the buyer still needs a private details link. Prefer **Ma
 
 The optional conversation paste only assists fill; it is not required to create an order, and the raw conversation is never stored in HubSpot.
 
+### Marketplace Chrome helper (testing)
+
+`chrome-extension/marketplace-scan` is an unpacked Chrome extension that scrapes the **open** Marketplace/Messenger thread (buyer/you labels from bubble position), posts to `/api/conversation-scan`, and saves a watchlist summary so Command center + Telegram can remind you about buried chats waiting on your reply. See that folder’s README for load/test steps. It does not call Facebook private APIs.
+
 ### Intake protection
 
 Manual create uses the same **Paid Order Intake access code** as the rest of Daily Work:
@@ -215,6 +219,11 @@ HubSpot manages subscriptions for standalone legacy private apps in the private-
 | `POST /api/webhooks/hubspot` | Receives HubSpot property-change event batches. |
 | `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
 | `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions (optional Manual assist). |
+| `POST /api/conversation-scan` | Protected. Labeled Marketplace transcript → stage, nudges, intake suggestions; optionally saves a watchlist summary for buried follow-ups. |
+| `GET /api/conversation-watchlist` | Protected. Open Marketplace follow-ups (`waitingOnYou=1` filters to chats waiting on you). |
+| `POST /api/conversation-watchlist/inbox` | Protected. Upserts shallow inbox-list rows into the watchlist. |
+| `POST /api/conversation-watchlist/:id/snooze` | Protected. Snooze a follow-up (default 24h). |
+| `POST /api/conversation-watchlist/:id/dismiss` | Protected. Mark a follow-up done. |
 | `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Order deal(s); accepts optional `lineItems`. |
 | `POST /api/order-links` | Protected. Mints a one-time client link and returns the plain token exactly once. |
 | `GET /api/order-links` | Protected. Queue listing with per-status counts. Never returns the token hash. |

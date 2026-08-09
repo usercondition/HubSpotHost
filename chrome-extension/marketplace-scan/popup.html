@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Print Ops Marketplace Scan</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Print Ops</p>
+        <h1>Marketplace scan</h1>
+        <p class="sub">
+          Reads the open thread’s bubbles (buyer / you), sends them to your app for stage nudges, and
+          saves a watchlist reminder for buried chats.
+        </p>
+      </header>
+
+      <label class="field">
+        <span>App base URL</span>
+        <input id="baseUrl" type="url" placeholder="http://localhost:5000" />
+      </label>
+      <label class="field">
+        <span>Owner access code</span>
+        <input id="accessCode" type="password" autocomplete="off" placeholder="Same code as Command center" />
+      </label>
+
+      <div class="actions">
+        <button id="scanThread" type="button">Scan open thread</button>
+        <button id="scanInbox" type="button" class="secondary">Scan inbox list</button>
+      </div>
+
+      <label class="field">
+        <span>Labeled transcript (editable)</span>
+        <textarea
+          id="transcript"
+          rows="10"
+          placeholder="[buyer] Still available?&#10;[you] Yes — $45 shipped&#10;[buyer] Paid via Venmo"
+        ></textarea>
+      </label>
+      <label class="field">
+        <span>Buyer name (optional)</span>
+        <input id="counterpartName" type="text" placeholder="Detected from the thread when possible" />
+      </label>
+
+      <label class="check">
+        <input id="saveWatchlist" type="checkbox" checked />
+        <span>Save to watchlist for buried follow-up reminders</span>
+      </label>
+
+      <div class="actions">
+        <button id="sendScan" type="button">Analyze + nudge</button>
+        <button id="loadFollowUps" type="button" class="secondary">Load reminders</button>
+      </div>
+
+      <pre id="status" class="status" hidden></pre>
+      <section id="result" class="result" hidden></section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

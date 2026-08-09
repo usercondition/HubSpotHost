@@ -21,6 +21,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
+import { MarketplaceFollowUpsPanel } from "@/components/marketplace-followups";
 import { PageHeader } from "@/components/shell";
 import { StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
@@ -313,6 +314,7 @@ export default function Dashboard() {
       <div className="page-stack">
         <TodaysWork />
         {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
+        {isUnlocked ? <MarketplaceFollowUpsPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
           className="overflow-hidden rounded-lg border border-card-border bg-card"

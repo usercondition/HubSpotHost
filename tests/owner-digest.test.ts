@@ -304,6 +304,7 @@ test("telegram config requires token and chat id shape", () => {
 });
 
 test("owner digest includes do-first, next print, production, fleet, resin", () => {
+  process.env.ORDER_LINKS_DB_FILE = join(mkdtempSync(join(tmpdir(), "owner-digest-")), "digest.db");
   const ctx = sampleContext();
   const text = buildOwnerDigestText(ctx, { PUBLIC_BASE_URL: "https://example.com" }, {
     now: new Date("2026-08-05T12:00:00.000Z"),
@@ -323,6 +324,7 @@ test("owner digest includes do-first, next print, production, fleet, resin", () 
   assert.match(text, /RESIN/);
   assert.match(text, /ABS-Like Grey/);
   assert.match(text, /Low sealed/);
+  assert.match(text, /MARKETPLACE FOLLOW-UPS/);
   assert.match(text, /Open:/);
   assert.match(text, /https:\/\/example\.com\/#\/printers/);
 });

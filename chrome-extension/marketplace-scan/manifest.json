@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Print Ops Marketplace Scan",
+  "version": "0.1.0",
+  "description": "Scan an open Facebook Marketplace thread into Print Ops with buyer/you labels, stage nudges, and follow-up reminders.",
+  "action": {
+    "default_title": "Scan Marketplace → Print Ops",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
+    "https://www.messenger.com/*",
+    "https://messenger.com/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://facebook.com/*",
+        "https://www.messenger.com/*",
+        "https://messenger.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

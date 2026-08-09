@@ -346,6 +346,26 @@ CREATE TABLE IF NOT EXISTS kits (
 CREATE INDEX IF NOT EXISTS kits_updated_at_idx ON kits (updated_at DESC);
 `;
 
+const CREATE_CONVERSATION_WATCHLIST_SQL = `
+CREATE TABLE IF NOT EXISTS conversation_watchlist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_key TEXT NOT NULL UNIQUE,
+  counterpart_name TEXT NOT NULL DEFAULT '',
+  stage TEXT NOT NULL DEFAULT 'unknown',
+  waiting_on TEXT NOT NULL DEFAULT 'none',
+  last_message_role TEXT NOT NULL DEFAULT '',
+  last_message_preview TEXT NOT NULL DEFAULT '',
+  last_message_at TEXT,
+  headline TEXT NOT NULL DEFAULT '',
+  suggested_reply TEXT NOT NULL DEFAULT '',
+  thread_url TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  snooze_until TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
 /** Columns added after the first Print Files release. Safe on existing Railway volumes. */
 const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["resin_cost", "TEXT"],
@@ -469,6 +489,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_BOTTLES_SQL);
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   sqlite.exec(CREATE_KITS_SQL);
+  sqlite.exec(CREATE_CONVERSATION_WATCHLIST_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
