@@ -12,6 +12,7 @@ import {
   type OrderPartStatus,
   type PrintPlateBit,
 } from "../../shared/schema";
+import { labelFromStlFileName, normalizeStlFileName } from "../../shared/stl-names";
 import { getDb } from "./order-links";
 
 export const DEFAULT_ITEM_GROUP = "Kit";
@@ -20,22 +21,8 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function baseName(path: string): string {
-  return path.split(/[/\\]/).pop() || path;
-}
-
 function cleanSegment(segment: string): string {
   return segment.replace(/\.zip$/i, "").replace(/@.*$/, "").trim();
-}
-
-function labelFromFileName(fileName: string): string {
-  return fileName.replace(/\.stl$/i, "").trim() || fileName;
-}
-
-function normalizeStlFileName(raw: string): string | null {
-  const name = baseName(raw).trim();
-  if (!name || !/\.stl$/i.test(name)) return null;
-  return name;
 }
 
 export function normalizeItemGroup(raw: string | null | undefined): string {
@@ -266,7 +253,7 @@ export function importOrderParts(
         hubspotDealName: dealName,
         itemGroup: entry.itemGroup,
         fileName: entry.fileName,
-        label: labelFromFileName(entry.fileName),
+        label: labelFromStlFileName(entry.fileName),
         status: "needed",
         printFileRecordId: null,
         printPlateBitId: null,
@@ -408,7 +395,7 @@ export function syncOrderPartsFromPlateBits(input: {
           hubspotDealName: dealName,
           itemGroup,
           fileName: bit.fileName,
-          label: bit.label || labelFromFileName(bit.fileName),
+          label: bit.label || labelFromStlFileName(bit.fileName),
           status: bit.status === "good" ? "good" : bit.status === "reprint" ? "reprint" : "on_plate",
           printFileRecordId: input.printFileRecordId,
           printPlateBitId: bit.id,

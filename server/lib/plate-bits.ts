@@ -1,6 +1,6 @@
 /**
  * Parts linked to an attached plate (print_file_records row).
- * Operator drops STLs that were on that CTB; CTB itself has no part names.
+ * Operator drops STLs that were on that plate; the slice file has no part names.
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
 import {
@@ -9,6 +9,7 @@ import {
   type PrintPlateBit,
   type PrintPlateBitStatus,
 } from "../../shared/schema";
+import { labelFromStlFileName, normalizeStlFileName } from "../../shared/stl-names";
 import { getDb } from "./order-links";
 import {
   inferItemGroupFromPath,
@@ -21,20 +22,6 @@ import {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function baseName(path: string): string {
-  return path.split(/[/\\]/).pop() || path;
-}
-
-function labelFromFileName(fileName: string): string {
-  return fileName.replace(/\.stl$/i, "").trim() || fileName;
-}
-
-function normalizeStlFileName(raw: string): string | null {
-  const name = baseName(raw).trim();
-  if (!name || !/\.stl$/i.test(name)) return null;
-  return name;
 }
 
 /**
@@ -167,7 +154,7 @@ export function addBitsToRecord(
       .values({
         printFileRecordId,
         fileName,
-        label: labelFromFileName(fileName),
+        label: labelFromStlFileName(fileName),
         status: "on_plate",
         createdAt: stamp,
         updatedAt: stamp,

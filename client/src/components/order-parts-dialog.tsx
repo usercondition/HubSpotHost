@@ -19,7 +19,7 @@ import { printsDealHref } from "@/lib/workflow";
 import { collectKitFilesFromFileList } from "@/lib/stl-folder-import";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
-import type { OrderPart, OrderPartStatus } from "@shared/schema";
+import { partStatusLabel, type OrderPart, type OrderPartStatus } from "@shared/schema";
 
 export type OrderPartItemGroupSummary = {
   itemGroup: string;
@@ -51,19 +51,6 @@ type PartsResponse = {
   summary: Omit<OrderPartSummary, "hubspotDealId" | "hubspotDealName">;
   added?: number;
 };
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "good":
-      return "Good";
-    case "reprint":
-      return "Reprint";
-    case "on_plate":
-      return "On plate";
-    default:
-      return "Needed";
-  }
-}
 
 export function formatPartsBadge(summary: OrderPartSummary): string {
   if (summary.remaining === 0) {
@@ -425,7 +412,7 @@ export function OrderPartsDialog({
                         <div className="min-w-0">
                           <p className="truncate font-medium">{part.label}</p>
                           <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-                            {statusLabel(part.status)}
+                            {partStatusLabel(part.status)}
                           </p>
                         </div>
                         <div className="flex shrink-0 gap-1">

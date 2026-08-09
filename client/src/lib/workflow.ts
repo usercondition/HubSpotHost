@@ -15,10 +15,6 @@ export function printsDealHref(dealId: string): string {
   return `/prints?dealId=${encodeURIComponent(dealId)}`;
 }
 
-export function kitsDealHref(dealId: string): string {
-  return `/kit-dry-run?dealId=${encodeURIComponent(dealId)}`;
-}
-
 export function hubspotAppHref(): string {
   return "https://app.hubspot.com/";
 }
@@ -53,7 +49,7 @@ export function attentionNextStep(item: {
   external: boolean;
 } {
   const issue = item.issue.toLowerCase();
-  if (issue.includes("ctb") || issue.includes("plate")) {
+  if (issue.includes("ctb") || issue.includes("ultx") || issue.includes("slice") || issue.includes("plate")) {
     return {
       href: printsDealHref(item.dealId),
       label: "Attach plates",

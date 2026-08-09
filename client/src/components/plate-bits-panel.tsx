@@ -1,6 +1,6 @@
 /**
- * Drop STLs onto an attached plate to record which parts were on that CTB.
- * Names are operator-declared — the CTB file does not contain part names.
+ * Drop STLs onto an attached plate to record which parts were on that plate.
+ * Names are operator-declared — the slice file does not contain part names.
  */
 import { useState } from "react";
 import { CheckCircle2, Loader2, RotateCcw, Trash2, Upload } from "lucide-react";
@@ -11,7 +11,7 @@ import {
   collectKitFilesFromDataTransfer,
   collectKitFilesFromFileList,
 } from "@/lib/stl-folder-import";
-import type { PrintPlateBit, PrintPlateBitStatus } from "@shared/schema";
+import { partStatusLabel, type PrintPlateBit, type PrintPlateBitStatus } from "@shared/schema";
 
 export type PlateBitSummary = {
   total: number;
@@ -26,12 +26,6 @@ type BitsResponse = {
   bitSummary: PlateBitSummary;
   added?: number;
 };
-
-function statusLabel(status: string): string {
-  if (status === "good") return "Good";
-  if (status === "reprint") return "Reprint";
-  return "On plate";
-}
 
 export function PlateBitsPanel({
   recordId,
@@ -271,7 +265,7 @@ export function PlateBitsPanel({
               <div className="min-w-0">
                 <p className="truncate font-medium">{bit.label}</p>
                 <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-                  {statusLabel(bit.status)}
+                  {partStatusLabel(bit.status)}
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
