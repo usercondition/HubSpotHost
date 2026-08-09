@@ -23,6 +23,12 @@ import { StatusPill } from "@/components/primitives";
 import { StlPreview } from "@/components/stl-preview";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  analyzePrintPlate,
+  assertAttachPrinterReady,
+  attachPrintPlate,
+  initialAttachPrinterId,
+} from "@/lib/print-attach";
 import { cn } from "@/lib/utils";
 import { printsDealHref, readHashQueryParam } from "@/lib/workflow";
 import {
@@ -417,23 +423,27 @@ export default function KitDryRunPage() {
       }
       setAttachBusy(true);
       try {
-        const form = new FormData();
-        form.append("file", ctbFile);
-        const analyzed = await apiRequest("POST", "/api/prints/analyze", form, { headers });
-        const staged = (await analyzed.json()) as { ok: true; analysisId: string };
-        const attached = await apiRequest(
-          "POST",
-          "/api/prints/attach",
-          { analysisId: staged.analysisId, dealId: kit.hubspotDealId },
-          { headers },
-        );
-        const body = (await attached.json()) as { ok: true; record: PrintFileRecord; message: string };
+        const staged = await analyzePrintPlate(ctbFile, { headers });
+        const printerIdRaw = initialAttachPrinterId(staged.printerMatch);
+        if (staged.printerMatch?.requiresPrinterChoice) {
+          throw new Error(
+            "This plate needs a printer choice (shared model name). Attach it from Prints so you can pick NEWX1/2/3.",
+          );
+        }
+        assertAttachPrinterReady(staged.printerMatch, printerIdRaw);
+        const body = await attachPrintPlate({
+          analysisId: staged.analysisId,
+          dealId: kit.hubspotDealId,
+          printerId: printerIdRaw ? Number(printerIdRaw) : null,
+          headers,
+        });
         nextCtbName = body.record.fileName;
         printFileRecordId = body.record.id;
         queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
         queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
       } catch (error) {
-        setNote(error instanceof Error ? error.message.replace(/^\d+:\s*/, "") : "Could not attach CTB to HubSpot");
+        setNote(error instanceof Error ? error.message.replace(/^\d+:\s*/, "") : "Could not attach plate to HubSpot");
         setAttachBusy(false);
         return;
       } finally {
