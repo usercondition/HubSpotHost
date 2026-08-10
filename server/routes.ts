@@ -64,6 +64,7 @@ import {
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
   stagePrintFileFromPath,
+  stageCtbFromPrefix,
   syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
@@ -1435,6 +1436,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   /**
    * Slice bytes only exist for the duration of this request. Optional
    * `sliceLog` is a Blueprint Slice.log used to recover sealed ULTX estimates.
+   * Mega/Mighty 8K CTBs may send only a sampled prefix (`mode=ctb-prefix` +
+   * `fullFileSize`) so reverse proxies do not time out with "upstream error".
    * The response contains a short-lived analysis ID; no plate binary is kept.
    */
   app.post(
@@ -1467,6 +1470,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+      const mode = typeof body.mode === "string" ? body.mode.trim() : "";
+      const fullFileSizeRaw =
+        typeof body.fullFileSize === "string"
+          ? body.fullFileSize
+          : typeof body.fullFileSize === "number"
+            ? String(body.fullFileSize)
+            : "";
+      const fullFileSize = Number(fullFileSizeRaw);
+
       try {
         const sliceLogText = readOptionalSliceLogUpload(sliceLogFile);
         if (sliceLogFile?.path && !sliceLogText) {
@@ -1475,7 +1488,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             error: "Slice.log upload was empty or not a .log file. Re-import Blueprint logs and try again.",
           });
         }
-        const staged = stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
+        const staged =
+          mode === "ctb-prefix"
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            : stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
         const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
         const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
         // Shared model names (Mighty 8K without NEWX#) do not auto-match after
@@ -1484,6 +1500,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(201).json({
           ok: true,
           ...staged,
+          uploadMode: mode === "ctb-prefix" ? "ctb-prefix" : "full",
           sliceLogApplied: Boolean(sliceLogText),
           printerMatch: {
             matchedPrinterId,

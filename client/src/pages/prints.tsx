@@ -23,6 +23,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/api-error";
+import { ctbPrefixBlob, describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
 import {
   buildSliceLogUploadFromLinkedFolder,
   getLinkedBlueprintLogsStatus,
@@ -371,7 +373,14 @@ export default function Prints() {
   const analyze = useMutation({
     mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
       const form = new FormData();
-      form.append("file", file);
+      if (isCtbFileName(file.name)) {
+        const { blob, fullFileSize } = ctbPrefixBlob(file);
+        form.append("file", blob, file.name);
+        form.append("mode", "ctb-prefix");
+        form.append("fullFileSize", String(fullFileSize));
+      } else {
+        form.append("file", file);
+      }
       let appliedLog: File | null = sliceLog ?? null;
       if (!appliedLog && /\.ultx$/i.test(file.name)) {
         appliedLog = await buildSliceLogUploadFromLinkedFolder(file.name);
@@ -399,6 +408,7 @@ export default function Prints() {
       } & StagedPrintFile;
     },
     onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
+      setAnalyzeStatus("");
       setStaged({ analysisId, metrics, expiresAt, printerMatch });
       if (printerMatch?.requiresPrinterChoice) {
         setAttachPrinterId("");
@@ -419,9 +429,17 @@ export default function Prints() {
     },
     onError: (error: Error) => {
       setStaged(null);
+      setAnalyzeStatus("");
+      const { status, message } = parseApiError(error);
+      const description =
+        /upstream|bad gateway|gateway timeout|networkerror|failed to fetch/i.test(message) ||
+        status === 502 ||
+        status === 504
+          ? "The host proxy timed out before the plate finished uploading. Retry — Mega 8K CTBs now send only a small header sample."
+          : message.slice(0, 220);
       toast({
         title: "That slice file could not be analyzed",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        description,
         variant: "destructive",
       });
     },
@@ -609,6 +627,8 @@ export default function Prints() {
     });
   };
 
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
+
   const acceptFiles = async (incoming: FileList | File[] | null | undefined) => {
     const files = incoming ? Array.from(incoming) : [];
     if (!files.length) return;
@@ -638,6 +658,7 @@ export default function Prints() {
       return;
     }
 
+    setAnalyzeStatus(isCtbFileName(plate.name) ? describeCtbUploadPlan(plate) : "Reading slice data…");
     promptLogsRefreshThenAnalyze(plate, sliceLogs[0] ?? null);
   };
 
@@ -855,14 +876,15 @@ export default function Prints() {
                     {awaitingLogsRefresh || linkingLogs
                       ? "Refreshing Blueprint logs…"
                       : analyze.isPending
-                        ? "Reading slice data…"
+                        ? analyzeStatus || "Reading slice data…"
                         : logsLink.ready
                           ? "Drop a .ultx plate — you’ll be asked to refresh logs first"
                           : "Drop a .ctb / .ultx plate, or drag the Blueprint logs folder here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Dropping a .ultx
-                    prompts a logs refresh (Chrome can’t watch AppData). Or drag{" "}
+                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Large Mega 8K CTBs
+                    send only a ~2 MB header sample (full plate never hits the proxy). Dropping a .ultx prompts a logs
+                    refresh (Chrome can’t watch AppData). Or drag{" "}
                     <span className="font-medium text-foreground">Blueprint Studio\logs</span> from Explorer anytime.
                   </span>
                 </button>

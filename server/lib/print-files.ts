@@ -6,6 +6,7 @@
  * the extracted values and source file fingerprint are retained in SQLite.
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { desc, eq } from "drizzle-orm";
 import {
   printFileAnalyses,
@@ -16,7 +17,7 @@ import {
   type PrintFileRecord,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
-import { CtbParseError, parseCtbFile, parseCtbFileFromPath } from "./ctb";
+import { CtbParseError, parseCtbFile, parseCtbFileFromPath, parseCtbFileFromPrefix } from "./ctb";
 import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
@@ -120,6 +121,25 @@ export function stagePrintFileFromPath(
   return stageParsedPrintFile(
     fileName,
     enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options)),
+  );
+}
+
+/**
+ * Stage a CTB from a browser-sampled prefix. `fullFileSize` is the real plate
+ * size on the owner's machine (Mega 8K plates are often hundreds of MB).
+ */
+export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
+  if (!/\.ctb$/i.test(fileName.trim())) {
+    throw new CtbParseError("Prefix sampling is only supported for Chitubox .ctb plates");
+  }
+  const prefix = fs.readFileSync(prefixPath);
+  return stageParsedPrintFile(
+    fileName,
+    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize)),
   );
 }
 
