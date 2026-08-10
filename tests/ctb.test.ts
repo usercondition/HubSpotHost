@@ -15,6 +15,7 @@ import {
   encryptCtbSettingsBlock,
   parseCtbFile,
   parseCtbFileFromPath,
+  parseCtbFileFromPrefix,
 } from "../server/lib/ctb";
 
 function fixtureClassicCtb(overrides?: {
@@ -185,6 +186,31 @@ test("parseCtbFileFromPath reads only on-disk ranges for encrypted CTB", () => {
   } finally {
     fs.unlinkSync(tempPath);
   }
+});
+
+test("parseCtbFileFromPrefix analyzes Mega-sized plates from a small sample", () => {
+  const settingsPlain = Buffer.alloc(288, 0);
+  settingsPlain.writeFloatLE(44, 104);
+  settingsPlain.writeFloatLE(48.4, 108);
+  settingsPlain.writeFloatLE(6.25, 112);
+  settingsPlain.writeUInt32LE(18_000, 76);
+  settingsPlain.writeUInt32LE(900, 64);
+  settingsPlain.writeFloatLE(0.05, 36);
+  const encrypted = encryptCtbSettingsBlock(settingsPlain);
+  const prefix = Buffer.alloc(0x30 + encrypted.length + 16, 0);
+  prefix.writeUInt32LE(0x12fd0107, 0);
+  prefix.writeUInt32LE(encrypted.length, 4);
+  prefix.writeUInt32LE(0x30, 8);
+  prefix.writeUInt32LE(5, 0x10);
+  encrypted.copy(prefix, 0x30);
+
+  const fullFileSize = 386_149_597; // ~368 MB Mega 8K plate
+  const metrics = parseCtbFileFromPrefix("MEGA 8K Land Raider Hull Plate.ctb", prefix, fullFileSize);
+  assert.equal(metrics.fileSizeBytes, fullFileSize);
+  assert.equal(metrics.resinVolumeMl, 44);
+  assert.equal(metrics.resinMassG, 48.4);
+  assert.equal(metrics.printTimeSeconds, 18_000);
+  assert.match(metrics.sha256, /^[a-f0-9]{64}$/);
 });
 
 

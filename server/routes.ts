@@ -64,6 +64,7 @@ import {
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
   stagePrintFileFromPath,
+  stageCtbFromPrefix,
   syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
@@ -1218,6 +1219,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
    * The CTB bytes only exist for the duration of this request. The response
    * contains a short-lived analysis ID; no file binary is ever written to
    * Railway storage or sent to HubSpot.
+   *
+   * Mega/Mighty 8K plates can be hundreds of MB. The browser may send only a
+   * sampled prefix (`mode=ctb-prefix` + `fullFileSize`) so reverse proxies do
+   * not time out with a generic "upstream error".
    */
   app.post(
     "/api/prints/analyze",
@@ -1242,9 +1247,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+      const mode = typeof body.mode === "string" ? body.mode.trim() : "";
+      const fullFileSizeRaw = typeof body.fullFileSize === "string" ? body.fullFileSize : typeof body.fullFileSize === "number" ? String(body.fullFileSize) : "";
+      const fullFileSize = Number(fullFileSizeRaw);
+
       try {
-        const staged = stagePrintFileFromPath(file.originalname, file.path);
-        return res.status(201).json({ ok: true, ...staged });
+        const staged =
+          mode === "ctb-prefix"
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            : stagePrintFileFromPath(file.originalname, file.path);
+        return res.status(201).json({
+          ok: true,
+          ...staged,
+          uploadMode: mode === "ctb-prefix" ? "ctb-prefix" : "full",
+        });
       } catch (error) {
         const message =
           error instanceof CtbParseError || error instanceof UltxParseError

@@ -22,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/api-error";
+import { ctbPrefixBlob, describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
 import { readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -297,7 +299,14 @@ export default function Prints() {
   const analyze = useMutation({
     mutationFn: async (file: File) => {
       const form = new FormData();
-      form.append("file", file);
+      if (isCtbFileName(file.name)) {
+        const { blob, fullFileSize } = ctbPrefixBlob(file);
+        form.append("file", blob, file.name);
+        form.append("mode", "ctb-prefix");
+        form.append("fullFileSize", String(fullFileSize));
+      } else {
+        form.append("file", file);
+      }
       const response = await apiRequest("POST", "/api/prints/analyze", form, { headers });
       return (await response.json()) as { ok: true } & StagedPrintFile;
     },
@@ -310,9 +319,16 @@ export default function Prints() {
     },
     onError: (error: Error) => {
       setStaged(null);
+      const { status, message } = parseApiError(error);
+      const description =
+        /upstream|bad gateway|gateway timeout|networkerror|failed to fetch/i.test(message) ||
+        status === 502 ||
+        status === 504
+          ? "The host proxy timed out before the plate finished uploading. Retry — Mega 8K CTBs now send only a small header sample."
+          : message.slice(0, 220);
       toast({
         title: "That slice file could not be analyzed",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        description,
         variant: "destructive",
       });
     },
@@ -353,10 +369,15 @@ export default function Prints() {
     },
   });
 
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
+
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
     setStaged(null);
-    analyze.mutate(file);
+    setAnalyzeStatus(isCtbFileName(file.name) ? describeCtbUploadPlan(file) : "Reading slice data…");
+    analyze.mutate(file, {
+      onSettled: () => setAnalyzeStatus(""),
+    });
   };
 
   const candidates = prints.data?.candidates ?? [];
@@ -529,10 +550,13 @@ export default function Prints() {
                     <FileUp className="h-5 w-5 text-primary" />
                   )}
                   <span className="mt-3 text-sm font-medium">
-                    {analyze.isPending ? "Reading slice data…" : "Drop a .ctb or .ultx file here"}
+                    {analyze.isPending
+                      ? analyzeStatus || "Reading slice data…"
+                      : "Drop a .ctb or .ultx file here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX uses a best-effort reader.
+                    Extracts time, resin use, cost estimate, exposure, and printer/machine name. Large Mega 8K CTBs
+                    send only a ~2 MB header sample — the full plate never goes through the proxy.
                   </span>
                 </button>
                 <Button
