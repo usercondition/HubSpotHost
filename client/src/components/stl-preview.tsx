@@ -113,10 +113,11 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
       renderer.render(scene, camera);
     };
 
+    const onWindowResize = () => syncSize(false);
     const resizeObserver =
       typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => syncSize(false)) : null;
     resizeObserver?.observe(mount);
-    window.addEventListener("resize", () => syncSize(false));
+    window.addEventListener("resize", onWindowResize);
     animate();
 
     file
@@ -151,7 +152,7 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
       disposed = true;
       cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", () => syncSize(false));
+      window.removeEventListener("resize", onWindowResize);
       controls.dispose();
       if (mesh) {
         mesh.geometry.dispose();
