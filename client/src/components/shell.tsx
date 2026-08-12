@@ -234,7 +234,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="scroll-pane min-w-0 bg-background">{children}</main>
+      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
     </div>
   );
 }
