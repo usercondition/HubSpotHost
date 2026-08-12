@@ -288,7 +288,7 @@ export default function DealsPage() {
                   {columns.map((column) => (
                     <div
                       key={column.id}
-                      className="flex h-full min-h-0 w-[15.5rem] min-w-[15.5rem] max-w-[18rem] flex-1 flex-col overflow-hidden rounded-md border border-border bg-muted/30"
+                      className="flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col overflow-hidden rounded-md border border-border bg-muted/30"
                       data-testid={`column-deal-stage-${column.id}`}
                     >
                       <div
