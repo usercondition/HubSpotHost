@@ -23,6 +23,27 @@ function meshColor(): number {
   return document.documentElement.classList.contains("dark") ? 0xa8a29e : 0x57534e;
 }
 
+/** Frame the mesh so it fills most of the viewport without clipping. */
+function frameObject(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  box: THREE.Box3,
+) {
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z, 1);
+  const fov = camera.fov * (Math.PI / 180);
+  const fitHeight = maxDim / 2 / Math.tan(fov / 2);
+  const fitWidth = fitHeight / Math.max(camera.aspect, 0.01);
+  const distance = Math.max(fitHeight, fitWidth) * 1.2;
+  camera.near = Math.max(distance / 100, 0.01);
+  camera.far = distance * 100;
+  camera.position.set(distance * 0.75, distance * 0.45, distance * 0.95);
+  camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
+
 /**
  * Browser-local STL viewer. Loads one File at a time (no server upload).
  */
@@ -43,23 +64,26 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
     setStatus("loading");
     setError(null);
 
-    const width = mount.clientWidth || 320;
-    const height = mount.clientHeight || 240;
+    const width = Math.max(mount.clientWidth, 1);
+    const height = Math.max(mount.clientHeight, 1);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(sceneBackgroundColor());
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 5000);
     camera.position.set(80, 60, 100);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height, false);
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
     mount.replaceChildren(renderer.domElement);
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0xb0b0b0, 1.1);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0xb0b0b0, 1.15);
     scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(40, 80, 30);
     scene.add(dir);
 
@@ -69,7 +93,18 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
 
     const loader = new STLLoader();
     let mesh: THREE.Mesh | null = null;
+    let meshBox: THREE.Box3 | null = null;
     let frame = 0;
+
+    const syncSize = (reframe = false) => {
+      if (!mountRef.current) return;
+      const w = Math.max(mountRef.current.clientWidth, 1);
+      const h = Math.max(mountRef.current.clientHeight, 1);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h, false);
+      if (reframe && meshBox) frameObject(camera, controls, meshBox);
+    };
 
     const animate = () => {
       if (disposed) return;
@@ -78,16 +113,10 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
       renderer.render(scene, camera);
     };
 
-    const onResize = () => {
-      if (!mountRef.current) return;
-      const w = mountRef.current.clientWidth || width;
-      const h = mountRef.current.clientHeight || height;
-      camera.aspect = w / Math.max(h, 1);
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h, false);
-    };
-
-    window.addEventListener("resize", onResize);
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => syncSize(false)) : null;
+    resizeObserver?.observe(mount);
+    window.addEventListener("resize", () => syncSize(false));
     animate();
 
     file
@@ -107,16 +136,8 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
         scene.add(mesh);
 
         geometry.computeBoundingBox();
-        const box = geometry.boundingBox;
-        if (box) {
-          const size = new THREE.Vector3();
-          box.getSize(size);
-          const maxDim = Math.max(size.x, size.y, size.z, 1);
-          const dist = maxDim * 2.2;
-          camera.position.set(dist, dist * 0.75, dist);
-          controls.target.set(0, 0, 0);
-          controls.update();
-        }
+        meshBox = geometry.boundingBox ? geometry.boundingBox.clone() : null;
+        syncSize(true);
 
         setStatus("ready");
       })
@@ -129,7 +150,8 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", () => syncSize(false));
       controls.dispose();
       if (mesh) {
         mesh.geometry.dispose();
@@ -145,7 +167,7 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
     return (
       <div
         className={cn(
-          "flex min-h-[14rem] items-center justify-center rounded-md border border-dashed border-border bg-muted/25 px-4 text-center text-sm text-muted-foreground",
+          "flex h-full min-h-[16rem] items-center justify-center rounded-md border border-dashed border-border bg-muted/25 px-4 text-center text-sm text-muted-foreground",
           className,
         )}
         data-testid="stl-preview-empty"
@@ -156,13 +178,13 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
   }
 
   return (
-    <div className={cn("overflow-hidden rounded-md border border-border bg-card", className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-border bg-card", className)}>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
         <p className="truncate text-xs font-medium">{label || file.name}</p>
         <p className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">Local preview</p>
       </div>
       <div
-        className={cn("relative bg-muted/40", canvasClassName || "h-56")}
+        className={cn("relative min-h-0 flex-1 bg-muted/40", canvasClassName)}
         ref={mountRef}
         data-testid="stl-preview-canvas"
       >
@@ -178,7 +200,7 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
           </div>
         ) : null}
       </div>
-      <p className="px-3 py-2 text-[0.7rem] text-muted-foreground">
+      <p className="shrink-0 border-t border-border px-3 py-2 text-[0.7rem] text-muted-foreground">
         Drag to orbit · scroll to zoom · compare to the physical print · file stays in this tab
       </p>
     </div>

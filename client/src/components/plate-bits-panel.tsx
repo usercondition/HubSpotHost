@@ -390,8 +390,8 @@ export function PlateBitsPanel({
       ) : null}
 
       {bits.length > 0 ? (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)]">
-          <div className="min-w-0 space-y-2">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)] lg:items-stretch">
+          <div className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-[10rem] flex-1 sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -431,7 +431,7 @@ export function PlateBitsPanel({
             </div>
 
             <ul
-              className="max-h-[min(28rem,50vh)] space-y-1 overflow-y-auto overscroll-contain rounded-md border border-border/70 bg-muted/15 p-1.5"
+              className="h-[min(28rem,50vh)] space-y-1 overflow-y-auto overscroll-contain rounded-md border border-border/70 bg-muted/15 p-1.5"
               data-testid={`list-plate-bits-${recordId}`}
             >
               {filteredBits.length === 0 ? (
@@ -557,7 +557,10 @@ export function PlateBitsPanel({
             </ul>
           </div>
 
-          <div className="min-w-0 lg:sticky lg:top-2 lg:self-start" data-testid={`panel-plate-bit-preview-${recordId}`}>
+          <div
+            className="flex min-h-[min(28rem,50vh)] min-w-0 flex-col lg:min-h-0"
+            data-testid={`panel-plate-bit-preview-${recordId}`}
+          >
             <StlPreview
               file={previewFile}
               label={selectedBit?.label}
@@ -566,8 +569,7 @@ export function PlateBitsPanel({
                   ? "Drop or re-add the .stl files for this plate to preview parts in 3D. Meshes stay in this browser tab."
                   : "Select a part with a local STL to compare against the physical print."
               }
-              className="min-h-[16rem]"
-              canvasClassName="h-64 md:h-72"
+              className="h-full min-h-[min(28rem,50vh)] lg:min-h-0"
             />
           </div>
         </div>
