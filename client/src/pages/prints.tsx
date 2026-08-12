@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -265,6 +265,7 @@ export default function Prints() {
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
+  const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -664,6 +665,18 @@ export default function Prints() {
 
   const candidates = prints.data?.candidates ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+
+  const plateHistoryRecords = useMemo(() => {
+    const records = prints.data?.records ?? [];
+    if (!dealId || showAllPlateHistory) return records;
+    return records.filter((record) => record.hubspotDealId === dealId);
+  }, [prints.data?.records, dealId, showAllPlateHistory]);
+
+  const hiddenOtherDealCount = useMemo(() => {
+    const records = prints.data?.records ?? [];
+    if (!dealId || showAllPlateHistory) return 0;
+    return records.filter((record) => record.hubspotDealId !== dealId).length;
+  }, [prints.data?.records, dealId, showAllPlateHistory]);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -1142,11 +1155,32 @@ export default function Prints() {
 
             <Panel
               title="Recent plate history"
-              description="Each attached slice file is a plate. Drop the .stl parts that were on that plate to track good vs reprint."
+              description="Each attached slice file is a plate. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
             >
-              {prints.data.records.length ? (
+              {dealId && (hiddenOtherDealCount > 0 || showAllPlateHistory) ? (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {showAllPlateHistory
+                      ? "Showing plates for every order."
+                      : `Showing plates for the selected order${selected ? ` · ${selected.dealName}` : ""}.`}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => setShowAllPlateHistory((value) => !value)}
+                    data-testid="button-toggle-all-plate-history"
+                  >
+                    {showAllPlateHistory
+                      ? "Show selected order only"
+                      : `Show all orders (${hiddenOtherDealCount} more)`}
+                  </Button>
+                </div>
+              ) : null}
+              {plateHistoryRecords.length ? (
                 <div className="space-y-3" data-testid="list-print-records">
-                  {prints.data.records.map((record) => (
+                  {plateHistoryRecords.map((record) => (
                     <article
                       key={record.id}
                       className="rounded-md border border-card-border bg-card p-4"
@@ -1202,9 +1236,15 @@ export default function Prints() {
               ) : (
                 <div className="py-7 text-center">
                   <Layers3 className="mx-auto h-5 w-5 text-muted-foreground" />
-                  <p className="mt-2 text-sm font-medium">No plates attached yet</p>
+                  <p className="mt-2 text-sm font-medium">
+                    {dealId && (prints.data?.records.length ?? 0) > 0
+                      ? "No plates on the selected order"
+                      : "No plates attached yet"}
+                  </p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                    Attach a plate first. Then drop the .stl parts that were on that plate to track QC.
+                    {dealId && (prints.data?.records.length ?? 0) > 0
+                      ? "Attach a plate to this order, or show all orders to QC another deal’s plates."
+                      : "Attach a plate first. Then drop the .stl parts that were on that plate to track QC and preview meshes."}
                   </p>
                 </div>
               )}

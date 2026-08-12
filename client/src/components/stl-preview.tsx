@@ -9,12 +9,24 @@ type StlPreviewProps = {
   file: File | null;
   label?: string;
   className?: string;
+  canvasClassName?: string;
+  emptyHint?: string;
 };
+
+function sceneBackgroundColor(): number {
+  if (typeof document === "undefined") return 0xe7e5e4;
+  return document.documentElement.classList.contains("dark") ? 0x1c1917 : 0xe7e5e4;
+}
+
+function meshColor(): number {
+  if (typeof document === "undefined") return 0x57534e;
+  return document.documentElement.classList.contains("dark") ? 0xa8a29e : 0x57534e;
+}
 
 /**
  * Browser-local STL viewer. Loads one File at a time (no server upload).
  */
-export function StlPreview({ file, label, className }: StlPreviewProps) {
+export function StlPreview({ file, label, className, canvasClassName, emptyHint }: StlPreviewProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +47,7 @@ export function StlPreview({ file, label, className }: StlPreviewProps) {
     const height = mount.clientHeight || 240;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf4f1ea);
+    scene.background = new THREE.Color(sceneBackgroundColor());
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
     camera.position.set(80, 60, 100);
@@ -87,9 +99,9 @@ export function StlPreview({ file, label, className }: StlPreviewProps) {
         geometry.center();
 
         const material = new THREE.MeshStandardMaterial({
-          color: 0x6b7280,
-          metalness: 0.15,
-          roughness: 0.55,
+          color: meshColor(),
+          metalness: 0.12,
+          roughness: 0.58,
         });
         mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
@@ -133,11 +145,12 @@ export function StlPreview({ file, label, className }: StlPreviewProps) {
     return (
       <div
         className={cn(
-          "flex h-56 items-center justify-center rounded-md border border-dashed border-border bg-muted/25 px-4 text-center text-sm text-muted-foreground",
+          "flex min-h-[14rem] items-center justify-center rounded-md border border-dashed border-border bg-muted/25 px-4 text-center text-sm text-muted-foreground",
           className,
         )}
+        data-testid="stl-preview-empty"
       >
-        Select a bit that was imported from a folder to preview the STL.
+        {emptyHint || "Select a part with a local STL to preview."}
       </div>
     );
   }
@@ -148,7 +161,11 @@ export function StlPreview({ file, label, className }: StlPreviewProps) {
         <p className="truncate text-xs font-medium">{label || file.name}</p>
         <p className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">Local preview</p>
       </div>
-      <div className="relative h-56 bg-[#f4f1ea]" ref={mountRef} data-testid="stl-preview-canvas">
+      <div
+        className={cn("relative bg-muted/40", canvasClassName || "h-56")}
+        ref={mountRef}
+        data-testid="stl-preview-canvas"
+      >
         {status === "loading" ? (
           <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/40 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -162,7 +179,7 @@ export function StlPreview({ file, label, className }: StlPreviewProps) {
         ) : null}
       </div>
       <p className="px-3 py-2 text-[0.7rem] text-muted-foreground">
-        Drag to orbit · scroll to zoom · file stays in this browser tab (not uploaded)
+        Drag to orbit · scroll to zoom · compare to the physical print · file stays in this tab
       </p>
     </div>
   );
