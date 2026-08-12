@@ -78,7 +78,10 @@ function frameObject(
   camera.position.set(distance * 0.72, distance * 0.52, distance * 0.98);
   camera.updateProjectionMatrix();
   controls.target.set(0, 0, 0);
+  controls.minDistance = maxDim * 0.35;
+  controls.maxDistance = distance * 8;
   controls.update();
+  return { maxDim, distance };
 }
 
 function buildFloorGrid(size: number, theme: ViewportTheme): THREE.Group {
@@ -143,7 +146,6 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(theme.background);
-    scene.fog = new THREE.Fog(theme.background, 80, 420);
 
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 5000);
     camera.position.set(80, 60, 100);
@@ -157,6 +159,7 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
     renderer.domElement.style.display = "block";
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
+    renderer.domElement.style.touchAction = "none";
     mount.replaceChildren(renderer.domElement);
 
     const hemi = new THREE.HemisphereLight(theme.hemiSky, theme.hemiGround, 0.85);
@@ -179,14 +182,18 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.maxPolarAngle = Math.PI * 0.49;
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+    controls.screenSpacePanning = true;
+    // Full free orbit (same as before the Chitubox restyle).
 
     const loader = new STLLoader();
     let mesh: THREE.Mesh | null = null;
     let meshBox: THREE.Box3 | null = null;
     let frame = 0;
 
-    const placeGrid = (box: THREE.Box3) => {
+    const placeGrid = (box: THREE.Box3, distanceHint?: number) => {
       if (grid) {
         scene.remove(grid);
         grid.traverse((obj) => {
@@ -208,8 +215,10 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
       grid.position.y = -size.y / 2 - maxDim * 0.02;
       scene.add(grid);
 
-      const near = Math.max(maxDim * 2.2, 20);
-      const far = Math.max(maxDim * 18, near * 4);
+      // Keep fog well beyond the orbit radius so rotating never “loses” the part.
+      const orbit = distanceHint ?? maxDim * 2;
+      const near = Math.max(orbit * 4, maxDim * 8);
+      const far = Math.max(near * 3, maxDim * 40);
       scene.fog = new THREE.Fog(theme.background, near, far);
     };
 
@@ -228,7 +237,10 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
         material.emissive.set(theme.meshEmissive);
         material.needsUpdate = true;
       }
-      if (meshBox) placeGrid(meshBox);
+      if (meshBox) {
+        const dist = camera.position.length();
+        placeGrid(meshBox, dist);
+      }
     };
 
     const syncSize = (reframe = false) => {
@@ -238,7 +250,10 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
-      if (reframe && meshBox) frameObject(camera, controls, meshBox);
+      if (reframe && meshBox) {
+        const framed = frameObject(camera, controls, meshBox);
+        placeGrid(meshBox, framed.distance);
+      }
     };
 
     const animate = () => {
@@ -285,7 +300,6 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
 
         geometry.computeBoundingBox();
         meshBox = geometry.boundingBox ? geometry.boundingBox.clone() : null;
-        if (meshBox) placeGrid(meshBox);
         syncSize(true);
 
         setStatus("ready");
@@ -344,13 +358,17 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint 
         <p className="truncate text-xs font-medium">{label || file.name}</p>
         <p className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">Local preview</p>
       </div>
+      {/*
+        Keep the WebGL host empty of React children so OrbitControls pointer
+        events are never covered by loading/error overlays after replaceChildren.
+      */}
       <div
         className={cn("relative min-h-0 flex-1 bg-[#dce3eb] dark:bg-[#2a2e36]", canvasClassName)}
-        ref={mountRef}
         data-testid="stl-preview-canvas"
       >
+        <div ref={mountRef} className="absolute inset-0 touch-none" />
         {status === "loading" ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/50 text-sm backdrop-blur-[1px]">
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/50 text-sm backdrop-blur-[1px]">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading STL…
           </div>
