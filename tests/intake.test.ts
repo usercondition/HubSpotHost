@@ -53,24 +53,36 @@ I want to order a printed knight. Can you send the price and payment information
   assert.ok(analysis.missing.includes("Clear payment confirmation"));
 });
 
-test("Paid-order validation requires payment, an identifiable client, product, and amount", () => {
+test("Paid-order validation requires payment, an identifiable client, product, and a non-negative amount", () => {
   assert.equal(validatePaidOrderDraft(validDraft), null);
+  assert.equal(validatePaidOrderDraft({ ...validDraft, amount: "0" }), null);
+  assert.equal(validatePaidOrderDraft({ ...validDraft, amount: "0.00" }), null);
   assert.match(
     validatePaidOrderDraft({ ...validDraft, paymentConfirmed: false }) ?? "",
     /Payment must be confirmed/,
   );
-  assert.match(validatePaidOrderDraft({ ...validDraft, amount: "0" }) ?? "", /greater than zero/);
+  assert.match(
+    validatePaidOrderDraft({ ...validDraft, amount: "-5" }) ?? "",
+    /zero or more/,
+  );
   assert.match(
     validatePaidOrderDraft({ ...validDraft, fullName: "", marketplaceUsername: "" }) ?? "",
     /client's name or Marketplace username/,
   );
 });
 
-test("Paid-order line items require a description and amount per row", () => {
+test("Paid-order line items require a description and non-negative amount per row", () => {
   assert.equal(
     validatePaidOrderLineItems([
       { productName: "Knight", amount: "120" },
       { productName: "Base", amount: "15.50" },
+    ]),
+    null,
+  );
+  assert.equal(
+    validatePaidOrderLineItems([
+      { productName: "Gift knight", amount: "0" },
+      { productName: "Tracking sample", amount: "0.00" },
     ]),
     null,
   );
@@ -80,7 +92,7 @@ test("Paid-order line items require a description and amount per row", () => {
     /Item 1 needs a model/,
   );
   assert.match(
-    validatePaidOrderLineItems([{ productName: "Knight", amount: "0" }]) ?? "",
-    /Item 1 needs a paid amount/,
+    validatePaidOrderLineItems([{ productName: "Knight", amount: "-1" }]) ?? "",
+    /Item 1 needs an amount of zero or more/,
   );
 });

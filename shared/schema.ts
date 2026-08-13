@@ -1504,7 +1504,7 @@ export const reviewEditSchema = z.object({
   confirmedItem: trimmed(400).min(2, "Confirm or correct the item description").optional(),
   quantity: z.coerce.number().int().min(1).max(999).optional(),
   clientNotes: trimmed(2000).optional(),
-  agreedAmount: amountLike.optional(),
+  agreedAmount: nonNegativeAmountLike.optional(),
   itemDescription: trimmed(400).optional(),
   paymentMethod: trimmed(80).optional(),
   paymentReference: trimmed(120).optional(),

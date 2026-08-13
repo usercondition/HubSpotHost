@@ -241,10 +241,13 @@ export default function PaidOrders() {
       return;
     }
     const cleaned = lines.filter((line) => line.productName.trim() || line.amount.trim());
-    if (cleaned.length === 0 || cleaned.some((line) => !line.productName.trim() || !(parseAmount(line.amount) > 0))) {
+    if (
+      cleaned.length === 0 ||
+      cleaned.some((line) => !line.productName.trim() || !(parseAmount(line.amount) >= 0) || line.amount.trim() === "")
+    ) {
       toast({
         title: "Order items incomplete",
-        description: "Each item needs a description and an amount greater than zero.",
+        description: "Each item needs a description and an amount of zero or more (use $0 for gifts / tracking).",
         variant: "destructive",
       });
       return;
