@@ -10,7 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Mark } from "@/components/shell";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { cn } from "@/lib/utils";
-import type { ClientOrderView } from "@shared/schema";
+import type { ClientOrderSavedDetails, ClientOrderView } from "@shared/schema";
 
 interface LookupOk {
   ok: true;
@@ -38,6 +38,25 @@ const EMPTY = {
   clientNotes: "",
 };
 
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function applySavedDetails(
+  current: typeof EMPTY,
+  saved: ClientOrderSavedDetails,
+): typeof EMPTY {
+  const next = { ...current };
+  if (!next.clientFullName) next.clientFullName = saved.clientFullName;
+  if (!next.clientUsername) next.clientUsername = saved.clientUsername;
+  if (!next.clientEmail) next.clientEmail = saved.clientEmail;
+  if (!next.clientPhone) next.clientPhone = saved.clientPhone;
+  if (!next.shippingStreet) next.shippingStreet = saved.shippingStreet;
+  if (!next.shippingCity) next.shippingCity = saved.shippingCity;
+  if (!next.shippingState) next.shippingState = saved.shippingState;
+  if (!next.shippingPostalCode) next.shippingPostalCode = saved.shippingPostalCode;
+  if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry;
+  return next;
+}
+
 export default function ClientOrder() {
   const params = useParams<{ token: string }>();
   const token = params.token ?? "";
@@ -46,6 +65,7 @@ export default function ClientOrder() {
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [identity, setIdentity] = useState({ email: "", username: "" });
 
   /** The token travels in the request body so it never lands in a server log. */
   const lookup = useQuery<LookupOk>({
@@ -72,31 +92,56 @@ export default function ClientOrder() {
     setPaymentConfirmed(false);
     setError("");
     setSubmitted(false);
+    setIdentity({ email: "", username: "" });
   }, [token]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setIdentity({
+        email: form.clientEmail.trim(),
+        username: form.clientUsername.trim(),
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [form.clientEmail, form.clientUsername]);
+
+  const canRecall =
+    EMAIL_RE.test(identity.email) || identity.username.replace(/^@+/, "").length >= 2;
+
+  const recalled = useQuery<{ ok: true; savedDetails: ClientOrderSavedDetails | null }>({
+    queryKey: ["client-order-saved-details", token, identity.email, identity.username],
+    enabled: Boolean(token) && !submitted && canRecall && !lookup.data?.view.savedDetails,
+    retry: false,
+    queryFn: async () => {
+      const res = await apiRequest("POST", "/api/client-order/saved-details", {
+        token,
+        clientEmail: identity.email,
+        clientUsername: identity.username,
+      });
+      return (await res.json()) as { ok: true; savedDetails: ClientOrderSavedDetails | null };
+    },
+  });
 
   useEffect(() => {
     const view = lookup.data?.view;
     if (!view) return;
-    const saved = view.savedDetails;
     setForm((current) => {
-      const next = { ...current };
+      let next = { ...current };
       if (!next.confirmedItem && view.itemDescription) next.confirmedItem = view.itemDescription;
-      if (saved) {
-        if (!next.clientFullName) next.clientFullName = saved.clientFullName;
-        if (!next.clientUsername) next.clientUsername = saved.clientUsername;
-        if (!next.clientEmail) next.clientEmail = saved.clientEmail;
-        if (!next.clientPhone) next.clientPhone = saved.clientPhone;
-        if (!next.shippingStreet) next.shippingStreet = saved.shippingStreet;
-        if (!next.shippingCity) next.shippingCity = saved.shippingCity;
-        if (!next.shippingState) next.shippingState = saved.shippingState;
-        if (!next.shippingPostalCode) next.shippingPostalCode = saved.shippingPostalCode;
-        if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry;
-      }
+      if (view.savedDetails) next = applySavedDetails(next, view.savedDetails);
       return next;
     });
-    if (saved) setShippingRequired(saved.shippingRequired);
+    if (view.savedDetails) setShippingRequired(view.savedDetails.shippingRequired);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lookup.data]);
+
+  useEffect(() => {
+    const saved = recalled.data?.savedDetails;
+    if (!saved) return;
+    setForm((current) => applySavedDetails(current, saved));
+    if (!form.shippingStreet) setShippingRequired(saved.shippingRequired);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recalled.data]);
 
   const state: LookupState = lookup.isLoading
     ? { kind: "loading" }
@@ -135,7 +180,7 @@ export default function ClientOrder() {
   const startSubmit = () => {
     setError("");
     if (form.clientFullName.trim().length < 2) return setError("Please enter your full name.");
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.clientEmail.trim()))
+    if (!EMAIL_RE.test(form.clientEmail.trim()))
       return setError("Please enter an email address the seller can reach you at.");
     if (form.confirmedItem.trim().length < 2) return setError("Please confirm what you ordered.");
     if (shippingRequired && form.shippingStreet.trim().length < 3)
@@ -206,7 +251,7 @@ export default function ClientOrder() {
               confirms that with you after reviewing what you enter here.
             </p>
 
-            {state.view.savedDetails && (
+            {(state.view.savedDetails || recalled.data?.savedDetails) && (
               <div
                 className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4"
                 data-testid="panel-saved-details"
@@ -287,6 +332,10 @@ export default function ClientOrder() {
                     autoComplete="tel"
                   />
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  If you have ordered before, enter the same email or Marketplace username and we
+                  will fill your last shipping details for you to confirm.
+                </p>
               </fieldset>
 
               <fieldset className="space-y-4">

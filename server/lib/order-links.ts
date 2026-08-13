@@ -726,6 +726,22 @@ export type ClientLookupResult =
   | { ok: true; view: ClientOrderView }
   | { ok: false; reason: "invalid" | "expired" | "already-submitted" };
 
+function publicSavedDetails(prior: PriorClientMatch | null): ClientOrderSavedDetails | null {
+  if (!prior) return null;
+  return {
+    clientFullName: prior.clientFullName,
+    clientUsername: prior.clientUsername,
+    clientEmail: prior.clientEmail,
+    clientPhone: prior.clientPhone,
+    shippingRequired: prior.shippingRequired,
+    shippingStreet: prior.shippingStreet,
+    shippingCity: prior.shippingCity,
+    shippingState: prior.shippingState,
+    shippingPostalCode: prior.shippingPostalCode,
+    shippingCountry: prior.shippingCountry,
+  };
+}
+
 /**
  * Public token lookup. Returns nothing owner-side: no internal label, no
  * payment reference, no owner notes, no queue state details.
@@ -742,24 +758,6 @@ export function lookupClientOrder(token: string): ClientLookupResult {
     return { ok: false, reason: "already-submitted" };
   }
   if (link.status !== "awaiting_client") return { ok: false, reason: "expired" };
-  const prior = findPriorClientDetails({
-    username: link.buyerUsernameHint,
-    excludeId: link.id,
-  });
-  const savedDetails: ClientOrderSavedDetails | null = prior
-    ? {
-        clientFullName: prior.clientFullName,
-        clientUsername: prior.clientUsername,
-        clientEmail: prior.clientEmail,
-        clientPhone: prior.clientPhone,
-        shippingRequired: prior.shippingRequired,
-        shippingStreet: prior.shippingStreet,
-        shippingCity: prior.shippingCity,
-        shippingState: prior.shippingState,
-        shippingPostalCode: prior.shippingPostalCode,
-        shippingCountry: prior.shippingCountry,
-      }
-    : null;
   return {
     ok: true,
     view: {
@@ -769,8 +767,38 @@ export function lookupClientOrder(token: string): ClientLookupResult {
       expiresAt: link.expiresAt,
       buyerNameHint: link.buyerNameHint,
       buyerUsernameHint: link.buyerUsernameHint,
-      savedDetails,
+      savedDetails: publicSavedDetails(
+        findPriorClientDetails({
+          username: link.buyerUsernameHint,
+          excludeId: link.id,
+        }),
+      ),
     },
+  };
+}
+
+export type ClientSavedDetailsResult =
+  | { ok: true; savedDetails: ClientOrderSavedDetails | null }
+  | { ok: false; reason: "invalid" | "expired" | "already-submitted" };
+
+/**
+ * Returning-buyer details for a valid unused token, keyed by the email or
+ * username the buyer just typed. Same token gate as lookup — not a public search.
+ */
+export function lookupClientSavedDetails(
+  token: string,
+  identity: { email?: string; username?: string },
+): ClientSavedDetailsResult {
+  const lookup = lookupClientOrder(token);
+  if (!lookup.ok) return lookup;
+  return {
+    ok: true,
+    savedDetails: publicSavedDetails(
+      findPriorClientDetails({
+        email: identity.email,
+        username: identity.username,
+      }),
+    ),
   };
 }
 

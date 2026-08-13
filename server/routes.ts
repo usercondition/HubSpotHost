@@ -133,6 +133,7 @@ import {
   getOrderLink,
   listOrderLinks,
   lookupClientOrder,
+  lookupClientSavedDetails,
   markOrderLinkCreated,
   orderLinkCounts,
   describeOrderLinksStorage,
@@ -1864,6 +1865,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const token = tokenFromBody(req.body);
     if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
     const result = lookupClientOrder(token);
+    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
+    return res.json(result);
+  });
+
+  /**
+   * Public: returning-buyer contact/shipping for a valid unused token, using
+   * the email or username the buyer typed. Never a directory search.
+   */
+  app.post("/api/client-order/saved-details", (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const token = tokenFromBody(req.body);
+    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    const result = lookupClientSavedDetails(token, {
+      email: typeof body.clientEmail === "string" ? body.clientEmail : "",
+      username: typeof body.clientUsername === "string" ? body.clientUsername : "",
+    });
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.json(result);
   });

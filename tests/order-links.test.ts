@@ -625,3 +625,59 @@ test("a submitted order is flagged as returning when email or username already e
   assert.equal(strangerDetail.body.link.priorMatch, null);
 });
 
+test("a valid token can recall last shipping from the email the buyer types", async () => {
+  const username = `recall.${crypto.randomUUID().slice(0, 8)}`;
+  const email = `${username}@example.com`;
+  const first = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RECALL-1",
+    itemDescription: "First recall order",
+    agreedAmount: "60",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: first.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: email,
+  });
+
+  const second = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RECALL-2",
+    itemDescription: "Second recall order",
+    agreedAmount: "75",
+  });
+  const token: string = second.body.token;
+
+  const recalled = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientEmail: email,
+  });
+  assert.equal(recalled.status, 200);
+  assert.equal(recalled.body.savedDetails.clientEmail, email);
+  assert.equal(recalled.body.savedDetails.shippingStreet, submission.shippingStreet);
+  assert.equal(JSON.stringify(recalled.body).includes("MIG-RECALL-1"), false);
+  assert.equal(JSON.stringify(recalled.body).includes(submission.confirmedItem), false);
+
+  const byUsername = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientUsername: username,
+  });
+  assert.equal(byUsername.body.savedDetails.shippingCity, submission.shippingCity);
+
+  const unknown = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientEmail: `${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  assert.equal(unknown.body.savedDetails, null);
+
+  const closed = await publicRequest("/api/client-order/saved-details", {
+    token: first.body.token,
+    clientEmail: email,
+  });
+  assert.equal(closed.status, 410);
+
+  const missing = await publicRequest("/api/client-order/saved-details", {
+    clientEmail: email,
+  });
+  assert.equal(missing.status, 404);
+});
+
