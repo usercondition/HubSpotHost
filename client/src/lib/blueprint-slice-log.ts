@@ -13,6 +13,13 @@
  * analyze `sliceLog` upload path as the server entry point when that lands.
  */
 
+/** Env-style path operators paste into Explorer (Win+R / address bar). */
+export const BLUEPRINT_STUDIO_LOGS_ENV_PATH = "%APPDATA%\\Blueprint Studio\\logs";
+
+/** Expanded example — username still varies per PC. */
+export const BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH =
+  "C:\\Users\\<You>\\AppData\\Roaming\\Blueprint Studio\\logs";
+
 const DB_NAME = "hubspot-blueprint-logs-v1";
 const STORE_NAME = "handles";
 const HANDLE_KEY = "logsDirectory";

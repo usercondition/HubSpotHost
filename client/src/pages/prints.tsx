@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ClipboardCopy,
   Clock3,
   CircleDollarSign,
   FilePlus2,
@@ -26,6 +28,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
 import { ctbPrefixBlob, describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
 import {
+  BLUEPRINT_STUDIO_LOGS_ENV_PATH,
+  BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH,
   buildSliceLogUploadFromLinkedFolder,
   getLinkedBlueprintLogsStatus,
   importBlueprintLogsFromFileList,
@@ -266,6 +270,7 @@ export default function Prints() {
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
   const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
+  const [logsPathCopied, setLogsPathCopied] = useState(false);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -923,8 +928,7 @@ export default function Prints() {
                       </>
                     ) : (
                       <>
-                        Drag <span className="font-medium text-foreground">%APPDATA%\Blueprint Studio\logs</span> from
-                        Explorer onto the drop zone (or use Refresh logs).
+                        Drag the Blueprint logs folder from Explorer onto the drop zone (or use Refresh logs).
                       </>
                     )}
                   </span>
@@ -957,6 +961,57 @@ export default function Prints() {
                         Clear
                       </button>
                     ) : null}
+                  </div>
+                </div>
+                <div
+                  className="mt-2 rounded-md border border-border bg-card px-3 py-2.5"
+                  data-testid="panel-blueprint-logs-path"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="rule-label">HeyGears / ULTX logs folder</p>
+                      <p className="mt-1 break-all font-mono text-xs font-medium text-foreground" data-testid="text-blueprint-logs-path">
+                        {BLUEPRINT_STUDIO_LOGS_ENV_PATH}
+                      </p>
+                      <p className="mt-1 text-[0.6875rem] leading-4 text-muted-foreground">
+                        Paste into Explorer or Win+R. Usually expands to{" "}
+                        <span className="font-mono text-foreground/80">{BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH}</span>
+                        . Drag that folder here after each slice so time/resin can fill from Slice.log.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            await navigator.clipboard.writeText(BLUEPRINT_STUDIO_LOGS_ENV_PATH);
+                            setLogsPathCopied(true);
+                            window.setTimeout(() => setLogsPathCopied(false), 2000);
+                            toast({
+                              title: "Logs path copied",
+                              description: "Paste it into File Explorer’s address bar.",
+                            });
+                          } catch {
+                            toast({
+                              title: "Copy was blocked",
+                              description: `Select and copy: ${BLUEPRINT_STUDIO_LOGS_ENV_PATH}`,
+                              variant: "destructive",
+                            });
+                          }
+                        })();
+                      }}
+                      data-testid="button-copy-blueprint-logs-path"
+                    >
+                      {logsPathCopied ? (
+                        <Check className="mr-1.5 h-3.5 w-3.5" />
+                      ) : (
+                        <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {logsPathCopied ? "Copied" : "Copy path"}
+                    </Button>
                   </div>
                 </div>
                 {sliceLogName ? (
