@@ -551,7 +551,7 @@ export default function PaidOrders() {
                 <span>
                   <span className="block text-sm font-medium">Payment has been confirmed</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Only check this after you verified the customer’s payment cleared.
+                    Check this after payment cleared — or for a $0 gift / tracking order you are ready to create.
                   </span>
                 </span>
               </label>
