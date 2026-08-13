@@ -14,6 +14,7 @@ import {
   Loader2,
   PlusCircle,
   RefreshCw,
+  Repeat2,
   ShieldCheck,
   Unlock,
 } from "lucide-react";
@@ -48,7 +49,9 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { printsDealHref } from "@/lib/workflow";
 
 /** Owner-side rows never carry the token hash. */
-type QueueLink = Omit<OrderIntakeLink, "tokenHash">;
+type QueueLink = Omit<OrderIntakeLink, "tokenHash"> & {
+  priorMatch?: PriorClientMatch | null;
+};
 
 interface QueueResponse {
   ok: true;
@@ -573,7 +576,7 @@ export default function OrderLinks() {
                     },
                     {
                       title: "You review privately",
-                      text: "The submission appears under Pending review. Correct anything the buyer typed loosely.",
+                      text: "The submission appears under Pending review. If that email or Marketplace username has ordered before, it is flagged as a returning buyer. Correct anything they typed loosely.",
                     },
                     {
                       title: "You approve",
@@ -681,6 +684,14 @@ export default function OrderLinks() {
                                 label={ORDER_INTAKE_STATUS_LABELS[link.status]}
                                 testId={`status-intake-${link.id}`}
                               />
+                              {link.priorMatch && (
+                                <StatusPill
+                                  tone="good"
+                                  icon={Repeat2}
+                                  label="Returning buyer"
+                                  testId={`status-returning-${link.id}`}
+                                />
+                              )}
                             </div>
                             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                               {link.confirmedItem || link.itemDescription}
@@ -698,6 +709,9 @@ export default function OrderLinks() {
                               <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-client-${link.id}`}>
                                 {link.clientFullName}
                                 {link.clientEmail ? ` · ${link.clientEmail}` : ""}
+                                {link.priorMatch
+                                  ? ` · ordered before (${link.priorMatch.lastInternalLabel})`
+                                  : ""}
                               </p>
                             )}
                             {link.hubspotDealId && (
@@ -947,6 +961,8 @@ function ReviewDialog({
                 testId="text-review-buyer-payment"
               />
             </div>
+
+            {link.priorMatch && <PriorMatchPanel match={link.priorMatch} />}
 
             {lineItemsForIntake(link).length > 1 ? (
               <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3" data-testid="panel-review-line-items">
@@ -1212,6 +1228,38 @@ function ReviewDialog({
 }
 
 /* -------------------------------------------------------------- primitives */
+
+function priorMatchReason(matchedBy: PriorClientMatch["matchedBy"]): string {
+  if (matchedBy === "email_and_username") return "email and Marketplace username";
+  if (matchedBy === "email") return "email";
+  return "Marketplace username";
+}
+
+function PriorMatchPanel({ match }: { match: PriorClientMatch }) {
+  const place = [match.shippingCity, match.shippingState].filter(Boolean).join(", ");
+  const lastShip = match.shippingRequired
+    ? [match.shippingStreet, place, match.shippingPostalCode].filter(Boolean).join(", ")
+    : "Pickup last time";
+  return (
+    <div
+      className="rounded-md border border-primary/30 bg-primary/5 p-3"
+      data-testid="panel-review-prior-match"
+    >
+      <p className="text-sm font-medium">Returning buyer — matched by {priorMatchReason(match.matchedBy)}</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Last order {match.lastInternalLabel}
+        {match.lastItemDescription ? ` · ${match.lastItemDescription}` : ""}
+        {lastShip ? ` · ${lastShip}` : ""}. Approve will reuse the HubSpot Contact if this email already exists.
+      </p>
+      {match.hubspotContactId && (
+        <p className="numeric mt-1 text-xs text-muted-foreground">
+          Previous Contact {match.hubspotContactId}
+          {match.hubspotDealId ? ` · Deal ${match.hubspotDealId}` : ""}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Readout({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return (

@@ -517,6 +517,10 @@ export function normalizeMarketplaceUsername(value: string): string {
   return value.trim().replace(/^@+/, "").toLowerCase();
 }
 
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function savedDetailsFromLink(link: OrderIntakeLink): ClientOrderSavedDetails {
   return {
     clientFullName: link.clientFullName,
@@ -532,28 +536,42 @@ function savedDetailsFromLink(link: OrderIntakeLink): ClientOrderSavedDetails {
   };
 }
 
+export type PriorClientLookup = {
+  username?: string;
+  email?: string;
+  excludeId?: number;
+};
+
 /**
- * Last submitted intake for this Marketplace username. Used to prefill a new
- * private order form so a returning buyer confirms details instead of retyping.
- * Matches are owner-driven (the username is on the link) — never a public search.
+ * Last submitted intake matching Marketplace username and/or email.
+ * Used to prefill a private form when the owner typed the username, and to
+ * flag a returning buyer on review after they submit whatever they typed.
+ * Never exposed as a public search.
  */
-export function findPriorClientDetails(
-  username: string,
-  options?: { excludeId?: number },
-): PriorClientMatch | null {
-  const needle = normalizeMarketplaceUsername(username);
-  if (needle.length < 2) return null;
+export function findPriorClientDetails(input: PriorClientLookup): PriorClientMatch | null {
+  const username = normalizeMarketplaceUsername(input.username ?? "");
+  const email = normalizeEmail(input.email ?? "");
+  const canMatchUsername = username.length >= 2;
+  const canMatchEmail = email.includes("@");
+  if (!canMatchUsername && !canMatchEmail) return null;
   const rows = getDb().select().from(orderIntakeLinks).orderBy(desc(orderIntakeLinks.id)).all();
   for (const row of rows) {
-    if (options?.excludeId && row.id === options.excludeId) continue;
+    if (input.excludeId && row.id === input.excludeId) continue;
     if (row.status !== "pending_review" && row.status !== "created") continue;
     if (!row.clientFullName.trim() && !row.clientEmail.trim()) continue;
-    const stored = normalizeMarketplaceUsername(row.clientUsername || row.buyerUsernameHint);
-    if (!stored || stored !== needle) continue;
+    const storedUser = normalizeMarketplaceUsername(row.clientUsername || row.buyerUsernameHint);
+    const storedEmail = normalizeEmail(row.clientEmail);
+    const userMatch = canMatchUsername && storedUser.length >= 2 && storedUser === username;
+    const emailMatch = canMatchEmail && storedEmail.includes("@") && storedEmail === email;
+    if (!userMatch && !emailMatch) continue;
     return {
       ...savedDetailsFromLink(row),
       lastSubmittedAt: row.submittedAt,
       lastItemDescription: row.confirmedItem || row.itemDescription,
+      lastInternalLabel: row.internalLabel,
+      matchedBy: userMatch && emailMatch ? "email_and_username" : emailMatch ? "email" : "username",
+      hubspotContactId: row.hubspotContactId,
+      hubspotDealId: row.hubspotDealId,
     };
   }
   return null;
@@ -724,7 +742,10 @@ export function lookupClientOrder(token: string): ClientLookupResult {
     return { ok: false, reason: "already-submitted" };
   }
   if (link.status !== "awaiting_client") return { ok: false, reason: "expired" };
-  const prior = findPriorClientDetails(link.buyerUsernameHint, { excludeId: link.id });
+  const prior = findPriorClientDetails({
+    username: link.buyerUsernameHint,
+    excludeId: link.id,
+  });
   const savedDetails: ClientOrderSavedDetails | null = prior
     ? {
         clientFullName: prior.clientFullName,

@@ -1527,10 +1527,14 @@ export interface ClientOrderSavedDetails {
   shippingCountry: string;
 }
 
-/** Owner-only match used when creating a returning-buyer link. */
+/** Owner-only match used when creating a returning-buyer link, or after they submit. */
 export interface PriorClientMatch extends ClientOrderSavedDetails {
   lastSubmittedAt: string | null;
   lastItemDescription: string;
+  lastInternalLabel: string;
+  matchedBy: "email" | "username" | "email_and_username";
+  hubspotContactId: string | null;
+  hubspotDealId: string | null;
 }
 
 /** What the public client page is allowed to see once a token validates. */

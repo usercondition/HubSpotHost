@@ -549,3 +549,79 @@ test("a returning buyer's next private link prefills last submitted details", as
   assert.equal(otherLookup.body.view.savedDetails, null);
 });
 
+test("a submitted order is flagged as returning when email or username already exists", async () => {
+  const username = `review-match.${crypto.randomUUID().slice(0, 8)}`;
+  const email = `${username}@example.com`;
+  const first = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-1",
+    itemDescription: "Prior kit",
+    agreedAmount: "70",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: first.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: email,
+  });
+  const firstApproved = await ownerRequest("POST", `/api/order-links/${first.body.link.id}/create-order`, {
+    paymentVerified: true,
+  });
+  assert.equal(firstApproved.status, 201);
+
+  const second = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-2",
+    itemDescription: "New kit, same buyer",
+    agreedAmount: "88",
+  });
+  assert.equal(second.body.link.priorMatch, null);
+
+  await publicRequest("/api/client-order/submit", {
+    token: second.body.token,
+    ...submission,
+    clientUsername: "fresh.username.this.time",
+    clientEmail: email,
+    shippingStreet: "999 New Street",
+  });
+
+  const detail = await ownerRequest("GET", `/api/order-links/${second.body.link.id}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.link.priorMatch.matchedBy, "email");
+  assert.equal(detail.body.link.priorMatch.lastInternalLabel, "MIG-MATCH-1");
+  assert.equal(detail.body.link.priorMatch.clientEmail, email);
+  assert.equal(detail.body.link.priorMatch.shippingStreet, submission.shippingStreet);
+  assert.equal(detail.body.link.priorMatch.hubspotContactId, firstApproved.body.result.contactId);
+
+  const queue = await ownerRequest("GET", "/api/order-links?status=pending_review");
+  const row = queue.body.links.find((link: { internalLabel: string }) => link.internalLabel === "MIG-MATCH-2");
+  assert.ok(row);
+  assert.equal(row.priorMatch.matchedBy, "email");
+
+  const byUsername = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-3",
+    itemDescription: "Same username, new email",
+    agreedAmount: "55",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: byUsername.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: `other.${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  const usernameMatch = await ownerRequest("GET", `/api/order-links/${byUsername.body.link.id}`);
+  assert.equal(usernameMatch.body.link.priorMatch.matchedBy, "username");
+
+  const stranger = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-NEW",
+    itemDescription: "Brand new buyer",
+    agreedAmount: "40",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: stranger.body.token,
+    ...submission,
+    clientUsername: `new.${crypto.randomUUID().slice(0, 8)}`,
+    clientEmail: `${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  const strangerDetail = await ownerRequest("GET", `/api/order-links/${stranger.body.link.id}`);
+  assert.equal(strangerDetail.body.link.priorMatch, null);
+});
+

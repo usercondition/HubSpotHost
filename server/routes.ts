@@ -502,9 +502,21 @@ function refreshPrintFileStagesFromHubSpot(
 }
 
 /** The owner-side representation. `tokenHash` never leaves the server. */
-function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> {
+function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> & {
+  priorMatch: ReturnType<typeof findPriorClientDetails>;
+} {
   const { tokenHash: _tokenHash, ...safe } = link;
-  return safe;
+  const submitted = link.status === "pending_review" || link.status === "created";
+  return {
+    ...safe,
+    priorMatch: submitted
+      ? findPriorClientDetails({
+          username: link.clientUsername || link.buyerUsernameHint,
+          email: link.clientEmail,
+          excludeId: link.id,
+        })
+      : null,
+  };
 }
 
 function tokenFromBody(body: unknown): string {
@@ -788,7 +800,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/order-links/prior-client", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const username = firstQueryValue(req.query?.username) ?? "";
-    return res.json({ ok: true, match: findPriorClientDetails(username) });
+    const email = firstQueryValue(req.query?.email) ?? "";
+    return res.json({ ok: true, match: findPriorClientDetails({ username, email }) });
   });
 
   /**
