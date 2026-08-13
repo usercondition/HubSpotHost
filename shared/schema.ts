@@ -1513,6 +1513,26 @@ export const reviewEditSchema = z.object({
 });
 export type ReviewEditInput = z.infer<typeof reviewEditSchema>;
 
+/** Contact and shipping copied from a previous submitted order. */
+export interface ClientOrderSavedDetails {
+  clientFullName: string;
+  clientUsername: string;
+  clientEmail: string;
+  clientPhone: string;
+  shippingRequired: boolean;
+  shippingStreet: string;
+  shippingCity: string;
+  shippingState: string;
+  shippingPostalCode: string;
+  shippingCountry: string;
+}
+
+/** Owner-only match used when creating a returning-buyer link. */
+export interface PriorClientMatch extends ClientOrderSavedDetails {
+  lastSubmittedAt: string | null;
+  lastItemDescription: string;
+}
+
 /** What the public client page is allowed to see once a token validates. */
 export interface ClientOrderView {
   itemDescription: string;
@@ -1521,6 +1541,8 @@ export interface ClientOrderView {
   expiresAt: string;
   buyerNameHint: string;
   buyerUsernameHint: string;
+  /** Present when this private link was prepared for a returning buyer. */
+  savedDetails: ClientOrderSavedDetails | null;
 }
 
 export interface CreatedOrderLink {

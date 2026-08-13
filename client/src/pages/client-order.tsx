@@ -75,9 +75,26 @@ export default function ClientOrder() {
   }, [token]);
 
   useEffect(() => {
-    if (lookup.data?.view.itemDescription && !form.confirmedItem) {
-      setForm((current) => ({ ...current, confirmedItem: lookup.data.view.itemDescription }));
-    }
+    const view = lookup.data?.view;
+    if (!view) return;
+    const saved = view.savedDetails;
+    setForm((current) => {
+      const next = { ...current };
+      if (!next.confirmedItem && view.itemDescription) next.confirmedItem = view.itemDescription;
+      if (saved) {
+        if (!next.clientFullName) next.clientFullName = saved.clientFullName;
+        if (!next.clientUsername) next.clientUsername = saved.clientUsername;
+        if (!next.clientEmail) next.clientEmail = saved.clientEmail;
+        if (!next.clientPhone) next.clientPhone = saved.clientPhone;
+        if (!next.shippingStreet) next.shippingStreet = saved.shippingStreet;
+        if (!next.shippingCity) next.shippingCity = saved.shippingCity;
+        if (!next.shippingState) next.shippingState = saved.shippingState;
+        if (!next.shippingPostalCode) next.shippingPostalCode = saved.shippingPostalCode;
+        if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry;
+      }
+      return next;
+    });
+    if (saved) setShippingRequired(saved.shippingRequired);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lookup.data]);
 
@@ -188,6 +205,19 @@ export default function ClientOrder() {
               charge you, take any payment, and it does not place a final order yet — the seller
               confirms that with you after reviewing what you enter here.
             </p>
+
+            {state.view.savedDetails && (
+              <div
+                className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4"
+                data-testid="panel-saved-details"
+              >
+                <p className="text-sm font-medium">We filled this from your last order</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Please check your contact and shipping details are still right. Change anything
+                  that has moved, then confirm you already paid for this order.
+                </p>
+              </div>
+            )}
 
             <section
               className="mt-6 rounded-lg border border-border bg-card p-4"

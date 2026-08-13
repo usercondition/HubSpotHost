@@ -129,6 +129,7 @@ import {
   clientLinkPath,
   createOrderLink,
   expireOrderLink,
+  findPriorClientDetails,
   getOrderLink,
   listOrderLinks,
   lookupClientOrder,
@@ -777,6 +778,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       counts: orderLinkCounts(),
       links: listOrderLinks(status).map(ownerLinkView),
     });
+  });
+
+  /**
+   * Owner-only returning-buyer lookup. Matches a Marketplace username to the
+   * last submitted intake so a new private link can prefill contact/shipping.
+   * Registered before `/api/order-links/:id` so "prior-client" is not treated as an id.
+   */
+  app.get("/api/order-links/prior-client", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const username = firstQueryValue(req.query?.username) ?? "";
+    return res.json({ ok: true, match: findPriorClientDetails(username) });
   });
 
   /**

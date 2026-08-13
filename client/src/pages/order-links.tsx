@@ -38,6 +38,7 @@ import {
   summarizeIntakeLineItems,
   type OrderIntakeLink,
   type OrderIntakeStatus,
+  type PriorClientMatch,
 } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { PageHeader } from "@/components/shell";
@@ -149,6 +150,7 @@ export default function OrderLinks() {
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [copied, setCopied] = useState(false);
   const [reviewId, setReviewId] = useState<number | null>(null);
+  const [usernameQuery, setUsernameQuery] = useState("");
 
   const queue = useQuery<QueueResponse>({
     queryKey: ["/api/order-links", tab],
@@ -163,8 +165,25 @@ export default function OrderLinks() {
 
   const counts = queue.data?.counts;
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setUsernameQuery(form.buyerUsernameHint.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [form.buyerUsernameHint]);
 
-  const createLink = useMutation({
+  const priorClient = useQuery<{ ok: true; match: PriorClientMatch | null }>({
+    queryKey: ["/api/order-links/prior-client", usernameQuery],
+    enabled: isUnlocked && usernameQuery.replace(/^@+/, "").length >= 2,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/order-links/prior-client?username=${encodeURIComponent(usernameQuery)}`,
+        undefined,
+        { headers },
+      );
+      return (await res.json()) as { ok: true; match: PriorClientMatch | null };
+    },
+  });  const createLink = useMutation({
     mutationFn: async (payload: {
       lineItems: Array<{ description: string; amount: string; quantity: number }>;
       paymentMethod: string;
@@ -443,12 +462,44 @@ export default function OrderLinks() {
                     value={form.buyerNameHint}
                     onChange={(v) => set("buyerNameHint", v)}
                   />
-                  <TextField
-                    id="buyer-username-hint"
-                    label="Marketplace username (optional)"
-                    value={form.buyerUsernameHint}
-                    onChange={(v) => set("buyerUsernameHint", v)}
-                  />
+                  <div className="space-y-2">
+                    <TextField
+                      id="buyer-username-hint"
+                      label="Marketplace username (optional)"
+                      value={form.buyerUsernameHint}
+                      onChange={(v) => set("buyerUsernameHint", v)}
+                      hint="For a returning buyer, enter their username so the form opens with last time’s details."
+                    />
+                    {usernameQuery.replace(/^@+/, "").length >= 2 && priorClient.data?.match && (
+                      <p
+                        className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground"
+                        data-testid="text-prior-client-match"
+                      >
+                        <span className="font-medium text-foreground">Returning buyer found. </span>
+                        {priorClient.data.match.clientFullName || priorClient.data.match.clientUsername}
+                        {priorClient.data.match.shippingCity
+                          ? ` · ${priorClient.data.match.shippingCity}${
+                              priorClient.data.match.shippingState
+                                ? `, ${priorClient.data.match.shippingState}`
+                                : ""
+                            }`
+                          : priorClient.data.match.shippingRequired === false
+                            ? " · pickup last time"
+                            : ""}
+                        {priorClient.data.match.lastItemDescription
+                          ? ` · last order: ${priorClient.data.match.lastItemDescription}`
+                          : ""}
+                        . Their form will open with these details filled in.
+                      </p>
+                    )}
+                    {usernameQuery.replace(/^@+/, "").length >= 2 &&
+                      priorClient.isFetched &&
+                      !priorClient.data?.match && (
+                        <p className="text-xs text-muted-foreground" data-testid="text-prior-client-none">
+                          No previous order for that username. They’ll fill the form from scratch.
+                        </p>
+                      )}
+                  </div>
                   <TextField
                     id="expiry-days"
                     label="Link expires in (days)"

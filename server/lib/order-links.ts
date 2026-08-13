@@ -22,6 +22,7 @@ import {
   lineItemsForIntake,
   normalizeIntakeLineItems,
   summarizeIntakeLineItems,
+  type ClientOrderSavedDetails,
   type ClientOrderSubmission,
   type ClientOrderView,
   type CreateOrderLinkInput,
@@ -29,6 +30,7 @@ import {
   type HubSpotIntakeDealRef,
   type OrderIntakeLink,
   type OrderIntakeStatus,
+  type PriorClientMatch,
   type ReviewEditInput,
 } from "../../shared/schema";
 
@@ -511,6 +513,52 @@ function generatedOrderReference(id: number, createdAt: string): string {
   return `PO-${date}-${String(id).padStart(6, "0")}`;
 }
 
+export function normalizeMarketplaceUsername(value: string): string {
+  return value.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function savedDetailsFromLink(link: OrderIntakeLink): ClientOrderSavedDetails {
+  return {
+    clientFullName: link.clientFullName,
+    clientUsername: link.clientUsername || link.buyerUsernameHint,
+    clientEmail: link.clientEmail,
+    clientPhone: link.clientPhone,
+    shippingRequired: link.shippingRequired,
+    shippingStreet: link.shippingStreet,
+    shippingCity: link.shippingCity,
+    shippingState: link.shippingState,
+    shippingPostalCode: link.shippingPostalCode,
+    shippingCountry: link.shippingCountry,
+  };
+}
+
+/**
+ * Last submitted intake for this Marketplace username. Used to prefill a new
+ * private order form so a returning buyer confirms details instead of retyping.
+ * Matches are owner-driven (the username is on the link) — never a public search.
+ */
+export function findPriorClientDetails(
+  username: string,
+  options?: { excludeId?: number },
+): PriorClientMatch | null {
+  const needle = normalizeMarketplaceUsername(username);
+  if (needle.length < 2) return null;
+  const rows = getDb().select().from(orderIntakeLinks).orderBy(desc(orderIntakeLinks.id)).all();
+  for (const row of rows) {
+    if (options?.excludeId && row.id === options.excludeId) continue;
+    if (row.status !== "pending_review" && row.status !== "created") continue;
+    if (!row.clientFullName.trim() && !row.clientEmail.trim()) continue;
+    const stored = normalizeMarketplaceUsername(row.clientUsername || row.buyerUsernameHint);
+    if (!stored || stored !== needle) continue;
+    return {
+      ...savedDetailsFromLink(row),
+      lastSubmittedAt: row.submittedAt,
+      lastItemDescription: row.confirmedItem || row.itemDescription,
+    };
+  }
+  return null;
+}
+
 function isExpired(link: OrderIntakeLink, at = nowIso()): boolean {
   return link.expiresAt <= at;
 }
@@ -676,6 +724,21 @@ export function lookupClientOrder(token: string): ClientLookupResult {
     return { ok: false, reason: "already-submitted" };
   }
   if (link.status !== "awaiting_client") return { ok: false, reason: "expired" };
+  const prior = findPriorClientDetails(link.buyerUsernameHint, { excludeId: link.id });
+  const savedDetails: ClientOrderSavedDetails | null = prior
+    ? {
+        clientFullName: prior.clientFullName,
+        clientUsername: prior.clientUsername,
+        clientEmail: prior.clientEmail,
+        clientPhone: prior.clientPhone,
+        shippingRequired: prior.shippingRequired,
+        shippingStreet: prior.shippingStreet,
+        shippingCity: prior.shippingCity,
+        shippingState: prior.shippingState,
+        shippingPostalCode: prior.shippingPostalCode,
+        shippingCountry: prior.shippingCountry,
+      }
+    : null;
   return {
     ok: true,
     view: {
@@ -685,6 +748,7 @@ export function lookupClientOrder(token: string): ClientLookupResult {
       expiresAt: link.expiresAt,
       buyerNameHint: link.buyerNameHint,
       buyerUsernameHint: link.buyerUsernameHint,
+      savedDetails,
     },
   };
 }
