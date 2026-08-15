@@ -335,11 +335,13 @@ function looksLikeNoiseItem(line: string): boolean {
   const normalized = line.toLowerCase();
   return (
     normalized.length < 3 ||
-    /^(amazon\.com|final details|order information|billing|shipping|payment|sold by|condition:|thank you|invoice|receipt|page\s+\d|vendor|merchant|store|track your order|hi[, ]|hello)/i.test(
+    /^(amazon\.com|final details|order information|order summary|billing|shipping|payment|sold by|supplied by|condition:|thank you|invoice|receipt|page\s+\d|vendor|merchant|store|track your order|hi[, ]|hello|arriving|back to top|conditions of use|ship to|payment method|view related|©)/i.test(
       normalized,
     ) ||
-    /^(subtotal|shipping|tax|total|grand total|order total|amount due|balance due|quantity)\b/i.test(normalized) ||
-    /^(billing address|shipping address|order date|order number)\b/i.test(normalized) ||
+    /^(subtotal|item\(s\)\s*subtotal|shipping|tax|estimated tax|total|grand total|order total|amount due|balance due|quantity)\b/i.test(
+      normalized,
+    ) ||
+    /^(billing address|shipping address|order date|order number|order placed)\b/i.test(normalized) ||
     /^\$?\d/.test(normalized) ||
     /^(https?:|www\.)/i.test(normalized)
   );
@@ -437,6 +439,89 @@ export function extractQuantityTotalBlocks(lines: string[]): SupplyPurchaseLineI
   return items.slice(0, 40);
 }
 
+/**
+ * Amazon print "Order Details" / many marketplace invoices: product title, then
+ * Sold by / Supplied by, then qty/price. Works when totals appear *before* items
+ * (Amazon print.html), not only under an "Items Ordered" heading.
+ */
+function extractSoldByAdjacentLineItems(lines: string[]): SupplyPurchaseLineItem[] {
+  const items: SupplyPurchaseLineItem[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!isProductTitleLine(line) || line.length < 8) continue;
+    if (/sold by|supplied by|condition:|asin|unit price/i.test(line)) continue;
+
+    let hasSeller = false;
+    let quantity = 1;
+    let unitPrice: string | null = null;
+    let lineTotal: string | null = null;
+
+    for (let offset = 1; offset <= 8; offset += 1) {
+      const next = lines[index + offset];
+      if (!next) break;
+      // Order-level summary — do not treat Grand Total / tax as this line's price.
+      if (hasSeller && isSectionEnd(next)) break;
+
+      if (/^(sold by|supplied by)\b/i.test(next)) {
+        hasSeller = true;
+        continue;
+      }
+
+      const qtyMatch = next.match(/\b(?:Qty\.?|Quantity)\s*[:\s]*(\d{1,5})\b/i);
+      if (qtyMatch) quantity = Number(qtyMatch[1]) || 1;
+
+      const unitMatch = next.match(/\bUnit\s*Price\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i);
+      if (unitMatch) unitPrice = moneyFromMatch(unitMatch[1]);
+
+      // Only item-level totals (never "Grand Total" / "Order Total").
+      const totalMatch = next.match(/^(?:Item\s+)?(?:Sub)?Total\s*[:\s]*\$?\s*([\d,]+\.\d{2})\b/i);
+      if (totalMatch) lineTotal = moneyFromMatch(totalMatch[1]);
+
+      const lone = next.match(/^\$\s*([\d,]+\.\d{2})$/);
+      if (lone && !unitPrice && !lineTotal) {
+        unitPrice = moneyFromMatch(lone[1]);
+      }
+
+      // Next product title after we already saw a seller → stop this block.
+      if (
+        hasSeller &&
+        offset > 1 &&
+        isProductTitleLine(next) &&
+        !/^(sold by|supplied by|condition:)/i.test(next) &&
+        next.length >= 12
+      ) {
+        break;
+      }
+
+      // Another product before any seller means this line wasn't an item.
+      if (
+        !hasSeller &&
+        isProductTitleLine(next) &&
+        !/^(sold by|supplied by|condition:|quantity|unit price)/i.test(next) &&
+        next.length >= 12
+      ) {
+        break;
+      }
+    }
+
+    if (!hasSeller) continue;
+
+    let amount = lineTotal;
+    if (!amount && unitPrice) amount = (Number(unitPrice) * quantity).toFixed(2);
+
+    items.push({
+      itemName: line.slice(0, 300),
+      quantity,
+      lineAmount: amount ?? "",
+      category: suggestSupplyCategory(line),
+    });
+    if (items.length >= 40) break;
+  }
+
+  return items;
+}
+
 function extractAmazonStyleLineItems(lines: string[]): SupplyPurchaseLineItem[] {
   const items: SupplyPurchaseLineItem[] = [];
   let inItems = false;
@@ -455,7 +540,7 @@ function extractAmazonStyleLineItems(lines: string[]): SupplyPurchaseLineItem[] 
     if (inItems && isSectionEnd(line)) break;
     if (!inItems) continue;
     if (looksLikeNoiseItem(line)) continue;
-    if (/sold by|condition:|asin|unit price|of:|shipment/i.test(line)) continue;
+    if (/sold by|supplied by|condition:|asin|unit price|of:|shipment/i.test(line)) continue;
     if (/^quantity\b/i.test(line)) continue;
     if (!/[a-zA-Z]{3,}/.test(line) || line.length < 6) continue;
 
@@ -484,7 +569,7 @@ function extractAmazonStyleLineItems(lines: string[]): SupplyPurchaseLineItem[] 
       if (
         offset > 1 &&
         /[a-zA-Z]{6,}/.test(next) &&
-        !/sold by|condition:|quantity|unit price|asin|total/i.test(next) &&
+        !/sold by|supplied by|condition:|quantity|unit price|asin|total/i.test(next) &&
         !looksLikeNoiseItem(next) &&
         next.length >= 12
       ) {
@@ -557,6 +642,10 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
   const quantityTotalBlocks = extractQuantityTotalBlocks(lines);
   if (quantityTotalBlocks.length > 0) return quantityTotalBlocks;
 
+  // Amazon print Order Details + most marketplace "Sold by" layouts (items may follow totals).
+  const soldByStyle = extractSoldByAdjacentLineItems(lines);
+  if (soldByStyle.length > 0) return soldByStyle;
+
   const amazonStyle = extractAmazonStyleLineItems(lines);
   if (amazonStyle.length > 0) return amazonStyle;
 
@@ -581,7 +670,11 @@ function extractLineItems(text: string): SupplyPurchaseLineItem[] {
   for (const line of lines) {
     if (looksLikeNoiseItem(line)) continue;
     if (!/[a-zA-Z]{3,}/.test(line)) continue;
-    if (/\b(resin|filament|glove|fep|ipa|isopropyl|mailer|box|printer|vat|bottle)\b/i.test(line)) {
+    if (
+      /\b(resin|filament|glove|fep|nfep|release\s*film|ipa|isopropyl|mailer|box|printer|vat|bottle|heygears)\b/i.test(
+        line,
+      )
+    ) {
       return [
         {
           itemName: line.slice(0, 300),

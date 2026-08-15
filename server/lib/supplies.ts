@@ -39,6 +39,8 @@ const PACKAGING_KEYWORDS = [
 const EQUIPMENT_KEYWORDS = [
   "fep",
   "nfep",
+  "release film",
+  "film set",
   "screen",
   "vat",
   "printer",
