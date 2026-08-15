@@ -32,6 +32,7 @@ test("supply categories are suggested from common print-operation purchases", ()
   assert.equal(suggestSupplyCategory("Nitrile gloves, 100 pack"), "consumables");
   assert.equal(suggestSupplyCategory("6 inch bubble wrap roll"), "packaging_shipping");
   assert.equal(suggestSupplyCategory("Replacement nFEP film"), "equipment_maintenance");
+  assert.equal(suggestSupplyCategory("HEYGEARS Release Film Set"), "equipment_maintenance");
   assert.equal(suggestSupplyCategory("Desk organizer"), "other");
 });
 
