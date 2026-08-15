@@ -362,7 +362,9 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
 }
 
 /** Optional multi-item payload for Manual Entry (mirrors Intake approve). */
-function paidOrderLineItemsFrom(body: unknown): Array<{ productName: string; amount: string }> | null {
+function paidOrderLineItemsFrom(
+  body: unknown,
+): Array<{ productName: string; amount: string; kind: "print" | "shipping" }> | null {
   const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   if (!Array.isArray(record.lineItems)) return null;
   const lines = record.lineItems
@@ -372,9 +374,15 @@ function paidOrderLineItemsFrom(body: unknown): Array<{ productName: string; amo
       const productName = typeof row.productName === "string" ? row.productName.trim().slice(0, 180) : "";
       const amount = typeof row.amount === "string" ? row.amount.trim().slice(0, 40) : "";
       if (!productName && !amount) return null;
-      return { productName, amount };
+      return {
+        productName,
+        amount,
+        kind: String(row.kind ?? "").trim().toLowerCase() === "shipping" ? ("shipping" as const) : ("print" as const),
+      };
     })
-    .filter((line): line is { productName: string; amount: string } => Boolean(line));
+    .filter(
+      (line): line is { productName: string; amount: string; kind: "print" | "shipping" } => Boolean(line),
+    );
   return lines.length > 0 ? lines.slice(0, 20) : null;
 }
 
@@ -556,7 +564,7 @@ function tooManyClientAttempts(req: Request, res: Response): boolean {
  */
 function draftsFromIntake(link: OrderIntakeLink): {
   draft: PaidOrderDraft;
-  lineItems: Array<{ productName: string; amount: string }>;
+  lineItems: Array<{ productName: string; amount: string; kind: "print" | "shipping" }>;
   orderGroup: string;
 } {
   const lines = lineItemsForIntake(link);
@@ -567,7 +575,8 @@ function draftsFromIntake(link: OrderIntakeLink): {
       ? `Line items:\n${lines
           .map((line, index) => {
             const extended = intakeLineExtendedAmount(line);
-            return `  ${index + 1}. ${line.description}${
+            const kindLabel = line.kind === "shipping" ? " [shipping]" : "";
+            return `  ${index + 1}. ${line.description}${kindLabel}${
               line.quantity > 1 ? ` (qty ${line.quantity} @ $${line.amount})` : ""
             } — $${extended.toFixed(2)}`;
           })
@@ -594,12 +603,14 @@ function draftsFromIntake(link: OrderIntakeLink): {
     return {
       productName: quantity > 1 ? `${line.description} (x${quantity})` : line.description,
       amount: intakeLineExtendedAmount(line).toFixed(2),
+      kind: line.kind === "shipping" ? ("shipping" as const) : ("print" as const),
     };
   });
 
   const primary = lineItems[0] ?? {
     productName: link.confirmedItem || link.itemDescription,
     amount: link.agreedAmount,
+    kind: "print" as const,
   };
 
   return {

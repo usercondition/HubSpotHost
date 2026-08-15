@@ -2,7 +2,7 @@ import { calculateProfit, round2 } from "./calc";
 import { attentionIssueKeyFromIssue, overrideKey } from "./attention";
 import { buildSupplyBooksBalance } from "./books";
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
-import type { SupplyBooksBalance } from "../../shared/schema";
+import { dealRequiresPlates, type SupplyBooksBalance } from "../../shared/schema";
 
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
@@ -204,12 +204,15 @@ export function buildPerformanceSnapshot(input: {
     const modifiedAt = asDate(props.hs_lastmodifieddate);
     const dealName = props.dealname?.trim() || `Deal ${deal.id}`;
     const displayStage = stageName(stageId, stageMap);
-    const missingCosts = [
-      props.print_material_cost,
-      props.print_labor_cost,
-      props.print_packaging_cost,
-      props.print_actual_shipping_cost,
-    ].some(isBlank);
+    const requiresPlates = dealRequiresPlates(props);
+    const missingCosts = requiresPlates
+      ? [
+          props.print_material_cost,
+          props.print_labor_cost,
+          props.print_packaging_cost,
+          props.print_actual_shipping_cost,
+        ].some(isBlank)
+      : isBlank(props.print_actual_shipping_cost);
 
     if (createdAt && createdAt >= periodStart) {
       orders += 1;
@@ -222,7 +225,9 @@ export function buildPerformanceSnapshot(input: {
 
     const hasPlates = attachedPrintDealIds.has(deal.id);
     const promptAttachPlates =
-      !hasPlates && !dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
+      requiresPlates &&
+      !hasPlates &&
+      !dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
     openDeals.push({
       dealId: deal.id,
       dealName,
@@ -257,7 +262,12 @@ export function buildPerformanceSnapshot(input: {
     };
 
     // Collect every open issue for the deal so one alert does not hide another.
-    if (!missingCosts && calculation.amount > 0 && calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT) {
+    if (
+      requiresPlates &&
+      !missingCosts &&
+      calculation.amount > 0 &&
+      calculation.marginPercentage < PERFORMANCE_MARGIN_ALERT_PERCENT
+    ) {
       pushAttention(
         calculation.marginPercentage < 20 ? 1 : 2,
         `Margin below ${PERFORMANCE_MARGIN_ALERT_PERCENT}%`,
@@ -279,12 +289,14 @@ export function buildPerformanceSnapshot(input: {
       pushAttention(
         4,
         "Cost details incomplete",
-        "Add material, labor, packaging, and shipping costs as they become known",
+        requiresPlates
+          ? "Add material, labor, packaging, and shipping costs as they become known"
+          : "Add actual shipping cost when known",
         "neutral",
       );
     }
 
-    if (!hasPlates && calculation.amount > 0) {
+    if (requiresPlates && !hasPlates && calculation.amount > 0) {
       pushAttention(
         5,
         "No CTB plates attached",

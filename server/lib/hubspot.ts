@@ -22,6 +22,7 @@ export const PERFORMANCE_PROPERTIES = [
   "closedate",
   "hs_is_closed",
   "hs_is_closed_won",
+  "print_line_kind",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
@@ -135,6 +136,14 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     name: "print_slice_attached_at",
     label: "Print slice attached at",
     description: "UTC time when Print Operations attached this slice metadata.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_line_kind",
+    label: "Print line kind",
+    description:
+      "print = resin print item (needs plates). shipping = freight/charge only — skips plate prompts.",
     type: "string",
     fieldType: "text",
   },

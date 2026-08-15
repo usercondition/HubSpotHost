@@ -1,10 +1,12 @@
-import { HubSpotError, PRINT_ORDERS_PIPELINE, hubspotRequest } from "./hubspot";
+import { HubSpotError, PRINT_ORDERS_PIPELINE, ensurePrintFileDealProperties, hubspotRequest } from "./hubspot";
 import { splitName } from "./intake";
 import type {
   HubSpotIntakeDealRef,
+  OrderLineKind,
   PaidOrderCreateResult,
   PaidOrderDraft,
 } from "../../shared/schema";
+import { normalizeOrderLineKind, PRINT_LINE_KIND_PROPERTY } from "../../shared/schema";
 
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
 
@@ -90,13 +92,16 @@ async function createDeal(input: {
   orderGroup?: string;
   lineIndex?: number;
   lineCount?: number;
+  kind?: OrderLineKind;
 }): Promise<HubSpotRecord> {
   const product = clean(input.productName, 180);
   const name = clean(input.contactName || input.marketplaceUsername || "Marketplace customer", 100);
+  const kind = normalizeOrderLineKind(input.kind);
   const dealName = `${product} - ${name}`.slice(0, 250);
   const detailLines = [
     "Source: Facebook Marketplace",
     "Payment status: Confirmed before HubSpot creation",
+    kind === "shipping" ? "Line kind: Shipping (no plates required)" : "Line kind: Print item",
     input.marketplaceUsername ? `Marketplace username: ${clean(input.marketplaceUsername, 100)}` : "",
     input.orderGroup
       ? `Order group: ${clean(input.orderGroup, 80)}${
@@ -117,6 +122,7 @@ async function createDeal(input: {
         pipeline: PRINT_ORDERS_PIPELINE,
         dealstage: DEPOSIT_RECEIVED_STAGE,
         description: detailLines.join("\n"),
+        [PRINT_LINE_KIND_PROPERTY]: kind,
       },
     }),
   });
@@ -136,14 +142,16 @@ async function associateDealToContact(dealId: string, contactId: string): Promis
 export async function createPaidOrder(
   draft: PaidOrderDraft,
   options?: {
-    lineItems?: Array<{ productName: string; amount: string }>;
+    lineItems?: Array<{ productName: string; amount: string; kind?: OrderLineKind }>;
     orderGroup?: string;
   },
 ): Promise<PaidOrderCreateResult> {
   const lines =
     options?.lineItems && options.lineItems.length > 0
       ? options.lineItems
-      : [{ productName: draft.productName, amount: draft.amount }];
+      : [{ productName: draft.productName, amount: draft.amount, kind: "print" as const }];
+
+  await ensurePrintFileDealProperties();
 
   const existing = await findContactByEmail(clean(draft.email));
   const contact = existing ?? (await createContact(draft));
@@ -164,6 +172,7 @@ export async function createPaidOrder(
   const deals: HubSpotIntakeDealRef[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
+    const kind = normalizeOrderLineKind(line.kind);
     const deal = await createDeal({
       productName: line.productName,
       amount: line.amount,
@@ -173,6 +182,7 @@ export async function createPaidOrder(
       orderGroup: options?.orderGroup,
       lineIndex: index,
       lineCount: lines.length,
+      kind,
     });
     await associateDealToContact(deal.id, contact.id);
     const dealName = `${clean(line.productName, 180)} - ${clean(contactName, 100)}`.slice(0, 250);
@@ -181,6 +191,7 @@ export async function createPaidOrder(
       dealName,
       amount: normalizedAmount(line.amount),
       productName: clean(line.productName, 180),
+      kind,
     });
   }
 

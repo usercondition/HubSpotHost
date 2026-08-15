@@ -338,6 +338,7 @@ export interface HubSpotIntakeDealRef {
   dealName: string;
   amount: string;
   productName: string;
+  kind?: OrderLineKind;
 }
 
 export interface PaidOrderCreateResult {
@@ -436,10 +437,33 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
 
 /** One commercial item on an intake. Each becomes its own HubSpot deal on approve. */
+export const ORDER_LINE_KINDS = ["print", "shipping"] as const;
+export type OrderLineKind = (typeof ORDER_LINE_KINDS)[number];
+
+export const ORDER_LINE_KIND_LABELS: Record<OrderLineKind, string> = {
+  print: "Print item",
+  shipping: "Shipping (no plates)",
+};
+
+/** HubSpot deal property — shipping lines skip plate prompts. */
+export const PRINT_LINE_KIND_PROPERTY = "print_line_kind";
+
+export function normalizeOrderLineKind(value: unknown): OrderLineKind {
+  return String(value ?? "").trim().toLowerCase() === "shipping" ? "shipping" : "print";
+}
+
+export function dealRequiresPlates(
+  props: Record<string, string | null | undefined> | null | undefined,
+): boolean {
+  return normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]) !== "shipping";
+}
+
 export interface OrderIntakeLineItem {
   description: string;
   amount: string;
   quantity: number;
+  /** print = needs plates; shipping = freight/charge only. */
+  kind: OrderLineKind;
 }
 
 export type ResinCostSource = "ctb" | "ultx" | "amazon" | "supplies" | "manual";
@@ -450,7 +474,12 @@ export function parseAmountNumber(value: string): number {
 
 /** Prefer explicit lineItems; otherwise treat legacy scalar fields as one line. */
 export function normalizeIntakeLineItems(input: {
-  lineItems?: Array<{ description?: string; amount?: string; quantity?: unknown }> | null;
+  lineItems?: Array<{
+    description?: string;
+    amount?: string;
+    quantity?: unknown;
+    kind?: unknown;
+  }> | null;
   itemDescription?: string;
   agreedAmount?: string;
 }): OrderIntakeLineItem[] {
@@ -460,6 +489,7 @@ export function normalizeIntakeLineItems(input: {
           description: String(item?.description ?? "").trim(),
           amount: String(item?.amount ?? "").trim(),
           quantity: Math.max(1, Math.min(999, Number(item?.quantity) || 1)),
+          kind: normalizeOrderLineKind(item?.kind),
         }))
         .filter((item) => {
           if (item.description.length < 2 || !item.amount) return false;
@@ -473,7 +503,7 @@ export function normalizeIntakeLineItems(input: {
   const amount = String(input.agreedAmount ?? "").trim();
   const parsed = parseAmountNumber(amount);
   if (description.length >= 2 && amount && Number.isFinite(parsed) && parsed >= 0) {
-    return [{ description, amount, quantity: 1 }];
+    return [{ description, amount, quantity: 1, kind: "print" }];
   }
   return [];
 }
@@ -530,6 +560,7 @@ export function parseHubSpotDealsJson(raw: string | null | undefined): HubSpotIn
           dealName: dealName || `Deal ${dealId}`,
           amount: String(row.amount ?? "").trim(),
           productName: String(row.productName ?? "").trim(),
+          kind: normalizeOrderLineKind(row.kind),
         };
       })
       .filter((item): item is HubSpotIntakeDealRef => item !== null);
@@ -1437,6 +1468,7 @@ const intakeLineItemSchema = z.object({
   description: trimmed(400).min(2, "Describe each agreed item"),
   amount: nonNegativeAmountLike,
   quantity: z.coerce.number().int().min(1).max(999).default(1),
+  kind: z.enum(ORDER_LINE_KINDS).default("print"),
 });
 
 export const createOrderLinkSchema = z

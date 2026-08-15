@@ -82,10 +82,15 @@ const EMPTY_FORM = {
   expiryDays: "14",
 };
 
-type LineDraft = { description: string; amount: string; quantity: string };
+type LineDraft = { description: string; amount: string; quantity: string; kind: "print" | "shipping" };
 
-function emptyLine(): LineDraft {
-  return { description: "", amount: "", quantity: "1" };
+function emptyLine(seed?: Partial<LineDraft>): LineDraft {
+  return {
+    description: seed?.description ?? "",
+    amount: seed?.amount ?? "",
+    quantity: seed?.quantity ?? "1",
+    kind: seed?.kind ?? "print",
+  };
 }
 
 function formatDate(value: string | null): string {
@@ -258,6 +263,7 @@ export default function OrderLinks() {
         description: line.description.trim(),
         amount: line.amount.trim(),
         quantity: Math.max(1, Math.min(999, Number(line.quantity) || 1)),
+        kind: line.kind,
       }))
       .filter((line) => line.description.length >= 2 || line.amount.length > 0);
 
@@ -306,6 +312,7 @@ export default function OrderLinks() {
         description: line.description.trim(),
         amount: line.amount.trim(),
         quantity: Math.max(1, Number(line.quantity) || 1),
+        kind: line.kind,
       })),
   ).agreedAmount;
 
@@ -341,7 +348,7 @@ export default function OrderLinks() {
             <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.85fr)]">
               <Panel
                 title="Create an order form link"
-                description="Add one or more items. Approval creates one HubSpot Contact and one Print Order deal per item."
+                description="Add print items and optional shipping. Shipping lines create a HubSpot deal that never asks for plates."
               >
                 <p className="mb-3 text-xs text-muted-foreground">
                   Already have the buyer’s details?{" "}
@@ -354,7 +361,7 @@ export default function OrderLinks() {
                   {lineItems.map((line, index) => (
                     <div
                       key={index}
-                      className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.4fr)_7rem_5rem_auto]"
+                      className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.2fr)_6.5rem_4.5rem_8.5rem_auto]"
                       data-testid={`row-line-item-${index}`}
                     >
                       <div className="space-y-1.5">
@@ -372,7 +379,9 @@ export default function OrderLinks() {
                               ),
                             )
                           }
-                          placeholder="Acastus Knight Porphyrion"
+                          placeholder={
+                            line.kind === "shipping" ? "Shipping" : "Acastus Knight Porphyrion"
+                          }
                           data-testid={`input-line-description-${index}`}
                         />
                       </div>
@@ -409,6 +418,30 @@ export default function OrderLinks() {
                           data-testid={`input-line-quantity-${index}`}
                         />
                       </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`line-kind-${index}`}>Type</Label>
+                        <select
+                          id={`line-kind-${index}`}
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                          value={line.kind}
+                          onChange={(event) =>
+                            setLineItems((current) =>
+                              current.map((row, i) =>
+                                i === index
+                                  ? {
+                                      ...row,
+                                      kind: event.target.value === "shipping" ? "shipping" : "print",
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }
+                          data-testid={`select-line-kind-${index}`}
+                        >
+                          <option value="print">Print item</option>
+                          <option value="shipping">Shipping (no plates)</option>
+                        </select>
+                      </div>
                       <div className="flex items-end">
                         <Button
                           type="button"
@@ -426,16 +459,33 @@ export default function OrderLinks() {
                     </div>
                   ))}
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setLineItems((current) => [...current, emptyLine()])}
-                      data-testid="button-add-line-item"
-                    >
-                      <PlusCircle className="mr-2 h-3.5 w-3.5" />
-                      Add another item
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setLineItems((current) => [
+                            ...current,
+                            emptyLine({ description: "Shipping", kind: "shipping" }),
+                          ])
+                        }
+                        data-testid="button-add-shipping-line"
+                      >
+                        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                        Add shipping
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setLineItems((current) => [...current, emptyLine()])}
+                        data-testid="button-add-line-item"
+                      >
+                        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                        Add another item
+                      </Button>
+                    </div>
                     <p className="text-sm text-muted-foreground" data-testid="text-line-items-total">
                       Order total: <span className="font-medium text-foreground numeric">${lineTotal}</span>
                     </p>
@@ -978,6 +1028,7 @@ function ReviewDialog({
                     >
                       <span className="min-w-0 truncate">
                         {line.description}
+                        {line.kind === "shipping" ? " · shipping (no plates)" : ""}
                         {line.quantity > 1 ? ` ×${line.quantity} @ $${line.amount}` : ""}
                       </span>
                       <span className="numeric shrink-0 text-muted-foreground">
