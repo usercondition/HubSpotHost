@@ -19,6 +19,11 @@ import {
   type TrackerAssistantContext,
 } from "./tracker-assistant";
 import { sendTelegramMessage, telegramConfigured } from "./telegram";
+import {
+  formatMarketplaceFollowUpsForDigest,
+  listConversationFollowUps,
+  reopenExpiredSnoozes,
+} from "./conversation-watchlist";
 
 export type OwnerDigestContext = TrackerAssistantContext & {
   fleet: PrinterFleetSnapshot;
@@ -282,6 +287,17 @@ export function buildOwnerDigestText(
       `Sealed stock: ${resin.totals.sealedBottles} bottle${resin.totals.sealedBottles === 1 ? "" : "s"} · ${money(resin.totals.sealedValueUsd)}`,
     );
   }
+
+  // —— Marketplace chat follow-ups (from Chrome helper watchlist) ——
+  reopenExpiredSnoozes(now);
+  const followUps = listConversationFollowUps({
+    now,
+    waitingOnYouOnly: true,
+    minHoursWaiting: 0,
+    limit: 8,
+  });
+  lines.push("", "MARKETPLACE FOLLOW-UPS");
+  lines.push(...formatMarketplaceFollowUpsForDigest(followUps, 5));
 
   // —— Snapshot footer + links ——
   lines.push("");

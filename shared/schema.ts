@@ -333,6 +333,107 @@ export interface PaidOrderDraft {
   conversationSummary: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Marketplace conversation scan (Chrome helper + watchlist)           */
+/* ------------------------------------------------------------------ */
+
+export type ConversationMessageRole = "buyer" | "you" | "system";
+
+export interface ConversationMessage {
+  role: ConversationMessageRole;
+  text: string;
+  /** Optional ISO timestamp when the bubble was sent (if the DOM exposes it). */
+  sentAt?: string;
+}
+
+export type ConversationStage =
+  | "inquiry"
+  | "negotiating"
+  | "awaiting_payment"
+  | "payment_claimed"
+  | "collecting_details"
+  | "ready_for_intake"
+  | "fulfillment_chat"
+  | "unknown";
+
+export const CONVERSATION_STAGE_LABELS: Record<ConversationStage, string> = {
+  inquiry: "New inquiry",
+  negotiating: "Negotiating price / scope",
+  awaiting_payment: "Awaiting payment",
+  payment_claimed: "Buyer claims paid",
+  collecting_details: "Collecting shipping / contact details",
+  ready_for_intake: "Ready for order intake",
+  fulfillment_chat: "Post-order / fulfillment chat",
+  unknown: "Unknown stage",
+};
+
+export type ConversationWaitingOn = "you" | "buyer" | "none";
+
+export interface ConversationNudge {
+  priority: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  suggestedReply?: string;
+  actionHref?: string;
+}
+
+export interface ConversationScanResult {
+  ok: true;
+  stage: ConversationStage;
+  stageLabel: string;
+  waitingOn: ConversationWaitingOn;
+  headline: string;
+  nudges: ConversationNudge[];
+  labeledTranscript: string;
+  counterpartName: string;
+  threadKey: string;
+  messageCount: number;
+  lastMessageRole: ConversationMessageRole | null;
+  lastMessagePreview: string;
+  analysis: PaidOrderAnalysis;
+  watchlistId: number | null;
+}
+
+export type ConversationWatchlistStatus = "open" | "snoozed" | "done";
+
+export const conversationWatchlist = sqliteTable("conversation_watchlist", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadKey: text("thread_key").notNull().unique(),
+  counterpartName: text("counterpart_name").notNull().default(""),
+  stage: text("stage").notNull().$type<ConversationStage>().default("unknown"),
+  waitingOn: text("waiting_on").notNull().$type<ConversationWaitingOn>().default("none"),
+  lastMessageRole: text("last_message_role").notNull().default(""),
+  lastMessagePreview: text("last_message_preview").notNull().default(""),
+  lastMessageAt: text("last_message_at"),
+  headline: text("headline").notNull().default(""),
+  suggestedReply: text("suggested_reply").notNull().default(""),
+  threadUrl: text("thread_url").notNull().default(""),
+  status: text("status").notNull().$type<ConversationWatchlistStatus>().default("open"),
+  snoozeUntil: text("snooze_until"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type ConversationWatchlistEntry = typeof conversationWatchlist.$inferSelect;
+
+export interface ConversationFollowUp {
+  id: number;
+  threadKey: string;
+  counterpartName: string;
+  stage: ConversationStage;
+  stageLabel: string;
+  waitingOn: ConversationWaitingOn;
+  lastMessageRole: string;
+  lastMessagePreview: string;
+  lastMessageAt: string | null;
+  headline: string;
+  suggestedReply: string;
+  threadUrl: string;
+  status: ConversationWatchlistStatus;
+  hoursWaiting: number | null;
+  reminder: string;
+}
+
 export interface HubSpotIntakeDealRef {
   dealId: string;
   dealName: string;

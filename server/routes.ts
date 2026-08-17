@@ -123,6 +123,15 @@ import {
   validatePaidOrderDraft,
   validatePaidOrderLineItems,
 } from "./lib/intake";
+import { scanConversation } from "./lib/conversation-scan";
+import {
+  dismissConversationWatchlist,
+  listConversationFollowUps,
+  reopenExpiredSnoozes,
+  snoozeConversationWatchlist,
+  upsertWatchlistFromInbox,
+  upsertWatchlistFromScan,
+} from "./lib/conversation-watchlist";
 import { createPaidOrder } from "./lib/paid-orders";
 import {
   applyReviewEdits,
@@ -1947,6 +1956,110 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     }
     return res.json({ ok: true, analysis: analyzeMarketplaceConversation(conversation) });
+  });
+
+  /**
+   * Chrome helper / labeled transcript scan.
+   * Returns stage + nudges + intake suggestions. Optionally saves a watchlist
+   * summary (never the full raw chat) for buried follow-up reminders.
+   */
+  app.post("/api/conversation-scan", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const messages = Array.isArray(body.messages) ? body.messages : undefined;
+    const conversation = typeof body.conversation === "string" ? body.conversation : undefined;
+    const counterpartName = typeof body.counterpartName === "string" ? body.counterpartName : undefined;
+    const threadUrl = typeof body.threadUrl === "string" ? body.threadUrl : undefined;
+    const threadKey = typeof body.threadKey === "string" ? body.threadKey : undefined;
+    const saveToWatchlist = body.saveToWatchlist !== false;
+
+    try {
+      const scan = scanConversation({
+        messages: messages as never,
+        conversation,
+        counterpartName,
+        threadUrl,
+        threadKey,
+        saveToWatchlist,
+      });
+      let watchlistId: number | null = null;
+      if (saveToWatchlist) {
+        watchlistId = upsertWatchlistFromScan(scan, {
+          messages: messages as never,
+          conversation,
+          counterpartName,
+          threadUrl,
+          threadKey,
+        });
+      }
+      return res.json({ ...scan, watchlistId });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not scan the conversation",
+      });
+    }
+  });
+
+  app.get("/api/conversation-watchlist", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    reopenExpiredSnoozes();
+    const waitingOnYouOnly =
+      String(firstQueryValue(req.query.waitingOnYou) ?? "").trim() === "1" ||
+      String(firstQueryValue(req.query.waitingOnYou) ?? "").trim().toLowerCase() === "true";
+    const minHoursRaw = Number.parseFloat(String(firstQueryValue(req.query.minHours) ?? "0"));
+    const minHoursWaiting = Number.isFinite(minHoursRaw) ? Math.max(0, minHoursRaw) : 0;
+    const followUps = listConversationFollowUps({ waitingOnYouOnly, minHoursWaiting });
+    return res.json({
+      ok: true,
+      count: followUps.length,
+      waitingOnYou: followUps.filter((row) => row.waitingOn === "you").length,
+      followUps,
+    });
+  });
+
+  app.post("/api/conversation-watchlist/inbox", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ ok: false, error: "No inbox rows to save" });
+    }
+    const result = upsertWatchlistFromInbox(items as never);
+    return res.json({ ok: true, ...result });
+  });
+
+  app.post("/api/conversation-watchlist/:id/snooze", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number.parseInt(String(req.params.id ?? ""), 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: "Choose a valid watchlist item" });
+    }
+    const hoursRaw =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? Number((req.body as Record<string, unknown>).hours)
+        : 24;
+    const hours = Number.isFinite(hoursRaw) ? Math.min(168, Math.max(1, hoursRaw)) : 24;
+    const ok = snoozeConversationWatchlist(id, hours);
+    if (!ok) return res.status(404).json({ ok: false, error: "Watchlist item not found" });
+    return res.json({ ok: true, snoozedHours: hours });
+  });
+
+  app.post("/api/conversation-watchlist/:id/dismiss", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number.parseInt(String(req.params.id ?? ""), 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: "Choose a valid watchlist item" });
+    }
+    const ok = dismissConversationWatchlist(id);
+    if (!ok) return res.status(404).json({ ok: false, error: "Watchlist item not found" });
+    return res.json({ ok: true });
   });
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {
