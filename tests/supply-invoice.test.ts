@@ -92,6 +92,38 @@ Estimated tax: $4.40
 Grand Total: $59.39
 `;
 
+/** Amazon print.html Order Details — totals first, then product + Sold by. */
+const AMAZON_PRINT_ORDER_DETAILS = `
+Order Summary
+Order placed August 15, 2026  Order # 112-4165520-4382601
+Ship to
+Miguel Mercado
+4547 KENSINGTON DR
+SAN DIEGO, CA 92116-3835
+United States
+Visa ending in 3436
+Payment method
+View related transactions
+Order Summary
+Item(s) Subtotal:$69.00
+Shipping & Handling:$0.00
+Total before tax:$69.00
+Estimated tax to be
+collected:
+$5.35
+Grand Total:$74.35
+Arriving August 25 - August 26
+HEYGEARS 2 PCS Release Film Set for Reflex RS & RS Turbo
+Sold by: HEYGEARS Official Store
+Supplied by: Other
+$69.00
+Back to top
+Conditions of UsePrivacy Notice
+© 1996-2026, Amazon.com, Inc. or its affiliates
+8/15/26, 12:23 PMOrder Details
+https://www.amazon.com/gp/css/summary/print.html?orderID=112-4165520-4382601
+`;
+
 const ULINE_INVOICE = `
 ULINE
 Invoice Number: 21554487
@@ -139,6 +171,23 @@ test("Amazon multi-item invoices extract a line-item breakdown", () => {
   assert.equal(result.fields.totalAmount, "59.39");
   assert.match(result.fields.itemName, /2 items:/i);
   assert.ok(result.warnings.some((warning) => /2 line items/i.test(warning)));
+});
+
+test("Amazon print Order Details PDF fills item after totals", () => {
+  const result = extractSupplyInvoiceFromText(AMAZON_PRINT_ORDER_DETAILS, {
+    fileName: "Order Details.pdf",
+  });
+
+  assert.equal(result.fields.source, "Amazon");
+  assert.equal(result.fields.orderReference, "112-4165520-4382601");
+  assert.match(result.fields.itemName, /HEYGEARS.*Release Film/i);
+  assert.equal(result.fields.category, "equipment_maintenance");
+  assert.equal(result.fields.totalAmount, "74.35");
+  assert.equal(result.fields.purchasedAt, "2026-08-15");
+  assert.equal(result.fields.lineItems.length, 1);
+  assert.equal(result.fields.lineItems[0]?.lineAmount, "69.00");
+  assert.equal(result.fields.lineItems[0]?.quantity, 1);
+  assert.equal(result.warnings.length, 0);
 });
 
 test("non-Amazon invoices detect vendor and nomenclature", () => {

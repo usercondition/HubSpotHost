@@ -14,6 +14,7 @@ import {
   Loader2,
   PlusCircle,
   RefreshCw,
+  Repeat2,
   ShieldCheck,
   Unlock,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import {
   summarizeIntakeLineItems,
   type OrderIntakeLink,
   type OrderIntakeStatus,
+  type PriorClientMatch,
 } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { PageHeader } from "@/components/shell";
@@ -47,7 +49,9 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { printsDealHref } from "@/lib/workflow";
 
 /** Owner-side rows never carry the token hash. */
-type QueueLink = Omit<OrderIntakeLink, "tokenHash">;
+type QueueLink = Omit<OrderIntakeLink, "tokenHash"> & {
+  priorMatch?: PriorClientMatch | null;
+};
 
 interface QueueResponse {
   ok: true;
@@ -78,10 +82,15 @@ const EMPTY_FORM = {
   expiryDays: "14",
 };
 
-type LineDraft = { description: string; amount: string; quantity: string };
+type LineDraft = { description: string; amount: string; quantity: string; kind: "print" | "shipping" };
 
-function emptyLine(): LineDraft {
-  return { description: "", amount: "", quantity: "1" };
+function emptyLine(seed?: Partial<LineDraft>): LineDraft {
+  return {
+    description: seed?.description ?? "",
+    amount: seed?.amount ?? "",
+    quantity: seed?.quantity ?? "1",
+    kind: seed?.kind ?? "print",
+  };
 }
 
 function formatDate(value: string | null): string {
@@ -149,6 +158,7 @@ export default function OrderLinks() {
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [copied, setCopied] = useState(false);
   const [reviewId, setReviewId] = useState<number | null>(null);
+  const [usernameQuery, setUsernameQuery] = useState("");
 
   const queue = useQuery<QueueResponse>({
     queryKey: ["/api/order-links", tab],
@@ -163,8 +173,25 @@ export default function OrderLinks() {
 
   const counts = queue.data?.counts;
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setUsernameQuery(form.buyerUsernameHint.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [form.buyerUsernameHint]);
 
-  const createLink = useMutation({
+  const priorClient = useQuery<{ ok: true; match: PriorClientMatch | null }>({
+    queryKey: ["/api/order-links/prior-client", usernameQuery],
+    enabled: isUnlocked && usernameQuery.replace(/^@+/, "").length >= 2,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/order-links/prior-client?username=${encodeURIComponent(usernameQuery)}`,
+        undefined,
+        { headers },
+      );
+      return (await res.json()) as { ok: true; match: PriorClientMatch | null };
+    },
+  });  const createLink = useMutation({
     mutationFn: async (payload: {
       lineItems: Array<{ description: string; amount: string; quantity: number }>;
       paymentMethod: string;
@@ -236,6 +263,7 @@ export default function OrderLinks() {
         description: line.description.trim(),
         amount: line.amount.trim(),
         quantity: Math.max(1, Math.min(999, Number(line.quantity) || 1)),
+        kind: line.kind,
       }))
       .filter((line) => line.description.length >= 2 || line.amount.length > 0);
 
@@ -284,6 +312,7 @@ export default function OrderLinks() {
         description: line.description.trim(),
         amount: line.amount.trim(),
         quantity: Math.max(1, Number(line.quantity) || 1),
+        kind: line.kind,
       })),
   ).agreedAmount;
 
@@ -319,7 +348,7 @@ export default function OrderLinks() {
             <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.85fr)]">
               <Panel
                 title="Create an order form link"
-                description="Add one or more items. Approval creates one HubSpot Contact and one Print Order deal per item."
+                description="Add print items and optional shipping. Shipping lines create a HubSpot deal that never asks for plates."
               >
                 <p className="mb-3 text-xs text-muted-foreground">
                   Already have the buyer’s details?{" "}
@@ -332,7 +361,7 @@ export default function OrderLinks() {
                   {lineItems.map((line, index) => (
                     <div
                       key={index}
-                      className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.4fr)_7rem_5rem_auto]"
+                      className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1.2fr)_6.5rem_4.5rem_8.5rem_auto]"
                       data-testid={`row-line-item-${index}`}
                     >
                       <div className="space-y-1.5">
@@ -350,7 +379,9 @@ export default function OrderLinks() {
                               ),
                             )
                           }
-                          placeholder="Acastus Knight Porphyrion"
+                          placeholder={
+                            line.kind === "shipping" ? "Shipping" : "Acastus Knight Porphyrion"
+                          }
                           data-testid={`input-line-description-${index}`}
                         />
                       </div>
@@ -387,6 +418,30 @@ export default function OrderLinks() {
                           data-testid={`input-line-quantity-${index}`}
                         />
                       </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`line-kind-${index}`}>Type</Label>
+                        <select
+                          id={`line-kind-${index}`}
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                          value={line.kind}
+                          onChange={(event) =>
+                            setLineItems((current) =>
+                              current.map((row, i) =>
+                                i === index
+                                  ? {
+                                      ...row,
+                                      kind: event.target.value === "shipping" ? "shipping" : "print",
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }
+                          data-testid={`select-line-kind-${index}`}
+                        >
+                          <option value="print">Print item</option>
+                          <option value="shipping">Shipping (no plates)</option>
+                        </select>
+                      </div>
                       <div className="flex items-end">
                         <Button
                           type="button"
@@ -404,16 +459,33 @@ export default function OrderLinks() {
                     </div>
                   ))}
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setLineItems((current) => [...current, emptyLine()])}
-                      data-testid="button-add-line-item"
-                    >
-                      <PlusCircle className="mr-2 h-3.5 w-3.5" />
-                      Add another item
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setLineItems((current) => [
+                            ...current,
+                            emptyLine({ description: "Shipping", kind: "shipping" }),
+                          ])
+                        }
+                        data-testid="button-add-shipping-line"
+                      >
+                        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                        Add shipping
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setLineItems((current) => [...current, emptyLine()])}
+                        data-testid="button-add-line-item"
+                      >
+                        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                        Add another item
+                      </Button>
+                    </div>
                     <p className="text-sm text-muted-foreground" data-testid="text-line-items-total">
                       Order total: <span className="font-medium text-foreground numeric">${lineTotal}</span>
                     </p>
@@ -443,12 +515,44 @@ export default function OrderLinks() {
                     value={form.buyerNameHint}
                     onChange={(v) => set("buyerNameHint", v)}
                   />
-                  <TextField
-                    id="buyer-username-hint"
-                    label="Marketplace username (optional)"
-                    value={form.buyerUsernameHint}
-                    onChange={(v) => set("buyerUsernameHint", v)}
-                  />
+                  <div className="space-y-2">
+                    <TextField
+                      id="buyer-username-hint"
+                      label="Marketplace username (optional)"
+                      value={form.buyerUsernameHint}
+                      onChange={(v) => set("buyerUsernameHint", v)}
+                      hint="For a returning buyer, enter their username so the form opens with last time’s details."
+                    />
+                    {usernameQuery.replace(/^@+/, "").length >= 2 && priorClient.data?.match && (
+                      <p
+                        className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground"
+                        data-testid="text-prior-client-match"
+                      >
+                        <span className="font-medium text-foreground">Returning buyer found. </span>
+                        {priorClient.data.match.clientFullName || priorClient.data.match.clientUsername}
+                        {priorClient.data.match.shippingCity
+                          ? ` · ${priorClient.data.match.shippingCity}${
+                              priorClient.data.match.shippingState
+                                ? `, ${priorClient.data.match.shippingState}`
+                                : ""
+                            }`
+                          : priorClient.data.match.shippingRequired === false
+                            ? " · pickup last time"
+                            : ""}
+                        {priorClient.data.match.lastItemDescription
+                          ? ` · last order: ${priorClient.data.match.lastItemDescription}`
+                          : ""}
+                        . Their form will open with these details filled in.
+                      </p>
+                    )}
+                    {usernameQuery.replace(/^@+/, "").length >= 2 &&
+                      priorClient.isFetched &&
+                      !priorClient.data?.match && (
+                        <p className="text-xs text-muted-foreground" data-testid="text-prior-client-none">
+                          No previous order for that username. They’ll fill the form from scratch.
+                        </p>
+                      )}
+                  </div>
                   <TextField
                     id="expiry-days"
                     label="Link expires in (days)"
@@ -522,7 +626,7 @@ export default function OrderLinks() {
                     },
                     {
                       title: "You review privately",
-                      text: "The submission appears under Pending review. Correct anything the buyer typed loosely.",
+                      text: "The submission appears under Pending review. If that email or Marketplace username has ordered before, it is flagged as a returning buyer. Correct anything they typed loosely.",
                     },
                     {
                       title: "You approve",
@@ -630,6 +734,14 @@ export default function OrderLinks() {
                                 label={ORDER_INTAKE_STATUS_LABELS[link.status]}
                                 testId={`status-intake-${link.id}`}
                               />
+                              {link.priorMatch && (
+                                <StatusPill
+                                  tone="good"
+                                  icon={Repeat2}
+                                  label="Returning buyer"
+                                  testId={`status-returning-${link.id}`}
+                                />
+                              )}
                             </div>
                             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                               {link.confirmedItem || link.itemDescription}
@@ -647,6 +759,9 @@ export default function OrderLinks() {
                               <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-client-${link.id}`}>
                                 {link.clientFullName}
                                 {link.clientEmail ? ` · ${link.clientEmail}` : ""}
+                                {link.priorMatch
+                                  ? ` · ordered before (${link.priorMatch.lastInternalLabel})`
+                                  : ""}
                               </p>
                             )}
                             {link.hubspotDealId && (
@@ -897,6 +1012,8 @@ function ReviewDialog({
               />
             </div>
 
+            {link.priorMatch && <PriorMatchPanel match={link.priorMatch} />}
+
             {lineItemsForIntake(link).length > 1 ? (
               <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3" data-testid="panel-review-line-items">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -911,6 +1028,7 @@ function ReviewDialog({
                     >
                       <span className="min-w-0 truncate">
                         {line.description}
+                        {line.kind === "shipping" ? " · shipping (no plates)" : ""}
                         {line.quantity > 1 ? ` ×${line.quantity} @ $${line.amount}` : ""}
                       </span>
                       <span className="numeric shrink-0 text-muted-foreground">
@@ -1161,6 +1279,38 @@ function ReviewDialog({
 }
 
 /* -------------------------------------------------------------- primitives */
+
+function priorMatchReason(matchedBy: PriorClientMatch["matchedBy"]): string {
+  if (matchedBy === "email_and_username") return "email and Marketplace username";
+  if (matchedBy === "email") return "email";
+  return "Marketplace username";
+}
+
+function PriorMatchPanel({ match }: { match: PriorClientMatch }) {
+  const place = [match.shippingCity, match.shippingState].filter(Boolean).join(", ");
+  const lastShip = match.shippingRequired
+    ? [match.shippingStreet, place, match.shippingPostalCode].filter(Boolean).join(", ")
+    : "Pickup last time";
+  return (
+    <div
+      className="rounded-md border border-primary/30 bg-primary/5 p-3"
+      data-testid="panel-review-prior-match"
+    >
+      <p className="text-sm font-medium">Returning buyer — matched by {priorMatchReason(match.matchedBy)}</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Last order {match.lastInternalLabel}
+        {match.lastItemDescription ? ` · ${match.lastItemDescription}` : ""}
+        {lastShip ? ` · ${lastShip}` : ""}. Approve will reuse the HubSpot Contact if this email already exists.
+      </p>
+      {match.hubspotContactId && (
+        <p className="numeric mt-1 text-xs text-muted-foreground">
+          Previous Contact {match.hubspotContactId}
+          {match.hubspotDealId ? ` · Deal ${match.hubspotDealId}` : ""}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Readout({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return (

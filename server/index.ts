@@ -90,6 +90,10 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
+  // Large CTB prefix uploads + HubSpot calls need headroom beyond Node defaults.
+  httpServer.requestTimeout = 15 * 60 * 1000;
+  httpServer.headersTimeout = 16 * 60 * 1000;
+  httpServer.keepAliveTimeout = 120_000;
   httpServer.listen(
     {
       port,

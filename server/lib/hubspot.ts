@@ -22,12 +22,13 @@ export const PERFORMANCE_PROPERTIES = [
   "closedate",
   "hs_is_closed",
   "hs_is_closed_won",
+  "print_line_kind",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
 
 /**
- * Production-planning fields populated from an attached Chitubox slice file.
+ * Production-planning fields populated from an attached slice plate (.ctb / .ultx).
  * They intentionally describe the full plate and remain separate from actual
  * costs, which the owner records when the order's real production costs are known.
  */
@@ -35,35 +36,35 @@ const PRINT_FILE_DEAL_PROPERTIES = [
   {
     name: "print_slice_file_name",
     label: "Print slice file name",
-    description: "Most recently attached Chitubox CTB filename from Print Operations.",
+    description: "Most recently attached slice plate filename (.ctb / .ultx) from Print Operations.",
     type: "string",
     fieldType: "text",
   },
   {
     name: "print_slice_format",
     label: "Print slice format",
-    description: "Chitubox CTB header revision and format details.",
+    description: "Slice format revision and details (Chitubox CTB or HeyGears ULTX).",
     type: "string",
     fieldType: "text",
   },
   {
     name: "print_estimated_time_hours",
     label: "Estimated print time (hours)",
-    description: "Total estimated print time across all attached CTB plates.",
+    description: "Total estimated print time across all attached slice plates.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_resin_volume_ml",
     label: "Estimated resin volume (ml)",
-    description: "Total estimated resin volume across all attached CTB plates.",
+    description: "Total estimated resin volume across all attached slice plates.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_resin_mass_g",
     label: "Estimated resin mass (g)",
-    description: "Total estimated resin mass across all attached CTB plates.",
+    description: "Total estimated resin mass across all attached slice plates.",
     type: "number",
     fieldType: "number",
   },
@@ -71,70 +72,78 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     name: "print_estimated_resin_cost",
     label: "Estimated resin cost (slicer)",
     description:
-      "Total Chitubox-configured resin cost estimate across attached CTB plates. Separate from actual print_material_cost.",
+      "Total slicer resin cost estimate across attached plates. Separate from actual print_material_cost.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_layer_count",
     label: "Print layer count",
-    description: "Total layers across all attached CTB plates.",
+    description: "Total layers across all attached slice plates.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_bottom_layer_count",
     label: "Print bottom layer count",
-    description: "Bottom layer count from the most recently attached CTB plate.",
+    description: "Bottom layer count from the most recently attached slice plate.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_exposure_seconds",
     label: "Normal exposure (s)",
-    description: "Normal-layer exposure time from the most recently attached CTB plate.",
+    description: "Normal-layer exposure time from the most recently attached slice plate.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_bottom_exposure_seconds",
     label: "Bottom exposure (s)",
-    description: "Bottom-layer exposure time from the most recently attached CTB plate.",
+    description: "Bottom-layer exposure time from the most recently attached slice plate.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_model_height_mm",
     label: "Model height (mm)",
-    description: "Model height from the most recently attached CTB plate.",
+    description: "Model height from the most recently attached slice plate.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_layer_height_mm",
     label: "Print layer height (mm)",
-    description: "Layer height extracted from the CTB file.",
+    description: "Layer height extracted from the slice plate.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_plate_count",
     label: "Print plate count",
-    description: "Number of Chitubox CTB plates attached to this Print Order.",
+    description: "Number of slice plates attached to this Print Order.",
     type: "number",
     fieldType: "number",
   },
   {
     name: "print_printer_profile",
     label: "Print printer profile",
-    description: "Printer or machine profile reported by the CTB file.",
+    description: "Printer or machine profile reported by the slice file.",
     type: "string",
     fieldType: "text",
   },
   {
     name: "print_slice_attached_at",
     label: "Print slice attached at",
-    description: "UTC time when Print Operations attached this CTB metadata.",
+    description: "UTC time when Print Operations attached this slice metadata.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_line_kind",
+    label: "Print line kind",
+    description:
+      "print = resin print item (needs plates). shipping = freight/charge only — skips plate prompts.",
     type: "string",
     fieldType: "text",
   },
@@ -323,7 +332,7 @@ export async function ensurePrintFileDealProperties(): Promise<void> {
 }
 
 /**
- * Attach calculated CTB metadata to one deal. This never writes material,
+ * Attach calculated slice-plate metadata to one deal. This never writes material,
  * labor, packaging, shipping, gross-profit, or margin fields.
  */
 export async function patchDealPrintFileMetrics(

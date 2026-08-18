@@ -22,6 +22,7 @@ import {
   lineItemsForIntake,
   normalizeIntakeLineItems,
   summarizeIntakeLineItems,
+  type ClientOrderSavedDetails,
   type ClientOrderSubmission,
   type ClientOrderView,
   type CreateOrderLinkInput,
@@ -29,6 +30,7 @@ import {
   type HubSpotIntakeDealRef,
   type OrderIntakeLink,
   type OrderIntakeStatus,
+  type PriorClientMatch,
   type ReviewEditInput,
 } from "../../shared/schema";
 
@@ -140,12 +142,88 @@ CREATE TABLE IF NOT EXISTS print_file_records (
   resolution_x INTEGER,
   resolution_y INTEGER,
   printer_profile TEXT,
+  fleet_printer_id INTEGER,
   hubspot_synced_at TEXT NOT NULL,
   attached_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS print_file_records_deal_id_idx
   ON print_file_records (hubspot_deal_id, attached_at DESC);
 `;
+
+const CREATE_PRINT_PLATE_BITS_SQL = `
+CREATE TABLE IF NOT EXISTS print_plate_bits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  print_file_record_id INTEGER NOT NULL,
+  file_name TEXT NOT NULL,
+  label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'on_plate',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (print_file_record_id, file_name)
+);
+CREATE INDEX IF NOT EXISTS print_plate_bits_record_idx
+  ON print_plate_bits (print_file_record_id, id);
+`;
+
+const CREATE_ORDER_PARTS_SQL = `
+CREATE TABLE IF NOT EXISTS order_parts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hubspot_deal_id TEXT NOT NULL,
+  hubspot_deal_name TEXT NOT NULL DEFAULT '',
+  item_group TEXT NOT NULL DEFAULT 'Kit',
+  file_name TEXT NOT NULL,
+  label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'needed',
+  print_file_record_id INTEGER,
+  print_plate_bit_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (hubspot_deal_id, item_group, file_name)
+);
+CREATE INDEX IF NOT EXISTS order_parts_deal_idx
+  ON order_parts (hubspot_deal_id, status);
+`;
+
+/** Upgrade early order_parts tables that lacked item_group / used the old unique key. */
+function ensureOrderPartsSchema(sqlite: Database.Database): void {
+  const table = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'order_parts'")
+    .get() as { name: string } | undefined;
+  if (!table) return;
+
+  const columns = (
+    sqlite.prepare("PRAGMA table_info(order_parts)").all() as Array<{ name: string }>
+  ).map((row) => row.name);
+  if (columns.includes("item_group")) return;
+
+  sqlite.exec(`
+    CREATE TABLE order_parts_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hubspot_deal_id TEXT NOT NULL,
+      hubspot_deal_name TEXT NOT NULL DEFAULT '',
+      item_group TEXT NOT NULL DEFAULT 'Kit',
+      file_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'needed',
+      print_file_record_id INTEGER,
+      print_plate_bit_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (hubspot_deal_id, item_group, file_name)
+    );
+    INSERT INTO order_parts_v2 (
+      id, hubspot_deal_id, hubspot_deal_name, item_group, file_name, label, status,
+      print_file_record_id, print_plate_bit_id, created_at, updated_at
+    )
+    SELECT
+      id, hubspot_deal_id, hubspot_deal_name, 'Kit', file_name, label, status,
+      print_file_record_id, print_plate_bit_id, created_at, updated_at
+    FROM order_parts;
+    DROP TABLE order_parts;
+    ALTER TABLE order_parts_v2 RENAME TO order_parts;
+    CREATE INDEX IF NOT EXISTS order_parts_deal_idx ON order_parts (hubspot_deal_id, status);
+  `);
+}
 
 const CREATE_RESIN_PROFILES_SQL = `
 CREATE TABLE IF NOT EXISTS resin_profiles (
@@ -321,7 +399,7 @@ const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["bottom_lift_distance_mm", "TEXT"],
   ["bottom_lift_speed_mm_per_min", "TEXT"],
   ["retract_speed_mm_per_min", "TEXT"],
-  ["assigned_printer_id", "INTEGER"],
+  ["fleet_printer_id", "INTEGER"],
 ];
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
@@ -416,6 +494,9 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_ATTENTION_OVERRIDES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
+  sqlite.exec(CREATE_PRINT_PLATE_BITS_SQL);
+  sqlite.exec(CREATE_ORDER_PARTS_SQL);
+  ensureOrderPartsSchema(sqlite);
   sqlite.exec(CREATE_RESIN_PROFILES_SQL);
   sqlite.exec(CREATE_PRINTERS_SQL);
   sqlite.exec(CREATE_PRINTER_LIFECYCLE_EVENTS_SQL);
@@ -466,6 +547,70 @@ function addDays(days: number): string {
 function generatedOrderReference(id: number, createdAt: string): string {
   const date = createdAt.slice(0, 10).replaceAll("-", "");
   return `PO-${date}-${String(id).padStart(6, "0")}`;
+}
+
+export function normalizeMarketplaceUsername(value: string): string {
+  return value.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function savedDetailsFromLink(link: OrderIntakeLink): ClientOrderSavedDetails {
+  return {
+    clientFullName: link.clientFullName,
+    clientUsername: link.clientUsername || link.buyerUsernameHint,
+    clientEmail: link.clientEmail,
+    clientPhone: link.clientPhone,
+    shippingRequired: link.shippingRequired,
+    shippingStreet: link.shippingStreet,
+    shippingCity: link.shippingCity,
+    shippingState: link.shippingState,
+    shippingPostalCode: link.shippingPostalCode,
+    shippingCountry: link.shippingCountry,
+  };
+}
+
+export type PriorClientLookup = {
+  username?: string;
+  email?: string;
+  excludeId?: number;
+};
+
+/**
+ * Last submitted intake matching Marketplace username and/or email.
+ * Used to prefill a private form when the owner typed the username, and to
+ * flag a returning buyer on review after they submit whatever they typed.
+ * Never exposed as a public search.
+ */
+export function findPriorClientDetails(input: PriorClientLookup): PriorClientMatch | null {
+  const username = normalizeMarketplaceUsername(input.username ?? "");
+  const email = normalizeEmail(input.email ?? "");
+  const canMatchUsername = username.length >= 2;
+  const canMatchEmail = email.includes("@");
+  if (!canMatchUsername && !canMatchEmail) return null;
+  const rows = getDb().select().from(orderIntakeLinks).orderBy(desc(orderIntakeLinks.id)).all();
+  for (const row of rows) {
+    if (input.excludeId && row.id === input.excludeId) continue;
+    if (row.status !== "pending_review" && row.status !== "created") continue;
+    if (!row.clientFullName.trim() && !row.clientEmail.trim()) continue;
+    const storedUser = normalizeMarketplaceUsername(row.clientUsername || row.buyerUsernameHint);
+    const storedEmail = normalizeEmail(row.clientEmail);
+    const userMatch = canMatchUsername && storedUser.length >= 2 && storedUser === username;
+    const emailMatch = canMatchEmail && storedEmail.includes("@") && storedEmail === email;
+    if (!userMatch && !emailMatch) continue;
+    return {
+      ...savedDetailsFromLink(row),
+      lastSubmittedAt: row.submittedAt,
+      lastItemDescription: row.confirmedItem || row.itemDescription,
+      lastInternalLabel: row.internalLabel,
+      matchedBy: userMatch && emailMatch ? "email_and_username" : emailMatch ? "email" : "username",
+      hubspotContactId: row.hubspotContactId,
+      hubspotDealId: row.hubspotDealId,
+    };
+  }
+  return null;
 }
 
 function isExpired(link: OrderIntakeLink, at = nowIso()): boolean {
@@ -617,6 +762,22 @@ export type ClientLookupResult =
   | { ok: true; view: ClientOrderView }
   | { ok: false; reason: "invalid" | "expired" | "already-submitted" };
 
+function publicSavedDetails(prior: PriorClientMatch | null): ClientOrderSavedDetails | null {
+  if (!prior) return null;
+  return {
+    clientFullName: prior.clientFullName,
+    clientUsername: prior.clientUsername,
+    clientEmail: prior.clientEmail,
+    clientPhone: prior.clientPhone,
+    shippingRequired: prior.shippingRequired,
+    shippingStreet: prior.shippingStreet,
+    shippingCity: prior.shippingCity,
+    shippingState: prior.shippingState,
+    shippingPostalCode: prior.shippingPostalCode,
+    shippingCountry: prior.shippingCountry,
+  };
+}
+
 /**
  * Public token lookup. Returns nothing owner-side: no internal label, no
  * payment reference, no owner notes, no queue state details.
@@ -642,7 +803,38 @@ export function lookupClientOrder(token: string): ClientLookupResult {
       expiresAt: link.expiresAt,
       buyerNameHint: link.buyerNameHint,
       buyerUsernameHint: link.buyerUsernameHint,
+      savedDetails: publicSavedDetails(
+        findPriorClientDetails({
+          username: link.buyerUsernameHint,
+          excludeId: link.id,
+        }),
+      ),
     },
+  };
+}
+
+export type ClientSavedDetailsResult =
+  | { ok: true; savedDetails: ClientOrderSavedDetails | null }
+  | { ok: false; reason: "invalid" | "expired" | "already-submitted" };
+
+/**
+ * Returning-buyer details for a valid unused token, keyed by the email or
+ * username the buyer just typed. Same token gate as lookup — not a public search.
+ */
+export function lookupClientSavedDetails(
+  token: string,
+  identity: { email?: string; username?: string },
+): ClientSavedDetailsResult {
+  const lookup = lookupClientOrder(token);
+  if (!lookup.ok) return lookup;
+  return {
+    ok: true,
+    savedDetails: publicSavedDetails(
+      findPriorClientDetails({
+        email: identity.email,
+        username: identity.username,
+      }),
+    ),
   };
 }
 

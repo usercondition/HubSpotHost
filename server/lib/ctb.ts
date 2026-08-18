@@ -123,6 +123,43 @@ export function createFileCtbReader(filePath: string): CtbReader {
   };
 }
 
+/**
+ * Analyze a CTB using only an uploaded prefix of the real plate file.
+ * `fullFileSize` is the on-disk plate size from the owner's machine; the
+ * fingerprint matches `createFileCtbReader` (size + first 1 MiB).
+ */
+export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number): CtbReader {
+  if (!Number.isFinite(fullFileSize) || fullFileSize < prefix.length || fullFileSize < HEADER_MIN_BYTES) {
+    throw new CtbParseError("That CTB prefix does not match the reported plate size");
+  }
+
+  return {
+    size: fullFileSize,
+    read(offset, length) {
+      if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length < 0) return null;
+      if (offset + length > fullFileSize) return null;
+      if (offset + length > prefix.length) {
+        throw new CtbParseError(
+          "That CTB stores planning settings past the sampled prefix. Re-export from Chitubox or upload the full plate on a direct host.",
+        );
+      }
+      return prefix.subarray(offset, offset + length);
+    },
+    sha256() {
+      const hash = crypto.createHash("sha256");
+      const sizeBuf = Buffer.alloc(8);
+      sizeBuf.writeBigUInt64LE(BigInt(fullFileSize));
+      hash.update(sizeBuf);
+      const prefixLen = Math.min(fullFileSize, HASH_CHUNK_BYTES, prefix.length);
+      if (prefixLen > 0) hash.update(prefix.subarray(0, prefixLen));
+      return hash.digest("hex");
+    },
+    close() {
+      /* prefix buffer */
+    },
+  };
+}
+
 function u32At(reader: CtbReader, offset: number): number | null {
   const bytes = reader.read(offset, 4);
   return bytes ? bytes.readUInt32LE(0) : null;
@@ -471,6 +508,26 @@ export function parseCtbFileFromPath(fileName: string, filePath: string): PrintF
   } catch (error) {
     if (error instanceof CtbParseError) throw error;
     throw new CtbParseError("That CTB file could not be read from disk");
+  } finally {
+    reader.close();
+  }
+}
+
+/**
+ * Parse CTB metadata from a sampled prefix of a larger on-disk plate.
+ * Used when the browser uploads only the first few MB to dodge proxy limits.
+ */
+export function parseCtbFileFromPrefix(
+  fileName: string,
+  prefix: Buffer,
+  fullFileSize: number,
+): PrintFileMetrics {
+  const reader = createPrefixCtbReader(prefix, fullFileSize);
+  try {
+    return parseCtbReader(fileName, reader);
+  } catch (error) {
+    if (error instanceof CtbParseError) throw error;
+    throw new CtbParseError("That CTB prefix could not be read");
   } finally {
     reader.close();
   }

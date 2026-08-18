@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ClipboardCopy,
   Clock3,
   CircleDollarSign,
   FilePlus2,
   FileUp,
+  FolderOpen,
   Layers3,
   Loader2,
   PackageCheck,
@@ -22,15 +25,28 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { parseApiError } from "@/lib/api-error";
+import { ctbPrefixBlob, describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
+import {
+  BLUEPRINT_STUDIO_LOGS_ENV_PATH,
+  BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH,
+  buildSliceLogUploadFromLinkedFolder,
+  getLinkedBlueprintLogsStatus,
+  importBlueprintLogsFromFileList,
+  unlinkBlueprintLogsDirectory,
+  type BlueprintLogsStatus,
+} from "@/lib/blueprint-slice-log";
 import { readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
+import { PlateBitsPanel, type PlateBitSummary } from "@/components/plate-bits-panel";
 import type {
   PrintFileCandidateDeal,
   PrintFileMetrics,
   PrintFileOrderSummary,
   PrintFileRecord,
+  PrintPlateBit,
   ResinProfile,
 } from "@shared/schema";
 
@@ -52,18 +68,32 @@ interface ResinProfileResponse {
   canRefreshAmazon: boolean;
 }
 
+type PrintFileRecordWithBits = PrintFileRecord & {
+  bits: PrintPlateBit[];
+  bitSummary: PlateBitSummary;
+};
+
 interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
-  records: PrintFileRecord[];
+  records: PrintFileRecordWithBits[];
   includeAttached: boolean;
   resin?: ResinProfileResponse;
+}
+
+interface PrinterMatchInfo {
+  matchedPrinterId: number | null;
+  requiresPrinterChoice: boolean;
+  sharedModelProfile?: boolean;
+  slicerProfile: string | null;
+  printers: Array<{ id: number; name: string; model: string }>;
 }
 
 interface StagedPrintFile {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
+  printerMatch?: PrinterMatchInfo;
 }
 
 function formatHours(seconds: number | null | undefined): string {
@@ -110,7 +140,7 @@ function resinCostHint(metrics: PrintFileMetrics): string {
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted CTB metrics">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted plate metrics">
         <StatCard label="Estimated plate time" value={formatHours(metrics.printTimeSeconds)} hint="Whole build plate" icon={Clock3} testId="metric-print-time" />
         <StatCard label="Resin volume" value={formatNumber(metrics.resinVolumeMl, " ml")} hint="Whole build plate" icon={Scale} testId="metric-resin-volume" />
         <StatCard label="Resin mass" value={formatNumber(metrics.resinMassG, " g")} hint={metrics.resinDensityGPerMl ? `${formatNumber(metrics.resinDensityGPerMl)} g/ml density` : "Whole build plate"} icon={PackageCheck} testId="metric-resin-mass" />
@@ -183,22 +213,64 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   );
 }
 
+const SLICE_LOG_MEMORY_KEY = "hubspot-print-slice-log-v1";
+const SLICE_LOG_MEMORY_MAX_CHARS = 2 * 1024 * 1024;
+
+function isSliceLogFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return name === "slice.log" || /^slice(?:-.*)?\.log$/.test(name);
+}
+
+function isPlateFile(file: File): boolean {
+  return /\.(ctb|ultx)$/i.test(file.name);
+}
+
+function readRememberedSliceLog(): { name: string; text: string } | null {
+  try {
+    const raw = sessionStorage.getItem(SLICE_LOG_MEMORY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { name?: string; text?: string };
+    if (!parsed?.text || !parsed?.name) return null;
+    return { name: parsed.name, text: parsed.text };
+  } catch {
+    return null;
+  }
+}
+
+function rememberSliceLog(name: string, text: string): void {
+  const clipped =
+    text.length > SLICE_LOG_MEMORY_MAX_CHARS ? text.slice(text.length - SLICE_LOG_MEMORY_MAX_CHARS) : text;
+  sessionStorage.setItem(SLICE_LOG_MEMORY_KEY, JSON.stringify({ name, text: clipped, savedAt: Date.now() }));
+}
+
 export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sliceLogInputRef = useRef<HTMLInputElement>(null);
+  const logsFolderInputRef = useRef<HTMLInputElement>(null);
+  /** ULTX waiting while the user re-picks Blueprint logs (AppData cannot auto-refresh). */
+  const pendingUltxRef = useRef<File | null>(null);
+  const awaitingLogsRefreshRef = useRef(false);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
-    successDescription: 'Attach CTB plates and seed cost estimates on open Print Orders.',
+    successDescription: 'Attach slice plates and seed cost estimates on open Print Orders.',
   });
   const [includeAttached, setIncludeAttached] = useState(true);
   const [staged, setStaged] = useState<StagedPrintFile | null>(null);
   const [dealId, setDealId] = useState(() => readHashQueryParam("dealId") ?? "");
   const [dragging, setDragging] = useState(false);
+  const [sliceLogName, setSliceLogName] = useState<string | null>(() => readRememberedSliceLog()?.name ?? null);
+  const [logsLink, setLogsLink] = useState<BlueprintLogsStatus>({ supported: true, ready: false });
+  const [linkingLogs, setLinkingLogs] = useState(false);
+  const [awaitingLogsRefresh, setAwaitingLogsRefresh] = useState(false);
+  const [attachPrinterId, setAttachPrinterId] = useState("");
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
+  const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
+  const [logsPathCopied, setLogsPathCopied] = useState(false);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -215,6 +287,16 @@ export default function Prints() {
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getLinkedBlueprintLogsStatus().then((status) => {
+      if (!cancelled) setLogsLink(status);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const prints = useQuery<PrintsResponse>({
@@ -295,36 +377,200 @@ export default function Prints() {
 
 
   const analyze = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
       const form = new FormData();
-      form.append("file", file);
+      if (isCtbFileName(file.name)) {
+        const { blob, fullFileSize } = ctbPrefixBlob(file);
+        form.append("file", blob, file.name);
+        form.append("mode", "ctb-prefix");
+        form.append("fullFileSize", String(fullFileSize));
+      } else {
+        form.append("file", file);
+      }
+      let appliedLog: File | null = sliceLog ?? null;
+      if (!appliedLog && /\.ultx$/i.test(file.name)) {
+        appliedLog = await buildSliceLogUploadFromLinkedFolder(file.name);
+        if (!appliedLog) {
+          const remembered = readRememberedSliceLog();
+          if (remembered) {
+            appliedLog = new File([remembered.text], remembered.name || "Slice.log", {
+              type: "text/plain",
+            });
+          }
+        } else {
+          // Keep a session copy so re-analyzes work even if folder permission lapses mid-session.
+          void appliedLog.text().then((text) => {
+            rememberSliceLog(appliedLog!.name, text);
+            setSliceLogName(appliedLog!.name);
+          });
+        }
+      }
+      if (appliedLog) form.append("sliceLog", appliedLog);
       const response = await apiRequest("POST", "/api/prints/analyze", form, { headers });
-      return (await response.json()) as { ok: true } & StagedPrintFile;
+      return (await response.json()) as {
+        ok: true;
+        sliceLogApplied?: boolean;
+        printerMatch?: PrinterMatchInfo;
+      } & StagedPrintFile;
     },
-    onSuccess: ({ analysisId, metrics, expiresAt }) => {
-      setStaged({ analysisId, metrics, expiresAt });
+    onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
+      setAnalyzeStatus("");
+      setStaged({ analysisId, metrics, expiresAt, printerMatch });
+      if (printerMatch?.requiresPrinterChoice) {
+        setAttachPrinterId("");
+      } else if (printerMatch?.matchedPrinterId) {
+        setAttachPrinterId(String(printerMatch.matchedPrinterId));
+      } else {
+        setAttachPrinterId("");
+      }
+      const fromLog = /estimates from slice\.log/i.test(metrics.formatRevision || "");
       toast({
-        title: "Plate data extracted",
-        description: "Choose the matching Print Order, then attach the production plan.",
+        title: fromLog || sliceLogApplied ? "Plate data extracted from Slice.log" : "Plate data extracted",
+        description: printerMatch?.requiresPrinterChoice
+          ? "Chitubox only reported a shared model name — choose which physical printer ran this plate before attaching."
+          : fromLog
+            ? "Time and resin came from the Blueprint Slice.log. Choose the matching Print Order, then attach."
+            : "Choose the matching Print Order, then attach the production plan.",
       });
     },
     onError: (error: Error) => {
       setStaged(null);
+      setAnalyzeStatus("");
+      const { status, message } = parseApiError(error);
+      const description =
+        /upstream|bad gateway|gateway timeout|networkerror|failed to fetch/i.test(message) ||
+        status === 502 ||
+        status === 504
+          ? "The host proxy timed out before the plate finished uploading. Retry — Mega 8K CTBs now send only a small header sample."
+          : message.slice(0, 220);
       toast({
         title: "That slice file could not be analyzed",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        description,
         variant: "destructive",
       });
     },
   });
 
+  const finishPendingUltxAnalyze = () => {
+    const pending = pendingUltxRef.current;
+    pendingUltxRef.current = null;
+    awaitingLogsRefreshRef.current = false;
+    setAwaitingLogsRefresh(false);
+    if (pending) {
+      setStaged(null);
+      analyze.mutate({ file: pending, sliceLog: null });
+    }
+  };
+
+  const importLogsFolder = async (fileList: ArrayLike<File> | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const hadPendingUltx = Boolean(pendingUltxRef.current && awaitingLogsRefreshRef.current);
+    // Claim the pending ULTX immediately so the cancel/focus timeout cannot race.
+    if (hadPendingUltx) {
+      awaitingLogsRefreshRef.current = false;
+      setAwaitingLogsRefresh(false);
+    }
+    setLinkingLogs(true);
+    try {
+      const cache = await importBlueprintLogsFromFileList(fileList);
+      setLogsLink({
+        supported: true,
+        ready: true,
+        source: "import",
+        name: cache.rootLabel,
+        fileCount: cache.candidates.length,
+        importedAt: cache.importedAt,
+      });
+      if (hadPendingUltx) {
+        toast({
+          title: "Logs refreshed",
+          description: `Cached ${cache.candidates.length} Slice.log file(s). Analyzing the plate…`,
+        });
+        finishPendingUltxAnalyze();
+      } else {
+        toast({
+          title: "Blueprint logs refreshed",
+          description: `Cached ${cache.candidates.length} Slice.log file(s) from “${cache.rootLabel}”. Drop a .ultx when ready.`,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Logs were not imported";
+      toast({
+        title: "Could not refresh Blueprint logs",
+        description: message.slice(0, 240),
+        variant: "destructive",
+      });
+      // Still analyze the waiting plate with whatever cache we already have.
+      if (hadPendingUltx) finishPendingUltxAnalyze();
+    } finally {
+      setLinkingLogs(false);
+    }
+  };
+
+  /** AppData imports are snapshots — ask for a fresh folder pick before each .ultx when possible. */
+  const promptLogsRefreshThenAnalyze = (plate: File, sliceLog: File | null) => {
+    if (sliceLog || !/\.ultx$/i.test(plate.name)) {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog });
+      return;
+    }
+    // Live directory handles re-read on analyze; no picker needed.
+    if (logsLink.ready && logsLink.source === "directory") {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog: null });
+      return;
+    }
+
+    const input = logsFolderInputRef.current;
+    if (!input) {
+      setStaged(null);
+      analyze.mutate({ file: plate, sliceLog: null });
+      return;
+    }
+
+    pendingUltxRef.current = plate;
+    awaitingLogsRefreshRef.current = true;
+    setAwaitingLogsRefresh(true);
+    toast({
+      title: "Refresh Blueprint logs",
+      description: "Select Blueprint Studio\\logs again for the latest Slice.log. Cancel to use the last import.",
+    });
+
+    const onWindowFocus = () => {
+      window.removeEventListener("focus", onWindowFocus);
+      window.setTimeout(() => {
+        if (!awaitingLogsRefreshRef.current) return;
+        // Folder picker was cancelled — continue with the existing cache.
+        finishPendingUltxAnalyze();
+      }, 400);
+    };
+    window.addEventListener("focus", onWindowFocus);
+    input.click();
+  };
+
+  const openLogsRefreshPicker = () => {
+    logsFolderInputRef.current?.click();
+  };
+
   const attach = useMutation({
     mutationFn: async () => {
       if (!staged) throw new Error("Analyze a CTB file before attaching it");
+      const needsPrinter =
+        staged.printerMatch?.requiresPrinterChoice ||
+        (!staged.printerMatch?.matchedPrinterId && !attachPrinterId);
+      if (needsPrinter && !attachPrinterId) {
+        throw new Error(
+          "Choose which physical printer ran this plate (Chitubox did not embed NEWX1/NEWX2/NEWX3).",
+        );
+      }
       const response = await apiRequest(
         "POST",
         "/api/prints/attach",
-        { analysisId: staged.analysisId, dealId },
+        {
+          analysisId: staged.analysisId,
+          dealId,
+          ...(attachPrinterId ? { printerId: Number(attachPrinterId) } : {}),
+        },
         { headers },
       );
       return (await response.json()) as {
@@ -336,9 +582,11 @@ export default function Prints() {
     },
     onSuccess: ({ summary, message }) => {
       setStaged(null);
+      setAttachPrinterId("");
       setIncludeAttached(true);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
       toast({
         title: `Plate ${summary.plateCount} attached`,
         description: `${message} Running time: ${formatHours(summary.totalPrintTimeSeconds)}.`,
@@ -353,20 +601,93 @@ export default function Prints() {
     },
   });
 
-  const acceptFile = (file: File | undefined) => {
-    if (!file) return;
-    setStaged(null);
-    analyze.mutate(file);
+  const saveSliceLogFile = async (file: File) => {
+    const text = await file.text();
+    if (!text.trim()) {
+      toast({
+        title: "Slice.log was empty",
+        description: "Pick the Blueprint project Slice.log that contains Output lines for this plate.",
+        variant: "destructive",
+      });
+      return;
+    }
+    rememberSliceLog(file.name, text);
+    setSliceLogName(file.name);
+    // Also merge into the import cache so later plates can match other logs.
+    try {
+      const cache = await importBlueprintLogsFromFileList([file], { merge: true });
+      setLogsLink({
+        supported: true,
+        ready: true,
+        source: "import",
+        name: cache.rootLabel,
+        fileCount: cache.candidates.length,
+        importedAt: cache.importedAt,
+      });
+    } catch {
+      /* session memory still works */
+    }
+    toast({
+      title: "Slice.log ready",
+      description: "It will be applied automatically the next time you analyze a .ultx plate.",
+    });
+  };
+
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
+
+  const acceptFiles = async (incoming: FileList | File[] | null | undefined) => {
+    const files = incoming ? Array.from(incoming) : [];
+    if (!files.length) return;
+
+    const plate = files.find(isPlateFile);
+    const sliceLogs = files.filter(isSliceLogFile);
+    const folderDrop = files.some((file) => (file.webkitRelativePath || "").includes("/"));
+
+    // Explorer drag of Blueprint logs (or a multi-log drop) — Chrome allows this even for AppData.
+    if (!plate && (folderDrop || sliceLogs.length > 1)) {
+      await importLogsFolder(files as unknown as FileList);
+      return;
+    }
+
+    if (sliceLogs[0]) {
+      await saveSliceLogFile(sliceLogs[0]);
+    }
+
+    if (!plate) {
+      if (!sliceLogs.length) {
+        toast({
+          title: "Unrecognized file",
+          description: "Drop a .ctb / .ultx plate, a Blueprint Slice.log, or the whole logs folder from Explorer.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
+    setAnalyzeStatus(isCtbFileName(plate.name) ? describeCtbUploadPlan(plate) : "Reading slice data…");
+    promptLogsRefreshThenAnalyze(plate, sliceLogs[0] ?? null);
   };
 
   const candidates = prints.data?.candidates ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
 
+  const plateHistoryRecords = useMemo(() => {
+    const records = prints.data?.records ?? [];
+    if (!dealId || showAllPlateHistory) return records;
+    return records.filter((record) => record.hubspotDealId === dealId);
+  }, [prints.data?.records, dealId, showAllPlateHistory]);
+
+  const hiddenOtherDealCount = useMemo(() => {
+    const records = prints.data?.records ?? [];
+    if (!dealId || showAllPlateHistory) return 0;
+    return records.filter((record) => record.hubspotDealId !== dealId).length;
+  }, [prints.data?.records, dealId, showAllPlateHistory]);
+
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Print information"
-        subtitle="Turn a sliced Chitubox plate into production metrics on the correct Print Order."
+        title="Prints"
+        subtitle="Analyze a .ctb / .ultx plate, attach metrics to a Print Order, then track part QC."
         actions={
           <>
             {ownerCode ? (
@@ -491,18 +812,59 @@ export default function Prints() {
             </Panel>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-              <Panel title="1. Analyze one sliced plate" description="Drag in a Chitubox .ctb or HeyGears .ultx file. The raw file is read in memory and then discarded.">
+              <Panel
+                title="1. Analyze one sliced plate"
+                description="Drop a .ctb/.ultx plate. For HeyGears: drag Blueprint Studio\\logs from File Explorer onto this page (Chrome blocks AppData folder pickers)."
+              >
                 <input
                   ref={fileInputRef}
                   id="print-file-input"
                   type="file"
-                  accept=".ctb,.ultx,application/octet-stream"
+                  multiple
+                  accept=".ctb,.ultx,.log,application/octet-stream,text/plain"
                   className="sr-only"
                   onChange={(event) => {
-                    acceptFile(event.target.files?.[0]);
+                    void acceptFiles(event.target.files);
                     event.currentTarget.value = "";
                   }}
                   data-testid="input-print-file"
+                />
+                <input
+                  ref={sliceLogInputRef}
+                  id="slice-log-input"
+                  type="file"
+                  multiple
+                  accept=".log,text/plain"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const picked = event.target.files;
+                    if (!picked?.length) return;
+                    if (picked.length === 1) {
+                      void saveSliceLogFile(picked[0]!);
+                    } else {
+                      void importLogsFolder(picked);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                  data-testid="input-slice-log"
+                />
+                <input
+                  ref={(element) => {
+                    logsFolderInputRef.current = element;
+                    if (element) {
+                      element.setAttribute("webkitdirectory", "");
+                      element.setAttribute("directory", "");
+                    }
+                  }}
+                  id="blueprint-logs-folder-input"
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => {
+                    void importLogsFolder(event.target.files);
+                    event.currentTarget.value = "";
+                  }}
+                  data-testid="input-blueprint-logs-folder"
                 />
                 <button
                   type="button"
@@ -516,7 +878,7 @@ export default function Prints() {
                   onDrop={(event) => {
                     event.preventDefault();
                     setDragging(false);
-                    acceptFile(event.dataTransfer.files?.[0]);
+                    void acceptFiles(event.dataTransfer.files);
                   }}
                   className={`flex min-h-40 w-full flex-col items-center justify-center rounded-md border border-dashed px-5 text-center transition-colors ${
                     dragging ? "border-primary bg-primary/10" : "border-border bg-muted/35 hover:bg-muted/60"
@@ -529,23 +891,182 @@ export default function Prints() {
                     <FileUp className="h-5 w-5 text-primary" />
                   )}
                   <span className="mt-3 text-sm font-medium">
-                    {analyze.isPending ? "Reading slice data…" : "Drop a .ctb or .ultx file here"}
+                    {awaitingLogsRefresh || linkingLogs
+                      ? "Refreshing Blueprint logs…"
+                      : analyze.isPending
+                        ? analyzeStatus || "Reading slice data…"
+                        : logsLink.ready
+                          ? "Drop a .ultx plate — you’ll be asked to refresh logs first"
+                          : "Drop a .ctb / .ultx plate, or drag the Blueprint logs folder here"}
                   </span>
                   <span className="mt-1 text-xs text-muted-foreground">
-                    Extracts time, resin use, cost estimate, exposure, and printer/machine name for fleet tracking. Mega 8K plates can be large; only header data is read. HeyGears ULTX uses a best-effort reader.
+                    Layer count comes from the ULTX archive. Time and resin come from Slice.log. Large Mega 8K CTBs
+                    send only a ~2 MB header sample (full plate never hits the proxy). Dropping a .ultx prompts a logs
+                    refresh (Chrome can’t watch AppData). Or drag{" "}
+                    <span className="font-medium text-foreground">Blueprint Studio\logs</span> from Explorer anytime.
                   </span>
                 </button>
-                <Button
-                  className="mt-3"
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={analyze.isPending}
-                  data-testid="button-browse-print-file"
+                <div
+                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+                  data-testid="status-blueprint-logs-link"
                 >
-                  <FilePlus2 className="mr-2 h-4 w-4" />
-                  Browse for a slice file
-                </Button>
+                  <span className="text-muted-foreground">
+                    {logsLink.ready && logsLink.source === "import" ? (
+                      <>
+                        Imported logs:{" "}
+                        <span className="font-medium text-foreground">{logsLink.name}</span>
+                        {" · "}
+                        {logsLink.fileCount} Slice.log
+                        {" · "}
+                        {new Date(logsLink.importedAt).toLocaleString()}
+                      </>
+                    ) : logsLink.ready && logsLink.source === "directory" ? (
+                      <>
+                        Linked logs folder:{" "}
+                        <span className="font-medium text-foreground">{logsLink.name}</span>
+                        {" · live on each analyze"}
+                      </>
+                    ) : (
+                      <>
+                        Drag the Blueprint logs folder from Explorer onto the drop zone (or use Refresh logs).
+                      </>
+                    )}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      disabled={linkingLogs || analyze.isPending}
+                      onClick={() => openLogsRefreshPicker()}
+                      data-testid="button-import-blueprint-logs"
+                    >
+                      {linkingLogs ? "Refreshing…" : logsLink.ready ? "Refresh logs" : "Import logs"}
+                    </button>
+                    {logsLink.ready ? (
+                      <button
+                        type="button"
+                        className="text-muted-foreground underline-offset-2 hover:underline"
+                        disabled={linkingLogs || analyze.isPending}
+                        onClick={() => {
+                          void unlinkBlueprintLogsDirectory().then(() => {
+                            setLogsLink({ supported: true, ready: false });
+                            toast({
+                              title: "Blueprint logs cleared",
+                              description: "ULTX analyzes will need a fresh import or a manual Slice.log.",
+                            });
+                          });
+                        }}
+                        data-testid="button-unlink-blueprint-logs"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div
+                  className="mt-2 rounded-md border border-border bg-card px-3 py-2.5"
+                  data-testid="panel-blueprint-logs-path"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="rule-label">HeyGears / ULTX logs folder</p>
+                      <p className="mt-1 break-all font-mono text-xs font-medium text-foreground" data-testid="text-blueprint-logs-path">
+                        {BLUEPRINT_STUDIO_LOGS_ENV_PATH}
+                      </p>
+                      <p className="mt-1 text-[0.6875rem] leading-4 text-muted-foreground">
+                        Paste into Explorer or Win+R. Usually expands to{" "}
+                        <span className="font-mono text-foreground/80">{BLUEPRINT_STUDIO_LOGS_EXAMPLE_PATH}</span>
+                        . Drag that folder here after each slice so time/resin can fill from Slice.log.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            await navigator.clipboard.writeText(BLUEPRINT_STUDIO_LOGS_ENV_PATH);
+                            setLogsPathCopied(true);
+                            window.setTimeout(() => setLogsPathCopied(false), 2000);
+                            toast({
+                              title: "Logs path copied",
+                              description: "Paste it into File Explorer’s address bar.",
+                            });
+                          } catch {
+                            toast({
+                              title: "Copy was blocked",
+                              description: `Select and copy: ${BLUEPRINT_STUDIO_LOGS_ENV_PATH}`,
+                              variant: "destructive",
+                            });
+                          }
+                        })();
+                      }}
+                      data-testid="button-copy-blueprint-logs-path"
+                    >
+                      {logsPathCopied ? (
+                        <Check className="mr-1.5 h-3.5 w-3.5" />
+                      ) : (
+                        <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {logsPathCopied ? "Copied" : "Copy path"}
+                    </Button>
+                  </div>
+                </div>
+                {sliceLogName ? (
+                  <div
+                    className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+                    data-testid="status-slice-log-ready"
+                  >
+                    <span className="text-muted-foreground">
+                      Slice.log ready: <span className="font-medium text-foreground">{sliceLogName}</span> (auto-applied to .ultx)
+                    </span>
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      onClick={() => {
+                        sessionStorage.removeItem(SLICE_LOG_MEMORY_KEY);
+                        setSliceLogName(null);
+                      }}
+                      data-testid="button-clear-slice-log"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={analyze.isPending}
+                    data-testid="button-browse-print-file"
+                  >
+                    <FilePlus2 className="mr-2 h-4 w-4" />
+                    Browse for a plate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => openLogsRefreshPicker()}
+                    disabled={analyze.isPending || linkingLogs}
+                    data-testid="button-import-blueprint-logs-outline"
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    {linkingLogs ? "Refreshing…" : logsLink.ready ? "Refresh logs" : "Import logs"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => sliceLogInputRef.current?.click()}
+                    disabled={analyze.isPending}
+                    data-testid="button-browse-slice-log"
+                  >
+                    <FileUp className="mr-2 h-4 w-4" />
+                    {sliceLogName ? "Replace Slice.log" : "Add Slice.log"}
+                  </Button>
+                </div>
               </Panel>
 
               <Panel title="2. Choose the Print Order" description="Only active orders without a local plate record are listed by default.">
@@ -603,21 +1124,73 @@ export default function Prints() {
                       Analysis expires at {localDate(staged.expiresAt)}. Verify the plate belongs to the selected order before attaching it.
                     </p>
                   </div>
-                  <StatusPill tone="good" icon={CheckCircle2} label="CTB analyzed" testId="status-ctb-analyzed" />
+                  <StatusPill
+                    tone="good"
+                    icon={CheckCircle2}
+                    label={staged.metrics.format === "ULTX" ? "ULTX analyzed" : "CTB analyzed"}
+                    testId="status-ctb-analyzed"
+                  />
                 </div>
-                {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ? (
+                {staged.metrics.formatRevision.toLowerCase().includes("encrypted") ||
+                staged.metrics.formatRevision.toLowerCase().includes("decrypted") ||
+                staged.metrics.formatRevision.toLowerCase().includes("sealed") ||
+                staged.metrics.formatRevision.toLowerCase().includes("slice.log") ? (
                   <p className="text-xs leading-5 text-muted-foreground" data-testid="text-encrypted-ctb-note">
-                    Encrypted Chitubox settings were decrypted in memory for this plate ({staged.metrics.formatRevision}).
+                    {staged.metrics.formatRevision.toLowerCase().includes("estimates from slice.log")
+                      ? `Filled time/resin from Blueprint Slice.log (${staged.metrics.formatRevision}).`
+                      : staged.metrics.formatRevision.toLowerCase().includes("sealed")
+                        ? `HeyGears metadata is still sealed in this ULTX (${staged.metrics.formatRevision}). Drop the matching Blueprint Slice.log above (or with the plate) — it is remembered for later .ultx uploads in this session.`
+                        : `Encrypted slice settings were handled in memory for this plate (${staged.metrics.formatRevision}).`}
                   </p>
                 ) : null}
                 <FileMetrics metrics={staged.metrics} />
+                {staged.printerMatch ? (
+                  <div
+                    className="space-y-2 rounded-lg border border-border bg-muted/30 p-4"
+                    data-testid="panel-attach-printer"
+                  >
+                    <Label htmlFor="attach-printer-select">Which printer ran this plate?</Label>
+                    <select
+                      id="attach-printer-select"
+                      value={attachPrinterId}
+                      onChange={(event) => setAttachPrinterId(event.target.value)}
+                      className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      data-testid="select-attach-printer"
+                    >
+                      <option value="">
+                        {staged.printerMatch.requiresPrinterChoice
+                          ? "Choose NEWX1 / NEWX2 / NEWX3 / …"
+                          : "Use auto-matched printer"}
+                      </option>
+                      {staged.printerMatch.printers.map((printer) => (
+                        <option key={printer.id} value={String(printer.id)}>
+                          {printer.name}
+                          {staged.printerMatch?.matchedPrinterId === printer.id ? " · matched" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Slicer reported{" "}
+                      <span className="font-medium text-foreground">
+                        {staged.printerMatch.slicerProfile || "no machine name"}
+                      </span>
+                      . Chitubox often writes only the model (Mighty 8K), not your custom NEWX names — pick the
+                      physical unit so Printers hours stay accurate. Tip: rename each machine in Chitubox to include
+                      NEWX1 / NEWX2 / NEWX3 so future plates auto-match.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="flex flex-col justify-between gap-3 rounded-lg border border-card-border bg-card p-4 sm:flex-row sm:items-center">
                   <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
                     These figures describe the complete build plate. Do not use them as the order’s actual material cost when a plate contains more than one customer’s work.
                   </p>
                   <Button
                     onClick={() => attach.mutate()}
-                    disabled={!dealId || attach.isPending}
+                    disabled={
+                      !dealId ||
+                      attach.isPending ||
+                      Boolean(staged.printerMatch?.requiresPrinterChoice && !attachPrinterId)
+                    }
                     data-testid="button-attach-print-file"
                   >
                     {attach.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PackageCheck className="mr-2 h-4 w-4" />}
@@ -637,55 +1210,96 @@ export default function Prints() {
 
             <Panel
               title="Recent plate history"
-              description="Local attach log for each plate. Order stage follows the live HubSpot Print Order as it moves."
+              description="Each attached slice file is a plate. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
             >
-              {prints.data.records.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-[54rem] text-left text-xs">
-                    <thead className="border-b border-border text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-2 font-medium">Print Order</th>
-                        <th className="px-2 py-2 font-medium">Plate file</th>
-                        <th className="px-2 py-2 font-medium">Time</th>
-                        <th className="px-2 py-2 font-medium">Resin</th>
-                        <th className="px-2 py-2 font-medium">Slicer cost</th>
-                        <th className="px-2 py-2 font-medium">Exposure</th>
-                        <th className="px-2 py-2 font-medium">Synced</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prints.data.records.map((record) => (
-                        <tr key={record.id} className="border-b border-border/70 last:border-b-0" data-testid={`row-print-record-${record.id}`}>
-                          <td className="px-2 py-3">
-                            <p className="font-medium">{record.hubspotDealName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{record.dealStage}</p>
-                          </td>
-                          <td className="max-w-56 px-2 py-3">
-                            <p className="truncate font-medium" title={record.fileName}>{record.fileName}</p>
-                            <p className="mt-0.5 text-muted-foreground">{fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}</p>
-                          </td>
-                          <td className="px-2 py-3 numeric">{formatHours(record.printTimeSeconds)}</td>
-                          <td className="px-2 py-3 numeric">{formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}</td>
-                          <td className="px-2 py-3 numeric">{formatMoney(record.resinCost)}</td>
-                          <td className="px-2 py-3 numeric">
-                            {formatNumber(record.exposureSeconds, " s")}
-                            {record.bottomExposureSeconds ? ` / ${formatNumber(record.bottomExposureSeconds, " s bot")}` : ""}
-                          </td>
-                          <td className="px-2 py-3">
-                            <p className="font-medium text-chart-4">HubSpot synced</p>
-                            <p className="mt-0.5 text-muted-foreground">{localDate(record.hubspotSyncedAt)}</p>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {dealId && (hiddenOtherDealCount > 0 || showAllPlateHistory) ? (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {showAllPlateHistory
+                      ? "Showing plates for every order."
+                      : `Showing plates for the selected order${selected ? ` · ${selected.dealName}` : ""}.`}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => setShowAllPlateHistory((value) => !value)}
+                    data-testid="button-toggle-all-plate-history"
+                  >
+                    {showAllPlateHistory
+                      ? "Show selected order only"
+                      : `Show all orders (${hiddenOtherDealCount} more)`}
+                  </Button>
+                </div>
+              ) : null}
+              {plateHistoryRecords.length ? (
+                <div className="space-y-3" data-testid="list-print-records">
+                  {plateHistoryRecords.map((record) => (
+                    <article
+                      key={record.id}
+                      className="rounded-md border border-card-border bg-card p-4"
+                      data-testid={`row-print-record-${record.id}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold tracking-tight">{record.hubspotDealName}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{record.dealStage}</p>
+                          <p className="mt-2 truncate text-sm font-medium" title={record.fileName}>
+                            {record.fileName}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                          <div>
+                            <p className="text-muted-foreground">Time</p>
+                            <p className="numeric font-medium">{formatHours(record.printTimeSeconds)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Resin</p>
+                            <p className="numeric font-medium">
+                              {formatNumber(record.resinVolumeMl, " ml")} · {formatNumber(record.resinMassG, " g")}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Slicer cost</p>
+                            <p className="numeric font-medium">{formatMoney(record.resinCost)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Synced</p>
+                            <p className="font-medium text-chart-4">{localDate(record.hubspotSyncedAt)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <PlateBitsPanel
+                        recordId={record.id}
+                        bits={record.bits ?? []}
+                        bitSummary={
+                          record.bitSummary ?? { total: 0, onPlate: 0, good: 0, reprint: 0 }
+                        }
+                        headers={headers}
+                        onChanged={() => {
+                          queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+                          queryClient.invalidateQueries({ queryKey: ["/api/order-parts/summaries"] });
+                        }}
+                      />
+                    </article>
+                  ))}
                 </div>
               ) : (
                 <div className="py-7 text-center">
                   <Layers3 className="mx-auto h-5 w-5 text-muted-foreground" />
-                  <p className="mt-2 text-sm font-medium">No plates attached yet</p>
+                  <p className="mt-2 text-sm font-medium">
+                    {dealId && (prints.data?.records.length ?? 0) > 0
+                      ? "No plates on the selected order"
+                      : "No plates attached yet"}
+                  </p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                    Your first completed attachment will create the plate history and running totals for that Print Order.
+                    {dealId && (prints.data?.records.length ?? 0) > 0
+                      ? "Attach a plate to this order, or show all orders to QC another deal’s plates."
+                      : "Attach a plate first. Then drop the .stl parts that were on that plate to track QC and preview meshes."}
                   </p>
                 </div>
               )}

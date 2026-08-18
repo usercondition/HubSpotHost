@@ -44,9 +44,9 @@ Do not enable both live-write environment settings until a test deal produces th
 1. Agree the order in Marketplace and take payment.
 2. Open **Order links**, unlock owner tools with the access code, and create a link: agreed item, amount paid, optional payment method/reference, optional buyer name or username, expiry (14 days by default), optional private notes. The app automatically creates an internal reference such as `PO-20260803-000123`.
 3. Press **Copy link** and paste the link into the Marketplace conversation. The link is shown once, right after creation.
-4. The buyer opens `/#/order-form/<token>` and fills in a short form: name, Marketplace username, email, phone, ship-or-pickup, shipping address, item confirmation (pre-filled and editable), quantity, notes, and a checkbox confirming they already paid. The page states clearly that it collects details only, takes no payment, and does not place a final order. No internal cost or margin fields are shown. Legacy `/#/client-order/<token>` links still work.
+4. The buyer opens `/#/order-form/<token>` and fills in a short form: name, Marketplace username, email, phone, ship-or-pickup, shipping address, item confirmation (pre-filled and editable), quantity, notes, and a checkbox confirming they already paid. Returning buyers do not have to retype their address: entering the same email or Marketplace username fills last time’s contact and shipping so they can confirm or correct it. If you already entered their username on the link, those fields open filled. The page states clearly that it collects details only, takes no payment, and does not place a final order. No internal cost or margin fields are shown. Legacy `/#/client-order/<token>` links still work.
 5. The submission lands in the private **Review queue** as *Pending review*. Nothing is written to HubSpot at this point.
-6. Open **Review**, correct anything the buyer typed loosely, press **Save corrections**, then tick **I verified this payment cleared and the price is correct**. That unlocks **Create Contact and Print Order in HubSpot**, and a browser confirmation appears immediately before the write.
+6. Open **Review**, correct anything the buyer typed loosely, press **Save corrections**, then tick **I verified this payment cleared and the price is correct**. That unlocks **Create Contact and Print Order in HubSpot**, and a browser confirmation appears immediately before the write. If the submitted email or Marketplace username matches a previous intake, Review and the queue mark them as a returning buyer so you can see last order and shipping without looking it up.
 7. Approval reuses the same paid-order creation path: a Contact is created or reused by email, and one associated Deal is created in the **Print Orders** pipeline at **Deposit Received**. The stored HubSpot contact and deal IDs are shown, and the intake is locked as *Approved / created* so it cannot be created twice.
 
 Queue tabs: **Awaiting client details**, **Pending review**, **Approved / created**, **Expired**. You can expire any link manually. Only structured fields and short notes are stored — never a raw conversation.
@@ -109,7 +109,7 @@ This works well for a single service and keeps the current SQLite queue across r
 
 ### Durable production direction
 
-Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. The app can then use a returning customer's verified email or Marketplace username to prefill the next private order link, asking them to confirm rather than retype their shipping information. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.
+Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. Returning-buyer prefill already works from the local intake history: put their Marketplace username on the next private link and the form asks them to confirm last time’s shipping details. A dedicated customer table is still the longer-term home for that data. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.
 
 ## Manual Order Entry
 
@@ -269,7 +269,9 @@ Keep HubSpot as the CRM of record. Use Print Ops as the shop-floor control loop.
 | `POST /api/tracker-assistant` | Protected. Read-only ops briefing / Q&A over live Performance + intake. |
 | `POST /api/owner-digest/send` | Protected. Sends the live tracker briefing to Telegram immediately. |
 | `POST /api/cron/owner-digest` | Secured by `OWNER_DIGEST_CRON_SECRET`. Daily digest entrypoint (skips if already sent today unless `force: true`). |
-| `POST /api/client-order/lookup` | Public. Token in the body. Returns only client-safe agreed-order details. |
+| `GET /api/order-links/prior-client` | Protected. Looks up the last submitted intake for a Marketplace username and/or email. |
+| `POST /api/client-order/lookup` | Public. Token in the body. Returns only client-safe agreed-order details, plus saved contact/shipping when this is a returning buyer. |
+| `POST /api/client-order/saved-details` | Public. Token plus the email or username the buyer typed. Returns last contact/shipping or null. Never a directory search. |
 | `POST /api/client-order/submit` | Public. Writes the buyer's details to the local queue. Never calls HubSpot. |
 
 ## Production notes

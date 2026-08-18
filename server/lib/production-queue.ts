@@ -13,23 +13,11 @@ import { listFulfillmentChecklists } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
 import { getDb } from "./order-links";
-import { ensureDefaultPrinters, listPrinterProfileMaps, matchPrinterId } from "./printers";
+import { ensureDefaultPrinters, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
 
 function parseGrams(value: string | null | undefined): number {
   const n = Number(value ?? "");
   return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-function resolveAssignedPrinterId(
-  record: { assignedPrinterId: number | null; printerProfile: string | null },
-  fleetIds: Set<number>,
-  fleet: ReturnType<typeof ensureDefaultPrinters>,
-  maps: ReturnType<typeof listPrinterProfileMaps>,
-): number | null {
-  if (record.assignedPrinterId != null && fleetIds.has(record.assignedPrinterId)) {
-    return record.assignedPrinterId;
-  }
-  return matchPrinterId(record.printerProfile, fleet, maps);
 }
 
 function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): number {
@@ -61,7 +49,6 @@ function classifyBucket(item: Omit<ProductionQueueItem, "priorityScore" | "bucke
 
 export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQueueResponse {
   const fleet = ensureDefaultPrinters();
-  const fleetIds = new Set(fleet.map((printer) => printer.id));
   const maps = listPrinterProfileMaps();
   const printerName = new Map(fleet.map((printer) => [printer.id, printer.name]));
 
@@ -91,7 +78,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
     let unassignedPlateCount = 0;
     let totalPrintTimeSeconds = 0;
     for (const plate of dealPlates) {
-      const printerId = resolveAssignedPrinterId(plate, fleetIds, fleet, maps);
+      const printerId = resolvePrinterIdForRecord(plate, fleet, maps);
       if (printerId == null) unassignedPlateCount += 1;
       else if (!assignedIds.includes(printerId)) assignedIds.push(printerId);
       if (plate.printTimeSeconds && plate.printTimeSeconds > 0) totalPrintTimeSeconds += plate.printTimeSeconds;

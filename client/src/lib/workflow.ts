@@ -57,7 +57,7 @@ export function attentionNextStep(item: {
   external: boolean;
 } {
   const issue = item.issue.toLowerCase();
-  if (issue.includes("ctb") || issue.includes("plate")) {
+  if (issue.includes("ctb") || issue.includes("ultx") || issue.includes("slice") || issue.includes("plate")) {
     return {
       href: printsDealHref(item.dealId),
       label: "Attach plates",

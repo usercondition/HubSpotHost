@@ -6,6 +6,7 @@
  * the extracted values and source file fingerprint are retained in SQLite.
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { desc, eq } from "drizzle-orm";
 import {
   printFileAnalyses,
@@ -16,7 +17,7 @@ import {
   type PrintFileRecord,
 } from "../../shared/schema";
 import { getDb } from "./order-links";
-import { CtbParseError, parseCtbFile, parseCtbFileFromPath } from "./ctb";
+import { CtbParseError, parseCtbFile, parseCtbFileFromPath, parseCtbFileFromPrefix } from "./ctb";
 import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
@@ -63,37 +64,82 @@ function parseMetrics(value: string): PrintFileMetrics | null {
   }
 }
 
-function parseSliceBuffer(fileName: string, buffer: Buffer): PrintFileMetrics {
+export interface StagePrintFileOptions {
+  /** Blueprint Slice.log text — used for sealed HeyGears .ultx time/resin recovery. */
+  sliceLogText?: string | null;
+}
+
+function parseSliceBuffer(
+  fileName: string,
+  buffer: Buffer,
+  options?: StagePrintFileOptions,
+): PrintFileMetrics {
   const ext = extensionOf(fileName);
-  if (ext === "ultx") return parseUltxFile(fileName, buffer);
+  if (ext === "ultx") return parseUltxFile(fileName, buffer, { sliceLogText: options?.sliceLogText });
   if (ext === "ctb") return parseCtbFile(fileName, buffer);
   throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
 }
 
-function parseSlicePath(fileName: string, filePath: string): PrintFileMetrics {
+function parseSlicePath(
+  fileName: string,
+  filePath: string,
+  options?: StagePrintFileOptions,
+): PrintFileMetrics {
   const ext = extensionOf(fileName);
-  if (ext === "ultx") return parseUltxFileFromPath(fileName, filePath);
+  if (ext === "ultx") {
+    return parseUltxFileFromPath(fileName, filePath, { sliceLogText: options?.sliceLogText });
+  }
   if (ext === "ctb") return parseCtbFileFromPath(fileName, filePath);
   throw new CtbParseError("Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here");
 }
 
-export function stagePrintFile(fileName: string, buffer: Buffer): {
-  analysisId: string;
-  metrics: PrintFileMetrics;
-  expiresAt: string;
-} {
-  return stageParsedPrintFile(fileName, enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer)));
-}
-
-/** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
-export function stagePrintFileFromPath(fileName: string, filePath: string): {
+export function stagePrintFile(
+  fileName: string,
+  buffer: Buffer,
+  options?: StagePrintFileOptions,
+): {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
   return stageParsedPrintFile(
     fileName,
-    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath)),
+    enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options)),
+  );
+}
+
+/** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
+export function stagePrintFileFromPath(
+  fileName: string,
+  filePath: string,
+  options?: StagePrintFileOptions,
+): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
+  return stageParsedPrintFile(
+    fileName,
+    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options)),
+  );
+}
+
+/**
+ * Stage a CTB from a browser-sampled prefix. `fullFileSize` is the real plate
+ * size on the owner's machine (Mega 8K plates are often hundreds of MB).
+ */
+export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number): {
+  analysisId: string;
+  metrics: PrintFileMetrics;
+  expiresAt: string;
+} {
+  if (!/\.ctb$/i.test(fileName.trim())) {
+    throw new CtbParseError("Prefix sampling is only supported for Chitubox .ctb plates");
+  }
+  const prefix = fs.readFileSync(prefixPath);
+  return stageParsedPrintFile(
+    fileName,
+    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize)),
   );
 }
 
@@ -147,6 +193,8 @@ export function createPrintFileRecord(input: {
   hubspotDealName: string;
   dealStage: string;
   metrics: PrintFileMetrics;
+  /** Physical fleet printer override when the CTB only has a shared model name. */
+  fleetPrinterId?: number | null;
 }): PrintFileRecord {
   const { metrics } = input;
   const attachedAt = nowIso();
@@ -184,6 +232,7 @@ export function createPrintFileRecord(input: {
       resolutionX: metrics.resolutionX,
       resolutionY: metrics.resolutionY,
       printerProfile: metrics.printerProfile,
+      fleetPrinterId: input.fleetPrinterId ?? null,
       hubspotSyncedAt: attachedAt,
       attachedAt,
     })

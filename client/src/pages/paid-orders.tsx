@@ -34,7 +34,7 @@ import type {
   ReturningBuyerProfile,
 } from "@shared/schema";
 
-type LineDraft = { id: string; productName: string; amount: string };
+type LineDraft = { id: string; productName: string; amount: string; kind: "print" | "shipping" };
 
 type ContactDraft = Omit<PaidOrderDraft, "paymentConfirmed" | "productName" | "amount">;
 
@@ -56,6 +56,7 @@ function newLine(seed?: Partial<LineDraft>): LineDraft {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     productName: seed?.productName ?? "",
     amount: seed?.amount ?? "",
+    kind: seed?.kind ?? "print",
   };
 }
 
@@ -197,6 +198,7 @@ export default function PaidOrders() {
         .map((line) => ({
           productName: line.productName.trim(),
           amount: line.amount.trim(),
+          kind: line.kind,
         }))
         .filter((line) => line.productName.length > 0 || line.amount.length > 0);
 
@@ -289,10 +291,13 @@ export default function PaidOrders() {
       return;
     }
     const cleaned = lines.filter((line) => line.productName.trim() || line.amount.trim());
-    if (cleaned.length === 0 || cleaned.some((line) => !line.productName.trim() || !(parseAmount(line.amount) > 0))) {
+    if (
+      cleaned.length === 0 ||
+      cleaned.some((line) => !line.productName.trim() || !(parseAmount(line.amount) >= 0) || line.amount.trim() === "")
+    ) {
       toast({
         title: "Order items incomplete",
-        description: "Each item needs a description and an amount greater than zero.",
+        description: "Each item needs a description and an amount of zero or more (use $0 for gifts / tracking).",
         variant: "destructive",
       });
       return;
@@ -516,28 +521,46 @@ export default function PaidOrders() {
 
             <Panel
               title="Order items"
-              description="One HubSpot Print Order deal per item, all on the same Contact."
+              description="One HubSpot Print Order deal per item. Mark shipping lines so they never ask for plates."
               actions={
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setLines((current) => [...current, newLine()]);
-                    setCreated(null);
-                  }}
-                  data-testid="button-add-manual-line"
-                >
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Add item
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setLines((current) => [
+                        ...current,
+                        newLine({ productName: "Shipping", amount: "", kind: "shipping" }),
+                      ]);
+                      setCreated(null);
+                    }}
+                    data-testid="button-add-manual-shipping"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add shipping
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setLines((current) => [...current, newLine()]);
+                      setCreated(null);
+                    }}
+                    data-testid="button-add-manual-line"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add item
+                  </Button>
+                </div>
               }
             >
               <div className="space-y-3">
                 {lines.map((line, index) => (
                   <div
                     key={line.id}
-                    className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_8rem_auto]"
+                    className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_8rem_9rem_auto]"
                     data-testid={`row-manual-line-${index}`}
                   >
                     <div className="space-y-1.5">
@@ -549,7 +572,7 @@ export default function PaidOrders() {
                         id={`line-product-${line.id}`}
                         value={line.productName}
                         onChange={(event) => updateLine(line.id, { productName: event.target.value })}
-                        placeholder="Model or order description"
+                        placeholder={line.kind === "shipping" ? "Shipping" : "Model or order description"}
                         data-testid={`input-line-product-${index}`}
                       />
                     </div>
@@ -566,6 +589,23 @@ export default function PaidOrders() {
                         placeholder="0.00"
                         data-testid={`input-line-amount-${index}`}
                       />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`line-kind-${line.id}`}>Type</Label>
+                      <select
+                        id={`line-kind-${line.id}`}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                        value={line.kind}
+                        onChange={(event) =>
+                          updateLine(line.id, {
+                            kind: event.target.value === "shipping" ? "shipping" : "print",
+                          })
+                        }
+                        data-testid={`select-line-kind-${index}`}
+                      >
+                        <option value="print">Print item</option>
+                        <option value="shipping">Shipping (no plates)</option>
+                      </select>
                     </div>
                     <div className="flex items-end">
                       <Button
@@ -589,6 +629,9 @@ export default function PaidOrders() {
                   <span className="text-muted-foreground">
                     {lines.length} item{lines.length === 1 ? "" : "s"} · {lines.length} HubSpot deal
                     {lines.length === 1 ? "" : "s"}
+                    {lines.some((line) => line.kind === "shipping")
+                      ? " · shipping lines skip plate prompts"
+                      : ""}
                   </span>
                   <span className="numeric font-semibold" data-testid="text-manual-line-total">
                     {formatMoney(lineTotal)}
@@ -618,7 +661,7 @@ export default function PaidOrders() {
                 <span>
                   <span className="block text-sm font-medium">Payment has been confirmed</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Only check this after you verified the customer’s payment cleared.
+                    Check this after payment cleared — or for a $0 gift / tracking order you are ready to create.
                   </span>
                 </span>
               </label>

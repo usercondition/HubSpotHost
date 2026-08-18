@@ -385,7 +385,7 @@ function UnassignedProfilesPanel({
   return (
     <Panel
       title="Unassigned plate profiles"
-      description="These CTB/ULTX machine names did not match automatically. Assign each one to a fleet printer — historical and future plates with that label will count toward it."
+      description="These slicer machine names did not match automatically. Unique labels (e.g. MEGA nicknames) become a lasting map. Shared model names like Mighty 8K only stamp existing plates — use per-plate assign below when NEWX1/2/3 all use the same Chitubox profile."
     >
       <ul className="space-y-3 text-sm" data-testid="list-unassigned-profiles">
         {profiles.map((profile) => {
@@ -430,6 +430,108 @@ function UnassignedProfilesPanel({
                 >
                   {busy ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
                   Assign
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
+  );
+}
+
+function UnassignedPlatesPanel({
+  jobs,
+  printers,
+  headers,
+  onAssigned,
+}: {
+  jobs: PrinterUsageBreakdown["recentJobs"];
+  printers: PrinterUsageBreakdown[];
+  headers: Record<string, string>;
+  onAssigned: () => void;
+}) {
+  const { toast } = useToast();
+  const [pendingId, setPendingId] = useState<number | null>(null);
+  const [choices, setChoices] = useState<Record<number, string>>({});
+
+  const assign = useMutation({
+    mutationFn: async ({ recordId, printerId }: { recordId: number; printerId: number }) => {
+      setPendingId(recordId);
+      const response = await apiRequest(
+        "POST",
+        "/api/printers/assign-plate",
+        { recordId, printerId },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; message: string };
+    },
+    onSuccess: (data) => {
+      setPendingId(null);
+      onAssigned();
+      toast({ title: "Plate assigned", description: data.message });
+    },
+    onError: (error: Error) => {
+      setPendingId(null);
+      toast({
+        title: "Could not assign plate",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 220),
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!jobs.length) return null;
+
+  return (
+    <Panel
+      title="Unassigned plates"
+      description="Assign each plate to the physical machine that printed it. Use this when Chitubox only saved Mighty 8K / Phrozen Sonic Mighty 8K instead of NEWX1, NEWX2, or NEWX3."
+    >
+      <ul className="space-y-3 text-sm" data-testid="list-unassigned-plates">
+        {jobs.map((job) => {
+          const selected = choices[job.recordId] ?? "";
+          const busy = pendingId === job.recordId && assign.isPending;
+          return (
+            <li
+              key={job.recordId}
+              className="flex flex-col gap-2 border-b border-border/60 pb-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
+              data-testid={`row-unassigned-plate-${job.recordId}`}
+            >
+              <div className="min-w-0">
+                <p className="font-medium">{job.dealName}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {job.fileName} · {job.printerProfile || "No machine name"} ·{" "}
+                  {formatHours((job.printTimeSeconds ?? 0) / 3_600)} · {localDate(job.attachedAt)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={selected}
+                  onChange={(event) =>
+                    setChoices((current) => ({ ...current, [job.recordId]: event.target.value }))
+                  }
+                  className="flex h-9 min-w-[12rem] rounded-md border border-input bg-background px-2 text-xs"
+                  data-testid={`select-assign-plate-${job.recordId}`}
+                >
+                  <option value="">Assign to printer…</option>
+                  {printers.map((printer) => (
+                    <option key={printer.printerId} value={String(printer.printerId)}>
+                      {printer.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!selected || busy}
+                  onClick={() =>
+                    assign.mutate({ recordId: job.recordId, printerId: Number(selected) })
+                  }
+                  data-testid={`button-assign-plate-${job.recordId}`}
+                >
+                  {busy ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  Assign plate
                 </Button>
               </div>
             </li>
@@ -575,12 +677,20 @@ export default function PrintersPage() {
             </div>
 
             {fleet.data.unassigned.plateCount > 0 ? (
-              <UnassignedProfilesPanel
-                profiles={fleet.data.unassigned.profiles}
-                printers={printers}
-                headers={headers}
-                onAssigned={() => queryClient.invalidateQueries({ queryKey: ["/api/printers"] })}
-              />
+              <>
+                <UnassignedPlatesPanel
+                  jobs={fleet.data.unassigned.recentJobs}
+                  printers={printers}
+                  headers={headers}
+                  onAssigned={() => queryClient.invalidateQueries({ queryKey: ["/api/printers"] })}
+                />
+                <UnassignedProfilesPanel
+                  profiles={fleet.data.unassigned.profiles}
+                  printers={printers}
+                  headers={headers}
+                  onAssigned={() => queryClient.invalidateQueries({ queryKey: ["/api/printers"] })}
+                />
+              </>
             ) : null}
           </>
         )}

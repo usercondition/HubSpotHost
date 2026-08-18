@@ -252,7 +252,12 @@ export default function Supplies() {
         lineItems,
       });
       toast({
-        title: lineItems.length > 1 ? "Receipt item breakdown filled in" : "Receipt fields filled in",
+        title:
+          lineItems.length === 0
+            ? "Receipt partially filled in"
+            : lineItems.length > 1
+              ? "Receipt item breakdown filled in"
+              : "Receipt fields filled in",
         description:
           warnings.length > 0
             ? `${warnings[0]} Review the form before saving.`

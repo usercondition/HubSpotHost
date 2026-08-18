@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileUp,
   Loader2,
+  Package,
   RefreshCw,
   Store,
   UserRound,
@@ -15,11 +16,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { hubspotDealHref, hubspotDealsListHref, kitsDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
+import { hubspotDealHref, hubspotDealsListHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsPanel } from "@/components/deal-ops-panel";
-import { StatusPill } from "@/components/primitives";
+import {
+  OrderPartsDialog,
+  formatPartsBadge,
+  type OrderPartSummary,
+} from "@/components/order-parts-dialog";
 import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -28,6 +33,11 @@ type BoardDeal = PerformanceResponse["activeDeals"][number] & {
   needsCosts: boolean;
   needsPlates: boolean;
   alerts: PerformanceResponse["attention"];
+};
+
+type BoardColumn = PerformanceResponse["pipeline"][number] & {
+  deals: BoardDeal[];
+  totalAmount: number;
 };
 
 /**
@@ -41,7 +51,9 @@ export default function DealsPage() {
     successDescription: "Live HubSpot stages and open print jobs, without leaving Print Operations.",
   });
   const [showClosedStages, setShowClosedStages] = useState(false);
+  const [showEmptyStages, setShowEmptyStages] = useState(false);
   const [opsDealId, setOpsDealId] = useState<string | null>(null);
+  const [partsDeal, setPartsDeal] = useState<{ dealId: string; dealName: string } | null>(null);
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -52,12 +64,29 @@ export default function DealsPage() {
     },
   });
 
+  const partSummaries = useQuery<{ ok: true; summaries: OrderPartSummary[] }>({
+    queryKey: ["/api/order-parts/summaries", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/order-parts/summaries", undefined, { headers });
+      return (await response.json()) as { ok: true; summaries: OrderPartSummary[] };
+    },
+  });
+
+  const summaryByDeal = useMemo(() => {
+    const map = new Map<string, OrderPartSummary>();
+    for (const row of partSummaries.data?.summaries ?? []) {
+      map.set(row.hubspotDealId, row);
+    }
+    return map;
+  }, [partSummaries.data?.summaries]);
+
   const snapshot = performance.data;
   const portalId = snapshot?.hubspotPortalId ?? null;
 
-  const { columns, openValue, closedColumnCount } = useMemo(() => {
+  const { columns, openValue, closedColumnCount, emptyColumnCount } = useMemo(() => {
     if (!snapshot) {
-      return { columns: [], openValue: 0, closedColumnCount: 0 };
+      return { columns: [] as BoardColumn[], openValue: 0, closedColumnCount: 0, emptyColumnCount: 0 };
     }
 
     const alertsByDeal = new Map<string, PerformanceResponse["attention"]>();
@@ -83,20 +112,24 @@ export default function DealsPage() {
       byStage.set(key, list);
     }
 
-    const allColumns = snapshot.pipeline.map((stage) => {
+    const allColumns: BoardColumn[] = snapshot.pipeline.map((stage) => {
       const deals = byStage.get(stage.id) ?? [];
       const totalAmount = deals.reduce((sum, deal) => sum + deal.amount, 0);
       return { ...stage, deals, totalAmount };
     });
 
     const closedColumnCount = allColumns.filter((column) => column.closed).length;
-    const columns = showClosedStages ? allColumns : allColumns.filter((column) => !column.closed);
+    const visible = showClosedStages ? allColumns : allColumns.filter((column) => !column.closed);
+    const emptyColumnCount = visible.filter((column) => column.deals.length === 0).length;
+    const columns = showEmptyStages ? visible : visible.filter((column) => column.deals.length > 0);
 
-    return { columns, openValue, closedColumnCount };
-  }, [snapshot, showClosedStages]);
+    return { columns, openValue, closedColumnCount, emptyColumnCount };
+  }, [snapshot, showClosedStages, showEmptyStages]);
+
+  const boardReady = isUnlocked && !performance.isLoading && !performance.isError && Boolean(snapshot);
 
   return (
-    <div className="mx-auto flex max-w-[100rem] flex-col">
+    <div className="mx-auto flex h-full min-h-0 max-w-[100rem] flex-col overflow-hidden">
       <PageHeader
         title="Orders"
         subtitle="Print Orders board — advance stages and enter costs from Queue without leaving Print Ops."
@@ -131,7 +164,12 @@ export default function DealsPage() {
         }
       />
 
-      <div className="page-stack">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          boardReady ? "px-4 pb-4 pt-3 md:px-6" : "page-stack overflow-y-auto",
+        )}
+      >
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock the Orders board"
@@ -160,82 +198,104 @@ export default function DealsPage() {
             </div>
           </section>
         ) : (
-          <>
-            <section
-              className="grid gap-3 sm:grid-cols-3"
-              aria-label="Orders summary"
-              data-testid="panel-deals-summary"
-            >
-              <SummaryStat
-                label="Open orders"
-                value={String(snapshot.summary.activeOrders)}
-                hint="Deals still moving through Print Orders"
-                testId="metric-orders-open"
-              />
-              <SummaryStat
-                label="Open pipeline value"
-                value={formatMoney(openValue)}
-                hint="Sum of amounts on open board cards"
-                testId="metric-orders-value"
-              />
-              <SummaryStat
-                label="Needs attention"
-                value={String(snapshot.summary.attentionCount)}
-                hint={
-                  snapshot.summary.attentionCount > 0
-                    ? "Plates, costs, or other alerts — see card badges"
-                    : "No open alerts on this board"
-                }
-                warn={snapshot.summary.attentionCount > 0}
-                testId="metric-orders-alerts"
-              />
-            </section>
+          <section
+            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-card-border bg-card"
+            data-testid="panel-deals-board"
+            aria-label="Print Orders pipeline board"
+          >
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2.5 md:px-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold tracking-tight">Print Orders</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Same stages as HubSpot · open a card’s Ops panel to move stage or enter costs
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className="flex flex-wrap items-center gap-1.5"
+                  aria-label="Orders summary"
+                  data-testid="panel-deals-summary"
+                >
+                  <span
+                    className="rounded border border-border bg-muted/60 px-2 py-1 text-xs tabular-nums text-muted-foreground"
+                    data-testid="metric-orders-open"
+                  >
+                    <span className="font-semibold text-foreground">{snapshot.summary.activeOrders}</span> open
+                  </span>
+                  <span
+                    className="rounded border border-border bg-muted/60 px-2 py-1 text-xs tabular-nums text-muted-foreground"
+                    data-testid="metric-orders-value"
+                  >
+                    <span className="font-semibold text-foreground numeric">{formatMoney(openValue)}</span>
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded border px-2 py-1 text-xs tabular-nums",
+                      snapshot.summary.attentionCount > 0
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border bg-muted/60 text-muted-foreground",
+                    )}
+                    data-testid="metric-orders-alerts"
+                  >
+                    <span className="font-semibold">{snapshot.summary.attentionCount}</span> attention
+                  </span>
+                </div>
+                {emptyColumnCount > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs"
+                    onClick={() => setShowEmptyStages((value) => !value)}
+                    data-testid="button-toggle-empty-stages"
+                  >
+                    {showEmptyStages ? "Hide empty stages" : `Show empty (${emptyColumnCount})`}
+                  </Button>
+                ) : null}
+                {closedColumnCount > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs"
+                    onClick={() => setShowClosedStages((value) => !value)}
+                    data-testid="button-toggle-closed-stages"
+                  >
+                    {showClosedStages ? "Hide completed & lost" : "Show completed & lost"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
 
-            <section
-              className="overflow-hidden rounded-md border border-card-border bg-card"
-              data-testid="panel-deals-board"
-              aria-label="Print Orders pipeline board"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold tracking-tight">Print Orders</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Same stages as HubSpot · open a card’s Ops panel to move stage or enter costs
+            {snapshot.summary.activeOrders === 0 ? (
+              <p className="shrink-0 border-b border-border px-4 py-2.5 text-sm text-muted-foreground" data-testid="empty-deals">
+                No open Print Orders right now.{" "}
+                <Link href="/orders" className="hs-link font-medium" data-testid="link-deals-to-intake">
+                  Start one in Paid Order Intake
+                </Link>
+              </p>
+            ) : null}
+
+            <div className="min-h-0 flex-1 overflow-x-auto overscroll-contain bg-muted/40 p-3 md:p-4">
+              {columns.length === 0 ? (
+                <div className="flex h-full min-h-[12rem] items-center justify-center rounded-md border border-dashed border-border bg-card/40 px-4">
+                  <p className="text-center text-sm text-muted-foreground">
+                    {emptyColumnCount > 0
+                      ? "All visible stages are empty — show empty stages to see the full pipeline."
+                      : "No stages to show for this pipeline view."}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {closedColumnCount > 0 ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 text-xs"
-                      onClick={() => setShowClosedStages((value) => !value)}
-                      data-testid="button-toggle-closed-stages"
-                    >
-                      {showClosedStages ? "Hide completed & lost" : "Show completed & lost"}
-                    </Button>
-                  ) : null}
-                  <StatusPill
-                    tone={snapshot.summary.attentionCount > 0 ? "warn" : "good"}
-                    icon={snapshot.summary.attentionCount > 0 ? AlertTriangle : CircleDollarSign}
-                    label={`${snapshot.summary.activeOrders} open · ${formatMoney(openValue)}`}
-                    testId="status-orders-board"
-                  />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto bg-muted/40 p-3 md:p-4">
-                <div className="flex min-h-[28rem] min-w-max items-stretch gap-3">
+              ) : (
+                <div className="flex h-full min-w-full items-stretch gap-3">
                   {columns.map((column) => (
                     <div
                       key={column.id}
-                      className="flex w-[17rem] shrink-0 flex-col rounded-md border border-border bg-muted/30"
+                      className="flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col overflow-hidden rounded-md border border-border bg-muted/30"
                       data-testid={`column-deal-stage-${column.id}`}
                     >
                       <div
                         className={cn(
-                          "rounded-t-md border-b border-border bg-card px-3 py-2.5",
+                          "shrink-0 border-b border-border bg-card px-3 py-2",
                           column.closed && /lost/i.test(column.label) && "bg-destructive/10",
                           column.closed && !/lost/i.test(column.label) && "bg-chart-4/10",
                         )}
@@ -256,9 +316,9 @@ export default function DealsPage() {
                         </div>
                       </div>
 
-                      <div className="flex flex-1 flex-col gap-2 p-2">
+                      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
                         {column.deals.length === 0 ? (
-                          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-2 py-10">
+                          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-2 py-6">
                             <p className="text-center text-xs text-muted-foreground">No orders</p>
                           </div>
                         ) : (
@@ -267,13 +327,17 @@ export default function DealsPage() {
                               key={deal.dealId}
                               deal={deal}
                               portalId={portalId}
+                              partsSummary={summaryByDeal.get(deal.dealId) ?? null}
                               onOpenOps={() => setOpsDealId(deal.dealId)}
+                              onOpenParts={() =>
+                                setPartsDeal({ dealId: deal.dealId, dealName: deal.dealName })
+                              }
                             />
                           ))
                         )}
                       </div>
 
-                      <div className="mt-auto space-y-1 rounded-b-md border-t border-border bg-card/80 px-3 py-2 text-xs text-muted-foreground">
+                      <div className="shrink-0 border-t border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground">
                         <div className="flex justify-between gap-2">
                           <span>Total</span>
                           <span className="numeric font-semibold text-foreground">{formatMoney(column.totalAmount)}</span>
@@ -282,50 +346,25 @@ export default function DealsPage() {
                     </div>
                   ))}
                 </div>
-              </div>
-            </section>
-
-            {opsDealId ? (
-              <DealOpsPanel
-                dealId={opsDealId}
-                headers={headers}
-                onClose={() => setOpsDealId(null)}
-              />
-            ) : null}
-
-            {snapshot.summary.activeOrders === 0 ? (
-              <p className="text-sm text-muted-foreground" data-testid="empty-deals">
-                No open Print Orders right now.{" "}
-                <Link href="/orders" className="hs-link font-medium" data-testid="link-deals-to-intake">
-                  Start one in Paid Order Intake
-                </Link>
-              </p>
-            ) : null}
-          </>
+              )}
+            </div>
+          </section>
         )}
       </div>
-    </div>
-  );
-}
 
-function SummaryStat({
-  label,
-  value,
-  hint,
-  warn,
-  testId,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  warn?: boolean;
-  testId: string;
-}) {
-  return (
-    <div className="rounded-md border border-card-border bg-card px-4 py-3" data-testid={testId}>
-      <p className="rule-label">{label}</p>
-      <p className={cn("mt-1 text-2xl font-semibold tracking-tight numeric", warn && "text-primary")}>{value}</p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">{hint}</p>
+      {opsDealId ? (
+        <DealOpsPanel dealId={opsDealId} headers={headers} onClose={() => setOpsDealId(null)} />
+      ) : null}
+
+      <OrderPartsDialog
+        dealId={partsDeal?.dealId ?? null}
+        dealName={partsDeal?.dealName ?? ""}
+        open={Boolean(partsDeal)}
+        onOpenChange={(next) => {
+          if (!next) setPartsDeal(null);
+        }}
+        headers={headers}
+      />
     </div>
   );
 }
@@ -333,18 +372,22 @@ function SummaryStat({
 function DealCard({
   deal,
   portalId,
+  partsSummary,
   onOpenOps,
+  onOpenParts,
 }: {
   deal: BoardDeal;
   portalId: string | null;
+  partsSummary: OrderPartSummary | null;
   onOpenOps: () => void;
+  onOpenParts: () => void;
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
 
   return (
     <article
-      className="group rounded-md border border-border bg-card p-3 shadow-xs transition-colors hover:border-accent/40"
+      className="group shrink-0 rounded-md border border-border bg-card p-2.5 shadow-xs transition-colors hover:border-accent/40"
       data-testid={`card-deal-${deal.dealId}`}
     >
       <a
@@ -357,30 +400,27 @@ function DealCard({
         {deal.dealName}
       </a>
 
-      <dl className="mt-2.5 space-y-1.5 text-xs text-muted-foreground">
-        {closeLabel ? (
-          <div className="flex items-center gap-2">
-            <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <dt className="sr-only">Close date</dt>
-            <dd>{closeLabel}</dd>
-          </div>
-        ) : null}
-        <div className="flex items-center gap-2">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1 font-semibold text-foreground numeric">
           <CircleDollarSign className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          <dt className="sr-only">Amount</dt>
-          <dd className="font-semibold text-foreground numeric">{formatMoney(deal.amount)}</dd>
-        </div>
+          {formatMoney(deal.amount)}
+        </span>
         {deal.contactName ? (
-          <div className="flex items-center gap-2">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 truncate">
             <UserRound className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <dt className="sr-only">Contact</dt>
-            <dd className="truncate">{deal.contactName}</dd>
-          </div>
+            <span className="truncate">{deal.contactName}</span>
+          </span>
         ) : null}
-      </dl>
+        {closeLabel ? (
+          <span className="inline-flex items-center gap-1">
+            <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            {closeLabel}
+          </span>
+        ) : null}
+      </div>
 
-      {(deal.needsPlates || deal.needsCosts) && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
+      {(deal.needsPlates || deal.needsCosts || partsSummary) && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {deal.needsPlates ? (
             <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-primary">
               Needs plates
@@ -391,10 +431,23 @@ function DealCard({
               Costs incomplete
             </span>
           ) : null}
+          {partsSummary && partsSummary.total > 0 ? (
+            <span
+              className={cn(
+                "rounded border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
+                partsSummary.remaining === 0
+                  ? "border-chart-4/30 bg-chart-4/10 text-chart-4"
+                  : "border-border bg-muted text-muted-foreground",
+              )}
+              data-testid={`badge-deal-parts-${deal.dealId}`}
+            >
+              {formatPartsBadge(partsSummary)}
+            </span>
+          ) : null}
         </div>
       )}
 
-      <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-2">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-1.5">
         <button
           type="button"
           onClick={onOpenOps}
@@ -402,6 +455,15 @@ function DealCard({
           data-testid={`button-deal-ops-${deal.dealId}`}
         >
           Ops / stage
+        </button>
+        <button
+          type="button"
+          onClick={onOpenParts}
+          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
+          data-testid={`button-deal-parts-${deal.dealId}`}
+        >
+          <Package className="h-3 w-3" />
+          Parts
         </button>
         {deal.needsPlates ? (
           <Link
@@ -413,13 +475,6 @@ function DealCard({
             Attach plates
           </Link>
         ) : null}
-        <Link
-          href={kitsDealHref(deal.dealId)}
-          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-          data-testid={`link-deal-kit-${deal.dealId}`}
-        >
-          Kit bits
-        </Link>
         {deal.needsCosts ? (
           <Link
             href={queueDealHref(deal.dealId)}
@@ -436,7 +491,7 @@ function DealCard({
           className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
           data-testid={`link-deal-hubspot-${deal.dealId}`}
         >
-          Open in HubSpot
+          HubSpot
           <ExternalLink className="h-3 w-3" />
         </a>
       </div>
@@ -446,13 +501,9 @@ function DealCard({
 
 function BoardSkeleton() {
   return (
-    <div className="space-y-3" data-testid="skeleton-deals">
-      <div className="grid gap-3 sm:grid-cols-3">
-        {Array.from({ length: 3 }, (_, index) => (
-          <Skeleton key={index} className="h-[4.5rem] rounded-lg" />
-        ))}
-      </div>
-      <Skeleton className="h-[28rem] rounded-lg" />
+    <div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="skeleton-deals">
+      <Skeleton className="h-10 w-full shrink-0 rounded-md" />
+      <Skeleton className="min-h-0 flex-1 rounded-lg" />
     </div>
   );
 }

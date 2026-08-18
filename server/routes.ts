@@ -64,14 +64,34 @@ import {
   listPrintFileRecords,
   markPrintFileAnalysisUsed,
   stagePrintFileFromPath,
+  stageCtbFromPrefix,
   syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
+  addBitsToRecord,
+  deleteBit,
+  listBitsForRecords,
+  summarizeBits,
+  updateBitStatus,
+} from "./lib/plate-bits";
+import {
+  clearOrderParts,
+  deleteOrderPart,
+  getOrderPartsView,
+  importOrderParts,
+  listOrderPartSummaries,
+  summarizeOrderParts,
+  updateOrderPartStatus,
+} from "./lib/order-parts";
+import {
   addPrinterLifecycleEvent,
+  assignPrintFilePrinter,
   assignPrinterProfile,
   buildPrinterFleetSnapshot,
   ensureDefaultPrinters,
   getPrinter,
+  isSharedModelPrinterProfile,
+  matchPrinterId,
   updatePrinter,
 } from "./lib/printers";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./lib/supplies";
@@ -109,9 +129,11 @@ import {
   clientLinkPath,
   createOrderLink,
   expireOrderLink,
+  findPriorClientDetails,
   getOrderLink,
   listOrderLinks,
   lookupClientOrder,
+  lookupClientSavedDetails,
   markOrderLinkCreated,
   orderLinkCounts,
   describeOrderLinksStorage,
@@ -125,10 +147,15 @@ import {
   dismissAttentionSchema,
   ATTENTION_ISSUE_KEYS,
   attachPrintFileSchema,
+  addPrintPlateBitsSchema,
+  updatePrintPlateBitStatusSchema,
+  importOrderPartsSchema,
+  updateOrderPartStatusSchema,
   adjustResinSealedSchema,
   assignPrinterProfileSchema,
   assignPlatePrinterSchema,
   advanceDealStageSchema,
+  assignPrintFilePrinterSchema,
   createPrinterLifecycleEventSchema,
   createProductionFailureSchema,
   openResinBottleSchema,
@@ -161,16 +188,50 @@ import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
+const SLICE_LOG_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
+
 const printFileUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, os.tmpdir()),
     filename: (_req, file, cb) => {
       const extension = path.extname(file.originalname || "").toLowerCase() || ".ctb";
-      cb(null, `ctb-upload-${crypto.randomUUID()}${extension}`);
+      const prefix = /\.log$/i.test(extension) ? "slice-log" : "ctb-upload";
+      cb(null, `${prefix}-${crypto.randomUUID()}${extension}`);
     },
   }),
-  limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 1 },
+  limits: { fileSize: PRINT_FILE_MAX_BYTES, files: 2 },
 });
+
+function isSliceLogUploadName(fileName: string): boolean {
+  const base = path.basename(fileName || "").toLowerCase();
+  return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base) || base.endsWith(".log");
+}
+
+/** Read Slice.log text; if oversized, keep the newest tail (Output lines land at the end). */
+function readOptionalSliceLogUpload(file: Express.Multer.File | undefined): string | null {
+  if (!file?.path) return null;
+  try {
+    const stat = fs.statSync(file.path);
+    if (stat.size <= 0) return null;
+    if (!isSliceLogUploadName(file.originalname) && path.extname(file.originalname).toLowerCase() !== ".log") {
+      return null;
+    }
+    if (stat.size <= SLICE_LOG_UPLOAD_MAX_BYTES) {
+      return fs.readFileSync(file.path, "utf8");
+    }
+    const fd = fs.openSync(file.path, "r");
+    try {
+      const start = stat.size - SLICE_LOG_UPLOAD_MAX_BYTES;
+      const buffer = Buffer.alloc(SLICE_LOG_UPLOAD_MAX_BYTES);
+      fs.readSync(fd, buffer, 0, SLICE_LOG_UPLOAD_MAX_BYTES, start);
+      return buffer.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
 
 function extensionForSupplyUpload(file: Express.Multer.File): string {
   const fromName = path.extname(file.originalname || "").toLowerCase();
@@ -318,7 +379,9 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
 }
 
 /** Optional multi-item payload for Manual Entry (mirrors Intake approve). */
-function paidOrderLineItemsFrom(body: unknown): Array<{ productName: string; amount: string }> | null {
+function paidOrderLineItemsFrom(
+  body: unknown,
+): Array<{ productName: string; amount: string; kind: "print" | "shipping" }> | null {
   const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   if (!Array.isArray(record.lineItems)) return null;
   const lines = record.lineItems
@@ -328,9 +391,15 @@ function paidOrderLineItemsFrom(body: unknown): Array<{ productName: string; amo
       const productName = typeof row.productName === "string" ? row.productName.trim().slice(0, 180) : "";
       const amount = typeof row.amount === "string" ? row.amount.trim().slice(0, 40) : "";
       if (!productName && !amount) return null;
-      return { productName, amount };
+      return {
+        productName,
+        amount,
+        kind: String(row.kind ?? "").trim().toLowerCase() === "shipping" ? ("shipping" as const) : ("print" as const),
+      };
     })
-    .filter((line): line is { productName: string; amount: string } => Boolean(line));
+    .filter(
+      (line): line is { productName: string; amount: string; kind: "print" | "shipping" } => Boolean(line),
+    );
   return lines.length > 0 ? lines.slice(0, 20) : null;
 }
 
@@ -459,9 +528,21 @@ function refreshPrintFileStagesFromHubSpot(
 }
 
 /** The owner-side representation. `tokenHash` never leaves the server. */
-function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> {
+function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> & {
+  priorMatch: ReturnType<typeof findPriorClientDetails>;
+} {
   const { tokenHash: _tokenHash, ...safe } = link;
-  return safe;
+  const submitted = link.status === "pending_review" || link.status === "created";
+  return {
+    ...safe,
+    priorMatch: submitted
+      ? findPriorClientDetails({
+          username: link.clientUsername || link.buyerUsernameHint,
+          email: link.clientEmail,
+          excludeId: link.id,
+        })
+      : null,
+  };
 }
 
 function tokenFromBody(body: unknown): string {
@@ -500,7 +581,7 @@ function tooManyClientAttempts(req: Request, res: Response): boolean {
  */
 function draftsFromIntake(link: OrderIntakeLink): {
   draft: PaidOrderDraft;
-  lineItems: Array<{ productName: string; amount: string }>;
+  lineItems: Array<{ productName: string; amount: string; kind: "print" | "shipping" }>;
   orderGroup: string;
 } {
   const lines = lineItemsForIntake(link);
@@ -511,7 +592,8 @@ function draftsFromIntake(link: OrderIntakeLink): {
       ? `Line items:\n${lines
           .map((line, index) => {
             const extended = intakeLineExtendedAmount(line);
-            return `  ${index + 1}. ${line.description}${
+            const kindLabel = line.kind === "shipping" ? " [shipping]" : "";
+            return `  ${index + 1}. ${line.description}${kindLabel}${
               line.quantity > 1 ? ` (qty ${line.quantity} @ $${line.amount})` : ""
             } — $${extended.toFixed(2)}`;
           })
@@ -538,12 +620,14 @@ function draftsFromIntake(link: OrderIntakeLink): {
     return {
       productName: quantity > 1 ? `${line.description} (x${quantity})` : line.description,
       amount: intakeLineExtendedAmount(line).toFixed(2),
+      kind: line.kind === "shipping" ? ("shipping" as const) : ("print" as const),
     };
   });
 
   const primary = lineItems[0] ?? {
     productName: link.confirmedItem || link.itemDescription,
     amount: link.agreedAmount,
+    kind: "print" as const,
   };
 
   return {
@@ -738,6 +822,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
+   * Owner-only returning-buyer lookup. Matches a Marketplace username to the
+   * last submitted intake so a new private link can prefill contact/shipping.
+   * Registered before `/api/order-links/:id` so "prior-client" is not treated as an id.
+   */
+  app.get("/api/order-links/prior-client", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const username = firstQueryValue(req.query?.username) ?? "";
+    const email = firstQueryValue(req.query?.email) ?? "";
+    return res.json({ ok: true, match: findPriorClientDetails({ username, email }) });
+  });
+
+  /**
    * Owner-only supply ledger. Regular Amazon accounts have no clean, official
    * order-feed integration, so the owner records receipt totals here. This
    * remains independent from actual cost fields on a HubSpot deal to prevent
@@ -873,8 +969,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   /**
-   * Durable kit inventory per HubSpot Print Order (bits + plates + QC).
-   * Client still keeps a localStorage cache; SQLite is the shared source of truth.
+   * PARKED Kits API — UI route/nav removed. Live parts/QC is Orders Parts +
+   * Prints plate bits. Keep these endpoints for stored kit JSON until Kits is
+   * rebuilt as a thin UI over that path (or data is migrated away).
    */
   app.get("/api/kits", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -1364,10 +1461,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .filter((deal) => includeAttached || !deal.hasPrintFile)
         .sort((a, b) => a.stage.localeCompare(b.stage) || a.dealName.localeCompare(b.dealName));
 
+      const records = listPrintFileRecords();
+      const bitsByRecord = listBitsForRecords(records.map((row) => row.id));
+      const recordsWithBits = records.map((record) => {
+        const bits = bitsByRecord.get(record.id) ?? [];
+        return {
+          ...record,
+          bits,
+          bitSummary: summarizeBits(bits),
+        };
+      });
+
       return res.json({
         ok: true,
         candidates,
-        records: listPrintFileRecords(),
+        records: recordsWithBits,
         includeAttached,
         resin: resinProfileView(),
       });
@@ -1380,10 +1488,160 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** Add .stl part names the operator says were on this attached plate. */
+  app.post("/api/prints/:recordId/bits", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    if (!Number.isInteger(recordId) || recordId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate." });
+    }
+    const parsed = addPrintPlateBitsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const parts = [
+      ...(parsed.data.parts || []),
+      ...(parsed.data.fileNames || []).map((fileName) => ({ fileName })),
+    ];
+    const result = addBitsToRecord(recordId, parts);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      bits: result.bits,
+      added: result.added,
+      bitSummary: summarizeBits(result.bits),
+    });
+  });
+
+  app.patch("/api/prints/:recordId/bits/:bitId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    const bitId = Number(req.params.bitId);
+    if (!Number.isInteger(recordId) || recordId < 1 || !Number.isInteger(bitId) || bitId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate part." });
+    }
+    const parsed = updatePrintPlateBitStatusSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = updateBitStatus(recordId, bitId, parsed.data.status);
+    if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+    const bits = listBitsForRecords([recordId]).get(recordId) ?? [];
+    return res.json({ ok: true, bit: result.bit, bits, bitSummary: summarizeBits(bits) });
+  });
+
+  app.delete("/api/prints/:recordId/bits/:bitId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const recordId = Number(req.params.recordId);
+    const bitId = Number(req.params.bitId);
+    if (!Number.isInteger(recordId) || recordId < 1 || !Number.isInteger(bitId) || bitId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid plate part." });
+    }
+    const result = deleteBit(recordId, bitId);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    const bits = listBitsForRecords([recordId]).get(recordId) ?? [];
+    return res.json({ ok: true, deleted: result.deleted, bits, bitSummary: summarizeBits(bits) });
+  });
+
+  /** Master parts checklist for a Print Order (Orders board → Parts). */
+  app.get("/api/order-parts/summaries", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, summaries: listOrderPartSummaries() });
+  });
+
+  app.get("/api/orders/:dealId/parts", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const view = getOrderPartsView(dealId);
+    return res.json({ ok: true, ...view });
+  });
+
+  app.post("/api/orders/:dealId/parts/import", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const parsed = importOrderPartsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = importOrderParts(dealId, parsed.data);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      parts: result.parts,
+      added: result.added,
+      summary: result.summary,
+    });
+  });
+
+  app.patch("/api/orders/:dealId/parts/:partId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    const partId = Number(req.params.partId);
+    if (!/^[0-9]{1,20}$/.test(dealId) || !Number.isInteger(partId) || partId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid order part." });
+    }
+    const parsed = updateOrderPartStatusSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = updateOrderPartStatus(dealId, partId, parsed.data.status);
+    if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      part: result.part,
+      parts: result.parts,
+      summary: result.summary,
+    });
+  });
+
+  app.delete("/api/orders/:dealId/parts/:partId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    const partId = Number(req.params.partId);
+    if (!/^[0-9]{1,20}$/.test(dealId) || !Number.isInteger(partId) || partId < 1) {
+      return res.status(400).json({ ok: false, error: "Choose a valid order part." });
+    }
+    const result = deleteOrderPart(dealId, partId);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    return res.json({
+      ok: true,
+      dealId,
+      deleted: result.deleted,
+      parts: result.parts,
+      summary: result.summary,
+    });
+  });
+
+  app.delete("/api/orders/:dealId/parts", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    const deleted = clearOrderParts(dealId);
+    return res.json({
+      ok: true,
+      dealId,
+      deleted,
+      parts: [],
+      summary: summarizeOrderParts([]),
+    });
+  });
+
   /**
-   * The CTB bytes only exist for the duration of this request. The response
-   * contains a short-lived analysis ID; no file binary is ever written to
-   * Railway storage or sent to HubSpot.
+   * Slice bytes only exist for the duration of this request. Optional
+   * `sliceLog` is a Blueprint Slice.log used to recover sealed ULTX estimates.
+   * Mega/Mighty 8K CTBs may send only a sampled prefix (`mode=ctb-prefix` +
+   * `fullFileSize`) so reverse proxies do not time out with "upstream error".
+   * The response contains a short-lived analysis ID; no plate binary is kept.
    */
   app.post(
     "/api/prints/analyze",
@@ -1391,10 +1649,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (rejectUnsecuredIntake(req, res)) return;
       next();
     },
-    printFileUpload.single("file"),
+    printFileUpload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "sliceLog", maxCount: 1 },
+    ]),
     (req: Request, res: Response) => {
-      const file = req.file;
+      const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
+      const file = files?.file?.[0];
+      const sliceLogFile = files?.sliceLog?.[0];
       if (!file?.path) {
+        removeTempUpload(sliceLogFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
@@ -1402,15 +1666,57 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
+        removeTempUpload(sliceLogFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
         });
       }
 
+      const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+      const mode = typeof body.mode === "string" ? body.mode.trim() : "";
+      const fullFileSizeRaw =
+        typeof body.fullFileSize === "string"
+          ? body.fullFileSize
+          : typeof body.fullFileSize === "number"
+            ? String(body.fullFileSize)
+            : "";
+      const fullFileSize = Number(fullFileSizeRaw);
+
       try {
-        const staged = stagePrintFileFromPath(file.originalname, file.path);
-        return res.status(201).json({ ok: true, ...staged });
+        const sliceLogText = readOptionalSliceLogUpload(sliceLogFile);
+        if (sliceLogFile?.path && !sliceLogText) {
+          return res.status(400).json({
+            ok: false,
+            error: "Slice.log upload was empty or not a .log file. Re-import Blueprint logs and try again.",
+          });
+        }
+        const staged =
+          mode === "ctb-prefix"
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            : stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
+        const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
+        const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
+        // Shared model names (Mighty 8K without NEWX#) do not auto-match after
+        // matchTokens was tightened — operator must pick the physical unit.
+        const requiresPrinterChoice = matchedPrinterId == null;
+        return res.status(201).json({
+          ok: true,
+          ...staged,
+          uploadMode: mode === "ctb-prefix" ? "ctb-prefix" : "full",
+          sliceLogApplied: Boolean(sliceLogText),
+          printerMatch: {
+            matchedPrinterId,
+            requiresPrinterChoice,
+            sharedModelProfile: isSharedModelPrinterProfile(staged.metrics.printerProfile, fleet),
+            slicerProfile: staged.metrics.printerProfile,
+            printers: fleet.map((printer) => ({
+              id: printer.id,
+              name: printer.name,
+              model: printer.model,
+            })),
+          },
+        });
       } catch (error) {
         const message =
           error instanceof CtbParseError || error instanceof UltxParseError
@@ -1419,6 +1725,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ ok: false, error: message });
       } finally {
         removeTempUpload(file.path);
+        removeTempUpload(sliceLogFile?.path);
       }
     },
   );
@@ -1475,7 +1782,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   /**
    * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Historical and future plates with that label then roll into that machine.
+   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
+   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
    */
   app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -1487,11 +1795,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!result) {
       return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
     }
+    const label = parsed.data.profile.trim();
+    const message = result.map
+      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
+      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
     return res.json({
       ok: true,
       map: result.map,
+      stamped: result.stamped,
       fleet: result.fleet,
-      message: `Assigned “${result.map.profileLabel}” to that printer. Matching plates now count toward its usage.`,
+      message,
+    });
+  });
+
+  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
+  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = assignPrintFilePrinter(parsed.data);
+    if (!result) {
+      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
+    }
+    return res.json({
+      ok: true,
+      record: result.record,
+      fleet: result.fleet,
+      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
     });
   });
 
@@ -1536,6 +1868,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      const fleet = ensureDefaultPrinters();
+      const autoMatchedId = matchPrinterId(staged.metrics.printerProfile, fleet);
+      const requestedPrinterId = parsed.data.printerId ?? null;
+      if (requestedPrinterId != null && !getPrinter(requestedPrinterId)) {
+        return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
+      }
+      if (autoMatchedId == null && requestedPrinterId == null) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Choose which physical printer ran this plate. Chitubox only embedded a shared model name (e.g. Mighty 8K), not NEWX1/NEWX2/NEWX3.",
+        });
+      }
+      const fleetPrinterId = requestedPrinterId ?? autoMatchedId;
+
       const attachedAt = new Date().toISOString();
       const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
       await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
@@ -1545,6 +1892,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         hubspotDealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
         dealStage: stage?.label || deal.properties.dealstage || "No stage",
         metrics: staged.metrics,
+        fleetPrinterId,
       });
       markPrintFileAnalysisUsed(parsed.data.analysisId);
 
@@ -1694,6 +2042,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const token = tokenFromBody(req.body);
     if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
     const result = lookupClientOrder(token);
+    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
+    return res.json(result);
+  });
+
+  /**
+   * Public: returning-buyer contact/shipping for a valid unused token, using
+   * the email or username the buyer typed. Never a directory search.
+   */
+  app.post("/api/client-order/saved-details", (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const token = tokenFromBody(req.body);
+    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    const result = lookupClientSavedDetails(token, {
+      email: typeof body.clientEmail === "string" ? body.clientEmail : "",
+      username: typeof body.clientUsername === "string" ? body.clientUsername : "",
+    });
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.json(result);
   });

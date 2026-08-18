@@ -338,6 +338,7 @@ export interface HubSpotIntakeDealRef {
   dealName: string;
   amount: string;
   productName: string;
+  kind?: OrderLineKind;
 }
 
 export interface PaidOrderCreateResult {
@@ -436,10 +437,33 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
 
 /** One commercial item on an intake. Each becomes its own HubSpot deal on approve. */
+export const ORDER_LINE_KINDS = ["print", "shipping"] as const;
+export type OrderLineKind = (typeof ORDER_LINE_KINDS)[number];
+
+export const ORDER_LINE_KIND_LABELS: Record<OrderLineKind, string> = {
+  print: "Print item",
+  shipping: "Shipping (no plates)",
+};
+
+/** HubSpot deal property — shipping lines skip plate prompts. */
+export const PRINT_LINE_KIND_PROPERTY = "print_line_kind";
+
+export function normalizeOrderLineKind(value: unknown): OrderLineKind {
+  return String(value ?? "").trim().toLowerCase() === "shipping" ? "shipping" : "print";
+}
+
+export function dealRequiresPlates(
+  props: Record<string, string | null | undefined> | null | undefined,
+): boolean {
+  return normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]) !== "shipping";
+}
+
 export interface OrderIntakeLineItem {
   description: string;
   amount: string;
   quantity: number;
+  /** print = needs plates; shipping = freight/charge only. */
+  kind: OrderLineKind;
 }
 
 export type ResinCostSource = "ctb" | "ultx" | "amazon" | "supplies" | "manual";
@@ -450,7 +474,12 @@ export function parseAmountNumber(value: string): number {
 
 /** Prefer explicit lineItems; otherwise treat legacy scalar fields as one line. */
 export function normalizeIntakeLineItems(input: {
-  lineItems?: Array<{ description?: string; amount?: string; quantity?: unknown }> | null;
+  lineItems?: Array<{
+    description?: string;
+    amount?: string;
+    quantity?: unknown;
+    kind?: unknown;
+  }> | null;
   itemDescription?: string;
   agreedAmount?: string;
 }): OrderIntakeLineItem[] {
@@ -460,6 +489,7 @@ export function normalizeIntakeLineItems(input: {
           description: String(item?.description ?? "").trim(),
           amount: String(item?.amount ?? "").trim(),
           quantity: Math.max(1, Math.min(999, Number(item?.quantity) || 1)),
+          kind: normalizeOrderLineKind(item?.kind),
         }))
         .filter((item) => {
           if (item.description.length < 2 || !item.amount) return false;
@@ -473,7 +503,7 @@ export function normalizeIntakeLineItems(input: {
   const amount = String(input.agreedAmount ?? "").trim();
   const parsed = parseAmountNumber(amount);
   if (description.length >= 2 && amount && Number.isFinite(parsed) && parsed >= 0) {
-    return [{ description, amount, quantity: 1 }];
+    return [{ description, amount, quantity: 1, kind: "print" }];
   }
   return [];
 }
@@ -530,6 +560,7 @@ export function parseHubSpotDealsJson(raw: string | null | undefined): HubSpotIn
           dealName: dealName || `Deal ${dealId}`,
           amount: String(row.amount ?? "").trim(),
           productName: String(row.productName ?? "").trim(),
+          kind: normalizeOrderLineKind(row.kind),
         };
       })
       .filter((item): item is HubSpotIntakeDealRef => item !== null);
@@ -830,13 +861,132 @@ export const printFileRecords = sqliteTable("print_file_records", {
   resolutionX: integer("resolution_x"),
   resolutionY: integer("resolution_y"),
   printerProfile: text("printer_profile"),
-  /** Explicit fleet assignment; wins over slicer profile matching when set. */
-  assignedPrinterId: integer("assigned_printer_id"),
+  /** Explicit fleet printer for this plate — wins over slicer profile matching. */
+  fleetPrinterId: integer("fleet_printer_id"),
   hubspotSyncedAt: text("hubspot_synced_at").notNull(),
   attachedAt: text("attached_at").notNull(),
 });
 
 export type PrintFileRecord = typeof printFileRecords.$inferSelect;
+
+/**
+ * Parts the operator says were on a specific attached plate.
+ * Names come from dropped .stl files — the slice file itself has no part names.
+ */
+export const PRINT_PLATE_BIT_STATUSES = ["on_plate", "good", "reprint"] as const;
+export type PrintPlateBitStatus = (typeof PRINT_PLATE_BIT_STATUSES)[number];
+
+export const PRINT_PLATE_BIT_STATUS_LABELS: Record<PrintPlateBitStatus, string> = {
+  on_plate: "On plate",
+  good: "Good",
+  reprint: "Reprint",
+};
+
+export const printPlateBits = sqliteTable("print_plate_bits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  printFileRecordId: integer("print_file_record_id").notNull(),
+  fileName: text("file_name").notNull(),
+  label: text("label").notNull(),
+  status: text("status").notNull().default("on_plate"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PrintPlateBit = typeof printPlateBits.$inferSelect;
+
+export const updatePrintPlateBitStatusSchema = z.object({
+  status: z.enum(PRINT_PLATE_BIT_STATUSES),
+});
+
+export type UpdatePrintPlateBitStatusInput = z.infer<typeof updatePrintPlateBitStatusSchema>;
+
+/**
+ * Master parts checklist for a HubSpot Print Order.
+ * Plates subtract from this list as STLs are linked to attached plates.
+ * `itemGroup` separates multiple products on the same order (Acastus vs Valiant).
+ */
+export const ORDER_PART_STATUSES = ["needed", "on_plate", "good", "reprint"] as const;
+export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
+
+export const ORDER_PART_STATUS_LABELS: Record<OrderPartStatus, string> = {
+  needed: "Needed",
+  on_plate: "On plate",
+  good: "Good",
+  reprint: "Reprint",
+};
+
+/** Human label for order-part or plate-bit status codes. */
+export function partStatusLabel(status: string): string {
+  if ((ORDER_PART_STATUSES as readonly string[]).includes(status)) {
+    return ORDER_PART_STATUS_LABELS[status as OrderPartStatus];
+  }
+  if ((PRINT_PLATE_BIT_STATUSES as readonly string[]).includes(status)) {
+    return PRINT_PLATE_BIT_STATUS_LABELS[status as PrintPlateBitStatus];
+  }
+  return status;
+}
+
+export const orderParts = sqliteTable("order_parts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  hubspotDealId: text("hubspot_deal_id").notNull(),
+  hubspotDealName: text("hubspot_deal_name").notNull().default(""),
+  itemGroup: text("item_group").notNull().default("Kit"),
+  fileName: text("file_name").notNull(),
+  label: text("label").notNull(),
+  status: text("status").notNull().default("needed"),
+  printFileRecordId: integer("print_file_record_id"),
+  printPlateBitId: integer("print_plate_bit_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type OrderPart = typeof orderParts.$inferSelect;
+
+export const orderPartImportEntrySchema = z.object({
+  fileName: z.string().trim().min(1).max(400),
+  itemGroup: z.string().trim().max(200).optional(),
+  relativePath: z.string().trim().max(800).optional(),
+  archivePath: z.string().trim().max(800).optional(),
+});
+
+export const importOrderPartsSchema = z.object({
+  /** @deprecated Prefer `parts` — kept for older clients. */
+  fileNames: z.array(z.string().trim().min(1).max(400)).max(2_000).optional(),
+  parts: z.array(orderPartImportEntrySchema).max(2_000).optional(),
+  dealName: z.string().trim().max(300).optional(),
+  /** When set, all imported files join this item (e.g. second product on the order). */
+  defaultItemGroup: z.string().trim().max(200).optional(),
+}).refine((value) => (value.parts?.length ?? 0) + (value.fileNames?.length ?? 0) > 0, {
+  message: "Add at least one part file.",
+});
+
+export type ImportOrderPartsInput = z.infer<typeof importOrderPartsSchema>;
+
+export const updateOrderPartStatusSchema = z.object({
+  status: z.enum(ORDER_PART_STATUSES),
+});
+
+export type UpdateOrderPartStatusInput = z.infer<typeof updateOrderPartStatusSchema>;
+
+export const addPrintPlateBitsSchema = z.object({
+  /** @deprecated Prefer `parts`. */
+  fileNames: z.array(z.string().trim().min(1).max(400)).max(500).optional(),
+  parts: z
+    .array(
+      z.object({
+        fileName: z.string().trim().min(1).max(400),
+        itemGroup: z.string().trim().max(200).optional(),
+        relativePath: z.string().trim().max(800).optional(),
+        archivePath: z.string().trim().max(800).optional(),
+      }),
+    )
+    .max(500)
+    .optional(),
+}).refine((value) => (value.parts?.length ?? 0) + (value.fileNames?.length ?? 0) > 0, {
+  message: "Add at least one .stl file.",
+});
+
+export type AddPrintPlateBitsInput = z.infer<typeof addPrintPlateBitsSchema>;
 
 /**
  * One kit document per HubSpot Print Order.
@@ -1041,6 +1191,11 @@ export type UpdatePrinterInput = z.infer<typeof updatePrinterSchema>;
 export const assignPrinterProfileSchema = z.object({
   profile: trimmed(200).min(1, "Choose an unassigned machine name"),
   printerId: z.coerce.number().int().positive("Choose a fleet printer"),
+  /**
+   * When true, map this slicer label onto one printer for all plates.
+   * Leave false/omit for shared model names (Mighty 8K) — use per-plate assign instead.
+   */
+  applyToAllPlates: z.boolean().optional().default(true),
 });
 
 export type AssignPrinterProfileInput = z.infer<typeof assignPrinterProfileSchema>;
@@ -1083,9 +1238,21 @@ export const attachPrintFileSchema = z.object({
     .string()
     .trim()
     .regex(/^[0-9]{1,20}$/, "Select a valid active Print Order"),
+  /**
+   * Physical fleet printer that ran this plate. Required when Chitubox only
+   * embeds a shared model name (e.g. Mighty 8K) shared by NEWX1/2/3.
+   */
+  printerId: z.coerce.number().int().positive("Choose which printer ran this plate").optional(),
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
+
+export const assignPrintFilePrinterSchema = z.object({
+  recordId: z.coerce.number().int().positive("Choose a plate record"),
+  printerId: z.coerce.number().int().positive("Choose a fleet printer"),
+});
+
+export type AssignPrintFilePrinterInput = z.infer<typeof assignPrintFilePrinterSchema>;
 
 const kitBitStatusSchema = z.enum(["needed", "on_plate", "good", "reprint"]);
 
@@ -1301,6 +1468,7 @@ const intakeLineItemSchema = z.object({
   description: trimmed(400).min(2, "Describe each agreed item"),
   amount: nonNegativeAmountLike,
   quantity: z.coerce.number().int().min(1).max(999).default(1),
+  kind: z.enum(ORDER_LINE_KINDS).default("print"),
 });
 
 export const createOrderLinkSchema = z
@@ -1368,7 +1536,7 @@ export const reviewEditSchema = z.object({
   confirmedItem: trimmed(400).min(2, "Confirm or correct the item description").optional(),
   quantity: z.coerce.number().int().min(1).max(999).optional(),
   clientNotes: trimmed(2000).optional(),
-  agreedAmount: amountLike.optional(),
+  agreedAmount: nonNegativeAmountLike.optional(),
   itemDescription: trimmed(400).optional(),
   paymentMethod: trimmed(80).optional(),
   paymentReference: trimmed(120).optional(),
@@ -1376,6 +1544,30 @@ export const reviewEditSchema = z.object({
   clientPaymentConfirmed: z.boolean().optional(),
 });
 export type ReviewEditInput = z.infer<typeof reviewEditSchema>;
+
+/** Contact and shipping copied from a previous submitted order. */
+export interface ClientOrderSavedDetails {
+  clientFullName: string;
+  clientUsername: string;
+  clientEmail: string;
+  clientPhone: string;
+  shippingRequired: boolean;
+  shippingStreet: string;
+  shippingCity: string;
+  shippingState: string;
+  shippingPostalCode: string;
+  shippingCountry: string;
+}
+
+/** Owner-only match used when creating a returning-buyer link, or after they submit. */
+export interface PriorClientMatch extends ClientOrderSavedDetails {
+  lastSubmittedAt: string | null;
+  lastItemDescription: string;
+  lastInternalLabel: string;
+  matchedBy: "email" | "username" | "email_and_username";
+  hubspotContactId: string | null;
+  hubspotDealId: string | null;
+}
 
 /** What the public client page is allowed to see once a token validates. */
 export interface ClientOrderView {
@@ -1385,6 +1577,8 @@ export interface ClientOrderView {
   expiresAt: string;
   buyerNameHint: string;
   buyerUsernameHint: string;
+  /** Present when this private link was prepared for a returning buyer. */
+  savedDetails: ClientOrderSavedDetails | null;
 }
 
 export interface CreatedOrderLink {

@@ -144,7 +144,8 @@ export function validatePaidOrderDraft(input: PaidOrderDraft): string | null {
   }
   if (!clean(input.productName)) return "Enter the model or order description";
   const amount = Number(String(input.amount).replace(/[$,\s]/g, ""));
-  if (!Number.isFinite(amount) || amount <= 0) return "Enter a paid amount greater than zero";
+  // $0 is allowed for gifts / tracking-only orders.
+  if (!Number.isFinite(amount) || amount < 0) return "Enter a paid amount of zero or more";
   return null;
 }
 
@@ -156,8 +157,8 @@ export function validatePaidOrderLineItems(
     const line = lines[index]!;
     if (!clean(line.productName)) return `Item ${index + 1} needs a model or order description`;
     const amount = Number(String(line.amount).replace(/[$,\s]/g, ""));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return `Item ${index + 1} needs a paid amount greater than zero`;
+    if (!Number.isFinite(amount) || amount < 0) {
+      return `Item ${index + 1} needs an amount of zero or more`;
     }
   }
   return null;

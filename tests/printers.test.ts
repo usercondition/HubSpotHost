@@ -27,8 +27,21 @@ const {
   buildPrinterFleetSnapshot,
   addPrinterLifecycleEvent,
   assignPrinterProfile,
+  assignPrintFilePrinter,
+  isSharedModelPrinterProfile,
+  resolvePrinterIdForRecord,
 } = await import("../server/lib/printers");
-const { parseUltxFile, extractZipTextMembers } = await import("../server/lib/ultx");
+const {
+  parseUltxFile,
+  extractZipTextMembers,
+  listUltxZipMembers,
+  countUltxLayersFromMembers,
+  extractPasswordsFromSliceLog,
+  extractUltxMetricsFromSliceLog,
+  matchSliceLogMetrics,
+  parseUltxExportStampMs,
+  BLUEPRINT_ASSET_ZIP_PASSWORD,
+} = await import("../server/lib/ultx");
 const { createPrintFileRecord, stagePrintFile } = await import("../server/lib/print-files");
 const { registerRoutes } = await import("../server/routes");
 
@@ -91,21 +104,10 @@ function fixtureCtb(machineName = "Mighty 8K NEWX1"): Buffer {
   return file;
 }
 
-function fixtureUltxZip(): Buffer {
-  const json = Buffer.from(
-    JSON.stringify({
-      machineName: "HeyGears Reflex Turbo",
-      printTime: 3600,
-      layerCount: 800,
-      resinVolume: 42.5,
-      resinMass: 46.2,
-      layerHeight: 0.05,
-      exposureTime: 2.2,
-    }),
-    "utf8",
-  );
-  const name = Buffer.from("printinfo.json", "utf8");
-  const compressed = zlib.deflateRawSync(json);
+function zipTextMember(fileName: string, contents: string): Buffer {
+  const payload = Buffer.from(contents, "utf8");
+  const name = Buffer.from(fileName, "utf8");
+  const compressed = zlib.deflateRawSync(payload);
   const local = Buffer.alloc(30 + name.length + compressed.length);
   local.writeUInt32LE(0x04034b50, 0);
   local.writeUInt16LE(20, 4);
@@ -115,12 +117,27 @@ function fixtureUltxZip(): Buffer {
   local.writeUInt16LE(0, 12);
   local.writeUInt32LE(0, 14);
   local.writeUInt32LE(compressed.length, 18);
-  local.writeUInt32LE(json.length, 22);
+  local.writeUInt32LE(payload.length, 22);
   local.writeUInt16LE(name.length, 26);
   local.writeUInt16LE(0, 28);
   name.copy(local, 30);
   compressed.copy(local, 30 + name.length);
   return local;
+}
+
+function fixtureUltxZip(): Buffer {
+  return zipTextMember(
+    "printinfo.json",
+    JSON.stringify({
+      machineName: "HeyGears Reflex Turbo",
+      printTime: 3600,
+      layerCount: 800,
+      resinVolume: 42.5,
+      resinMass: 46.2,
+      layerHeight: 0.05,
+      exposureTime: 2.2,
+    }),
+  );
 }
 
 before(async () => {
@@ -173,12 +190,42 @@ test("machine-name matching prefers distinctive aliases like NEWX1", () => {
   const heygears = fleet.find((printer) => printer.name === "HeyGears Reflex Turbo")!;
 
   assert.equal(matchPrinterId("Mighty 8K NEWX1", fleet), newx1.id);
+  assert.equal(matchPrinterId("NEWX2", fleet), fleet.find((p) => p.name === "Mighty 8K NEWX2")!.id);
   assert.equal(matchPrinterId("ELEGOO Mega 8K", fleet), mega.id);
   assert.equal(matchPrinterId("Phrozen Sonic Mega 8K S", fleet), mega.id);
   assert.equal(matchPrinterId("Phrozen Sonic Mega 8K", fleet), mega.id);
   assert.equal(matchPrinterId("Reflex RS Turbo", fleet), heygears.id);
   assert.equal(matchPrinterId("totally unknown box", fleet), null);
+  // Shared model-only names must NOT latch onto NEWX1 via substring containment.
+  assert.equal(matchPrinterId("Mighty 8K", fleet), null);
+  assert.equal(matchPrinterId("Phrozen Sonic Mighty 8K", fleet), null);
+  assert.equal(isSharedModelPrinterProfile("Mighty 8K", fleet), true);
+  assert.equal(isSharedModelPrinterProfile("Mighty 8K NEWX1", fleet), false);
   assert.equal(normalizePrinterKey("Mighty  8K!!! NEWX1"), "mighty 8k newx1");
+});
+
+test("per-plate fleet printer assignment attributes shared Mighty 8K hours", () => {
+  const fleet = ensureDefaultPrinters();
+  const newx2 = fleet.find((printer) => printer.name === "Mighty 8K NEWX2")!;
+  const staged = stagePrintFile("shared-mighty.ctb", fixtureCtb("Phrozen Sonic Mighty 8K"));
+  const record = createPrintFileRecord({
+    analysisId: staged.analysisId,
+    hubspotDealId: "9002",
+    hubspotDealName: "Shared Mighty plate",
+    dealStage: "In work",
+    metrics: staged.metrics,
+  });
+  assert.equal(matchPrinterId(record.printerProfile, fleet), null);
+  assert.equal(resolvePrinterIdForRecord(record, fleet), null);
+
+  const assigned = assignPrintFilePrinter({ recordId: record.id, printerId: newx2.id });
+  assert.ok(assigned);
+  assert.equal(assigned!.record.fleetPrinterId, newx2.id);
+  const snapshot = buildPrinterFleetSnapshot();
+  const usage = snapshot.printers.find((printer) => printer.printerId === newx2.id);
+  assert.ok(usage);
+  assert.ok(usage!.recentJobs.some((job) => job.recordId === record.id));
+  assert.ok(usage!.totalPrintHours > 0);
 });
 
 test("manual profile assignment maps odd labels onto a fleet printer", () => {
@@ -205,6 +252,152 @@ test("ULTX zip metadata is harvested into print metrics", () => {
   assert.equal(metrics.layerCount, 800);
   assert.equal(metrics.resinVolumeMl, 42.5);
   assert.equal(metrics.printerProfile, "HeyGears Reflex Turbo");
+});
+
+test("ULTX plaintext parameters.ini harvests Blueprint field names", () => {
+  const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-plaintext.ultx"));
+  const metrics = parseUltxFile("plate.ultx", buffer);
+  assert.equal(metrics.printTimeSeconds, 7200);
+  assert.equal(metrics.resinMassG, 88.5);
+  assert.equal(metrics.resinVolumeMl, 80);
+  // Layer PNGs win over the parameters.ini layerCount=400 placeholder.
+  assert.equal(metrics.layerCount, 10);
+  assert.equal(metrics.layerHeightMm, 0.05);
+  assert.equal(metrics.printerProfile, "HeyGears Reflex Turbo");
+  assert.equal(metrics.modelHeightMm, 0.5);
+});
+
+test("ULTX AES archive yields layer count without password and full metrics with password", () => {
+  const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx"));
+  const members = listUltxZipMembers(buffer);
+  assert.ok(members.length >= 7);
+  assert.equal(countUltxLayersFromMembers(members), 5);
+
+  const sealed = parseUltxFile("P_demo-Plate01.rs.ultx", buffer, { password: null });
+  assert.equal(sealed.layerCount, 5);
+  assert.equal(sealed.printTimeSeconds, null);
+  assert.equal(sealed.resinMassG, null);
+  assert.equal(sealed.printerProfile, "Reflex RS");
+  assert.match(sealed.formatRevision, /AES-encrypted|metadata sealed/i);
+
+  const opened = parseUltxFile("P_demo-Plate01.rs.ultx", buffer, { password: "heygears-test-pass" });
+  assert.equal(opened.printTimeSeconds, 12457);
+  assert.equal(opened.resinMassG, 44);
+  assert.equal(opened.resinVolumeMl, 40.2);
+  assert.equal(opened.layerHeightMm, 0.03);
+  assert.equal(opened.layerCount, 5);
+  assert.equal(opened.modelHeightMm, 0.15);
+  assert.equal(opened.printerProfile, "Reflex RS");
+  assert.equal(opened.resinCostLabel, "Open Material");
+  assert.match(opened.formatRevision, /decrypted/i);
+});
+
+test("ULTX harvests Blueprint Slice.log / UI-style phrases with spaced keys", () => {
+  // Simulate decrypted parameters.ini + Slice.log fragments from Blueprint AppCache.
+  const dump = [
+    "Time Cost: 03:27:37",
+    "materialWeight: 44g",
+    "Techbag file volume: 161.701311",
+    "layerThickness=0.03",
+    "platformSizeX=228.1",
+    "platformSizeY=128.3",
+    "platformSizeZ=228",
+    "Use open material",
+    'openMaterialConfig={"normalLayerExposure":1300,"firstLayerExposure":10000}',
+  ].join("\n");
+  const metrics = parseUltxFile("P_demo-Plate01.rs.ultx", zipTextMember("parameters.ini", dump));
+  assert.equal(metrics.printTimeSeconds, 3 * 3600 + 27 * 60 + 37);
+  assert.equal(metrics.resinMassG, 44);
+  assert.equal(metrics.resinVolumeMl, 161.701);
+  assert.equal(metrics.layerHeightMm, 0.03);
+  assert.equal(metrics.buildVolumeXmm, 228.1);
+  assert.equal(metrics.buildVolumeYmm, 128.3);
+  assert.equal(metrics.buildVolumeZmm, 228);
+  assert.equal(metrics.resinCostLabel, "Open Material");
+  assert.equal(metrics.exposureSeconds, 1.3);
+  assert.equal(metrics.bottomExposureSeconds, 10);
+});
+
+test("ULTX scrapes Codex zip passwords from Blueprint Slice.log lines", () => {
+  const passwords = extractPasswordsFromSliceLog(
+    ["[Slice] Use open material", "[Slice] password: ab12cd34ef", "[Slice] password: ab12cd34ef", "noise"].join(
+      "\n",
+    ),
+  );
+  assert.deepEqual(passwords, ["ab12cd34ef"]);
+  assert.equal(BLUEPRINT_ASSET_ZIP_PASSWORD, "heygears008");
+});
+
+test("ULTX harvests print estimates from Blueprint Slice.log Output JSON", () => {
+  const sliceLog = [
+    '1786060093550|info|ALG|[Slice] Techbag file volume: 33.51452|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:13:550',
+    '1786060094161|info|ALG|[Slice] material cost: 43.568876 g, print time cost: 12457725 ms|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:14:161',
+    '1786060108784|info|ALG|[Slice] Output: {"calcMValueTime":12714,"compressTime":12891,"numberOfSlices":1113,"printEstimateMaterials":43.568875999999996,"printEstimateTime":12457,"sliceFileName":"Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx","sliceTime":35453,"sliceTotalTime":63421}|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:28:784',
+    '1786060028480|info|ALG|[Slice] Output: {"numberOfSlices":2073,"printEstimateMaterials":138.0576704,"printEstimateTime":22921,"sliceFileName":"Slice-54265a30-b458-467a-865e-be177354167c.ultx","sliceTotalTime":127340}|54265a30-b458-467a-865e-be177354167c|16:47:08:480',
+  ].join("\n");
+
+  const entries = extractUltxMetricsFromSliceLog(sliceLog);
+  assert.equal(entries.length, 2);
+
+  const byName = matchSliceLogMetrics(
+    entries,
+    "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx",
+  );
+  assert.ok(byName);
+  assert.equal(byName!.printTimeSeconds, 12457);
+  assert.equal(byName!.resinMassG, 43.569);
+  assert.equal(byName!.resinVolumeMl, 33.515);
+  assert.equal(byName!.layerCount, 1113);
+
+  const byUuid = matchSliceLogMetrics(entries, "P_plate-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.rs.ultx");
+  assert.equal(byUuid?.printTimeSeconds, 12457);
+
+  const byLayers = matchSliceLogMetrics(entries, "mystery-plate.ultx", 2073);
+  assert.equal(byLayers?.resinMassG, 138.058);
+  assert.equal(byLayers?.printTimeSeconds, 22921);
+
+  // Blueprint export names keep a local stamp, not the Slice-*.ultx uuid.
+  const exportName = "P_20260806_164828-Plate01.rs.ultx";
+  const stamp = parseUltxExportStampMs(exportName);
+  assert.ok(stamp);
+  // Align the first Output line's epoch prefix to the export stamp for the matcher.
+  const stampedLog = sliceLog.replace("1786060108784|", `${stamp}|`);
+  const stampedEntries = extractUltxMetricsFromSliceLog(stampedLog);
+  const byStamp = matchSliceLogMetrics(stampedEntries, exportName, 1113);
+  assert.equal(byStamp?.printTimeSeconds, 12457);
+  assert.equal(byStamp?.resinMassG, 43.569);
+
+  const prev = process.env.ULTX_SLICE_LOG;
+  const logFile = path.join(os.tmpdir(), `slice-log-${crypto.randomUUID()}.log`);
+  fs.writeFileSync(logFile, sliceLog, "utf8");
+  process.env.ULTX_SLICE_LOG = logFile;
+  try {
+    const buffer = fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx"));
+    // Sealed AES fixture has 5 layers — force a UUID filename match instead.
+    const renamed = Buffer.from(buffer);
+    const metrics = parseUltxFile("Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx", renamed, {
+      password: null,
+    });
+    assert.equal(metrics.layerCount, 5); // ZIP PNG inventory wins over log layer count
+    assert.equal(metrics.printTimeSeconds, 12457);
+    assert.equal(metrics.resinMassG, 43.569);
+    assert.equal(metrics.resinVolumeMl, 33.515);
+    assert.match(metrics.formatRevision, /Slice\.log/i);
+  } finally {
+    if (prev === undefined) delete process.env.ULTX_SLICE_LOG;
+    else process.env.ULTX_SLICE_LOG = prev;
+    fs.unlinkSync(logFile);
+  }
+
+  // Uploaded Slice.log text (analyze form) works without ULTX_SLICE_LOG.
+  delete process.env.ULTX_SLICE_LOG;
+  const uploaded = parseUltxFile(
+    "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx",
+    fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx")),
+    { password: null, sliceLogText: sliceLog },
+  );
+  assert.equal(uploaded.printTimeSeconds, 12457);
+  assert.equal(uploaded.resinMassG, 43.569);
 });
 
 test("attached CTB plates roll into the matched printer usage breakdown", () => {

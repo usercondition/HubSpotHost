@@ -25,7 +25,11 @@ import {
 } from "./hubspot";
 import { getKitForDeal } from "./kits";
 import { getDb } from "./order-links";
-import { ensureDefaultPrinters, matchPrinterId, listPrinterProfileMaps } from "./printers";
+import {
+  ensureDefaultPrinters,
+  listPrinterProfileMaps,
+  resolvePrinterIdForRecord,
+} from "./printers";
 import { recalculateDeal } from "./service";
 
 function moneyText(value: string | null | undefined): string {
@@ -149,21 +153,22 @@ export function assignPlateToPrinter(
   if (!record) return { ok: false, error: "Plate record not found." };
 
   const fleet = ensureDefaultPrinters();
-  let assignedPrinterId: number | null = input.printerId;
+  let fleetPrinterId: number | null = input.printerId;
   let assignedPrinterName: string | null = null;
-  if (assignedPrinterId != null) {
-    const printer = fleet.find((item) => item.id === assignedPrinterId);
+  if (fleetPrinterId != null) {
+    const printer = fleet.find((item) => item.id === fleetPrinterId);
     if (!printer) return { ok: false, error: "Choose a fleet printer." };
     assignedPrinterName = printer.name;
   }
 
   getDb()
     .update(printFileRecords)
-    .set({ assignedPrinterId })
+    .set({ fleetPrinterId })
     .where(eq(printFileRecords.id, input.recordId))
     .run();
 
-  return { ok: true, recordId: input.recordId, assignedPrinterId, assignedPrinterName };
+  // API keeps assignedPrinter* names for DealOpsPanel; DB column is fleet_printer_id.
+  return { ok: true, recordId: input.recordId, assignedPrinterId: fleetPrinterId, assignedPrinterName };
 }
 
 export async function updateDealCosts(
@@ -308,16 +313,13 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
       .all();
 
     const plateViews = plates.map((plate) => {
-      const assignedId =
-        plate.assignedPrinterId && fleet.some((printer) => printer.id === plate.assignedPrinterId)
-          ? plate.assignedPrinterId
-          : matchPrinterId(plate.printerProfile, fleet, profileMaps);
+      const assignedId = resolvePrinterIdForRecord(plate, fleet, profileMaps);
       const printer = assignedId != null ? fleet.find((item) => item.id === assignedId) : null;
       return {
         id: plate.id,
         fileName: plate.fileName,
         printerProfile: plate.printerProfile,
-        assignedPrinterId: plate.assignedPrinterId ?? assignedId,
+        assignedPrinterId: plate.fleetPrinterId ?? assignedId,
         assignedPrinterName: printer?.name ?? null,
         printTimeSeconds: plate.printTimeSeconds,
         resinMassG: parseGrams(plate.resinMassG),

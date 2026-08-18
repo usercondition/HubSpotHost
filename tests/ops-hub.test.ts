@@ -11,6 +11,7 @@ import { assignPlateToPrinter } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { printFileRecords } from "../shared/schema";
 import type { PerformanceResponse, ResinInventorySnapshot } from "../shared/schema";
+import { eq } from "drizzle-orm";
 
 function withTempDb(run: () => void | Promise<void>) {
   const dir = mkdtempSync(join(tmpdir(), "ops-hub-"));
@@ -180,7 +181,7 @@ test("production queue buckets next print vs in production", async () => {
         resolutionX: null,
         resolutionY: null,
         printerProfile: "Mighty 8K",
-        assignedPrinterId: null,
+        fleetPrinterId: null,
         hubspotSyncedAt: "2026-08-01T00:00:00.000Z",
         attachedAt: "2026-08-01T00:00:00.000Z",
       })
@@ -197,7 +198,7 @@ test("production queue buckets next print vs in production", async () => {
   });
 });
 
-test("plate printer assignment stores assigned_printer_id", async () => {
+test("plate printer assignment stores fleet_printer_id", async () => {
   await withTempDb(() => {
     const record = getDb()
       .insert(printFileRecords)
@@ -233,7 +234,7 @@ test("plate printer assignment stores assigned_printer_id", async () => {
         resolutionX: null,
         resolutionY: null,
         printerProfile: "Odd Profile",
-        assignedPrinterId: null,
+        fleetPrinterId: null,
         hubspotSyncedAt: "2026-08-01T00:00:00.000Z",
         attachedAt: "2026-08-01T00:00:00.000Z",
       })
@@ -244,11 +245,15 @@ test("plate printer assignment stores assigned_printer_id", async () => {
     assert.equal(assigned.ok, true);
     if (!assigned.ok) return;
     assert.equal(assigned.assignedPrinterId, 1);
+    const stored = getDb().select().from(printFileRecords).where(eq(printFileRecords.id, record.id)).get();
+    assert.equal(stored?.fleetPrinterId, 1);
 
     const cleared = assignPlateToPrinter({ recordId: record.id, printerId: null });
     assert.equal(cleared.ok, true);
     if (!cleared.ok) return;
     assert.equal(cleared.assignedPrinterId, null);
+    const clearedRow = getDb().select().from(printFileRecords).where(eq(printFileRecords.id, record.id)).get();
+    assert.equal(clearedRow?.fleetPrinterId, null);
   });
 });
 

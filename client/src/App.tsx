@@ -17,7 +17,6 @@ import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
 import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
-import KitDryRunPage from "@/pages/kit-dry-run";
 import ProductionQueuePage from "@/pages/queue";
 import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
@@ -38,7 +37,11 @@ function ShellRoutes() {
           <Route path="/prints" component={Prints} />
           <Route path="/printers" component={PrintersPage} />
           <Route path="/resin" component={ResinInventoryPage} />
-          <Route path="/kit-dry-run" component={KitDryRunPage} />
+          {/*
+            Kits UI parked: live parts/QC is Orders Parts + Prints plate bits.
+            Keep kit-dry-run.tsx /api/kits for a later thin rebuild; do not re-add
+            the route until attach uses the same Slice.log + printer + bits path.
+          */}
           <Route path="/performance" component={Performance} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />

@@ -259,3 +259,57 @@ test("board deals expose close date and contact parsed from Product - Client nam
   assert.ok(snapshot.activeDeals[0]?.closeDate);
   assert.match(snapshot.activeDeals[0]?.closeDate ?? "", /^2026-08-04/);
 });
+
+test("shipping line kind skips plate prompts and plate attention", () => {
+  const now = new Date("2026-08-04T12:00:00.000Z");
+  const snapshot = buildPerformanceSnapshot({
+    now,
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: [],
+    stages: [
+      { id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } },
+    ],
+    deals: [
+      {
+        id: "print-deal",
+        properties: {
+          dealname: "Knight - Buyer",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "120",
+          print_line_kind: "print",
+          print_material_cost: "",
+          print_labor_cost: "",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "",
+        },
+      },
+      {
+        id: "ship-deal",
+        properties: {
+          dealname: "Shipping - Buyer",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "15",
+          print_line_kind: "shipping",
+          print_material_cost: "",
+          print_labor_cost: "",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "",
+        },
+      },
+    ],
+  });
+
+  const printDeal = snapshot.activeDeals.find((deal) => deal.dealId === "print-deal");
+  const shipDeal = snapshot.activeDeals.find((deal) => deal.dealId === "ship-deal");
+  assert.equal(printDeal?.promptAttachPlates, true);
+  assert.equal(shipDeal?.promptAttachPlates, false);
+  assert.ok(snapshot.attention.some((item) => item.dealId === "print-deal" && item.issueKey === "no_plates"));
+  assert.equal(
+    snapshot.attention.some((item) => item.dealId === "ship-deal" && item.issueKey === "no_plates"),
+    false,
+  );
+});

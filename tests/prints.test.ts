@@ -226,16 +226,50 @@ test("a CTB plate is parsed in memory and the raw file is never persisted", asyn
   assert.equal(analysis.body.metrics.fileName, "knight-plate-01.ctb");
 });
 
+test("ULTX analyze accepts an uploaded Slice.log for sealed estimate recovery", async () => {
+  const ultx = fs.readFileSync(path.join("tests", "fixtures", "sample-encrypted.ultx"));
+  const sliceLog = [
+    '1786060093550|info|ALG|[Slice] Techbag file volume: 33.51452|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:13:550',
+    '1786060108784|info|ALG|[Slice] Output: {"numberOfSlices":1113,"printEstimateMaterials":43.568875999999996,"printEstimateTime":12457,"sliceFileName":"Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx","sliceTotalTime":63421}|ed4909aa-1ea8-4a0d-a3f5-3215bed8c027|16:48:28:784',
+  ].join("\n");
+
+  const form = new FormData();
+  form.append("file", new Blob([ultx]), "Slice-ed4909aa-1ea8-4a0d-a3f5-3215bed8c027.ultx");
+  form.append("sliceLog", new Blob([sliceLog], { type: "text/plain" }), "Slice.log");
+
+  const response = await fetch(`${appBase}/api/prints/analyze`, {
+    method: "POST",
+    headers: { "x-paid-order-access-code": OWNER_CODE },
+    body: form,
+  });
+  const body = (await response.json()) as any;
+  assert.equal(response.status, 201, body?.error || "analyze failed");
+  assert.equal(body.sliceLogApplied, true);
+  assert.equal(body.metrics.format, "ULTX");
+  assert.equal(body.metrics.layerCount, 5);
+  assert.equal(body.metrics.printTimeSeconds, 12457);
+  assert.equal(body.metrics.resinMassG, 43.569);
+  assert.equal(body.metrics.resinVolumeMl, 33.515);
+  assert.match(body.metrics.formatRevision, /Slice\.log/i);
+});
+
 test("each CTB plate appends to one job and HubSpot receives cumulative totals", async () => {
   mockCalls = [];
   mockDealStage = "in_work";
   mockDealStageLabel = "In work";
+  // Fixture CTB uses "ELEGOO SATURN" — unmatched fleet profile needs an explicit printer.
+  const fleet = await jsonOwnerRequest("GET", "/api/printers");
+  assert.equal(fleet.status, 200);
+  const printerId = fleet.body.printers[0]?.printerId as number;
+  assert.ok(printerId);
+
   const first = stagePrintFile("knight-plate-01.ctb", fixtureCtb());
   const firstAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: first.analysisId,
     dealId: "701",
+    printerId,
   });
-  assert.equal(firstAttach.status, 201);
+  assert.equal(firstAttach.status, 201, firstAttach.body?.error || "attach failed");
   assert.equal(firstAttach.body.summary.plateCount, 1);
   assert.equal(firstAttach.body.summary.totalPrintTimeSeconds, 14_400);
   assert.equal(firstAttach.body.summary.totalResinVolumeMl, 31.25);
@@ -243,11 +277,13 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.record.resinCost, "4.75");
   assert.equal(firstAttach.body.record.exposureSeconds, "2.5");
   assert.equal(firstAttach.body.record.dealStage, "In work");
+  assert.equal(firstAttach.body.record.fleetPrinterId, printerId);
 
   const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb());
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
+    printerId,
   });
   assert.equal(secondAttach.status, 201);
   assert.equal(secondAttach.body.summary.plateCount, 2);

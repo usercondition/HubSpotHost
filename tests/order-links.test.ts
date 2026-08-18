@@ -187,6 +187,7 @@ test("a valid token exposes only client-safe order details", () => {
     "expiresAt",
     "itemDescription",
     "lineItems",
+    "savedDetails",
   ]);
   assert.equal(lookup.view.lineItems.length, 1);
   assert.equal(lookup.view.lineItems[0].description, "Acastus Knight Porphyrion");
@@ -481,3 +482,202 @@ test("a partial owner edit leaves untouched buyer fields intact", async () => {
   assert.equal(edited.body.link.clientNotes, submission.clientNotes);
   assert.equal(edited.body.link.clientUsername, submission.clientUsername);
 });
+
+test("a returning buyer's next private link prefills last submitted details", async () => {
+  const username = `returning.${crypto.randomUUID().slice(0, 8)}`;
+  const first = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RETURN-1",
+    itemDescription: "First returning order",
+    agreedAmount: "80",
+    buyerUsernameHint: username,
+  });
+  assert.equal(first.status, 201);
+  const firstLookup = await publicRequest("/api/client-order/lookup", { token: first.body.token });
+  assert.equal(firstLookup.status, 200);
+  assert.equal(firstLookup.body.view.savedDetails, null);
+
+  await publicRequest("/api/client-order/submit", {
+    token: first.body.token,
+    ...submission,
+    clientUsername: username,
+  });
+
+  const ownerMatch = await ownerRequest(
+    "GET",
+    `/api/order-links/prior-client?username=${encodeURIComponent(`@${username.toUpperCase()}`)}`,
+  );
+  assert.equal(ownerMatch.status, 200);
+  assert.equal(ownerMatch.body.match.clientEmail, submission.clientEmail);
+  assert.equal(ownerMatch.body.match.shippingStreet, submission.shippingStreet);
+  assert.equal(ownerMatch.body.match.lastItemDescription, submission.confirmedItem);
+
+  const unauth = await fetch(`${appBase}/api/order-links/prior-client?username=x`);
+  assert.equal(unauth.status, 401);
+
+  const second = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RETURN-2",
+    itemDescription: "Second returning order",
+    agreedAmount: "95",
+    buyerUsernameHint: `@${username.toUpperCase()}`,
+  });
+  const secondLookup = await publicRequest("/api/client-order/lookup", { token: second.body.token });
+  assert.equal(secondLookup.status, 200);
+  assert.equal(secondLookup.body.view.itemDescription, "Second returning order");
+  assert.deepEqual(secondLookup.body.view.savedDetails, {
+    clientFullName: submission.clientFullName,
+    clientUsername: username,
+    clientEmail: submission.clientEmail,
+    clientPhone: submission.clientPhone,
+    shippingRequired: true,
+    shippingStreet: submission.shippingStreet,
+    shippingCity: submission.shippingCity,
+    shippingState: submission.shippingState,
+    shippingPostalCode: submission.shippingPostalCode,
+    shippingCountry: submission.shippingCountry,
+  });
+  assert.equal(JSON.stringify(secondLookup.body.view).includes("MIG-RETURN-1"), false);
+  assert.equal(JSON.stringify(secondLookup.body.view).includes(submission.confirmedItem), false);
+  assert.equal(JSON.stringify(secondLookup.body.view).includes("ZL-88213"), false);
+
+  const other = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RETURN-OTHER",
+    itemDescription: "Someone else",
+    agreedAmount: "40",
+    buyerUsernameHint: `other.${crypto.randomUUID().slice(0, 8)}`,
+  });
+  const otherLookup = await publicRequest("/api/client-order/lookup", { token: other.body.token });
+  assert.equal(otherLookup.body.view.savedDetails, null);
+});
+
+test("a submitted order is flagged as returning when email or username already exists", async () => {
+  const username = `review-match.${crypto.randomUUID().slice(0, 8)}`;
+  const email = `${username}@example.com`;
+  const first = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-1",
+    itemDescription: "Prior kit",
+    agreedAmount: "70",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: first.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: email,
+  });
+  const firstApproved = await ownerRequest("POST", `/api/order-links/${first.body.link.id}/create-order`, {
+    paymentVerified: true,
+  });
+  assert.equal(firstApproved.status, 201);
+
+  const second = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-2",
+    itemDescription: "New kit, same buyer",
+    agreedAmount: "88",
+  });
+  assert.equal(second.body.link.priorMatch, null);
+
+  await publicRequest("/api/client-order/submit", {
+    token: second.body.token,
+    ...submission,
+    clientUsername: "fresh.username.this.time",
+    clientEmail: email,
+    shippingStreet: "999 New Street",
+  });
+
+  const detail = await ownerRequest("GET", `/api/order-links/${second.body.link.id}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.link.priorMatch.matchedBy, "email");
+  assert.equal(detail.body.link.priorMatch.lastInternalLabel, "MIG-MATCH-1");
+  assert.equal(detail.body.link.priorMatch.clientEmail, email);
+  assert.equal(detail.body.link.priorMatch.shippingStreet, submission.shippingStreet);
+  assert.equal(detail.body.link.priorMatch.hubspotContactId, firstApproved.body.result.contactId);
+
+  const queue = await ownerRequest("GET", "/api/order-links?status=pending_review");
+  const row = queue.body.links.find((link: { internalLabel: string }) => link.internalLabel === "MIG-MATCH-2");
+  assert.ok(row);
+  assert.equal(row.priorMatch.matchedBy, "email");
+
+  const byUsername = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-3",
+    itemDescription: "Same username, new email",
+    agreedAmount: "55",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: byUsername.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: `other.${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  const usernameMatch = await ownerRequest("GET", `/api/order-links/${byUsername.body.link.id}`);
+  assert.equal(usernameMatch.body.link.priorMatch.matchedBy, "username");
+
+  const stranger = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-MATCH-NEW",
+    itemDescription: "Brand new buyer",
+    agreedAmount: "40",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: stranger.body.token,
+    ...submission,
+    clientUsername: `new.${crypto.randomUUID().slice(0, 8)}`,
+    clientEmail: `${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  const strangerDetail = await ownerRequest("GET", `/api/order-links/${stranger.body.link.id}`);
+  assert.equal(strangerDetail.body.link.priorMatch, null);
+});
+
+test("a valid token can recall last shipping from the email the buyer types", async () => {
+  const username = `recall.${crypto.randomUUID().slice(0, 8)}`;
+  const email = `${username}@example.com`;
+  const first = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RECALL-1",
+    itemDescription: "First recall order",
+    agreedAmount: "60",
+  });
+  await publicRequest("/api/client-order/submit", {
+    token: first.body.token,
+    ...submission,
+    clientUsername: username,
+    clientEmail: email,
+  });
+
+  const second = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-RECALL-2",
+    itemDescription: "Second recall order",
+    agreedAmount: "75",
+  });
+  const token: string = second.body.token;
+
+  const recalled = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientEmail: email,
+  });
+  assert.equal(recalled.status, 200);
+  assert.equal(recalled.body.savedDetails.clientEmail, email);
+  assert.equal(recalled.body.savedDetails.shippingStreet, submission.shippingStreet);
+  assert.equal(JSON.stringify(recalled.body).includes("MIG-RECALL-1"), false);
+  assert.equal(JSON.stringify(recalled.body).includes(submission.confirmedItem), false);
+
+  const byUsername = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientUsername: username,
+  });
+  assert.equal(byUsername.body.savedDetails.shippingCity, submission.shippingCity);
+
+  const unknown = await publicRequest("/api/client-order/saved-details", {
+    token,
+    clientEmail: `${crypto.randomUUID().slice(0, 8)}@example.com`,
+  });
+  assert.equal(unknown.body.savedDetails, null);
+
+  const closed = await publicRequest("/api/client-order/saved-details", {
+    token: first.body.token,
+    clientEmail: email,
+  });
+  assert.equal(closed.status, 410);
+
+  const missing = await publicRequest("/api/client-order/saved-details", {
+    clientEmail: email,
+  });
+  assert.equal(missing.status, 404);
+});
+

@@ -13,7 +13,6 @@ import {
   FileUp,
   Lock,
   Moon,
-  Layers3,
   ListOrdered,
   Printer,
   ShoppingBag,
@@ -127,17 +126,10 @@ const NAV = [
     group: "Work",
   },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Work" },
-  { href: "/prints", label: "Prints", title: "Print Files", icon: FileUp, testId: "link-nav-prints", group: "Work" },
+  { href: "/prints", label: "Prints", title: "Prints", icon: FileUp, testId: "link-nav-prints", group: "Work" },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Work" },
   { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Work" },
-  {
-    href: "/kit-dry-run",
-    label: "Kits",
-    title: "Kit bit inventory & plates",
-    icon: Layers3,
-    testId: "link-nav-kit-dry-run",
-    group: "Work",
-  },
+  // Kits nav parked — Orders Parts + Prints plate bits are the live checklist/QC path.
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "System" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "System" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
@@ -244,7 +236,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="scroll-pane min-w-0 bg-background">{children}</main>
+      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
     </div>
   );
 }
