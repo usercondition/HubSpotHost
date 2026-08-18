@@ -33,4 +33,12 @@ test("attention next steps route plates in-app and costs to the queue", () => {
       external: false,
     },
   );
+  assert.deepEqual(
+    attentionNextStep({ dealId: "3", issue: "No activity for 10 days", portalId: "99" }),
+    {
+      href: "/queue?dealId=3",
+      label: "Open in Queue",
+      external: false,
+    },
+  );
 });

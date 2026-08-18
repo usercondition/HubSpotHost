@@ -1094,18 +1094,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ ok: true, checklist: getFulfillmentChecklist(dealId) });
   });
 
-  app.patch("/api/fulfillment/:dealId", (req: Request, res: Response) => {
+  app.patch("/api/fulfillment/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const dealId = String(req.params.dealId || "").trim();
     const parsed = updateFulfillmentChecklistSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     }
-    const result = upsertFulfillmentChecklist(dealId, parsed.data);
+    const result = await upsertFulfillmentChecklist(dealId, parsed.data);
     if ("error" in result) {
       return res.status(400).json({ ok: false, error: result.error });
     }
-    return res.json({ ok: true, checklist: result });
+    return res.json({ ok: true, checklist: result.checklist, hubspot: result.hubspot });
   });
 
   app.post("/api/plates/assign-printer", (req: Request, res: Response) => {

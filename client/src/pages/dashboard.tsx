@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { hubspotDealHref, hubspotDealsListHref, printsDealHref } from "@/lib/workflow";
+import { hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader } from "@/components/shell";
@@ -197,11 +197,11 @@ function TodaysWork() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="outline" data-testid="button-todays-work-hubspot">
-            <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              HubSpot deals
-            </a>
+          <Button asChild size="sm" variant="outline" data-testid="button-todays-work-queue">
+            <Link href="/queue">
+              <PackageCheck className="mr-2 h-3.5 w-3.5" />
+              Queue
+            </Link>
           </Button>
           <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
             <Link href="/performance">
@@ -272,6 +272,13 @@ function TodaysWork() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-3">
+                  <Link
+                    href={queueDealHref(deal.dealId)}
+                    className="text-xs font-medium text-primary hover:underline"
+                    data-testid={`link-todays-ops-${deal.dealId}`}
+                  >
+                    Ops
+                  </Link>
                   {deal.promptAttachPlates ? (
                     <Link
                       href={printsDealHref(deal.dealId)}
@@ -495,7 +502,7 @@ export default function Dashboard() {
                   <Store className="h-4 w-4 text-primary" />
                   <span>
                     <span className="block font-medium">HubSpot CRM</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Orders, customers, costs, and pipeline</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Contacts, emails, timeline, and reporting</span>
                   </span>
                 </span>
                 <ExternalLink className="h-4 w-4 text-muted-foreground" />

@@ -147,6 +147,20 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     type: "string",
     fieldType: "text",
   },
+  {
+    name: "print_tracking_number",
+    label: "Print tracking number",
+    description: "Carrier tracking number saved from Print Ops ship checklist.",
+    type: "string",
+    fieldType: "text",
+  },
+  {
+    name: "print_ship_notes",
+    label: "Print ship notes",
+    description: "Short ship notes from Print Ops fulfillment checklist.",
+    type: "string",
+    fieldType: "textarea",
+  },
 ] as const;
 
 export class HubSpotError extends Error {

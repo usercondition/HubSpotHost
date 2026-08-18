@@ -230,16 +230,19 @@ Keep HubSpot as the CRM of record. Use Print Ops as the shop-floor control loop.
 
 - Inputs (webhook + Queue cost form): `amount`, `print_material_cost`, `print_labor_cost`, `print_packaging_cost`, `print_actual_shipping_cost`
 - Outputs (automation only): `print_gross_profit`, `print_margin_percentage`
+- Shipping (from Queue checklist): `print_tracking_number`, `print_ship_notes`
 - Planning (from CTB/ULTX attach): `print_slice_*`, `print_estimated_*`, `print_plate_count`, `print_printer_profile`, …
 
 **Workflow tips**
 
 1. Keep Print Orders stages short and shop-floor meaningful (e.g. Deposit Received → Queued → Printing → QC → Ready to Ship → Shipped). Advance them from the Queue / Orders **Ops** panel so HubSpot stays accurate without tab-hopping.
 2. Enter actual costs in Queue once postage and packaging are known — the webhook still recalculates GP/margin when properties change in HubSpot.
-3. Put shipping address on the **Contact** (Print Ops already does this on approve). Use the packing slip + Pirate Ship link from Queue; paste tracking into the checklist (and optionally a HubSpot note/property if you add one).
-4. Use HubSpot lists or workflows for “deposit received > 48h with no activity” reminders; Print Ops attention covers plates/costs/stale for the daily loop.
+3. Put shipping address on the **Contact** (Print Ops already does this on approve). Use the packing slip + Pirate Ship link from Queue; **Save tracking** writes `print_tracking_number` (and optional ship notes) onto the HubSpot deal when write gates are open.
+4. Use HubSpot lists or workflows for “deposit received > 48h with no activity” reminders; Print Ops attention routes plates/costs/stale into Queue or Prints for the daily loop.
 5. Avoid a second CRM. Returning-buyer prefill reads HubSpot Contacts by email and fills gaps from local intake history only.
 6. Do **not** auto-allocate supply receipts onto deal costs — keep the Supplies ledger as a management view so material costs are not double-counted.
+
+Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for contacts, deal money fields, timeline/comms, and reporting — open it when you need CRM history, not for routine stage moves or cost entry.
 
 ## Endpoints
 

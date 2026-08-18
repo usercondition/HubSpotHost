@@ -10,7 +10,6 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  Store,
   UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,8 +40,8 @@ type BoardColumn = PerformanceResponse["pipeline"][number] & {
 };
 
 /**
- * Orders board — at-a-glance Print Orders pipeline, HubSpot-style columns.
- * Stage moves stay in HubSpot; this page is the owner’s daily glance.
+ * Orders board — at-a-glance Print Orders pipeline columns.
+ * Open Ops on a card (or Queue) to move stage, enter costs, and ship.
  */
 export default function DealsPage() {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
@@ -137,10 +136,15 @@ export default function DealsPage() {
           <>
             {isUnlocked ? (
               <>
-                <Button asChild size="sm" variant="outline" data-testid="button-open-hubspot-deals">
+                <Button asChild size="sm" data-testid="button-open-queue-from-deals">
+                  <Link href="/queue">
+                    <Package className="mr-2 h-3.5 w-3.5" />
+                    Queue
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="ghost" data-testid="button-open-hubspot-deals">
                   <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
-                    <Store className="mr-2 h-3.5 w-3.5" />
-                    HubSpot board
+                    HubSpot
                     <ExternalLink className="ml-2 h-3.5 w-3.5" />
                   </a>
                 </Button>
@@ -207,7 +211,7 @@ export default function DealsPage() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold tracking-tight">Print Orders</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Same stages as HubSpot · open a card’s Ops panel to move stage or enter costs
+                    Same stages as HubSpot · Ops panel moves stage and costs without leaving Print Ops
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

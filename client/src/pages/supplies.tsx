@@ -696,7 +696,7 @@ export default function Supplies() {
             <section className="flex items-start gap-3 rounded-lg border border-border bg-muted/35 p-4" data-testid="note-supplies-no-double-count">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-chart-4" />
               <p className="text-xs leading-5 text-muted-foreground">
-                Supply purchases are a management view, not a replacement for order-level costing. Keep recording actual material, labor, packaging, and shipping costs on the related HubSpot deal so gross profit remains accurate.
+                Supply purchases are a management view, not a replacement for order-level costing. Enter actual material, labor, packaging, and shipping costs from Queue → Ops so HubSpot gross profit stays accurate.
               </p>
             </section>
           </>

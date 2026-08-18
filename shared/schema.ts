@@ -1606,11 +1606,11 @@ export const FULFILLMENT_CHECKLIST_LABELS: Record<FulfillmentChecklistKey, strin
   addressVerified: "Address verified",
   costsEntered: "Actual costs entered",
   labelBought: "Pirate Ship label bought",
-  trackingPasted: "Tracking pasted on deal",
+  trackingPasted: "Tracking saved",
   packingDone: "Packed & ready",
 };
 
-/** Local ship-ready checklist per HubSpot deal (CRM stage stays in HubSpot). */
+/** Local ship-ready checklist per HubSpot deal (stage/costs/tracking also write HubSpot from Ops). */
 export const fulfillmentChecklists = sqliteTable("fulfillment_checklists", {
   hubspotDealId: text("hubspot_deal_id").primaryKey(),
   addressVerified: integer("address_verified", { mode: "boolean" }).notNull().default(false),
@@ -1670,6 +1670,8 @@ export const updateFulfillmentChecklistSchema = z.object({
   packingDone: z.boolean().optional(),
   trackingNumber: trimmed(120).optional(),
   notes: trimmed(2_000).optional(),
+  /** When true (default), also PATCH tracking/notes onto the HubSpot deal if provided. */
+  liveWrite: z.boolean().optional(),
 });
 
 export type UpdateFulfillmentChecklistInput = z.infer<typeof updateFulfillmentChecklistSchema>;

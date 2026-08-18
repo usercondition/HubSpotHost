@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
 import { formatMoney } from "@/lib/format";
-import { printsDealHref } from "@/lib/workflow";
+import { printsDealHref, queueDealHref, hubspotDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
@@ -718,15 +718,18 @@ export default function PaidOrders() {
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <Button asChild size="sm" data-testid={`button-attach-plates-${deal.dealId}`}>
+                              <Button asChild size="sm" data-testid={`button-open-queue-${deal.dealId}`}>
+                                <Link href={queueDealHref(deal.dealId)}>Ops / Queue</Link>
+                              </Button>
+                              <Button asChild size="sm" variant="outline" data-testid={`button-attach-plates-${deal.dealId}`}>
                                 <Link href={printsDealHref(deal.dealId)}>
                                   <FileUp className="mr-1.5 h-3.5 w-3.5" />
                                   Attach plates
                                 </Link>
                               </Button>
-                              <Button asChild size="sm" variant="outline">
+                              <Button asChild size="sm" variant="ghost">
                                 <a
-                                  href="https://app.hubspot.com/"
+                                  href={hubspotDealHref(deal.dealId)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   data-testid={`link-hubspot-deal-${deal.dealId}`}

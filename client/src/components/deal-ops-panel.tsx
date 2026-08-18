@@ -147,16 +147,34 @@ export function DealOpsPanel({
   });
 
   const toggleChecklist = useMutation({
-    mutationFn: async (patch: Partial<Record<FulfillmentChecklistKey, boolean>> & { trackingNumber?: string }) => {
+    mutationFn: async (patch: Partial<Record<FulfillmentChecklistKey, boolean>> & { trackingNumber?: string; notes?: string }) => {
       const response = await apiRequest(
         "PATCH",
         `/api/fulfillment/${encodeURIComponent(dealId)}`,
-        patch,
+        { ...patch, liveWrite: true },
         { headers },
       );
-      return response.json();
+      return response.json() as Promise<{
+        ok: true;
+        checklist: DealOpsDetail["checklist"];
+        hubspot: { dryRun?: boolean; gate?: string; wrote?: boolean } | null;
+      }>;
     },
-    onSuccess: () => invalidateOps(dealId),
+    onSuccess: (data, variables) => {
+      invalidateOps(dealId);
+      if (variables.trackingNumber !== undefined || variables.notes !== undefined) {
+        toast({
+          title: data.hubspot?.dryRun
+            ? "Tracking saved locally (HubSpot dry run)"
+            : data.hubspot?.wrote
+              ? "Tracking saved to HubSpot"
+              : "Tracking saved",
+          description: data.hubspot?.dryRun
+            ? `Write gate: ${data.hubspot.gate || "dry-run"}. Enable ALLOW_HUBSPOT_WRITES for live CRM sync.`
+            : "Checklist updated on this order.",
+        });
+      }
+    },
     onError: (error: Error) => {
       toast({
         title: "Checklist update failed",
@@ -315,7 +333,7 @@ export function DealOpsPanel({
           ) : null}
           <Button size="sm" onClick={() => saveCosts.mutate()} disabled={saveCosts.isPending} data-testid="button-save-costs">
             {saveCosts.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
-            Save costs to HubSpot
+            Save costs
           </Button>
         </div>
 
@@ -341,7 +359,7 @@ export function DealOpsPanel({
             data-testid="button-advance-stage"
           >
             {advanceStage.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
-            Update HubSpot stage
+            Update stage
           </Button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 /**
  * Ship-ready checklist per Print Order. Complements HubSpot stages —
  * Pirate Ship / packing steps live here so the queue can score readiness.
+ * Tracking + ship notes also sync onto HubSpot deal properties when writes are open.
  */
 import { eq } from "drizzle-orm";
 import {
@@ -9,6 +10,8 @@ import {
   type FulfillmentChecklistView,
   type UpdateFulfillmentChecklistInput,
 } from "../../shared/schema";
+import { getConfig, resolveWriteDecision } from "./config";
+import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError } from "./hubspot";
 import { getDb } from "./order-links";
 
 function nowIso(): string {
@@ -94,10 +97,47 @@ export function listFulfillmentChecklists(dealIds: string[]): Map<string, Fulfil
   return map;
 }
 
-export function upsertFulfillmentChecklist(
+export type HubSpotShippingSync = {
+  attempted: boolean;
+  dryRun: boolean;
+  gate: string;
+  wrote: boolean;
+};
+
+/**
+ * PATCH print_tracking_number / print_ship_notes onto the deal when write gates allow.
+ */
+export async function syncDealShippingToHubSpot(
+  dealId: string,
+  fields: { trackingNumber: string; notes: string },
+  liveWrite = true,
+): Promise<HubSpotShippingSync> {
+  const config = getConfig();
+  const decision = resolveWriteDecision(config, liveWrite);
+  const properties: Record<string, string> = {
+    print_tracking_number: fields.trackingNumber.slice(0, 120),
+    print_ship_notes: fields.notes.slice(0, 2_000),
+  };
+
+  if (!decision.write) {
+    return { attempted: true, dryRun: true, gate: decision.reason, wrote: false };
+  }
+
+  await ensurePrintFileDealProperties();
+  await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
+  return { attempted: true, dryRun: false, gate: decision.reason, wrote: true };
+}
+
+export async function upsertFulfillmentChecklist(
   dealId: string,
   input: UpdateFulfillmentChecklistInput,
-): FulfillmentChecklistView | { error: string } {
+): Promise<
+  | { checklist: FulfillmentChecklistView; hubspot: HubSpotShippingSync | null }
+  | { error: string }
+> {
   const id = dealId.trim();
   if (!/^[0-9]{1,20}$/.test(id)) return { error: "Select a valid Print Order." };
 
@@ -113,6 +153,11 @@ export function upsertFulfillmentChecklist(
     notes: input.notes ?? existing?.notes ?? "",
   };
 
+  // Saving a tracking number implies the checklist flag.
+  if (input.trackingNumber !== undefined && next.trackingNumber.trim().length > 0) {
+    next.trackingPasted = true;
+  }
+
   getDb()
     .insert(fulfillmentChecklists)
     .values({
@@ -127,5 +172,28 @@ export function upsertFulfillmentChecklist(
     })
     .run();
 
-  return toChecklistView(id, { ...next, updatedAt: now });
+  const checklist = toChecklistView(id, { ...next, updatedAt: now });
+
+  const shouldSyncHubSpot =
+    input.trackingNumber !== undefined || input.notes !== undefined;
+  if (!shouldSyncHubSpot) {
+    return { checklist, hubspot: null };
+  }
+
+  try {
+    const hubspot = await syncDealShippingToHubSpot(
+      id,
+      { trackingNumber: next.trackingNumber, notes: next.notes },
+      input.liveWrite !== false,
+    );
+    return { checklist, hubspot };
+  } catch (error) {
+    // Local checklist already saved — surface CRM sync failure without rolling back shop-floor state.
+    const message =
+      error instanceof HubSpotError ? error.message : "Could not sync tracking to HubSpot.";
+    return {
+      checklist,
+      hubspot: { attempted: true, dryRun: false, gate: message, wrote: false },
+    };
+  }
 }

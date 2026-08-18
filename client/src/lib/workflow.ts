@@ -72,8 +72,8 @@ export function attentionNextStep(item: {
     };
   }
   return {
-    href: hubspotDealHref(item.dealId, item.portalId),
-    label: "Open in HubSpot",
-    external: true,
+    href: queueDealHref(item.dealId),
+    label: "Open in Queue",
+    external: false,
   };
 }

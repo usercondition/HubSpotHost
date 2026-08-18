@@ -43,12 +43,6 @@ function queueHref(dealId: string): string {
   return `/queue?dealId=${encodeURIComponent(dealId)}`;
 }
 
-function hubspotDealHref(dealId: string, portalId: string | null): string | null {
-  const portal = String(portalId ?? "").trim();
-  if (!portal || !dealId) return null;
-  return `https://app.hubspot.com/contacts/${encodeURIComponent(portal)}/record/0-3/${encodeURIComponent(dealId)}`;
-}
-
 export function getTrackerAssistantApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return (
     env.TRACKER_ASSISTANT_API_KEY?.trim() ||
@@ -223,11 +217,12 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     lines.push("Here’s what looks stuck or incomplete:");
     for (const item of [...staleIssues, ...plateIssues, ...costIssues].slice(0, 6)) {
       lines.push(`• ${item.dealName} (${item.stage}) — ${item.issue}: ${item.detail}`);
-      if (/plate|ctb/i.test(item.issue)) {
+      if (/plate|ctb|ultx|slice/i.test(item.issue)) {
         actions.push({ label: `Attach · ${item.dealName.slice(0, 24)}`, href: printsHref(item.dealId) });
+      } else if (/cost/i.test(item.issue)) {
+        actions.push({ label: `Enter costs · ${item.dealName.slice(0, 24)}`, href: queueHref(item.dealId) });
       } else {
-        const href = hubspotDealHref(item.dealId, snapshot.hubspotPortalId);
-        if (href) actions.push({ label: `HubSpot · ${item.dealName.slice(0, 24)}`, href, external: true });
+        actions.push({ label: `Queue · ${item.dealName.slice(0, 24)}`, href: queueHref(item.dealId) });
       }
     }
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 5), usedFacts };

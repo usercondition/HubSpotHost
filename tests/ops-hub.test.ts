@@ -102,30 +102,34 @@ function sampleSnapshot(overrides?: Partial<PerformanceResponse["activeDeals"][n
 }
 
 test("fulfillment checklist upserts and reports ship-ready progress", async () => {
-  await withTempDb(() => {
+  await withTempDb(async () => {
     const empty = getFulfillmentChecklist("1001");
     assert.equal(empty.readyPercent, 0);
     assert.equal(empty.shipReady, false);
 
-    const mid = upsertFulfillmentChecklist("1001", {
+    const mid = await upsertFulfillmentChecklist("1001", {
       addressVerified: true,
       costsEntered: true,
       labelBought: true,
     });
     assert.ok(!("error" in mid));
     if ("error" in mid) return;
-    assert.equal(mid.completedCount, 3);
-    assert.equal(mid.readyPercent, 60);
+    assert.equal(mid.checklist.completedCount, 3);
+    assert.equal(mid.checklist.readyPercent, 60);
+    assert.equal(mid.hubspot, null);
 
-    const done = upsertFulfillmentChecklist("1001", {
+    const done = await upsertFulfillmentChecklist("1001", {
       trackingPasted: true,
       packingDone: true,
       trackingNumber: "9400TEST",
+      liveWrite: false,
     });
     assert.ok(!("error" in done));
     if ("error" in done) return;
-    assert.equal(done.shipReady, true);
-    assert.equal(done.trackingNumber, "9400TEST");
+    assert.equal(done.checklist.shipReady, true);
+    assert.equal(done.checklist.trackingNumber, "9400TEST");
+    assert.ok(done.hubspot);
+    assert.equal(done.hubspot?.dryRun, true);
   });
 });
 

@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { hubspotDealsListHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { BooksBalancePanel } from "@/components/books-balance";
@@ -229,15 +228,13 @@ export default function Performance() {
                 title="Needs attention"
                 description="Also available from the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
                 actions={
-                  <a
-                    href={hubspotDealsListHref(snapshot.hubspotPortalId)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Link
+                    href="/queue"
                     className="text-xs font-medium text-primary hover:underline"
-                    data-testid="link-performance-hubspot"
+                    data-testid="link-performance-queue"
                   >
-                    Open HubSpot
-                  </a>
+                    Open Queue
+                  </Link>
                 }
               >
                 {snapshot.attention.length > 0 ? (

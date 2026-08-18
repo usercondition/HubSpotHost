@@ -195,7 +195,7 @@ export function buildOwnerDigestText(
     const withPlates = snapshot.activeDeals.filter((deal) => deal.hasPlates).length;
     lines.push(
       withPlates > 0
-        ? `All ${withPlates} open order${withPlates === 1 ? "" : "s"} already have plate data. Review IN PRODUCTION or advance stages in HubSpot.`
+        ? `All ${withPlates} open order${withPlates === 1 ? "" : "s"} already have plate data. Review IN PRODUCTION or advance stages from Queue.`
         : "No open Print Orders waiting for plates.",
     );
   } else {
