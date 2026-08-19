@@ -44,6 +44,7 @@ const EMPTY_CONTACT: ContactDraft = {
   email: "",
   phone: "",
   address: "",
+  address2: "",
   city: "",
   state: "",
   postalCode: "",
@@ -142,6 +143,7 @@ export default function PaidOrders() {
         marketplaceUsername: current.marketplaceUsername || buyer.username,
         phone: current.phone || buyer.phone,
         address: current.address || buyer.address,
+        address2: current.address2 || buyer.address2,
         city: current.city || buyer.city,
         state: current.state || buyer.state,
         postalCode: current.postalCode || buyer.postalCode,
@@ -267,6 +269,7 @@ export default function PaidOrders() {
         email: contact.email.trim(),
         phone: contact.phone.trim(),
         address: contact.address.trim(),
+        address2: contact.address2?.trim() || "",
         city: contact.city.trim(),
         state: contact.state.trim(),
         postalCode: contact.postalCode.trim(),
@@ -591,6 +594,12 @@ export default function PaidOrders() {
                     onChange={(value) => updateContact("address", value)}
                   />
                 </div>
+                <Field
+                  label="Apt / suite / unit"
+                  id="address2"
+                  value={contact.address2 || ""}
+                  onChange={(value) => updateContact("address2", value)}
+                />
                 <Field label="City" id="city" value={contact.city} onChange={(value) => updateContact("city", value)} />
                 <Field label="State / region" id="state" value={contact.state} onChange={(value) => updateContact("state", value)} />
                 <Field
