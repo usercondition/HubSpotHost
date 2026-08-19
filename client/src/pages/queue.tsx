@@ -62,7 +62,10 @@ function QueueCard({
         <p className="text-sm font-medium">{formatMoney(item.amount)}</p>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {!item.hasPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
+        {item.requiresPlates && !item.hasPlates ? (
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+        ) : null}
+        {!item.requiresPlates ? <StatusPill tone="neutral" label="No plates" /> : null}
         {item.plateCount > 0 ? (
           <StatusPill tone="neutral" icon={Clock3} label={`${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}`} />
         ) : null}
@@ -85,14 +88,16 @@ function QueueCard({
           label={`Ship ${item.fulfillment.readyPercent}%`}
         />
       </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <Link href={printsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-          Plates
-        </Link>
-        <Link href={kitsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-          Kits
-        </Link>
-      </div>
+      {item.requiresPlates ? (
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <Link href={printsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+            Plates
+          </Link>
+          <Link href={kitsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+            Kits
+          </Link>
+        </div>
+      ) : null}
     </button>
   );
 }

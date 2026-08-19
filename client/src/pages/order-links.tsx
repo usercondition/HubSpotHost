@@ -82,7 +82,7 @@ const EMPTY_FORM = {
   expiryDays: "14",
 };
 
-type LineDraft = { description: string; amount: string; quantity: string; kind: "print" | "shipping" };
+type LineDraft = { description: string; amount: string; quantity: string; kind: "print" | "shipping" | "fee" };
 
 function emptyLine(seed?: Partial<LineDraft>): LineDraft {
   return {
@@ -426,20 +426,21 @@ export default function OrderLinks() {
                           value={line.kind}
                           onChange={(event) =>
                             setLineItems((current) =>
-                              current.map((row, i) =>
-                                i === index
-                                  ? {
-                                      ...row,
-                                      kind: event.target.value === "shipping" ? "shipping" : "print",
-                                    }
-                                  : row,
-                              ),
+                              current.map((row, i) => {
+                                if (i !== index) return row;
+                                const value = event.target.value;
+                                return {
+                                  ...row,
+                                  kind: value === "shipping" || value === "fee" ? value : "print",
+                                };
+                              }),
                             )
                           }
                           data-testid={`select-line-kind-${index}`}
                         >
                           <option value="print">Print item</option>
                           <option value="shipping">Shipping (no plates)</option>
+                          <option value="fee">Fee / surcharge (no plates)</option>
                         </select>
                       </div>
                       <div className="flex items-end">
@@ -474,6 +475,21 @@ export default function OrderLinks() {
                       >
                         <PlusCircle className="mr-2 h-3.5 w-3.5" />
                         Add shipping
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setLineItems((current) => [
+                            ...current,
+                            emptyLine({ description: "Paypal fee", kind: "fee" }),
+                          ])
+                        }
+                        data-testid="button-add-fee-line"
+                      >
+                        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+                        Add fee
                       </Button>
                       <Button
                         type="button"
@@ -1028,7 +1044,11 @@ function ReviewDialog({
                     >
                       <span className="min-w-0 truncate">
                         {line.description}
-                        {line.kind === "shipping" ? " · shipping (no plates)" : ""}
+                        {line.kind === "shipping"
+                          ? " · shipping (no plates)"
+                          : line.kind === "fee"
+                            ? " · fee (no plates)"
+                            : ""}
                         {line.quantity > 1 ? ` ×${line.quantity} @ $${line.amount}` : ""}
                       </span>
                       <span className="numeric shrink-0 text-muted-foreground">

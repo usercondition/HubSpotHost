@@ -246,6 +246,7 @@ function sampleContext(): OwnerDigestContext {
         contactName: "Ada",
         hasPlates: false,
         promptAttachPlates: true,
+        requiresPlates: true,
         closeDate: "2026-08-10",
       },
       {
@@ -257,6 +258,7 @@ function sampleContext(): OwnerDigestContext {
         contactName: "Ada",
         hasPlates: true,
         promptAttachPlates: false,
+        requiresPlates: true,
         closeDate: null,
       },
     ],

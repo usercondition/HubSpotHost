@@ -224,6 +224,8 @@ export interface PerformanceResponse {
     stage: string;
     amount: number;
     hasPlates: boolean;
+    /** False for shipping/fee (and name-heuristic non-print) deals — never ask for plates. */
+    requiresPlates: boolean;
     /** Show Attach plates when plates missing and alert not dismissed. */
     promptAttachPlates: boolean;
     closeDate: string | null;
@@ -437,32 +439,57 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;
 
 /** One commercial item on an intake. Each becomes its own HubSpot deal on approve. */
-export const ORDER_LINE_KINDS = ["print", "shipping"] as const;
+export const ORDER_LINE_KINDS = ["print", "shipping", "fee"] as const;
 export type OrderLineKind = (typeof ORDER_LINE_KINDS)[number];
 
 export const ORDER_LINE_KIND_LABELS: Record<OrderLineKind, string> = {
   print: "Print item",
   shipping: "Shipping (no plates)",
+  fee: "Fee / surcharge (no plates)",
 };
 
-/** HubSpot deal property — shipping lines skip plate prompts. */
+/** HubSpot deal property — non-print lines skip plate prompts. */
 export const PRINT_LINE_KIND_PROPERTY = "print_line_kind";
 
+/** Deal / product titles that are never resin prints (existing HubSpot deals may lack print_line_kind). */
+export function dealNameLooksNonPrint(dealName: string): boolean {
+  const name = String(dealName ?? "").trim().toLowerCase();
+  if (!name) return false;
+  // "Shipping - Sam Jensen" / "Paypal 4% Fee - Sam" → match product side before last " - ".
+  const product = name.includes(" - ") ? name.slice(0, name.lastIndexOf(" - ")).trim() : name;
+  if (/^shipping\b/.test(product) || /^postage\b/.test(product) || /^freight\b/.test(product)) return true;
+  if (/\bfee\b/.test(product)) return true;
+  if (/^paypal\b/.test(product)) return true;
+  if (/\b(processing|platform|service|handling|convenience)\s*fee\b/.test(product)) return true;
+  if (/^(tax|surcharge|tip)\b/.test(product)) return true;
+  return false;
+}
+
 export function normalizeOrderLineKind(value: unknown): OrderLineKind {
-  return String(value ?? "").trim().toLowerCase() === "shipping" ? "shipping" : "print";
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "shipping") return "shipping";
+  if (raw === "fee" || raw === "charge" || raw === "surcharge") return "fee";
+  return "print";
+}
+
+export function orderLineKindSkipsPlates(kind: OrderLineKind): boolean {
+  return kind === "shipping" || kind === "fee";
 }
 
 export function dealRequiresPlates(
   props: Record<string, string | null | undefined> | null | undefined,
 ): boolean {
-  return normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]) !== "shipping";
+  const kind = normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]);
+  if (orderLineKindSkipsPlates(kind)) return false;
+  if (dealNameLooksNonPrint(props?.dealname ?? "")) return false;
+  return true;
 }
 
 export interface OrderIntakeLineItem {
   description: string;
   amount: string;
   quantity: number;
-  /** print = needs plates; shipping = freight/charge only. */
+  /** print = needs plates; shipping/fee = charge only. */
   kind: OrderLineKind;
 }
 
@@ -1763,6 +1790,8 @@ export interface ProductionQueueItem {
   closeDate: string | null;
   contactName: string | null;
   hasPlates: boolean;
+  /** False for shipping/fee lines — never bucket as next-print / needs-plates. */
+  requiresPlates: boolean;
   plateCount: number;
   totalPrintTimeSeconds: number | null;
   assignedPrinterIds: number[];

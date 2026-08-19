@@ -38,6 +38,7 @@ function sampleSnapshot(overrides?: Partial<PerformanceResponse["activeDeals"][n
       amount: 120,
       hasPlates: false,
       promptAttachPlates: true,
+      requiresPlates: true,
       closeDate: "2026-08-10",
       contactName: "Ada",
     },
@@ -49,6 +50,7 @@ function sampleSnapshot(overrides?: Partial<PerformanceResponse["activeDeals"][n
       amount: 220,
       hasPlates: true,
       promptAttachPlates: false,
+      requiresPlates: true,
       closeDate: null,
       contactName: "Beau",
     },
@@ -199,6 +201,55 @@ test("production queue buckets next print vs in production", async () => {
         queue.blocked.some((item) => item.dealId === "1002") ||
         queue.shipReady.some((item) => item.dealId === "1002"),
     );
+  });
+});
+
+test("production queue keeps shipping and fee deals out of next print", async () => {
+  await withTempDb(() => {
+    const snapshot = sampleSnapshot([
+      {
+        dealId: "ship-1",
+        dealName: "Shipping - Sam Jensen",
+        stageId: "s1",
+        stage: "Deposit Received",
+        amount: 8,
+        hasPlates: false,
+        promptAttachPlates: false,
+        requiresPlates: false,
+        closeDate: null,
+        contactName: "Sam Jensen",
+      },
+      {
+        dealId: "fee-1",
+        dealName: "Paypal 4% Fee - Sam Jensen",
+        stageId: "s1",
+        stage: "Deposit Received",
+        amount: 2,
+        hasPlates: false,
+        promptAttachPlates: false,
+        requiresPlates: false,
+        closeDate: null,
+        contactName: "Sam Jensen",
+      },
+      {
+        dealId: "print-1",
+        dealName: "Armigers - Jose",
+        stageId: "s1",
+        stage: "Queued to Print",
+        amount: 59.99,
+        hasPlates: false,
+        promptAttachPlates: true,
+        requiresPlates: true,
+        closeDate: null,
+        contactName: "Jose",
+      },
+    ]);
+    const queue = buildProductionQueue(snapshot);
+    assert.equal(queue.summary.nextPrint, 1);
+    assert.ok(queue.nextPrint.every((item) => item.dealId === "print-1"));
+    assert.ok(queue.inProduction.some((item) => item.dealId === "ship-1"));
+    assert.ok(queue.inProduction.some((item) => item.dealId === "fee-1"));
+    assert.equal(queue.nextPrint[0]?.requiresPlates, true);
   });
 });
 

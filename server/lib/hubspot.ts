@@ -143,7 +143,7 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     name: "print_line_kind",
     label: "Print line kind",
     description:
-      "print = resin print item (needs plates). shipping = freight/charge only — skips plate prompts.",
+      "print = resin print item (needs plates). shipping / fee = charge-only lines — skip plate prompts.",
     type: "string",
     fieldType: "text",
   },

@@ -169,6 +169,8 @@ import {
   upsertKitSchema,
   intakeLineExtendedAmount,
   lineItemsForIntake,
+  normalizeOrderLineKind,
+  orderLineKindSkipsPlates,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
@@ -381,7 +383,7 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
 /** Optional multi-item payload for Manual Entry (mirrors Intake approve). */
 function paidOrderLineItemsFrom(
   body: unknown,
-): Array<{ productName: string; amount: string; kind: "print" | "shipping" }> | null {
+): Array<{ productName: string; amount: string; kind: "print" | "shipping" | "fee" }> | null {
   const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   if (!Array.isArray(record.lineItems)) return null;
   const lines = record.lineItems
@@ -394,11 +396,12 @@ function paidOrderLineItemsFrom(
       return {
         productName,
         amount,
-        kind: String(row.kind ?? "").trim().toLowerCase() === "shipping" ? ("shipping" as const) : ("print" as const),
+        kind: normalizeOrderLineKind(row.kind),
       };
     })
     .filter(
-      (line): line is { productName: string; amount: string; kind: "print" | "shipping" } => Boolean(line),
+      (line): line is { productName: string; amount: string; kind: "print" | "shipping" | "fee" } =>
+        Boolean(line),
     );
   return lines.length > 0 ? lines.slice(0, 20) : null;
 }
@@ -581,7 +584,7 @@ function tooManyClientAttempts(req: Request, res: Response): boolean {
  */
 function draftsFromIntake(link: OrderIntakeLink): {
   draft: PaidOrderDraft;
-  lineItems: Array<{ productName: string; amount: string; kind: "print" | "shipping" }>;
+  lineItems: Array<{ productName: string; amount: string; kind: "print" | "shipping" | "fee" }>;
   orderGroup: string;
 } {
   const lines = lineItemsForIntake(link);
@@ -592,7 +595,7 @@ function draftsFromIntake(link: OrderIntakeLink): {
       ? `Line items:\n${lines
           .map((line, index) => {
             const extended = intakeLineExtendedAmount(line);
-            const kindLabel = line.kind === "shipping" ? " [shipping]" : "";
+            const kindLabel = orderLineKindSkipsPlates(line.kind) ? ` [${line.kind}]` : "";
             return `  ${index + 1}. ${line.description}${kindLabel}${
               line.quantity > 1 ? ` (qty ${line.quantity} @ $${line.amount})` : ""
             } — $${extended.toFixed(2)}`;
@@ -620,7 +623,7 @@ function draftsFromIntake(link: OrderIntakeLink): {
     return {
       productName: quantity > 1 ? `${line.description} (x${quantity})` : line.description,
       amount: intakeLineExtendedAmount(line).toFixed(2),
-      kind: line.kind === "shipping" ? ("shipping" as const) : ("print" as const),
+      kind: normalizeOrderLineKind(line.kind),
     };
   });
 

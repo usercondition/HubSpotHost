@@ -306,10 +306,80 @@ test("shipping line kind skips plate prompts and plate attention", () => {
   const printDeal = snapshot.activeDeals.find((deal) => deal.dealId === "print-deal");
   const shipDeal = snapshot.activeDeals.find((deal) => deal.dealId === "ship-deal");
   assert.equal(printDeal?.promptAttachPlates, true);
+  assert.equal(printDeal?.requiresPlates, true);
   assert.equal(shipDeal?.promptAttachPlates, false);
+  assert.equal(shipDeal?.requiresPlates, false);
   assert.ok(snapshot.attention.some((item) => item.dealId === "print-deal" && item.issueKey === "no_plates"));
   assert.equal(
     snapshot.attention.some((item) => item.dealId === "ship-deal" && item.issueKey === "no_plates"),
+    false,
+  );
+});
+
+test("fee kind and shipping/fee deal names skip plate prompts without print_line_kind", () => {
+  const now = new Date("2026-08-04T12:00:00.000Z");
+  const snapshot = buildPerformanceSnapshot({
+    now,
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: [],
+    stages: [
+      { id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } },
+    ],
+    deals: [
+      {
+        id: "fee-prop",
+        properties: {
+          dealname: "Service charge - Buyer",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "2",
+          print_line_kind: "fee",
+        },
+      },
+      {
+        id: "fee-name",
+        properties: {
+          dealname: "Paypal 4% Fee - Sam Jensen",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "2",
+        },
+      },
+      {
+        id: "ship-name",
+        properties: {
+          dealname: "Shipping - Sam Jensen",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "8",
+        },
+      },
+      {
+        id: "print-name",
+        properties: {
+          dealname: "Armigers - Jose",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "59.99",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "fee-prop")?.requiresPlates, false);
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "fee-name")?.requiresPlates, false);
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "ship-name")?.requiresPlates, false);
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "print-name")?.requiresPlates, true);
+  assert.equal(
+    snapshot.attention.some((item) => item.dealId === "fee-name" && item.issueKey === "no_plates"),
+    false,
+  );
+  assert.equal(
+    snapshot.attention.some((item) => item.dealId === "ship-name" && item.issueKey === "no_plates"),
     false,
   );
 });

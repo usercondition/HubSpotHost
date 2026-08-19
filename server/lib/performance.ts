@@ -87,6 +87,10 @@ export interface PerformanceSnapshot {
     amount: number;
     hasPlates: boolean;
     /**
+     * False for shipping / fee / name-heuristic non-print deals.
+     */
+    requiresPlates: boolean;
+    /**
      * True when plates are still missing and the owner has not dismissed the
      * “No CTB plates” attention alert for this deal.
      */
@@ -235,6 +239,7 @@ export function buildPerformanceSnapshot(input: {
       stage: displayStage,
       amount: round2(calculation.amount),
       hasPlates,
+      requiresPlates,
       promptAttachPlates,
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),

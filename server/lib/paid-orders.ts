@@ -101,7 +101,11 @@ async function createDeal(input: {
   const detailLines = [
     "Source: Facebook Marketplace",
     "Payment status: Confirmed before HubSpot creation",
-    kind === "shipping" ? "Line kind: Shipping (no plates required)" : "Line kind: Print item",
+    kind === "shipping"
+      ? "Line kind: Shipping (no plates required)"
+      : kind === "fee"
+        ? "Line kind: Fee / surcharge (no plates required)"
+        : "Line kind: Print item",
     input.marketplaceUsername ? `Marketplace username: ${clean(input.marketplaceUsername, 100)}` : "",
     input.orderGroup
       ? `Order group: ${clean(input.orderGroup, 80)}${

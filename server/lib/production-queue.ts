@@ -30,7 +30,7 @@ function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket
       else if (days <= 7) score += 40;
     }
   }
-  if (!item.hasPlates) score += 50;
+  if (item.requiresPlates && !item.hasPlates) score += 50;
   if (item.kitReprint > 0) score += 35;
   if (item.kitNeeded > 0) score += 20;
   if (item.costsIncomplete) score += 15;
@@ -41,8 +41,11 @@ function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket
 }
 
 function classifyBucket(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): ProductionQueueItem["bucket"] {
-  if (!item.hasPlates) return "next_print";
-  if (item.kitReprint > 0 || item.kitNeeded > 0 || item.unassignedPlateCount > 0) return "blocked";
+  // Shipping / fee lines never wait on plates.
+  if (item.requiresPlates && !item.hasPlates) return "next_print";
+  if (item.requiresPlates && (item.kitReprint > 0 || item.kitNeeded > 0 || item.unassignedPlateCount > 0)) {
+    return "blocked";
+  }
   if (item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) return "ship_ready";
   return "in_production";
 }
@@ -93,6 +96,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       closeDate: deal.closeDate,
       contactName: deal.contactName,
       hasPlates: deal.hasPlates || dealPlates.length > 0,
+      requiresPlates: deal.requiresPlates,
       plateCount: dealPlates.length,
       totalPrintTimeSeconds: totalPrintTimeSeconds > 0 ? totalPrintTimeSeconds : null,
       assignedPrinterIds: assignedIds,

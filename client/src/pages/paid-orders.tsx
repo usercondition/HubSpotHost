@@ -34,7 +34,7 @@ import type {
   ReturningBuyerProfile,
 } from "@shared/schema";
 
-type LineDraft = { id: string; productName: string; amount: string; kind: "print" | "shipping" };
+type LineDraft = { id: string; productName: string; amount: string; kind: "print" | "shipping" | "fee" };
 
 type ContactDraft = Omit<PaidOrderDraft, "paymentConfirmed" | "productName" | "amount">;
 
@@ -521,7 +521,7 @@ export default function PaidOrders() {
 
             <Panel
               title="Order items"
-              description="One HubSpot Print Order deal per item. Mark shipping lines so they never ask for plates."
+              description="One HubSpot Print Order deal per item. Mark shipping/fee lines so they never ask for plates."
               actions={
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -539,6 +539,22 @@ export default function PaidOrders() {
                   >
                     <Plus className="mr-1.5 h-3.5 w-3.5" />
                     Add shipping
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setLines((current) => [
+                        ...current,
+                        newLine({ productName: "Paypal fee", amount: "", kind: "fee" }),
+                      ]);
+                      setCreated(null);
+                    }}
+                    data-testid="button-add-manual-fee"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add fee
                   </Button>
                   <Button
                     type="button"
@@ -572,7 +588,13 @@ export default function PaidOrders() {
                         id={`line-product-${line.id}`}
                         value={line.productName}
                         onChange={(event) => updateLine(line.id, { productName: event.target.value })}
-                        placeholder={line.kind === "shipping" ? "Shipping" : "Model or order description"}
+                        placeholder={
+                          line.kind === "shipping"
+                            ? "Shipping"
+                            : line.kind === "fee"
+                              ? "Paypal fee"
+                              : "Model or order description"
+                        }
                         data-testid={`input-line-product-${index}`}
                       />
                     </div>
@@ -596,15 +618,17 @@ export default function PaidOrders() {
                         id={`line-kind-${line.id}`}
                         className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                         value={line.kind}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.target.value;
                           updateLine(line.id, {
-                            kind: event.target.value === "shipping" ? "shipping" : "print",
-                          })
-                        }
+                            kind: value === "shipping" || value === "fee" ? value : "print",
+                          });
+                        }}
                         data-testid={`select-line-kind-${index}`}
                       >
                         <option value="print">Print item</option>
                         <option value="shipping">Shipping (no plates)</option>
+                        <option value="fee">Fee / surcharge (no plates)</option>
                       </select>
                     </div>
                     <div className="flex items-end">
@@ -629,8 +653,8 @@ export default function PaidOrders() {
                   <span className="text-muted-foreground">
                     {lines.length} item{lines.length === 1 ? "" : "s"} · {lines.length} HubSpot deal
                     {lines.length === 1 ? "" : "s"}
-                    {lines.some((line) => line.kind === "shipping")
-                      ? " · shipping lines skip plate prompts"
+                    {lines.some((line) => line.kind === "shipping" || line.kind === "fee")
+                      ? " · shipping/fee lines skip plate prompts"
                       : ""}
                   </span>
                   <span className="numeric font-semibold" data-testid="text-manual-line-total">
