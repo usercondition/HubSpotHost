@@ -1134,6 +1134,15 @@ function ReviewDialog({
                       onChange={(v) => setEdits((c) => ({ ...c, shippingStreet: v }))}
                     />
                   </div>
+                  <div className="sm:col-span-2">
+                    <ReviewField
+                      id="review-street-2"
+                      label="Apt / suite / unit"
+                      value={value("shippingStreet2")}
+                      disabled={alreadyCreated}
+                      onChange={(v) => setEdits((c) => ({ ...c, shippingStreet2: v }))}
+                    />
+                  </div>
                   <ReviewField
                     id="review-city"
                     label="City"
@@ -1308,8 +1317,9 @@ function priorMatchReason(matchedBy: PriorClientMatch["matchedBy"]): string {
 
 function PriorMatchPanel({ match }: { match: PriorClientMatch }) {
   const place = [match.shippingCity, match.shippingState].filter(Boolean).join(", ");
+  const street = [match.shippingStreet, match.shippingStreet2].filter(Boolean).join(", ");
   const lastShip = match.shippingRequired
-    ? [match.shippingStreet, place, match.shippingPostalCode].filter(Boolean).join(", ")
+    ? [street, place, match.shippingPostalCode].filter(Boolean).join(", ")
     : "Pickup last time";
   return (
     <div

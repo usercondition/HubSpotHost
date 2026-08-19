@@ -73,6 +73,7 @@ const submission = {
   clientPhone: "619-555-0199",
   shippingRequired: true,
   shippingStreet: "123 Resin Way",
+  shippingStreet2: "Apt 4B",
   shippingCity: "San Diego",
   shippingState: "CA",
   shippingPostalCode: "92101",
@@ -477,6 +478,7 @@ test("a partial owner edit leaves untouched buyer fields intact", async () => {
   assert.equal(edited.body.link.quantity, 4);
   // Regression: an absent key must not blank the stored column.
   assert.equal(edited.body.link.shippingStreet, submission.shippingStreet);
+  assert.equal(edited.body.link.shippingStreet2, submission.shippingStreet2);
   assert.equal(edited.body.link.shippingCity, submission.shippingCity);
   assert.equal(edited.body.link.clientPhone, submission.clientPhone);
   assert.equal(edited.body.link.clientNotes, submission.clientNotes);
@@ -509,6 +511,7 @@ test("a returning buyer's next private link prefills last submitted details", as
   assert.equal(ownerMatch.status, 200);
   assert.equal(ownerMatch.body.match.clientEmail, submission.clientEmail);
   assert.equal(ownerMatch.body.match.shippingStreet, submission.shippingStreet);
+  assert.equal(ownerMatch.body.match.shippingStreet2, submission.shippingStreet2);
   assert.equal(ownerMatch.body.match.lastItemDescription, submission.confirmedItem);
 
   const unauth = await fetch(`${appBase}/api/order-links/prior-client?username=x`);
@@ -530,6 +533,7 @@ test("a returning buyer's next private link prefills last submitted details", as
     clientPhone: submission.clientPhone,
     shippingRequired: true,
     shippingStreet: submission.shippingStreet,
+    shippingStreet2: submission.shippingStreet2,
     shippingCity: submission.shippingCity,
     shippingState: submission.shippingState,
     shippingPostalCode: submission.shippingPostalCode,
@@ -654,6 +658,7 @@ test("a valid token can recall last shipping from the email the buyer types", as
   assert.equal(recalled.status, 200);
   assert.equal(recalled.body.savedDetails.clientEmail, email);
   assert.equal(recalled.body.savedDetails.shippingStreet, submission.shippingStreet);
+  assert.equal(recalled.body.savedDetails.shippingStreet2, submission.shippingStreet2);
   assert.equal(JSON.stringify(recalled.body).includes("MIG-RECALL-1"), false);
   assert.equal(JSON.stringify(recalled.body).includes(submission.confirmedItem), false);
 
@@ -679,5 +684,52 @@ test("a valid token can recall last shipping from the email the buyer types", as
     clientEmail: email,
   });
   assert.equal(missing.status, 404);
+});
+
+test("shipping submissions require phone and a complete address", async () => {
+  const { clientOrderSubmissionSchema, formatShippingStreetLine } = await import("../shared/schema");
+
+  assert.equal(formatShippingStreetLine("123 Resin Way", "Apt 4B"), "123 Resin Way, Apt 4B");
+  assert.equal(formatShippingStreetLine("123 Resin Way", ""), "123 Resin Way");
+
+  const create = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-ADDR-GATE",
+    itemDescription: "Address gate kit",
+    agreedAmount: "50",
+  });
+  assert.equal(create.status, 201);
+  const token: string = create.body.token;
+
+  const incomplete = await publicRequest("/api/client-order/submit", {
+    token,
+    ...submission,
+    shippingCity: "",
+  });
+  assert.equal(incomplete.status, 400);
+
+  const noPhone = await publicRequest("/api/client-order/submit", {
+    token,
+    ...submission,
+    clientPhone: "",
+  });
+  assert.equal(noPhone.status, 400);
+
+  const schemaOk = clientOrderSubmissionSchema.safeParse(submission);
+  assert.equal(schemaOk.success, true);
+  const schemaBad = clientOrderSubmissionSchema.safeParse({
+    ...submission,
+    shippingPostalCode: "",
+  });
+  assert.equal(schemaBad.success, false);
+
+  const ok = await publicRequest("/api/client-order/submit", { token, ...submission });
+  assert.equal(ok.status, 201);
+  const row = store
+    .getDb()
+    .select()
+    .from(orderIntakeLinks)
+    .where(eq(orderIntakeLinks.id, create.body.link.id))
+    .get();
+  assert.equal(row?.shippingStreet2, submission.shippingStreet2);
 });
 

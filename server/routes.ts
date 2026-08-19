@@ -171,6 +171,7 @@ import {
   lineItemsForIntake,
   normalizeOrderLineKind,
   orderLineKindSkipsPlates,
+  formatShippingStreetLine,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
@@ -640,11 +641,13 @@ function draftsFromIntake(link: OrderIntakeLink): {
       marketplaceUsername: link.clientUsername || link.buyerUsernameHint,
       email: link.clientEmail,
       phone: link.clientPhone,
-      address: link.shippingRequired ? link.shippingStreet : "",
+      address: link.shippingRequired
+        ? formatShippingStreetLine(link.shippingStreet, link.shippingStreet2)
+        : "",
       city: link.shippingRequired ? link.shippingCity : "",
       state: link.shippingRequired ? link.shippingState : "",
       postalCode: link.shippingRequired ? link.shippingPostalCode : "",
-      country: link.shippingRequired ? link.shippingCountry : "",
+      country: link.shippingRequired ? link.shippingCountry || "United States" : "",
       productName: primary.productName,
       amount: primary.amount,
       conversationSummary: summary,

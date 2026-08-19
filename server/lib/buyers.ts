@@ -23,6 +23,7 @@ function emptyProfile(email: string): ReturningBuyerProfile {
     phone: "",
     username: "",
     address: "",
+    address2: "",
     city: "",
     state: "",
     postalCode: "",
@@ -67,6 +68,7 @@ function findLocalBuyerByEmail(email: string): {
   phone: string;
   username: string;
   address: string;
+  address2: string;
   city: string;
   state: string;
   postalCode: string;
@@ -90,6 +92,7 @@ function findLocalBuyerByEmail(email: string): {
     phone: clean(latest.clientPhone, 40),
     username: clean(latest.clientUsername, 120),
     address: clean(latest.shippingStreet),
+    address2: clean(latest.shippingStreet2, 120),
     city: clean(latest.shippingCity, 120),
     state: clean(latest.shippingState, 120),
     postalCode: clean(latest.shippingPostalCode, 40),
@@ -118,7 +121,10 @@ export async function lookupReturningBuyer(emailRaw: string): Promise<ReturningB
     fullName: hubName || local?.fullName || "",
     phone: clean(props.phone, 40) || local?.phone || "",
     username: local?.username || "",
+    // HubSpot contacts use a single `address` line; apt/suite comes from prior intake only
+    // when we did not already take a combined HubSpot address.
     address: clean(props.address) || local?.address || "",
+    address2: clean(props.address) ? "" : local?.address2 || "",
     city: clean(props.city, 120) || local?.city || "",
     state: clean(props.state, 120) || local?.state || "",
     postalCode: clean(props.zip, 40) || local?.postalCode || "",

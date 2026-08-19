@@ -29,10 +29,11 @@ const EMPTY = {
   clientEmail: "",
   clientPhone: "",
   shippingStreet: "",
+  shippingStreet2: "",
   shippingCity: "",
   shippingState: "",
   shippingPostalCode: "",
-  shippingCountry: "",
+  shippingCountry: "United States",
   confirmedItem: "",
   quantity: "1",
   clientNotes: "",
@@ -50,10 +51,11 @@ function applySavedDetails(
   if (!next.clientEmail) next.clientEmail = saved.clientEmail;
   if (!next.clientPhone) next.clientPhone = saved.clientPhone;
   if (!next.shippingStreet) next.shippingStreet = saved.shippingStreet;
+  if (!next.shippingStreet2) next.shippingStreet2 = saved.shippingStreet2;
   if (!next.shippingCity) next.shippingCity = saved.shippingCity;
   if (!next.shippingState) next.shippingState = saved.shippingState;
   if (!next.shippingPostalCode) next.shippingPostalCode = saved.shippingPostalCode;
-  if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry;
+  if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry || "United States";
   return next;
 }
 
@@ -183,8 +185,16 @@ export default function ClientOrder() {
     if (!EMAIL_RE.test(form.clientEmail.trim()))
       return setError("Please enter an email address the seller can reach you at.");
     if (form.confirmedItem.trim().length < 2) return setError("Please confirm what you ordered.");
-    if (shippingRequired && form.shippingStreet.trim().length < 3)
-      return setError("Please add the street address for delivery.");
+    if (shippingRequired) {
+      if (form.clientPhone.replace(/\D/g, "").length < 7)
+        return setError("Please add a phone number for delivery updates.");
+      if (form.shippingStreet.trim().length < 3)
+        return setError("Please add the street address for delivery.");
+      if (form.shippingCity.trim().length < 2) return setError("Please add the city.");
+      if (form.shippingState.trim().length < 2) return setError("Please add the state or province.");
+      if (form.shippingPostalCode.trim().length < 3) return setError("Please add the postal / ZIP code.");
+      if (form.shippingCountry.trim().length < 2) return setError("Please add the country.");
+    }
     if (!paymentConfirmed)
       return setError("Please tick the box confirming you already paid the seller for this order.");
     submit.mutate();
@@ -329,6 +339,7 @@ export default function ClientOrder() {
                     type="tel"
                     value={form.clientPhone}
                     onChange={(v) => set("clientPhone", v)}
+                    required={shippingRequired}
                     autoComplete="tel"
                   />
                 </div>
@@ -365,25 +376,37 @@ export default function ClientOrder() {
 
                 {shippingRequired && (
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <AddressAutocomplete
-                      street={form.shippingStreet}
-                      onStreetChange={(v) => set("shippingStreet", v)}
-                      onSelect={(address) => {
-                        setForm((current) => ({
-                          ...current,
-                          shippingStreet: address.street,
-                          shippingCity: address.city || current.shippingCity,
-                          shippingState: address.state || current.shippingState,
-                          shippingPostalCode: address.postalCode || current.shippingPostalCode,
-                          shippingCountry: address.country || current.shippingCountry,
-                        }));
-                      }}
-                    />
+                    <div className="sm:col-span-2">
+                      <AddressAutocomplete
+                        street={form.shippingStreet}
+                        onStreetChange={(v) => set("shippingStreet", v)}
+                        onSelect={(address) => {
+                          setForm((current) => ({
+                            ...current,
+                            shippingStreet: address.street,
+                            shippingCity: address.city || current.shippingCity,
+                            shippingState: address.state || current.shippingState,
+                            shippingPostalCode: address.postalCode || current.shippingPostalCode,
+                            shippingCountry: address.country || current.shippingCountry || "United States",
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <ClientField
+                        id="shipping-street-2"
+                        label="Apt / suite / unit"
+                        value={form.shippingStreet2}
+                        onChange={(v) => set("shippingStreet2", v)}
+                        autoComplete="address-line2"
+                      />
+                    </div>
                     <ClientField
                       id="shipping-city"
                       label="City"
                       value={form.shippingCity}
                       onChange={(v) => set("shippingCity", v)}
+                      required
                       autoComplete="address-level2"
                     />
                     <ClientField
@@ -391,13 +414,15 @@ export default function ClientOrder() {
                       label="State / province"
                       value={form.shippingState}
                       onChange={(v) => set("shippingState", v)}
+                      required
                       autoComplete="address-level1"
                     />
                     <ClientField
                       id="shipping-postal-code"
-                      label="Postal code"
+                      label="Postal / ZIP code"
                       value={form.shippingPostalCode}
                       onChange={(v) => set("shippingPostalCode", v)}
+                      required
                       autoComplete="postal-code"
                     />
                     <ClientField
@@ -405,6 +430,7 @@ export default function ClientOrder() {
                       label="Country"
                       value={form.shippingCountry}
                       onChange={(v) => set("shippingCountry", v)}
+                      required
                       autoComplete="country-name"
                     />
                   </div>

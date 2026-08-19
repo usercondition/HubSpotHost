@@ -326,6 +326,8 @@ export interface PaidOrderDraft {
   email: string;
   phone: string;
   address: string;
+  /** Optional apt / suite / unit — combined into HubSpot `address` on write. */
+  address2?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -395,6 +397,7 @@ export const orderIntakeLinks = sqliteTable("order_intake_links", {
   clientPhone: text("client_phone").notNull().default(""),
   shippingRequired: integer("shipping_required", { mode: "boolean" }).notNull().default(false),
   shippingStreet: text("shipping_street").notNull().default(""),
+  shippingStreet2: text("shipping_street_2").notNull().default(""),
   shippingCity: text("shipping_city").notNull().default(""),
   shippingState: text("shipping_state").notNull().default(""),
   shippingPostalCode: text("shipping_postal_code").notNull().default(""),
@@ -1523,25 +1526,81 @@ export const createOrderLinkSchema = z
   });
 export type CreateOrderLinkInput = z.input<typeof createOrderLinkSchema>;
 
+/** Combine street + unit for HubSpot / Shippy (contacts use a single address field). */
+export function formatShippingStreetLine(street: string, street2?: string | null): string {
+  const line1 = String(street ?? "").replace(/\s+/g, " ").trim();
+  const line2 = String(street2 ?? "").replace(/\s+/g, " ").trim();
+  if (!line1) return line2;
+  if (!line2) return line1;
+  return `${line1}, ${line2}`;
+}
+
 /** The public buyer form. Deliberately contains no internal cost fields. */
-export const clientOrderSubmissionSchema = z.object({
-  clientFullName: trimmed(120).min(2, "Enter your full name"),
-  clientUsername: trimmed(120).default(""),
-  clientEmail: z.string().trim().email("Enter a valid email address").max(200),
-  clientPhone: trimmed(40).default(""),
-  shippingRequired: z.boolean().default(true),
-  shippingStreet: trimmed(200).default(""),
-  shippingCity: trimmed(120).default(""),
-  shippingState: trimmed(120).default(""),
-  shippingPostalCode: trimmed(40).default(""),
-  shippingCountry: trimmed(120).default(""),
-  confirmedItem: trimmed(400).min(2, "Confirm or correct the item description"),
-  quantity: z.coerce.number().int().min(1).max(999).default(1),
-  clientNotes: trimmed(2000).default(""),
-  clientPaymentConfirmed: z
-    .boolean()
-    .refine((value) => value === true, "Please confirm that you already paid for this order"),
-});
+export const clientOrderSubmissionSchema = z
+  .object({
+    clientFullName: trimmed(120).min(2, "Enter your full name"),
+    clientUsername: trimmed(120).default(""),
+    clientEmail: z.string().trim().email("Enter a valid email address").max(200),
+    clientPhone: trimmed(40).default(""),
+    shippingRequired: z.boolean().default(true),
+    shippingStreet: trimmed(200).default(""),
+    shippingStreet2: trimmed(120).default(""),
+    shippingCity: trimmed(120).default(""),
+    shippingState: trimmed(120).default(""),
+    shippingPostalCode: trimmed(40).default(""),
+    shippingCountry: trimmed(120).default(""),
+    confirmedItem: trimmed(400).min(2, "Confirm or correct the item description"),
+    quantity: z.coerce.number().int().min(1).max(999).default(1),
+    clientNotes: trimmed(2000).default(""),
+    clientPaymentConfirmed: z
+      .boolean()
+      .refine((value) => value === true, "Please confirm that you already paid for this order"),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.shippingRequired) return;
+    if (value.clientPhone.replace(/\D/g, "").length < 7) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter a phone number carriers can use for delivery",
+        path: ["clientPhone"],
+      });
+    }
+    if (value.shippingStreet.trim().length < 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the street address for delivery",
+        path: ["shippingStreet"],
+      });
+    }
+    if (value.shippingCity.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the city",
+        path: ["shippingCity"],
+      });
+    }
+    if (value.shippingState.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the state or province",
+        path: ["shippingState"],
+      });
+    }
+    if (value.shippingPostalCode.trim().length < 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the postal / ZIP code",
+        path: ["shippingPostalCode"],
+      });
+    }
+    if (value.shippingCountry.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the country",
+        path: ["shippingCountry"],
+      });
+    }
+  });
 export type ClientOrderSubmission = z.infer<typeof clientOrderSubmissionSchema>;
 
 /**
@@ -1556,6 +1615,7 @@ export const reviewEditSchema = z.object({
   clientPhone: trimmed(40).optional(),
   shippingRequired: z.boolean().optional(),
   shippingStreet: trimmed(200).optional(),
+  shippingStreet2: trimmed(120).optional(),
   shippingCity: trimmed(120).optional(),
   shippingState: trimmed(120).optional(),
   shippingPostalCode: trimmed(40).optional(),
@@ -1580,6 +1640,7 @@ export interface ClientOrderSavedDetails {
   clientPhone: string;
   shippingRequired: boolean;
   shippingStreet: string;
+  shippingStreet2: string;
   shippingCity: string;
   shippingState: string;
   shippingPostalCode: string;
@@ -1916,6 +1977,8 @@ export interface ReturningBuyerProfile {
   phone: string;
   username: string;
   address: string;
+  /** Apt / suite / unit from prior intake (HubSpot stores a single address line). */
+  address2: string;
   city: string;
   state: string;
   postalCode: string;
