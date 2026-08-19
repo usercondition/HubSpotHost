@@ -25,7 +25,7 @@ export function StatusPill({
   testId,
 }: {
   tone: Tone;
-  icon: LucideIcon;
+  icon?: LucideIcon;
   label: string;
   testId?: string;
 }) {
@@ -37,7 +37,7 @@ export function StatusPill({
         TONE_PILL[tone],
       )}
     >
-      <Icon className="h-3 w-3 shrink-0" />
+      {Icon ? <Icon className="h-3 w-3 shrink-0" /> : null}
       <span className="min-w-0 truncate">{label}</span>
     </span>
   );

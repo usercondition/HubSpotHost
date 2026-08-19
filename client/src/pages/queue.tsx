@@ -7,6 +7,7 @@ import {
   FileUp,
   Layers3,
   Loader2,
+  Package,
   PackageCheck,
   RefreshCw,
   Ship,
@@ -14,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { kitsDealHref, printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsPanel } from "@/components/deal-ops-panel";
@@ -65,7 +66,7 @@ function QueueCard({
         {item.requiresPlates && !item.hasPlates ? (
           <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
         ) : null}
-        {!item.requiresPlates ? <StatusPill tone="neutral" label="No plates" /> : null}
+        {!item.requiresPlates ? <StatusPill tone="neutral" icon={Package} label="No plates" /> : null}
         {item.plateCount > 0 ? (
           <StatusPill tone="neutral" icon={Clock3} label={`${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}`} />
         ) : null}
@@ -92,9 +93,6 @@ function QueueCard({
         <div className="mt-2 flex flex-wrap gap-2 text-xs">
           <Link href={printsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
             Plates
-          </Link>
-          <Link href={kitsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-            Kits
           </Link>
         </div>
       ) : null}

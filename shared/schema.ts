@@ -575,22 +575,22 @@ export function parseHubSpotDealsJson(raw: string | null | undefined): HubSpotIn
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const row = item as Record<string, unknown>;
-        const dealId = String(row.dealId ?? "").trim();
-        const dealName = String(row.dealName ?? "").trim();
-        if (!dealId) return null;
-        return {
-          dealId,
-          dealName: dealName || `Deal ${dealId}`,
-          amount: String(row.amount ?? "").trim(),
-          productName: String(row.productName ?? "").trim(),
-          kind: normalizeOrderLineKind(row.kind),
-        };
-      })
-      .filter((item): item is HubSpotIntakeDealRef => item !== null);
+    const deals: HubSpotIntakeDealRef[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const dealId = String(row.dealId ?? "").trim();
+      const dealName = String(row.dealName ?? "").trim();
+      if (!dealId) continue;
+      deals.push({
+        dealId,
+        dealName: dealName || `Deal ${dealId}`,
+        amount: String(row.amount ?? "").trim(),
+        productName: String(row.productName ?? "").trim(),
+        kind: normalizeOrderLineKind(row.kind),
+      });
+    }
+    return deals;
   } catch {
     return [];
   }
