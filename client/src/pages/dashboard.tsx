@@ -1,19 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRight,
   BarChart3,
   CheckCircle2,
   ClipboardCheck,
   ExternalLink,
-  FileUp,
   Link2,
   PackageCheck,
-  ShoppingBag,
-  ShipWheel,
   SlidersHorizontal,
-  Store,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,16 +20,13 @@ import { StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
-const HUBSPOT_URL = "https://app.hubspot.com/";
-const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
-
 function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   const live = health?.safety.liveWriteReady === true;
   const signing = health?.webhook.verification === "configured";
   const storageWarn = health?.storage?.warning;
 
   if (!health) {
-    return <Skeleton className="h-24 w-full rounded-lg" data-testid="skeleton-system-status" />;
+    return <Skeleton className="h-20 w-full rounded-md" data-testid="skeleton-system-status" />;
   }
 
   return (
@@ -44,88 +35,39 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
       aria-labelledby="system-status-title"
       data-testid="panel-system-status"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="rule-label">Connection status</p>
-          <h2 id="system-status-title" className="mt-1 text-base font-semibold tracking-tight">
-            Your order system is online
+          <p className="rule-label">System</p>
+          <h2 id="system-status-title" className="text-sm font-semibold tracking-tight">
+            {live && signing && !storageWarn ? "Ready for orders" : "Needs a quick check"}
           </h2>
         </div>
         <StatusPill
           tone={live && signing && !storageWarn ? "good" : "warn"}
           icon={live && signing && !storageWarn ? CheckCircle2 : SlidersHorizontal}
-          label={live && signing && !storageWarn ? "Ready for orders" : "Needs review"}
+          label={live && signing && !storageWarn ? "Live" : "Review"}
           testId="status-command-center"
         />
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div className="rounded-md bg-muted/55 p-2.5">
-          <p className="rule-label">HubSpot updates</p>
-          <p className="mt-0.5 text-sm font-medium" data-testid="text-hubspot-write-status">
-            {live ? "Live updates enabled" : "Safe test mode"}
-          </p>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            {live ? "Approved orders can create or update CRM records." : "No CRM records will be changed."}
-          </p>
-        </div>
-        <div className="rounded-md bg-muted/55 p-2.5">
-          <p className="rule-label">Profit automation</p>
-          <p className="mt-0.5 text-sm font-medium" data-testid="text-webhook-status">
-            {signing ? "Webhook secured" : "Webhook needs attention"}
-          </p>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            {signing ? "Cost updates are protected by HubSpot verification." : "Open System setup to verify the connection."}
-          </p>
-        </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
+        <span data-testid="text-hubspot-write-status">
+          HubSpot: {live ? "live writes" : "safe test mode"}
+        </span>
+        <span data-testid="text-webhook-status">
+          Webhook: {signing ? "secured" : "needs setup"}
+        </span>
+        {!signing || storageWarn ? (
+          <Link href="/setup" className="font-medium text-primary hover:underline">
+            Open Setup
+          </Link>
+        ) : null}
       </div>
       {storageWarn ? (
-        <div
-          className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-3"
-          data-testid="panel-storage-warning"
-        >
-          <p className="text-sm font-medium">Production data may not persist</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">{storageWarn}</p>
-          <Link href="/setup" className="mt-2 inline-flex text-xs font-medium text-primary hover:underline">
-            Review System setup
-          </Link>
-        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="panel-storage-warning">
+          {storageWarn}
+        </p>
       ) : null}
     </section>
-  );
-}
-
-function WorkflowStep({
-  number,
-  title,
-  body,
-  href,
-  action,
-  icon: Icon,
-}: {
-  number: string;
-  title: string;
-  body: string;
-  href: string;
-  action: string;
-  icon: LucideIcon;
-}) {
-  return (
-    <article className="relative border-t border-border pt-4 first:border-t-0 first:pt-0 md:border-l md:border-t-0 md:pl-5 md:first:pl-0">
-      <div className="flex items-center gap-2 text-primary">
-        <Icon className="h-4 w-4" />
-        <span className="rule-label">Step {number}</span>
-      </div>
-      <h3 className="mt-2 text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-1 max-w-[30ch] text-xs leading-5 text-muted-foreground">{body}</p>
-      <Link
-        href={href}
-        className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-        data-testid={`link-workflow-${number}`}
-      >
-        {action}
-        <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
-    </article>
   );
 }
 
@@ -145,7 +87,6 @@ function TodaysWork() {
     },
   });
 
-
   if (!isUnlocked) {
     return (
       <OwnerUnlockPanel
@@ -160,12 +101,12 @@ function TodaysWork() {
   }
 
   if (performance.isLoading) {
-    return <Skeleton className="h-48 rounded-lg" data-testid="skeleton-todays-work" />;
+    return <Skeleton className="h-48 rounded-md" data-testid="skeleton-todays-work" />;
   }
 
   if (performance.isError || !performance.data) {
     return (
-      <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-todays-work-error">
+      <section className="rounded-md border border-destructive/35 bg-card p-4" data-testid="panel-todays-work-error">
         <p className="text-sm font-medium">Today’s work could not be loaded</p>
         <Button className="mt-3" size="sm" onClick={() => performance.refetch()}>
           Try again
@@ -177,8 +118,6 @@ function TodaysWork() {
   const snapshot = performance.data;
   const activeDeals = snapshot.activeDeals ?? [];
   const portalId = snapshot.hubspotPortalId;
-  const money = (value: number) =>
-    value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   return (
     <section
@@ -188,25 +127,22 @@ function TodaysWork() {
     >
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2.5">
         <div>
-          <p className="rule-label">Today’s work</p>
-          <h2 id="todays-work-title" className="mt-0.5 text-sm font-semibold tracking-tight">
-            What needs you right now
+          <p className="rule-label">Today</p>
+          <h2 id="todays-work-title" className="text-sm font-semibold tracking-tight">
+            What needs you
           </h2>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            Alerts live in the top tools bar — skip anything that doesn’t apply.
-          </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           <Button asChild size="sm" variant="outline" data-testid="button-todays-work-queue">
             <Link href="/queue">
-              <PackageCheck className="mr-2 h-3.5 w-3.5" />
+              <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
               Queue
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
             <Link href="/performance">
-              <BarChart3 className="mr-2 h-3.5 w-3.5" />
-              Full performance
+              <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
+              Stats
             </Link>
           </Button>
         </div>
@@ -220,7 +156,6 @@ function TodaysWork() {
         >
           <p className="rule-label">Pending review</p>
           <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.intake.pendingReview}</p>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Buyer forms waiting for approval</p>
         </Link>
         <Link
           href="/orders"
@@ -229,30 +164,22 @@ function TodaysWork() {
         >
           <p className="rule-label">Awaiting client</p>
           <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.intake.awaitingClient}</p>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Links still open for buyer details</p>
         </Link>
         <div className="rounded-md border border-border bg-muted/40 p-2.5" data-testid="card-todays-attention">
           <p className="rule-label">Open alerts</p>
           <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.summary.attentionCount}</p>
-          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Bell · review or skip reminders</p>
         </div>
       </div>
 
       {activeDeals.length > 0 ? (
-        <div className="border-t border-border px-3 py-3" data-testid="panel-todays-active-deals">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <p className="rule-label">Active Print Orders</p>
-            <div className="flex items-center gap-3">
-              <p className="text-xs text-muted-foreground numeric">
-                {snapshot.summary.activeOrders} open
-                {snapshot.summary.activeOrders > activeDeals.length
-                  ? ` · showing ${activeDeals.length}`
-                  : ""}
-              </p>
-              <Link href="/deals" className="text-xs font-medium text-primary hover:underline" data-testid="link-todays-all-deals">
+        <div className="border-t border-border px-3 py-2.5" data-testid="panel-todays-active-deals">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <p className="rule-label">Active orders</p>
+            <div className="flex items-center gap-2 text-xs">
+              <Link href="/deals" className="font-medium text-primary hover:underline" data-testid="link-todays-all-deals">
                 Board
               </Link>
-              <Link href="/queue" className="text-xs font-medium text-primary hover:underline" data-testid="link-todays-queue">
+              <Link href="/queue" className="font-medium text-primary hover:underline" data-testid="link-todays-queue">
                 Queue
               </Link>
             </div>
@@ -261,20 +188,20 @@ function TodaysWork() {
             {activeDeals.map((deal) => (
               <li
                 key={deal.dealId}
-                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5"
+                className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
                 data-testid={`row-todays-active-deal-${deal.dealId}`}
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{deal.dealName}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
                     {deal.stage}
                     {deal.amount > 0 ? ` · ${formatMoney(deal.amount)}` : ""}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-3">
+                <div className="flex shrink-0 flex-wrap items-center gap-2.5 text-xs">
                   <Link
                     href={queueDealHref(deal.dealId)}
-                    className="text-xs font-medium text-primary hover:underline"
+                    className="font-medium text-primary hover:underline"
                     data-testid={`link-todays-ops-${deal.dealId}`}
                   >
                     Ops
@@ -282,17 +209,17 @@ function TodaysWork() {
                   {deal.promptAttachPlates ? (
                     <Link
                       href={printsDealHref(deal.dealId)}
-                      className="text-xs font-medium text-primary hover:underline"
+                      className="font-medium text-primary hover:underline"
                       data-testid={`link-todays-attach-${deal.dealId}`}
                     >
-                      Attach plates
+                      Plates
                     </Link>
                   ) : null}
                   <a
                     href={hubspotDealHref(deal.dealId, portalId)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                    className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground"
                     data-testid={`link-todays-hubspot-${deal.dealId}`}
                   >
                     HubSpot
@@ -304,7 +231,6 @@ function TodaysWork() {
           </ul>
         </div>
       ) : null}
-
     </section>
   );
 }
@@ -314,218 +240,43 @@ export default function Dashboard() {
   const { isUnlocked, ownerCode } = useOwnerSession();
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <PageHeader
-        title="Home"
-        subtitle="Bottom dock switches Sell / Make / Stock / System. Page chips above jump within the phase."
-      />
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title="Home" subtitle="Pending intake, active orders, and the next paid form." />
 
       <div className="page-stack">
         <TodaysWork />
         {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
-          className="overflow-hidden rounded-md border border-card-border bg-card"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-card-border bg-card p-3"
           aria-labelledby="start-order-title"
           data-testid="panel-start-order"
         >
-          <div className="grid gap-4 p-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)] lg:items-end lg:p-4">
-            <div>
-              <p className="rule-label text-primary">Next move</p>
-              <h2 id="start-order-title" className="mt-1 text-base font-semibold tracking-tight">
-                Paid? Send the buyer their order form.
-              </h2>
-              <p className="mt-1.5 max-w-xl text-sm leading-5 text-muted-foreground">
-                One-time link → buyer confirms address → approve into HubSpot for Pirate Ship labels.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button asChild data-testid="button-start-paid-order">
-                  <Link href="/orders">
-                    <Link2 className="mr-2 h-4 w-4" />
-                    Start paid order
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" data-testid="button-manual-order">
-                  <Link href="/paid-orders">
-                    <ClipboardCheck className="mr-2 h-4 w-4" />
-                    Enter one manually
-                  </Link>
-                </Button>
-              </div>
-            </div>
-            <div className="border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-              <p className="rule-label">Simple rule</p>
-              <p className="mt-2 text-sm font-medium leading-6">
-                Buyer submits details. You verify payment. Only then does HubSpot receive the order.
-              </p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                This protects your CRM from incomplete addresses and unconfirmed sales.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section aria-labelledby="workflow-title" data-testid="panel-daily-workflow">
-          <div className="mb-3 flex items-end justify-between gap-4">
-            <div>
-              <p className="rule-label">Daily workflow</p>
-              <h2 id="workflow-title" className="mt-1 text-base font-semibold tracking-tight">
-                One sale, one clear path
-              </h2>
-            </div>
-            <span className="hidden text-xs text-muted-foreground sm:block">Repeat for every paid order</span>
-          </div>
-          <div className="grid gap-4 rounded-md border border-card-border bg-card p-3 md:grid-cols-3 md:gap-0 md:p-4">
-            <WorkflowStep
-              number="01"
-              title="Collect buyer details"
-              body="Create the secure intake link once payment is received."
-              href="/orders"
-              action="Open paid order intake"
-              icon={Link2}
-            />
-            <WorkflowStep
-              number="02"
-              title="Attach production data"
-              body="After approval, attach each Chitubox plate so time and resin estimates land on the deal."
-              href="/prints"
-              action="Open Print files"
-              icon={FileUp}
-            />
-            <WorkflowStep
-              number="03"
-              title="Buy and record shipping"
-              body="Create a label in Pirate Ship, then enter the actual shipping cost on the deal."
-              href="/operations"
-              action="See cost fields"
-              icon={ShipWheel}
-            />
-          </div>
-        </section>
-
-        <section
-          className="overflow-hidden rounded-md border border-card-border bg-card"
-          aria-labelledby="control-loop-title"
-          data-testid="panel-control-loop"
-        >
-          <div className="border-b border-border px-3 py-2.5">
-            <p className="rule-label">Control loop</p>
-            <h2 id="control-loop-title" className="mt-0.5 text-sm font-semibold tracking-tight">
-              Keep the whole business visible
+          <div className="min-w-0">
+            <h2 id="start-order-title" className="text-sm font-semibold tracking-tight">
+              Paid? Send the buyer form
             </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Intake link → address confirmed → approve into HubSpot.
+            </p>
           </div>
-          <div className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
-            <Link
-              href="/prints"
-              data-testid="link-control-loop-prints"
-              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
-            >
-              <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Attach sliced plate data <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Turn each Chitubox CTB plate into time, resin, cost, and exposure totals on the right Print Order.
-                </span>
-              </span>
-            </Link>
-            <Link
-              href="/supplies"
-              data-testid="link-control-loop-supplies"
-              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
-            >
-              <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Log supply purchases <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Copy Amazon receipt totals into a clean materials, consumables, and packaging ledger.
-                </span>
-              </span>
-            </Link>
-            <Link
-              href="/performance"
-              data-testid="link-control-loop-performance"
-              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
-            >
-              <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Review performance <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  See pipeline workload, recent revenue, margins, supply spend, and orders that need attention.
-                </span>
-              </span>
-            </Link>
-            <Link
-              href="/operations"
-              data-testid="link-control-loop-operations"
-              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
-            >
-              <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  Profit automation <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Confirm webhook health when HubSpot cost fields change.
-                </span>
-              </span>
-            </Link>
+          <div className="flex flex-wrap gap-1.5">
+            <Button asChild size="sm" data-testid="button-start-paid-order">
+              <Link href="/orders">
+                <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                Intake
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline" data-testid="button-manual-order">
+              <Link href="/paid-orders">
+                <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />
+                Manual
+              </Link>
+            </Button>
           </div>
         </section>
 
-        <section className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
-          <SystemStatus health={health.data} />
-
-          <section
-            className="rounded-md border border-card-border bg-card p-3"
-            aria-labelledby="tools-title"
-            data-testid="panel-business-tools"
-          >
-            <p className="rule-label">Business tools</p>
-            <h2 id="tools-title" className="mt-1 text-base font-semibold tracking-tight">
-              Open the systems you use
-            </h2>
-            <div className="mt-4 space-y-2">
-              <a
-                href={HUBSPOT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="link-command-center-hubspot"
-                className="flex items-center justify-between rounded-md border border-border px-3 py-3 text-sm transition-colors hover:bg-muted/60"
-              >
-                <span className="flex items-center gap-2.5">
-                  <Store className="h-4 w-4 text-primary" />
-                  <span>
-                    <span className="block font-medium">HubSpot CRM</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Contacts, emails, timeline, and reporting</span>
-                  </span>
-                </span>
-                <ExternalLink className="h-4 w-4 text-muted-foreground" />
-              </a>
-              <a
-                href={PIRATE_SHIP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="link-command-center-pirateship"
-                className="flex items-center justify-between rounded-md border border-border px-3 py-3 text-sm transition-colors hover:bg-muted/60"
-              >
-                <span className="flex items-center gap-2.5">
-                  <ShipWheel className="h-4 w-4 text-primary" />
-                  <span>
-                    <span className="block font-medium">Pirate Ship</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Shipping labels and actual postage</span>
-                  </span>
-                </span>
-                <ExternalLink className="h-4 w-4 text-muted-foreground" />
-              </a>
-            </div>
-          </section>
-        </section>
+        <SystemStatus health={health.data} />
       </div>
     </div>
   );

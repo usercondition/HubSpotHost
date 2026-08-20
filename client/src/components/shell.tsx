@@ -19,10 +19,6 @@ import {
   Settings2,
   ShipWheel,
   Sun,
-  Package,
-  Factory,
-  Warehouse,
-  Wrench,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { useOwnerSession } from "@/hooks/use-owner-session";
@@ -70,7 +66,7 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid={testId}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
@@ -143,17 +139,23 @@ const NAV: Array<{
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
 ];
 
-const PHASES: Array<{ id: NavGroup; home: string; icon: typeof Package; hint: string }> = [
-  { id: "Sell", home: "/", icon: Package, hint: "Intake & entry" },
-  { id: "Make", home: "/queue", icon: Factory, hint: "Queue & plates" },
-  { id: "Stock", home: "/resin", icon: Warehouse, hint: "Resin & supplies" },
-  { id: "System", home: "/setup", icon: Wrench, hint: "Profit & setup" },
-];
+const GROUPS: NavGroup[] = ["Sell", "Make", "Stock", "System"];
+
+const GROUP_HOME: Record<NavGroup, string> = {
+  Sell: "/",
+  Make: "/queue",
+  Stock: "/resin",
+  System: "/performance",
+};
 
 function groupForPath(path: string): NavGroup {
   return NAV.find((item) => item.href === path)?.group ?? "Sell";
 }
 
+/**
+ * Single chrome: phase switcher + pages for that phase + tools.
+ * Removes the redundant bottom dock + second chip row.
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { isUnlocked, lock } = useOwnerSession();
@@ -166,115 +168,110 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      {/* Slim top tools — brand + utilities only */}
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card/95 px-3 backdrop-blur md:px-4">
-        <Link
-          href="/"
-          className="flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          data-testid="link-home"
-          title="Print Ops"
-        >
-          <Mark className="h-5 w-5 text-primary" />
-          <span className="text-sm font-semibold tracking-tight">Print Ops</span>
-        </Link>
+      <header className="shrink-0 border-b border-border bg-card">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 md:px-4">
+          <Link
+            href="/"
+            className="flex shrink-0 items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="link-home"
+            title="Print Ops"
+          >
+            <Mark className="h-5 w-5 text-primary" />
+            <span className="text-sm font-semibold tracking-tight">Print Ops</span>
+          </Link>
 
-        <div className="ml-auto flex items-center gap-1">
-          <AttentionBell />
-          <a
-            href="https://app.hubspot.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="HubSpot CRM"
-            data-testid="link-sidebar-hubspot"
-            className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
+          <nav
+            aria-label="Workflow phases"
+            className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/70 p-0.5"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
-            HubSpot
-          </a>
-          <a
-            href="https://ship.pirateship.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Pirate Ship"
-            data-testid="link-sidebar-pirateship"
-            className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
+            {GROUPS.map((group) => {
+              const active = activeGroup === group;
+              return (
+                <Link
+                  key={group}
+                  href={GROUP_HOME[group]}
+                  data-testid={`link-phase-${group.toLowerCase()}`}
+                  className={cn(
+                    "rounded px-2 py-1 text-[0.6875rem] font-semibold tracking-wide transition-colors",
+                    active
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {group}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <nav
+            aria-label={`${activeGroup} pages`}
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
           >
-            <ShipWheel className="h-3.5 w-3.5" />
-            Ship
-          </a>
-          <ThemeToggle testId="button-theme-toggle" />
-          {isUnlocked ? (
-            <button
-              type="button"
-              onClick={lock}
-              title="Lock owner session"
-              data-testid="button-lock-owner-session"
-              className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            {siblings.map((item) => {
+              const active = location === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={item.title}
+                  data-testid={item.testId}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-primary/10 text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <item.icon className={cn("h-3.5 w-3.5", active && "text-primary")} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <AttentionBell />
+            <a
+              href="https://app.hubspot.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="HubSpot CRM"
+              data-testid="link-sidebar-hubspot"
+              className="hidden h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
             >
-              <Lock className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Lock</span>
-            </button>
-          ) : null}
+              <ExternalLink className="h-3.5 w-3.5" />
+              HubSpot
+            </a>
+            <a
+              href="https://ship.pirateship.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Pirate Ship"
+              data-testid="link-sidebar-pirateship"
+              className="hidden h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
+            >
+              <ShipWheel className="h-3.5 w-3.5" />
+              Ship
+            </a>
+            <ThemeToggle testId="button-theme-toggle" />
+            {isUnlocked ? (
+              <button
+                type="button"
+                onClick={lock}
+                title="Lock owner session"
+                data-testid="button-lock-owner-session"
+                className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Lock</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
-      {/* Phase page chips — sit above content, change with dock */}
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/40 px-3 md:px-4">
-        <span className="rule-label mr-1 hidden text-primary sm:inline">{activeGroup}</span>
-        <nav aria-label={`${activeGroup} pages`} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-          {siblings.map((item) => {
-            const active = location === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.title}
-                data-testid={item.testId}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  active
-                    ? "bg-card text-foreground shadow-sm ring-1 ring-border"
-                    : "text-muted-foreground hover:bg-card/80 hover:text-foreground",
-                )}
-              >
-                <item.icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-
-      <main className="scroll-pane min-h-0 min-w-0 flex-1 pb-[4.75rem]">{children}</main>
-
-      {/* Bottom workflow dock */}
-      <nav
-        aria-label="Workflow phases"
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[0_-8px_30px_hsl(222_40%_12%/0.18)]"
-      >
-        <div className="mx-auto grid max-w-3xl grid-cols-4 gap-1 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          {PHASES.map((phase) => {
-            const active = activeGroup === phase.id;
-            return (
-              <Link
-                key={phase.id}
-                href={phase.home}
-                title={phase.hint}
-                data-testid={`link-phase-${phase.id.toLowerCase()}`}
-                className={cn(
-                  "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition-colors",
-                  active
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                )}
-              >
-                <phase.icon className="h-4 w-4" />
-                <span className="text-[0.6875rem] font-semibold tracking-tight">{phase.id}</span>
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+      <main className="scroll-pane min-h-0 min-w-0 flex-1">{children}</main>
     </div>
   );
 }
@@ -289,18 +286,20 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
-      <div className="flex flex-wrap items-end justify-between gap-2.5">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-2 md:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h1
-            className="truncate text-lg font-semibold tracking-tight text-foreground md:text-xl"
+            className="truncate text-base font-semibold tracking-tight text-foreground md:text-lg"
             data-testid="text-page-title"
           >
             {title}
           </h1>
-          <p className="mt-0.5 max-w-2xl text-xs leading-4 text-muted-foreground md:text-sm md:leading-5">
-            {subtitle}
-          </p>
+          {subtitle ? (
+            <p className="mt-0.5 max-w-3xl truncate text-xs text-muted-foreground md:whitespace-normal">
+              {subtitle}
+            </p>
+          ) : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
       </div>
