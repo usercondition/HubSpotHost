@@ -139,140 +139,164 @@ const NAV: Array<{
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
 ];
 
-const GROUPS: NavGroup[] = ["Sell", "Make", "Stock", "System"];
-
-const GROUP_HOME: Record<NavGroup, string> = {
-  Sell: "/",
-  Make: "/queue",
-  Stock: "/resin",
-  System: "/performance",
-};
-
-function groupForPath(path: string): NavGroup {
-  return NAV.find((item) => item.href === path)?.group ?? "Sell";
-}
+const GROUPS: Array<{ id: NavGroup; hint: string }> = [
+  { id: "Sell", hint: "Paid → form" },
+  { id: "Make", hint: "Print → ship" },
+  { id: "Stock", hint: "Resin & spend" },
+  { id: "System", hint: "Health & stats" },
+];
 
 /**
- * Single chrome: phase switcher + pages for that phase + tools.
- * Removes the redundant bottom dock + second chip row.
+ * Left workflow rail: always-visible labels, grouped by how the shop actually runs.
+ * Make (Queue) sits in the middle as the daily production spine.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { isUnlocked, lock } = useOwnerSession();
-  const activeGroup = groupForPath(location);
-  const siblings = NAV.filter((item) => item.group === activeGroup);
+  const activeGroup = NAV.find((item) => item.href === location)?.group ?? "Sell";
 
   useEffect(() => {
     document.title = "Print Ops";
   }, [location]);
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      <header className="shrink-0 border-b border-border bg-card">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 md:px-4">
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[12.5rem_1fr] md:grid-rows-1">
+      <aside className="flex min-w-0 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-2.5 py-2 text-sidebar-foreground md:h-full md:flex-col md:items-stretch md:gap-3 md:border-b-0 md:border-r md:px-2 md:py-3">
+        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-2">
           <Link
             href="/"
-            className="flex shrink-0 items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring md:px-1.5"
             data-testid="link-home"
             title="Print Ops"
           >
-            <Mark className="h-5 w-5 text-primary" />
-            <span className="text-sm font-semibold tracking-tight">Print Ops</span>
+            <Mark className="h-6 w-6 shrink-0 text-sidebar-primary" />
+            <span className="min-w-0 truncate">
+              <span className="block text-sm font-semibold tracking-tight">Print Ops</span>
+              <span className="hidden text-[0.625rem] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40 md:block">
+                Workflow
+              </span>
+            </span>
           </Link>
-
-          <nav
-            aria-label="Workflow phases"
-            className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/70 p-0.5"
-          >
-            {GROUPS.map((group) => {
-              const active = activeGroup === group;
-              return (
-                <Link
-                  key={group}
-                  href={GROUP_HOME[group]}
-                  data-testid={`link-phase-${group.toLowerCase()}`}
-                  className={cn(
-                    "rounded px-2 py-1 text-[0.6875rem] font-semibold tracking-wide transition-colors",
-                    active
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {group}
-                </Link>
-              );
-            })}
-          </nav>
-
-          <nav
-            aria-label={`${activeGroup} pages`}
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
-          >
-            {siblings.map((item) => {
-              const active = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.title}
-                  data-testid={item.testId}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <item.icon className={cn("h-3.5 w-3.5", active && "text-primary")} />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="flex items-center gap-1 md:justify-center">
             <AttentionBell />
-            <a
-              href="https://app.hubspot.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="HubSpot CRM"
-              data-testid="link-sidebar-hubspot"
-              className="hidden h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              HubSpot
-            </a>
-            <a
-              href="https://ship.pirateship.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Pirate Ship"
-              data-testid="link-sidebar-pirateship"
-              className="hidden h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
-            >
-              <ShipWheel className="h-3.5 w-3.5" />
-              Ship
-            </a>
-            <ThemeToggle testId="button-theme-toggle" />
-            {isUnlocked ? (
-              <button
-                type="button"
-                onClick={lock}
-                title="Lock owner session"
-                data-testid="button-lock-owner-session"
-                className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <Lock className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Lock</span>
-              </button>
-            ) : null}
+            <ThemeToggle
+              className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
+              testId="button-theme-toggle-mobile"
+            />
           </div>
         </div>
-      </header>
 
-      <main className="scroll-pane min-h-0 min-w-0 flex-1">{children}</main>
+        <nav
+          aria-label="Primary navigation"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:block md:overflow-x-visible md:overflow-y-auto"
+        >
+          {GROUPS.map((group) => {
+            const isActiveGroup = activeGroup === group.id;
+            return (
+              <div
+                key={group.id}
+                className={cn(
+                  "flex shrink-0 items-center gap-0.5 md:mb-3 md:block md:rounded-lg md:px-0.5 md:py-0.5",
+                  isActiveGroup && "md:bg-white/[0.03]",
+                )}
+              >
+                <div className="hidden px-2 pb-1 pt-0.5 md:block">
+                  <p
+                    className={cn(
+                      "text-[0.625rem] font-bold uppercase tracking-[0.12em]",
+                      isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/35",
+                    )}
+                  >
+                    {group.id}
+                  </p>
+                  <p className="text-[0.6rem] text-sidebar-foreground/30">{group.hint}</p>
+                </div>
+                {NAV.filter((item) => item.group === group.id).map((item) => {
+                  const active = location === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.title}
+                      data-testid={item.testId}
+                      className={cn(
+                        "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors md:mb-px md:w-full",
+                        active
+                          ? "bg-sidebar-primary/18 font-semibold text-sidebar-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-sidebar-primary"
+                          : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                      )}
+                    >
+                      <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-sidebar-primary")} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto hidden space-y-0.5 border-t border-sidebar-border pt-2 md:block">
+          <p className="px-2 pb-1 text-[0.625rem] font-bold uppercase tracking-[0.12em] text-sidebar-foreground/35">
+            Tools
+          </p>
+          <a
+            href="https://app.hubspot.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="HubSpot CRM"
+            data-testid="link-sidebar-hubspot"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+            HubSpot
+          </a>
+          <a
+            href="https://ship.pirateship.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Pirate Ship"
+            data-testid="link-sidebar-pirateship"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <ShipWheel className="h-3.5 w-3.5 shrink-0" />
+            Ship
+          </a>
+          <ThemeToolButton />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
+              <Lock className="h-3.5 w-3.5 shrink-0" />
+              Lock
+            </button>
+          ) : null}
+        </div>
+      </aside>
+
+      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
     </div>
+  );
+}
+
+function ThemeToolButton() {
+  const { theme, toggle } = useContext(ThemeContext);
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      data-testid="button-theme-toggle"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+    >
+      {theme === "dark" ? <Sun className="h-3.5 w-3.5 shrink-0" /> : <Moon className="h-3.5 w-3.5 shrink-0" />}
+      Theme
+    </button>
   );
 }
 

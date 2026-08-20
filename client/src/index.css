@@ -3,66 +3,66 @@
 @tailwind utilities;
 
 /*
- * Print Ops — single-chrome workbench.
- * One top bar for phases + pages + tools. No side rail, no bottom dock.
- * Quiet zinc canvas, sky accent. Home kept to actionable work only.
+ * Print Ops — left workflow rail.
+ * Labeled Sell → Make → Stock → System sidebar for shop-floor scanning.
+ * Soft stone canvas, seafoam primary. Lean content area.
  */
 
 /* LIGHT MODE */
 :root {
-  --button-outline: rgba(15, 23, 42, 0.12);
-  --badge-outline: rgba(15, 23, 42, 0.06);
+  --button-outline: rgba(28, 36, 34, 0.12);
+  --badge-outline: rgba(28, 36, 34, 0.06);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(15, 23, 42, 0.04);
-  --elevate-2: rgba(15, 23, 42, 0.08);
+  --elevate-1: rgba(28, 36, 34, 0.04);
+  --elevate-2: rgba(28, 36, 34, 0.08);
 
-  --background: 210 20% 97%;
-  --foreground: 222 35% 14%;
-  --border: 214 16% 88%;
+  --background: 160 12% 96%;
+  --foreground: 168 18% 14%;
+  --border: 160 10% 86%;
   --card: 0 0% 100%;
-  --card-foreground: 222 35% 14%;
-  --card-border: 214 16% 91%;
-  --sidebar: 222 30% 12%;
-  --sidebar-foreground: 210 25% 94%;
-  --sidebar-border: 222 22% 20%;
-  --sidebar-primary: 199 89% 44%;
+  --card-foreground: 168 18% 14%;
+  --card-border: 160 10% 90%;
+  --sidebar: 170 16% 11%;
+  --sidebar-foreground: 160 12% 92%;
+  --sidebar-border: 170 12% 18%;
+  --sidebar-primary: 168 55% 42%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 222 22% 18%;
-  --sidebar-accent-foreground: 210 25% 94%;
-  --sidebar-ring: 199 89% 44%;
+  --sidebar-accent: 170 12% 17%;
+  --sidebar-accent-foreground: 160 12% 94%;
+  --sidebar-ring: 168 55% 42%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 35% 14%;
-  --popover-border: 214 16% 88%;
-  --primary: 199 89% 40%;
+  --popover-foreground: 168 18% 14%;
+  --popover-border: 160 10% 88%;
+  --primary: 168 55% 36%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 18% 93%;
-  --secondary-foreground: 222 30% 18%;
-  --muted: 210 16% 94%;
-  --muted-foreground: 215 14% 42%;
-  --accent: 199 70% 36%;
+  --secondary: 160 12% 92%;
+  --secondary-foreground: 168 16% 18%;
+  --muted: 160 10% 93%;
+  --muted-foreground: 168 10% 40%;
+  --accent: 200 40% 36%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 48%;
   --destructive-foreground: 0 0% 98%;
-  --input: 214 14% 74%;
-  --ring: 199 89% 40%;
-  --chart-1: 199 89% 40%;
-  --chart-2: 222 30% 30%;
-  --chart-3: 215 14% 45%;
-  --chart-4: 152 42% 36%;
-  --chart-5: 24 90% 48%;
+  --input: 160 10% 74%;
+  --ring: 168 55% 36%;
+  --chart-1: 168 55% 36%;
+  --chart-2: 200 40% 36%;
+  --chart-3: 168 12% 40%;
+  --chart-4: 42 80% 42%;
+  --chart-5: 350 55% 44%;
 
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --radius: 0.5rem;
   --shadow-2xs: 0 0 0 0 transparent;
-  --shadow-xs: 0 1px 2px hsl(222 35% 14% / 0.04);
-  --shadow-sm: 0 1px 2px hsl(222 35% 14% / 0.05);
-  --shadow: 0 1px 3px hsl(222 35% 14% / 0.06);
-  --shadow-md: 0 4px 12px hsl(222 35% 14% / 0.07);
-  --shadow-lg: 0 8px 20px hsl(222 35% 14% / 0.08);
-  --shadow-xl: 0 12px 28px hsl(222 35% 14% / 0.1);
-  --shadow-2xl: 0 20px 40px hsl(222 35% 14% / 0.12);
+  --shadow-xs: 0 1px 2px hsl(168 18% 14% / 0.04);
+  --shadow-sm: 0 1px 2px hsl(168 18% 14% / 0.05);
+  --shadow: 0 1px 3px hsl(168 18% 14% / 0.06);
+  --shadow-md: 0 4px 12px hsl(168 18% 14% / 0.07);
+  --shadow-lg: 0 8px 20px hsl(168 18% 14% / 0.08);
+  --shadow-xl: 0 12px 28px hsl(168 18% 14% / 0.1);
+  --shadow-2xl: 0 20px 40px hsl(168 18% 14% / 0.12);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -103,40 +103,40 @@
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.08);
 
-  --background: 222 28% 7%;
-  --foreground: 210 25% 94%;
-  --border: 222 18% 18%;
-  --card: 222 24% 10%;
-  --card-foreground: 210 25% 94%;
-  --card-border: 222 18% 16%;
-  --sidebar: 222 30% 9%;
-  --sidebar-foreground: 210 25% 92%;
-  --sidebar-border: 222 18% 16%;
-  --sidebar-primary: 199 89% 52%;
-  --sidebar-primary-foreground: 222 35% 10%;
-  --sidebar-accent: 222 20% 15%;
-  --sidebar-accent-foreground: 210 25% 94%;
-  --sidebar-ring: 199 89% 52%;
-  --popover: 222 24% 11%;
-  --popover-foreground: 210 25% 94%;
-  --popover-border: 222 18% 20%;
-  --primary: 199 89% 52%;
-  --primary-foreground: 222 35% 10%;
-  --secondary: 222 18% 15%;
-  --secondary-foreground: 210 25% 92%;
-  --muted: 222 18% 14%;
-  --muted-foreground: 215 12% 62%;
-  --accent: 199 70% 48%;
-  --accent-foreground: 222 35% 10%;
+  --background: 170 14% 7%;
+  --foreground: 160 12% 94%;
+  --border: 170 10% 18%;
+  --card: 170 12% 10%;
+  --card-foreground: 160 12% 94%;
+  --card-border: 170 10% 16%;
+  --sidebar: 170 16% 8%;
+  --sidebar-foreground: 160 12% 92%;
+  --sidebar-border: 170 10% 15%;
+  --sidebar-primary: 168 55% 45%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 170 10% 14%;
+  --sidebar-accent-foreground: 160 12% 94%;
+  --sidebar-ring: 168 55% 45%;
+  --popover: 170 12% 11%;
+  --popover-foreground: 160 12% 94%;
+  --popover-border: 170 10% 20%;
+  --primary: 168 55% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 170 10% 15%;
+  --secondary-foreground: 160 12% 92%;
+  --muted: 170 10% 14%;
+  --muted-foreground: 160 8% 62%;
+  --accent: 200 40% 48%;
+  --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 55%;
   --destructive-foreground: 0 0% 98%;
-  --input: 222 16% 26%;
-  --ring: 199 89% 52%;
-  --chart-1: 199 89% 52%;
-  --chart-2: 210 25% 70%;
-  --chart-3: 215 12% 55%;
-  --chart-4: 152 42% 45%;
-  --chart-5: 24 90% 55%;
+  --input: 170 10% 26%;
+  --ring: 168 55% 45%;
+  --chart-1: 168 55% 45%;
+  --chart-2: 200 40% 48%;
+  --chart-3: 160 8% 68%;
+  --chart-4: 42 80% 50%;
+  --chart-5: 350 55% 58%;
 
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.25);
@@ -314,7 +314,7 @@
   .rule-label {
     font-size: 0.625rem;
     line-height: 0.875rem;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     font-weight: 600;
     color: hsl(var(--muted-foreground));
