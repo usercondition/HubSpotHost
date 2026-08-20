@@ -13,7 +13,7 @@ import {
   Lock,
   Moon,
   ListOrdered,
-  Home,
+  LayoutDashboard,
   Printer,
   ShoppingBag,
   Settings2,
@@ -66,7 +66,7 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid={testId}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
@@ -77,10 +77,6 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
 
 /* ----------------------------------------------------------------- mark --- */
 
-/**
- * Layered-print mark: three stacked strokes narrowing upward with a resin dot
- * on top — a print bed building a part, reduced to four elements.
- */
 export function Mark({ className }: { className?: string }) {
   return (
     <svg
@@ -112,63 +108,75 @@ export function Mark({ className }: { className?: string }) {
 
 /* ---------------------------------------------------------------- shell --- */
 
-const NAV = [
-  { href: "/", label: "Home", title: "Home", icon: Home, testId: "link-nav-home", group: "Work" },
-  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Work" },
-  { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Work" },
-  { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Work" },
+type NavGroup = "Sell" | "Make" | "Stock" | "System";
+
+const NAV: Array<{
+  href: string;
+  label: string;
+  title: string;
+  icon: typeof LayoutDashboard;
+  testId: string;
+  group: NavGroup;
+}> = [
+  { href: "/", label: "Home", title: "Overview", icon: LayoutDashboard, testId: "link-nav-home", group: "Sell" },
+  { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Sell" },
   {
     href: "/paid-orders",
     label: "Manual",
     title: "Manual Order Entry",
     icon: ClipboardCheck,
     testId: "link-nav-paid-orders",
-    group: "Work",
+    group: "Sell",
   },
-  { href: "/prints", label: "Prints", title: "Prints", icon: FileUp, testId: "link-nav-prints", group: "Work" },
-  { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Work" },
-  { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Work" },
-  { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Work" },
+  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Make" },
+  { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Make" },
+  { href: "/prints", label: "Prints", title: "Prints", icon: FileUp, testId: "link-nav-prints", group: "Make" },
+  { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Make" },
+  { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Stock" },
+  { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Stock" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "System" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "System" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
 ];
 
+const GROUPS: NavGroup[] = ["Sell", "Make", "Stock", "System"];
+
+function groupForPath(path: string): NavGroup {
+  return NAV.find((item) => item.href === path)?.group ?? "Sell";
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const groups = Array.from(new Set(NAV.map((item) => item.group)));
   const { isUnlocked, lock } = useOwnerSession();
+  const activeGroup = groupForPath(location);
+  const siblings = NAV.filter((item) => item.group === activeGroup);
 
   useEffect(() => {
     document.title = "Print Ops";
   }, [location]);
 
   return (
-    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[10.5rem_1fr] md:grid-rows-1">
-      <aside className="flex min-w-0 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-2.5 py-2 md:h-full md:flex-col md:items-stretch md:gap-2 md:border-b-0 md:border-r md:px-2 md:py-3">
-        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-2">
-          <Link
-            href="/"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1.5 md:pb-1"
-            data-testid="link-home"
-            title="Print Ops"
-          >
-            <Mark className="h-6 w-6 shrink-0 text-primary" />
-            <span className="truncate text-sm font-semibold tracking-tight">Print Ops</span>
-          </Link>
-          <div className="flex items-center gap-1 md:justify-center">
-            <AttentionBell />
-            <ThemeToggle className="md:hidden" testId="button-theme-toggle-mobile" />
-          </div>
-        </div>
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[3.75rem_1fr] md:grid-rows-1">
+      {/* Icon rail — workflow-grouped */}
+      <aside className="flex min-w-0 shrink-0 items-center gap-1 border-b border-sidebar-border bg-sidebar px-2 py-2 text-sidebar-foreground md:h-full md:flex-col md:gap-0 md:border-b-0 md:border-r md:px-1.5 md:py-3">
+        <Link
+          href="/"
+          className="mb-0 flex shrink-0 items-center justify-center rounded-lg p-1.5 text-sidebar-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring md:mb-3"
+          data-testid="link-home"
+          title="Print Ops"
+        >
+          <Mark className="h-6 w-6" />
+        </Link>
 
         <nav
           aria-label="Primary navigation"
-          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:block md:overflow-y-auto md:overflow-x-visible"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:flex-col md:overflow-x-visible md:overflow-y-auto md:gap-0"
         >
-          {groups.map((group) => (
-            <div key={group} className="flex shrink-0 items-center gap-0.5 md:mb-2.5 md:block">
-              <p className="rule-label hidden px-2 pb-1 pt-0.5 md:block">{group}</p>
+          {GROUPS.map((group, groupIndex) => (
+            <div key={group} className={cn("flex shrink-0 items-center gap-1 md:w-full md:flex-col md:gap-0.5", groupIndex > 0 && "md:mt-2 md:border-t md:border-sidebar-border md:pt-2")}>
+              <p className="hidden w-full truncate px-0.5 pb-1 text-center text-[0.55rem] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/35 md:block">
+                {group}
+              </p>
               {NAV.filter((item) => item.group === group).map((item) => {
                 const active = location === item.href;
                 return (
@@ -178,14 +186,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={item.title}
                     data-testid={item.testId}
                     className={cn(
-                      "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors md:mb-px md:w-full",
+                      "group/rail relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors md:mx-auto",
                       active
-                        ? "bg-primary/10 font-semibold text-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
-                        : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
-                    <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-primary")} />
-                    <span className="tracking-tight">{item.label}</span>
+                    <item.icon className="h-4 w-4" />
+                    <span className="rail-tip hidden md:inline">{item.label}</span>
+                    <span className="sr-only">{item.label}</span>
                   </Link>
                 );
               })}
@@ -193,18 +202,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="mt-auto hidden space-y-0.5 border-t border-sidebar-border pt-2 md:block">
-          <p className="rule-label px-2 pb-1">Tools</p>
+        <div className="flex shrink-0 items-center gap-1 md:mt-auto md:flex-col md:gap-1 md:border-t md:border-sidebar-border md:pt-2">
+          <div className="md:hidden">
+            <AttentionBell />
+          </div>
+          <ThemeToggle className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden" testId="button-theme-toggle-mobile" />
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            className="group/rail relative hidden h-9 w-9 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:flex"
           >
-            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-            HubSpot
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span className="rail-tip">HubSpot</span>
           </a>
           <a
             href="https://ship.pirateship.com/"
@@ -212,10 +224,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             rel="noopener noreferrer"
             title="Pirate Ship"
             data-testid="link-sidebar-pirateship"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            className="group/rail relative hidden h-9 w-9 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:flex"
           >
-            <ShipWheel className="h-3.5 w-3.5 shrink-0" />
-            Ship
+            <ShipWheel className="h-3.5 w-3.5" />
+            <span className="rail-tip">Ship</span>
           </a>
           <ThemeToolButton />
           {isUnlocked ? (
@@ -224,16 +236,51 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={lock}
               title="Lock owner session"
               data-testid="button-lock-owner-session"
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="group/rail relative hidden h-9 w-9 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:flex"
             >
-              <Lock className="h-3.5 w-3.5 shrink-0" />
-              Lock
+              <Lock className="h-3.5 w-3.5" />
+              <span className="rail-tip">Lock</span>
             </button>
           ) : null}
         </div>
       </aside>
 
-      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
+      <div className="flex min-h-0 min-w-0 flex-col">
+        {/* Contextual stage strip — siblings in the active workflow group */}
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-card px-3 md:px-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="rule-label shrink-0 text-primary">{activeGroup}</span>
+              <nav aria-label={`${activeGroup} pages`} className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+                {siblings.map((item) => {
+                  const active = location === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      data-testid={`${item.testId}-stage`}
+                      className={cn(
+                        "shrink-0 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                        active
+                          ? "bg-primary/10 text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          </div>
+          <div className="hidden items-center gap-1.5 md:flex">
+            <AttentionBell />
+            <span className="text-xs font-semibold tracking-tight text-foreground">Print Ops</span>
+          </div>
+        </div>
+
+        <main className="scroll-pane min-h-0 min-w-0 flex-1">{children}</main>
+      </div>
     </div>
   );
 }
@@ -247,10 +294,10 @@ function ThemeToolButton() {
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid="button-theme-toggle"
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+      className="group/rail relative hidden h-9 w-9 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:flex"
     >
-      {theme === "dark" ? <Sun className="h-3.5 w-3.5 shrink-0" /> : <Moon className="h-3.5 w-3.5 shrink-0" />}
-      Theme
+      {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+      <span className="rail-tip">Theme</span>
     </button>
   );
 }
@@ -265,16 +312,16 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-2.5 md:px-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border/80 px-3 py-3 md:px-5">
+      <div className="flex flex-wrap items-end justify-between gap-2.5">
         <div className="min-w-0">
           <h1
-            className="truncate text-base font-semibold tracking-tight text-foreground md:text-lg"
+            className="truncate text-lg font-semibold tracking-tight text-foreground md:text-xl"
             data-testid="text-page-title"
           >
             {title}
           </h1>
-          <p className="mt-0.5 max-w-3xl truncate text-xs leading-4 text-muted-foreground md:whitespace-normal">
+          <p className="mt-0.5 max-w-2xl text-xs leading-4 text-muted-foreground md:text-sm md:leading-5">
             {subtitle}
           </p>
         </div>
