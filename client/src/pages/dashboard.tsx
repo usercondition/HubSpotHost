@@ -193,7 +193,7 @@ function TodaysWork() {
             What needs you right now
           </h2>
           <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            Alerts live in the sidebar bell — skip anything that doesn’t apply.
+            Alerts live in the stage strip bell — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -317,7 +317,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Home"
-        subtitle="Paid orders from intake through HubSpot — same coral CRM language, denser for daily work."
+        subtitle="Workflow spine: Sell → Make → Stock. Icon rail jumps stages; the strip above lists siblings."
       />
 
       <div className="page-stack">

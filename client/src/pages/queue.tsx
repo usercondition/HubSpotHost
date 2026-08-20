@@ -48,10 +48,10 @@ function QueueCard({
       onClick={onSelect}
       data-testid={`button-queue-deal-${item.dealId}`}
       className={cn(
-        "w-full rounded-md border p-2.5 text-left transition-colors",
+        "w-full rounded-xl border p-3 text-left shadow-sm transition-colors",
         selected
-          ? "border-primary bg-primary/5"
-          : "border-border bg-card hover:bg-muted/40",
+          ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+          : "border-card-border bg-card hover:bg-muted/40",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
