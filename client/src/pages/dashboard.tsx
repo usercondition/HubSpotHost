@@ -40,7 +40,7 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
 
   return (
     <section
-      className="rounded-xl border border-card-border bg-card/95 p-5 shadow-sm"
+      className="rounded-md border border-card-border bg-card p-3"
       aria-labelledby="system-status-title"
       data-testid="panel-system-status"
     >
@@ -182,18 +182,18 @@ function TodaysWork() {
 
   return (
     <section
-      className="surface-rise rounded-xl border border-card-border bg-card/95 shadow-sm"
+      className="rounded-md border border-card-border bg-card"
       aria-labelledby="todays-work-title"
       data-testid="panel-todays-work"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/80 px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2.5">
         <div>
-          <p className="rule-label">On deck</p>
-          <h2 id="todays-work-title" className="mt-1 text-lg font-semibold tracking-tight">
+          <p className="rule-label">Today’s work</p>
+          <h2 id="todays-work-title" className="mt-0.5 text-sm font-semibold tracking-tight">
             What needs you right now
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Alerts live in the sidebar bell — skip anything that doesn’t apply.
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+            Alerts live in the top-bar bell — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -212,34 +212,34 @@ function TodaysWork() {
         </div>
       </div>
 
-      <div className="grid gap-3 p-5 sm:grid-cols-3">
+      <div className="grid gap-2 p-3 sm:grid-cols-3">
         <Link
           href="/orders"
-          className="rounded-lg border border-border/80 bg-muted/40 p-3.5 transition-all hover:border-primary/35 hover:bg-primary/5"
+          className="rounded-md border border-border bg-muted/40 p-2.5 transition-colors hover:bg-muted/70"
           data-testid="card-todays-pending-review"
         >
           <p className="rule-label">Pending review</p>
-          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.intake.pendingReview}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Buyer forms waiting for approval</p>
+          <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.intake.pendingReview}</p>
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Buyer forms waiting for approval</p>
         </Link>
         <Link
           href="/orders"
-          className="rounded-lg border border-border/80 bg-muted/40 p-3.5 transition-all hover:border-primary/35 hover:bg-primary/5"
+          className="rounded-md border border-border bg-muted/40 p-2.5 transition-colors hover:bg-muted/70"
           data-testid="card-todays-awaiting-client"
         >
           <p className="rule-label">Awaiting client</p>
-          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.intake.awaitingClient}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Links still open for buyer details</p>
+          <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.intake.awaitingClient}</p>
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Links still open for buyer details</p>
         </Link>
-        <div className="rounded-lg border border-border/80 bg-muted/40 p-3.5" data-testid="card-todays-attention">
+        <div className="rounded-md border border-border bg-muted/40 p-2.5" data-testid="card-todays-attention">
           <p className="rule-label">Open alerts</p>
-          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.summary.attentionCount}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Bell icon · review or skip reminders</p>
+          <p className="mt-1 text-xl font-semibold tracking-tight numeric">{snapshot.summary.attentionCount}</p>
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">Bell · review or skip reminders</p>
         </div>
       </div>
 
       {activeDeals.length > 0 ? (
-        <div className="border-t border-border px-5 py-4" data-testid="panel-todays-active-deals">
+        <div className="border-t border-border px-3 py-3" data-testid="panel-todays-active-deals">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <p className="rule-label">Active Print Orders</p>
             <div className="flex items-center gap-3">
@@ -316,8 +316,8 @@ export default function Dashboard() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Shop floor"
-        subtitle="Intake → print → ship. One thread from paid buyer to packing slip."
+        title="Home"
+        subtitle="Paid orders from intake through HubSpot — same coral CRM language, denser for daily work."
       />
 
       <div className="page-stack">
@@ -325,18 +325,18 @@ export default function Dashboard() {
         {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
-          className="overflow-hidden rounded-xl border border-card-border bg-card/95 shadow-sm"
+          className="overflow-hidden rounded-md border border-card-border bg-card"
           aria-labelledby="start-order-title"
           data-testid="panel-start-order"
         >
-          <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)] lg:items-end lg:p-6">
+          <div className="grid gap-4 p-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)] lg:items-end lg:p-4">
             <div>
               <p className="rule-label text-primary">Next move</p>
-              <h2 id="start-order-title" className="mt-2 text-xl font-semibold tracking-tight md:text-[1.35rem]">
+              <h2 id="start-order-title" className="mt-1 text-base font-semibold tracking-tight">
                 Paid? Send the buyer their order form.
               </h2>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                One-time link → buyer confirms address → you approve into HubSpot for Pirate Ship labels.
+              <p className="mt-1.5 max-w-xl text-sm leading-5 text-muted-foreground">
+                One-time link → buyer confirms address → approve into HubSpot for Pirate Ship labels.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <Button asChild data-testid="button-start-paid-order">
@@ -375,7 +375,7 @@ export default function Dashboard() {
             </div>
             <span className="hidden text-xs text-muted-foreground sm:block">Repeat for every paid order</span>
           </div>
-          <div className="grid gap-5 rounded-xl border border-card-border bg-card/95 p-5 shadow-sm md:grid-cols-3 md:gap-0">
+          <div className="grid gap-4 rounded-md border border-card-border bg-card p-3 md:grid-cols-3 md:gap-0 md:p-4">
             <WorkflowStep
               number="01"
               title="Collect buyer details"
@@ -404,13 +404,13 @@ export default function Dashboard() {
         </section>
 
         <section
-          className="overflow-hidden rounded-xl border border-card-border bg-card/95 shadow-sm"
+          className="overflow-hidden rounded-md border border-card-border bg-card"
           aria-labelledby="control-loop-title"
           data-testid="panel-control-loop"
         >
-          <div className="border-b border-border px-5 py-4">
+          <div className="border-b border-border px-3 py-2.5">
             <p className="rule-label">Control loop</p>
-            <h2 id="control-loop-title" className="mt-1 text-base font-semibold tracking-tight">
+            <h2 id="control-loop-title" className="mt-0.5 text-sm font-semibold tracking-tight">
               Keep the whole business visible
             </h2>
           </div>
@@ -418,7 +418,7 @@ export default function Dashboard() {
             <Link
               href="/prints"
               data-testid="link-control-loop-prints"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
             >
               <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <span>
@@ -433,7 +433,7 @@ export default function Dashboard() {
             <Link
               href="/supplies"
               data-testid="link-control-loop-supplies"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
             >
               <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <span>
@@ -448,7 +448,7 @@ export default function Dashboard() {
             <Link
               href="/performance"
               data-testid="link-control-loop-performance"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
             >
               <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <span>
@@ -463,7 +463,7 @@ export default function Dashboard() {
             <Link
               href="/operations"
               data-testid="link-control-loop-operations"
-              className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+              className="group flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/50"
             >
               <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <span>
@@ -478,11 +478,11 @@ export default function Dashboard() {
           </div>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+        <section className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
           <SystemStatus health={health.data} />
 
           <section
-            className="rounded-xl border border-card-border bg-card/95 p-5 shadow-sm"
+            className="rounded-md border border-card-border bg-card p-3"
             aria-labelledby="tools-title"
             data-testid="panel-business-tools"
           >
