@@ -58,22 +58,22 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
           testId="status-command-center"
         />
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-md bg-muted/55 p-3">
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-md bg-muted/55 p-2.5">
           <p className="rule-label">HubSpot updates</p>
-          <p className="mt-1 text-sm font-medium" data-testid="text-hubspot-write-status">
+          <p className="mt-0.5 text-sm font-medium" data-testid="text-hubspot-write-status">
             {live ? "Live updates enabled" : "Safe test mode"}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
             {live ? "Approved orders can create or update CRM records." : "No CRM records will be changed."}
           </p>
         </div>
-        <div className="rounded-md bg-muted/55 p-3">
+        <div className="rounded-md bg-muted/55 p-2.5">
           <p className="rule-label">Profit automation</p>
-          <p className="mt-1 text-sm font-medium" data-testid="text-webhook-status">
+          <p className="mt-0.5 text-sm font-medium" data-testid="text-webhook-status">
             {signing ? "Webhook secured" : "Webhook needs attention"}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
             {signing ? "Cost updates are protected by HubSpot verification." : "Open System setup to verify the connection."}
           </p>
         </div>
