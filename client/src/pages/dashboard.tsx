@@ -193,7 +193,7 @@ function TodaysWork() {
             What needs you right now
           </h2>
           <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            Alerts live in the top-bar bell — skip anything that doesn’t apply.
+            Alerts live in the sidebar bell — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
