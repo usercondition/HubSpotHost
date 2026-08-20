@@ -76,7 +76,7 @@ const ENDPOINTS = [
 ];
 
 const DAILY_ROUTES = [
-  { path: "/#/", note: "Home — today’s work only (phases live in the top bar)" },
+  { path: "/#/", note: "Home — today’s work; left rail is Sell → Make → Stock → System" },
   { path: "/#/queue", note: "Production queue — next print, ops panel, ship checklist" },
   { path: "/#/orders", note: "Paid order intake links and review queue" },
   { path: "/#/prints", note: "Attach Chitubox plates; deep-link with ?dealId=" },

@@ -241,7 +241,7 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Home" subtitle="Pending intake, active orders, and the next paid form." />
+      <PageHeader title="Home" subtitle="Sell starts here — then Make (Queue) carries the day." />
 
       <div className="page-stack">
         <TodaysWork />
