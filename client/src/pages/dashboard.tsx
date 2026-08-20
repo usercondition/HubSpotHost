@@ -193,7 +193,7 @@ function TodaysWork() {
             What needs you right now
           </h2>
           <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            Alerts live in the top-bar bell — skip anything that doesn’t apply.
+            Alerts live in the top tools bar — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -317,7 +317,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Home"
-        subtitle="Workbench top bar: pick Sell / Make / Stock / System, then jump with the page chips underneath."
+        subtitle="Bottom dock switches Sell / Make / Stock / System. Page chips above jump within the phase."
       />
 
       <div className="page-stack">
