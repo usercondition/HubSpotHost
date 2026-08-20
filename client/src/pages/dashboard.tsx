@@ -193,7 +193,7 @@ function TodaysWork() {
             What needs you right now
           </h2>
           <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-            Alerts live in the stage strip bell — skip anything that doesn’t apply.
+            Alerts live in the top-bar bell — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -317,7 +317,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Home"
-        subtitle="Workflow spine: Sell → Make → Stock. Icon rail jumps stages; the strip above lists siblings."
+        subtitle="Workbench top bar: pick Sell / Make / Stock / System, then jump with the page chips underneath."
       />
 
       <div className="page-stack">

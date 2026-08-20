@@ -6,15 +6,15 @@ type Tone = "neutral" | "good" | "warn" | "bad";
 
 const TONE_TEXT: Record<Tone, string> = {
   neutral: "text-muted-foreground",
-  good: "text-chart-4",
-  warn: "text-chart-5",
+  good: "text-primary",
+  warn: "text-chart-4",
   bad: "text-destructive",
 };
 
 const TONE_PILL: Record<Tone, string> = {
   neutral: "border-border bg-muted/55 text-muted-foreground",
-  good: "border-chart-4/40 bg-chart-4/10 text-chart-4",
-  warn: "border-chart-5/40 bg-chart-5/10 text-chart-5",
+  good: "border-primary/35 bg-primary/10 text-primary",
+  warn: "border-chart-4/40 bg-chart-4/10 text-chart-4",
   bad: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
