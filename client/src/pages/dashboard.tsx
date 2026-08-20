@@ -40,7 +40,7 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
 
   return (
     <section
-      className="rounded-lg border border-card-border bg-card p-5"
+      className="rounded-xl border border-card-border bg-card/95 p-5 shadow-sm"
       aria-labelledby="system-status-title"
       data-testid="panel-system-status"
     >
@@ -182,18 +182,18 @@ function TodaysWork() {
 
   return (
     <section
-      className="rounded-lg border border-card-border bg-card"
+      className="surface-rise rounded-xl border border-card-border bg-card/95 shadow-sm"
       aria-labelledby="todays-work-title"
       data-testid="panel-todays-work"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/80 px-5 py-4">
         <div>
-          <p className="rule-label">Today’s work</p>
-          <h2 id="todays-work-title" className="mt-1 text-base font-semibold tracking-tight">
+          <p className="rule-label">On deck</p>
+          <h2 id="todays-work-title" className="mt-1 text-lg font-semibold tracking-tight">
             What needs you right now
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Order alerts live in the bell next to Print Operations — skip any step that doesn’t apply.
+            Alerts live in the sidebar bell — skip anything that doesn’t apply.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -215,26 +215,26 @@ function TodaysWork() {
       <div className="grid gap-3 p-5 sm:grid-cols-3">
         <Link
           href="/orders"
-          className="rounded-md border border-border bg-muted/35 p-3 transition-colors hover:bg-muted/60"
+          className="rounded-lg border border-border/80 bg-muted/40 p-3.5 transition-all hover:border-primary/35 hover:bg-primary/5"
           data-testid="card-todays-pending-review"
         >
           <p className="rule-label">Pending review</p>
-          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.intake.pendingReview}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Buyer forms waiting for your approval</p>
+          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.intake.pendingReview}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Buyer forms waiting for approval</p>
         </Link>
         <Link
           href="/orders"
-          className="rounded-md border border-border bg-muted/35 p-3 transition-colors hover:bg-muted/60"
+          className="rounded-lg border border-border/80 bg-muted/40 p-3.5 transition-all hover:border-primary/35 hover:bg-primary/5"
           data-testid="card-todays-awaiting-client"
         >
           <p className="rule-label">Awaiting client</p>
-          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.intake.awaitingClient}</p>
+          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.intake.awaitingClient}</p>
           <p className="mt-1 text-xs text-muted-foreground">Links still open for buyer details</p>
         </Link>
-        <div className="rounded-md border border-border bg-muted/35 p-3" data-testid="card-todays-attention">
+        <div className="rounded-lg border border-border/80 bg-muted/40 p-3.5" data-testid="card-todays-attention">
           <p className="rule-label">Open alerts</p>
-          <p className="mt-1 text-2xl font-semibold numeric">{snapshot.summary.attentionCount}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Check the bell icon to review or skip reminders</p>
+          <p className="mt-1.5 text-2xl font-semibold tracking-tight numeric">{snapshot.summary.attentionCount}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Bell icon · review or skip reminders</p>
         </div>
       </div>
 
@@ -316,8 +316,8 @@ export default function Dashboard() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Command center"
-        subtitle="Run paid orders from buyer details to shipping without losing the thread."
+        title="Shop floor"
+        subtitle="Intake → print → ship. One thread from paid buyer to packing slip."
       />
 
       <div className="page-stack">
@@ -325,18 +325,18 @@ export default function Dashboard() {
         {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
-          className="overflow-hidden rounded-lg border border-card-border bg-card"
+          className="overflow-hidden rounded-xl border border-card-border bg-card/95 shadow-sm"
           aria-labelledby="start-order-title"
           data-testid="panel-start-order"
         >
           <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)] lg:items-end lg:p-6">
             <div>
-              <p className="rule-label text-primary">Your next move</p>
-              <h2 id="start-order-title" className="mt-2 text-xl font-semibold tracking-tight">
+              <p className="rule-label text-primary">Next move</p>
+              <h2 id="start-order-title" className="mt-2 text-xl font-semibold tracking-tight md:text-[1.35rem]">
                 Paid? Send the buyer their order form.
               </h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                Create a one-time link, let the buyer confirm delivery details, then approve the clean order into HubSpot.
+                One-time link → buyer confirms address → you approve into HubSpot for Pirate Ship labels.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <Button asChild data-testid="button-start-paid-order">
@@ -375,7 +375,7 @@ export default function Dashboard() {
             </div>
             <span className="hidden text-xs text-muted-foreground sm:block">Repeat for every paid order</span>
           </div>
-          <div className="grid gap-5 rounded-lg border border-card-border bg-card p-5 md:grid-cols-3 md:gap-0">
+          <div className="grid gap-5 rounded-xl border border-card-border bg-card/95 p-5 shadow-sm md:grid-cols-3 md:gap-0">
             <WorkflowStep
               number="01"
               title="Collect buyer details"
@@ -404,7 +404,7 @@ export default function Dashboard() {
         </section>
 
         <section
-          className="overflow-hidden rounded-lg border border-card-border bg-card"
+          className="overflow-hidden rounded-xl border border-card-border bg-card/95 shadow-sm"
           aria-labelledby="control-loop-title"
           data-testid="panel-control-loop"
         >
@@ -482,7 +482,7 @@ export default function Dashboard() {
           <SystemStatus health={health.data} />
 
           <section
-            className="rounded-lg border border-card-border bg-card p-5"
+            className="rounded-xl border border-card-border bg-card/95 p-5 shadow-sm"
             aria-labelledby="tools-title"
             data-testid="panel-business-tools"
           >

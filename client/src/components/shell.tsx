@@ -8,12 +8,12 @@ import {
   Boxes,
   ClipboardCheck,
   ExternalLink,
-  Home,
   Link2,
   FileUp,
   Lock,
   Moon,
   ListOrdered,
+  LayoutDashboard,
   Printer,
   ShoppingBag,
   Settings2,
@@ -113,23 +113,22 @@ export function Mark({ className }: { className?: string }) {
 /* ---------------------------------------------------------------- shell --- */
 
 const NAV = [
-  { href: "/", label: "Home", title: "Command Center", icon: Home, testId: "link-nav-home", group: "Work" },
-  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Work" },
-  { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Work" },
-  { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Work" },
+  { href: "/", label: "Floor", title: "Shop floor", icon: LayoutDashboard, testId: "link-nav-home", group: "Floor" },
+  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Floor" },
+  { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Floor" },
+  { href: "/prints", label: "Prints", title: "Prints", icon: FileUp, testId: "link-nav-prints", group: "Floor" },
+  { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Floor" },
+  { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Bench" },
   {
     href: "/paid-orders",
     label: "Manual",
     title: "Manual Order Entry",
     icon: ClipboardCheck,
     testId: "link-nav-paid-orders",
-    group: "Work",
+    group: "Bench",
   },
-  { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Work" },
-  { href: "/prints", label: "Prints", title: "Prints", icon: FileUp, testId: "link-nav-prints", group: "Work" },
-  { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Work" },
-  { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Work" },
-  // Kits nav parked — Orders Parts + Prints plate bits are the live checklist/QC path.
+  { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Bench" },
+  { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Bench" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "System" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "System" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
@@ -141,22 +140,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { isUnlocked, lock } = useOwnerSession();
 
   useEffect(() => {
-    document.title = "Print Operations";
+    document.title = "Print Ops";
   }, [location]);
 
   return (
-    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[9rem_1fr] md:grid-rows-1">
-      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-3 py-3 md:h-full md:flex-col md:items-stretch md:gap-3 md:border-b-0 md:border-r md:px-2 md:py-4">
-        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-2">
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[11.5rem_1fr] md:grid-rows-1">
+      <aside className="flex min-w-0 shrink-0 items-center gap-3 border-b border-sidebar-border bg-sidebar px-3 py-3 text-sidebar-foreground md:h-full md:flex-col md:items-stretch md:gap-4 md:border-b-0 md:border-r md:px-2.5 md:py-5">
+        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-3">
           <Link
             href="/"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex-col md:px-1 md:pt-1"
+            className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring md:flex-col md:gap-2 md:px-1 md:pt-0.5"
             data-testid="link-home"
-            title="Print Operations"
+            title="Print Ops"
           >
-            <Mark className="h-7 w-7 shrink-0 text-primary" />
-            <span className="truncate text-sm font-semibold tracking-tight md:text-center md:text-xs">
-              Print Ops
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary/15 text-sidebar-primary ring-1 ring-sidebar-primary/25 transition-transform duration-200 group-hover:scale-[1.03]">
+              <Mark className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 truncate md:text-center">
+              <span className="block text-sm font-semibold tracking-tight text-sidebar-foreground">Print Ops</span>
+              <span className="hidden text-[0.65rem] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/45 md:block">
+                Shop floor
+              </span>
             </span>
           </Link>
           <div className="flex items-center gap-1.5 md:justify-center">
@@ -167,11 +171,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <nav
           aria-label="Primary navigation"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:block md:overflow-visible"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:block md:overflow-visible md:overflow-y-auto"
         >
           {groups.map((group) => (
-            <div key={group} className="flex shrink-0 items-center gap-1 md:mb-3 md:block">
-              <p className="hidden px-2 pb-1.5 pt-1 rule-label md:block">{group}</p>
+            <div key={group} className="flex shrink-0 items-center gap-1 md:mb-4 md:block">
+              <p className="hidden px-2.5 pb-1.5 pt-0.5 text-[0.65rem] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/40 md:block">
+                {group}
+              </p>
               {NAV.filter((item) => item.group === group).map((item) => {
                 const active = location === item.href;
                 return (
@@ -181,14 +187,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={item.title}
                     data-testid={item.testId}
                     className={cn(
-                      "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm transition-colors md:mb-0.5 md:flex-col md:gap-1 md:px-2 md:py-2.5 md:text-center",
+                      "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-all duration-150 md:mb-0.5 md:w-full md:gap-2.5 md:px-2.5 md:py-2",
                       active
-                        ? "bg-primary/10 font-semibold text-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary md:before:inset-y-1.5"
-                        : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                        ? "bg-sidebar-primary/15 font-semibold text-sidebar-foreground shadow-[inset_3px_0_0_0_hsl(var(--sidebar-primary))]"
+                        : "nav-ink",
                     )}
                   >
-                    <item.icon className={cn("h-4 w-4 shrink-0", active && "text-primary")} />
-                    <span className="text-xs font-medium tracking-tight">{item.label}</span>
+                    <item.icon className={cn("h-4 w-4 shrink-0", active ? "text-sidebar-primary" : "opacity-80")} />
+                    <span className="text-[0.8125rem] font-medium tracking-tight">{item.label}</span>
                   </Link>
                 );
               })}
@@ -196,18 +202,20 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="mt-auto hidden space-y-1 border-t border-sidebar-border pt-3 md:block">
-          <p className="rule-label px-2 pb-1">Tools</p>
+        <div className="mt-auto hidden space-y-0.5 border-t border-sidebar-border pt-3 md:block">
+          <p className="px-2.5 pb-1.5 text-[0.65rem] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/40">
+            Tools
+          </p>
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            className="nav-ink flex items-center gap-2.5 rounded-lg px-2.5 py-2"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
-            <span className="text-xs font-medium">HubSpot</span>
+            <ExternalLink className="h-3.5 w-3.5 opacity-80" />
+            <span className="text-[0.8125rem] font-medium">HubSpot</span>
           </a>
           <a
             href="https://ship.pirateship.com/"
@@ -215,10 +223,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             rel="noopener noreferrer"
             title="Pirate Ship"
             data-testid="link-sidebar-pirateship"
-            className="flex flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            className="nav-ink flex items-center gap-2.5 rounded-lg px-2.5 py-2"
           >
-            <ShipWheel className="h-3.5 w-3.5" />
-            <span className="text-xs font-medium">Ship</span>
+            <ShipWheel className="h-3.5 w-3.5 opacity-80" />
+            <span className="text-[0.8125rem] font-medium">Ship</span>
           </a>
           <ThemeToolButton />
           {isUnlocked ? (
@@ -227,16 +235,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={lock}
               title="Lock owner session"
               data-testid="button-lock-owner-session"
-              className="flex w-full flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="nav-ink flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2"
             >
-              <Lock className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Lock</span>
+              <Lock className="h-3.5 w-3.5 opacity-80" />
+              <span className="text-[0.8125rem] font-medium">Lock</span>
             </button>
           ) : null}
         </div>
       </aside>
 
-      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
+      <main className="scroll-pane min-h-0 min-w-0 bg-transparent">{children}</main>
     </div>
   );
 }
@@ -250,10 +258,10 @@ function ThemeToolButton() {
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid="button-theme-toggle"
-      className="flex w-full flex-col items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+      className="nav-ink flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2"
     >
-      {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-      <span className="text-xs font-medium">Theme</span>
+      {theme === "dark" ? <Sun className="h-3.5 w-3.5 opacity-80" /> : <Moon className="h-3.5 w-3.5 opacity-80" />}
+      <span className="text-[0.8125rem] font-medium">Theme</span>
     </button>
   );
 }
@@ -268,13 +276,16 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-4 py-3 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold tracking-tight text-foreground" data-testid="text-page-title">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border/80 px-4 py-3.5 md:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0 surface-rise">
+          <h1
+            className="truncate text-[1.35rem] font-semibold tracking-tight text-foreground md:text-2xl"
+            data-testid="text-page-title"
+          >
             {title}
           </h1>
-          <p className="mt-0.5 max-w-2xl text-sm leading-5 text-muted-foreground">{subtitle}</p>
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">{subtitle}</p>
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

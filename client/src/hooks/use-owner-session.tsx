@@ -136,7 +136,7 @@ export function OwnerUnlockPanel({
 
   return (
     <section
-      className="rounded-lg border border-card-border bg-card p-5 md:grid md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] md:items-end md:gap-8 md:p-6"
+      className="rounded-xl border border-card-border bg-card/95 p-5 shadow-sm md:grid md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] md:items-end md:gap-8 md:p-6"
       aria-labelledby={`${testIdPrefix}-unlock-title`}
       data-testid={`panel-${testIdPrefix}-unlock`}
     >

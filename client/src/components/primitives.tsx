@@ -12,9 +12,9 @@ const TONE_TEXT: Record<Tone, string> = {
 };
 
 const TONE_PILL: Record<Tone, string> = {
-  neutral: "border-border bg-muted/50 text-muted-foreground",
-  good: "border-chart-4/40 bg-chart-4/10 text-chart-4",
-  warn: "border-primary/45 bg-primary/10 text-primary",
+  neutral: "border-border/80 bg-muted/60 text-muted-foreground",
+  good: "border-chart-4/35 bg-chart-4/10 text-chart-4",
+  warn: "border-primary/40 bg-primary/12 text-foreground",
   bad: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
@@ -33,7 +33,7 @@ export function StatusPill({
     <span
       data-testid={testId}
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-wide",
+        "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-medium tracking-wide",
         TONE_PILL[tone],
       )}
     >
@@ -61,13 +61,17 @@ export function StatCard({
   return (
     <div
       data-testid={testId}
-      className="rounded-lg border border-card-border bg-card p-3.5 transition-colors hover:border-border"
+      className="rounded-xl border border-card-border bg-card/95 p-3.5 shadow-sm transition-colors hover:border-border"
     >
       <div className="flex items-center justify-between gap-2">
         <p className="rule-label">{label}</p>
-        <Icon className={cn("h-3.5 w-3.5", TONE_TEXT[tone])} />
+        <span className={cn("inline-flex h-7 w-7 items-center justify-center rounded-md bg-muted/70", TONE_TEXT[tone])}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
       </div>
-      <p className={cn("mt-1.5 text-base font-semibold tracking-tight", TONE_TEXT[tone])}>{value}</p>
+      <p className={cn("mt-2 text-xl font-semibold tracking-tight numeric", tone === "neutral" ? "text-foreground" : TONE_TEXT[tone])}>
+        {value}
+      </p>
       <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{hint}</p>
     </div>
   );
@@ -85,8 +89,8 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-card-border bg-card">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <section className="overflow-hidden rounded-xl border border-card-border bg-card/95 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/80 px-4 py-3.5">
         <div>
           <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
           {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
@@ -102,7 +106,7 @@ export function CodeLine({ children, testId }: { children: ReactNode; testId?: s
   return (
     <code
       data-testid={testId}
-      className="numeric rounded border border-border bg-muted/50 px-1.5 py-0.5 text-[0.6875rem]"
+      className="numeric rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-[0.6875rem]"
     >
       {children}
     </code>

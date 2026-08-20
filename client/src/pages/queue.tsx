@@ -48,8 +48,10 @@ function QueueCard({
       onClick={onSelect}
       data-testid={`button-queue-deal-${item.dealId}`}
       className={cn(
-        "w-full rounded-lg border p-3 text-left transition-colors",
-        selected ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40",
+        "w-full rounded-xl border p-3.5 text-left shadow-sm transition-all duration-150",
+        selected
+          ? "border-primary/50 bg-primary/8 shadow-[inset_3px_0_0_0_hsl(var(--primary))]"
+          : "border-card-border bg-card/95 hover:border-border hover:bg-muted/35",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -176,7 +178,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="What to print next, what’s on machines, and what’s ready to ship."
+        subtitle="Next to print · on machines · ready to ship. Tap an order for Deal Ops."
         actions={
           isUnlocked ? (
             <Button

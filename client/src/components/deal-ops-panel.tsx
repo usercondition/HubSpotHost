@@ -262,7 +262,7 @@ export function DealOpsPanel({
   const slip = data.packingSlip;
 
   return (
-    <section className="space-y-4 rounded-lg border border-border bg-card p-4 md:p-5" data-testid="panel-deal-ops">
+    <section className="space-y-4 rounded-xl border border-card-border bg-card/95 p-4 shadow-sm md:p-5" data-testid="panel-deal-ops">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="rule-label">Deal ops</p>
