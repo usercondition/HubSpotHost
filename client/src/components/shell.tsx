@@ -19,6 +19,10 @@ import {
   Settings2,
   ShipWheel,
   Sun,
+  Package,
+  Factory,
+  Warehouse,
+  Wrench,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { useOwnerSession } from "@/hooks/use-owner-session";
@@ -66,7 +70,7 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid={testId}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-sidebar-foreground/80 transition-colors hover:bg-white/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
@@ -139,14 +143,12 @@ const NAV: Array<{
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "System" },
 ];
 
-const GROUPS: NavGroup[] = ["Sell", "Make", "Stock", "System"];
-
-const GROUP_HOME: Record<NavGroup, string> = {
-  Sell: "/",
-  Make: "/queue",
-  Stock: "/resin",
-  System: "/setup",
-};
+const PHASES: Array<{ id: NavGroup; home: string; icon: typeof Package; hint: string }> = [
+  { id: "Sell", home: "/", icon: Package, hint: "Intake & entry" },
+  { id: "Make", home: "/queue", icon: Factory, hint: "Queue & plates" },
+  { id: "Stock", home: "/resin", icon: Warehouse, hint: "Resin & supplies" },
+  { id: "System", home: "/setup", icon: Wrench, hint: "Profit & setup" },
+];
 
 function groupForPath(path: string): NavGroup {
   return NAV.find((item) => item.href === path)?.group ?? "Sell";
@@ -164,117 +166,115 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      {/* Charcoal workbench command bar */}
-      <header className="shrink-0 bg-sidebar text-sidebar-foreground">
-        <div className="flex h-12 items-center gap-2 px-3 md:gap-3 md:px-4">
-          <Link
-            href="/"
-            className="flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-            data-testid="link-home"
-            title="Print Ops"
+      {/* Slim top tools — brand + utilities only */}
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card/95 px-3 backdrop-blur md:px-4">
+        <Link
+          href="/"
+          className="flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="link-home"
+          title="Print Ops"
+        >
+          <Mark className="h-5 w-5 text-primary" />
+          <span className="text-sm font-semibold tracking-tight">Print Ops</span>
+        </Link>
+
+        <div className="ml-auto flex items-center gap-1">
+          <AttentionBell />
+          <a
+            href="https://app.hubspot.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="HubSpot CRM"
+            data-testid="link-sidebar-hubspot"
+            className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
           >
-            <Mark className="h-6 w-6 text-sidebar-primary" />
-            <span className="hidden text-sm font-semibold tracking-tight sm:inline">Print Ops</span>
-          </Link>
-
-          <div className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden />
-
-          {/* Phase switcher — primary workflow organization */}
-          <nav
-            aria-label="Workflow phases"
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-lg bg-black/25 p-0.5"
+            <ExternalLink className="h-3.5 w-3.5" />
+            HubSpot
+          </a>
+          <a
+            href="https://ship.pirateship.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Pirate Ship"
+            data-testid="link-sidebar-pirateship"
+            className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
           >
-            {GROUPS.map((group) => {
-              const active = activeGroup === group;
-              return (
-                <Link
-                  key={group}
-                  href={GROUP_HOME[group]}
-                  data-testid={`link-phase-${group.toLowerCase()}`}
-                  className={cn(
-                    "shrink-0 rounded-md px-2.5 py-1.5 text-xs font-semibold tracking-wide transition-colors sm:px-3",
-                    active
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                      : "text-sidebar-foreground/65 hover:bg-white/5 hover:text-sidebar-foreground",
-                  )}
-                >
-                  {group}
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="flex shrink-0 items-center gap-1">
-            <AttentionBell />
-            <a
-              href="https://app.hubspot.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="HubSpot CRM"
-              data-testid="link-sidebar-hubspot"
-              className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-white/10 hover:text-sidebar-foreground sm:inline-flex"
+            <ShipWheel className="h-3.5 w-3.5" />
+            Ship
+          </a>
+          <ThemeToggle testId="button-theme-toggle" />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              HubSpot
-            </a>
-            <a
-              href="https://ship.pirateship.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Pirate Ship"
-              data-testid="link-sidebar-pirateship"
-              className="hidden h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-white/10 hover:text-sidebar-foreground md:inline-flex"
-            >
-              <ShipWheel className="h-3.5 w-3.5" />
-              Ship
-            </a>
-            <ThemeToggle testId="button-theme-toggle" />
-            {isUnlocked ? (
-              <button
-                type="button"
-                onClick={lock}
-                title="Lock owner session"
-                data-testid="button-lock-owner-session"
-                className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-white/10 hover:text-sidebar-foreground"
-              >
-                <Lock className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Lock</span>
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Page chips for the active phase */}
-        <div className="flex h-10 items-center gap-1 border-t border-white/10 bg-black/20 px-3 md:px-4">
-          <span className="mr-1 hidden text-[0.625rem] font-bold uppercase tracking-[0.12em] text-sidebar-foreground/40 sm:inline">
-            {activeGroup}
-          </span>
-          <nav aria-label={`${activeGroup} pages`} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-            {siblings.map((item) => {
-              const active = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.title}
-                  data-testid={item.testId}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-white/15 text-sidebar-foreground"
-                      : "text-sidebar-foreground/60 hover:bg-white/8 hover:text-sidebar-foreground",
-                  )}
-                >
-                  <item.icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+              <Lock className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Lock</span>
+            </button>
+          ) : null}
         </div>
       </header>
 
-      <main className="scroll-pane min-h-0 min-w-0 flex-1">{children}</main>
+      {/* Phase page chips — sit above content, change with dock */}
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/40 px-3 md:px-4">
+        <span className="rule-label mr-1 hidden text-primary sm:inline">{activeGroup}</span>
+        <nav aria-label={`${activeGroup} pages`} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+          {siblings.map((item) => {
+            const active = location === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.title}
+                data-testid={item.testId}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  active
+                    ? "bg-card text-foreground shadow-sm ring-1 ring-border"
+                    : "text-muted-foreground hover:bg-card/80 hover:text-foreground",
+                )}
+              >
+                <item.icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+
+      <main className="scroll-pane min-h-0 min-w-0 flex-1 pb-[4.75rem]">{children}</main>
+
+      {/* Bottom workflow dock */}
+      <nav
+        aria-label="Workflow phases"
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[0_-8px_30px_hsl(222_40%_12%/0.18)]"
+      >
+        <div className="mx-auto grid max-w-3xl grid-cols-4 gap-1 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          {PHASES.map((phase) => {
+            const active = activeGroup === phase.id;
+            return (
+              <Link
+                key={phase.id}
+                href={phase.home}
+                title={phase.hint}
+                data-testid={`link-phase-${phase.id.toLowerCase()}`}
+                className={cn(
+                  "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition-colors",
+                  active
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                )}
+              >
+                <phase.icon className="h-4 w-4" />
+                <span className="text-[0.6875rem] font-semibold tracking-tight">{phase.id}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }
