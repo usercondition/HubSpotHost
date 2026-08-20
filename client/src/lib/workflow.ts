@@ -37,6 +37,16 @@ export function hubspotDealHref(dealId: string, portalId?: string | null): strin
   return hubspotAppHref();
 }
 
+/** Contact record deep link when portal id is known; otherwise HubSpot home. */
+export function hubspotContactHref(contactId: string, portalId?: string | null): string {
+  const id = String(contactId ?? "").trim();
+  const portal = String(portalId ?? "").trim();
+  if (id && portal) {
+    return `https://app.hubspot.com/contacts/${encodeURIComponent(portal)}/record/0-1/${encodeURIComponent(id)}`;
+  }
+  return hubspotAppHref();
+}
+
 /** Print Orders object list when portal id is known; otherwise HubSpot home. */
 export function hubspotDealsListHref(portalId?: string | null): string {
   const portal = String(portalId ?? "").trim();

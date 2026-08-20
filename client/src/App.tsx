@@ -18,6 +18,7 @@ import Prints from "@/pages/prints";
 import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
 import ProductionQueuePage from "@/pages/queue";
+import ClientsPage from "@/pages/clients";
 import ClientOrder from "@/pages/client-order";
 import NotFound from "@/pages/not-found";
 
@@ -30,6 +31,7 @@ function ShellRoutes() {
           <Route path="/" component={Dashboard} />
           <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/deals" component={DealsPage} />
+          <Route path="/clients" component={ClientsPage} />
           <Route path="/orders" component={OrderLinks} />
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />

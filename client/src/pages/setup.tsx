@@ -72,6 +72,8 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/supplies", note: "Supply ledger (owner code)" },
   { method: "GET", path: "/api/performance", note: "Daily performance snapshot (owner code)" },
   { method: "POST", path: "/api/buyers/lookup", note: "Returning-buyer prefill from HubSpot + intake" },
+  { method: "GET", path: "/api/contacts", note: "Browse HubSpot contacts (query + recent)" },
+  { method: "GET", path: "/api/contacts/:id", note: "Single HubSpot contact card" },
   { method: "GET", path: "/api/resin-reorder", note: "Resin burn-rate buy cues (owner code)" },
 ];
 

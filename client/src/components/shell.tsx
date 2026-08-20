@@ -19,6 +19,7 @@ import {
   Settings2,
   ShipWheel,
   Sun,
+  Users,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { useOwnerSession } from "@/hooks/use-owner-session";
@@ -119,6 +120,7 @@ const NAV: Array<{
   group: NavGroup;
 }> = [
   { href: "/", label: "Home", title: "Overview", icon: LayoutDashboard, testId: "link-nav-home", group: "Sell" },
+  { href: "/clients", label: "Clients", title: "HubSpot clients", icon: Users, testId: "link-nav-clients", group: "Sell" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Sell" },
   {
     href: "/paid-orders",

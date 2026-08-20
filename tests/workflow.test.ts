@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   attentionNextStep,
+  hubspotContactHref,
   hubspotDealHref,
   hubspotDealsListHref,
   printsDealHref,
@@ -17,6 +18,14 @@ test("HubSpot deal deep links require a portal id", () => {
     hubspotDealsListHref("12345"),
     "https://app.hubspot.com/contacts/12345/objects/0-3/views/all/list",
   );
+});
+
+test("HubSpot contact deep links use object type 0-1", () => {
+  assert.equal(
+    hubspotContactHref("51", "12345"),
+    "https://app.hubspot.com/contacts/12345/record/0-1/51",
+  );
+  assert.equal(hubspotContactHref("51", null), "https://app.hubspot.com/");
 });
 
 test("attention next steps route plates in-app and costs to the queue", () => {

@@ -177,6 +177,7 @@ import {
   type PerformanceResponse,
 } from "../shared/schema";
 import { lookupReturningBuyer } from "./lib/buyers";
+import { browseHubSpotContacts, getHubSpotContact } from "./lib/contacts";
 import {
   advanceDealStage,
   assignPlateToPrinter,
@@ -1170,6 +1171,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(error instanceof HubSpotError ? error.status : 500).json({
         ok: false,
         error: error instanceof Error ? error.message : "Buyer lookup failed",
+      });
+    }
+  });
+
+  /** Browse / search HubSpot contacts for the Clients page. */
+  app.get("/api/contacts", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 40;
+    try {
+      const result = await browseHubSpotContacts(q, limitRaw);
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load HubSpot contacts",
+      });
+    }
+  });
+
+  app.get("/api/contacts/:id", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const result = await getHubSpotContact(String(req.params.id ?? ""));
+      if (!result.contact) return res.status(404).json({ ok: false, error: "Contact not found" });
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load that HubSpot contact",
       });
     }
   });

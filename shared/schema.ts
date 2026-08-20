@@ -1924,6 +1924,22 @@ export interface ReturningBuyerProfile {
   priorOrders: number;
 }
 
+/** HubSpot contact card fields for the Print Ops Clients browser. */
+export interface HubSpotContactCard {
+  contactId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  company: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface ResinReorderSuggestion {
   productId: number;
   name: string;
