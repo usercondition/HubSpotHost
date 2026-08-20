@@ -112,7 +112,6 @@ export function Mark({ className }: { className?: string }) {
 
 /* ---------------------------------------------------------------- shell --- */
 
-/** Primary CRM-style top tabs — HubSpot index density. */
 const NAV = [
   { href: "/", label: "Home", title: "Home", icon: Home, testId: "link-nav-home", group: "Work" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Work" },
@@ -137,122 +136,122 @@ const NAV = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const groups = Array.from(new Set(NAV.map((item) => item.group)));
   const { isUnlocked, lock } = useOwnerSession();
 
   useEffect(() => {
     document.title = "Print Ops";
   }, [location]);
 
-  const workNav = NAV.filter((item) => item.group === "Work");
-  const systemNav = NAV.filter((item) => item.group === "System");
-
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      {/* HubSpot-style top chrome */}
-      <header className="shrink-0 border-b border-border bg-card">
-        <div className="flex h-11 items-center gap-2 px-3 md:gap-3 md:px-4">
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[10.5rem_1fr] md:grid-rows-1">
+      <aside className="flex min-w-0 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-2.5 py-2 md:h-full md:flex-col md:items-stretch md:gap-2 md:border-b-0 md:border-r md:px-2 md:py-3">
+        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-2">
           <Link
             href="/"
-            className="flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-1.5 md:pb-1"
             data-testid="link-home"
             title="Print Ops"
           >
-            <Mark className="h-6 w-6 text-primary" />
-            <span className="hidden text-sm font-semibold tracking-tight sm:inline">Print Ops</span>
+            <Mark className="h-6 w-6 shrink-0 text-primary" />
+            <span className="truncate text-sm font-semibold tracking-tight">Print Ops</span>
           </Link>
-
-          <div className="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden />
-
-          <nav
-            aria-label="Primary navigation"
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
-          >
-            {workNav.map((item) => {
-              const active = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.title}
-                  data-testid={item.testId}
-                  className={cn(
-                    "relative flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors",
-                    active
-                      ? "bg-primary/10 text-foreground after:absolute after:inset-x-2 after:-bottom-[0.55rem] after:h-0.5 after:rounded-full after:bg-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-primary")} />
-                  <span className="hidden whitespace-nowrap lg:inline">{item.label}</span>
-                </Link>
-              );
-            })}
-            <span className="mx-1 hidden h-4 w-px shrink-0 bg-border md:block" aria-hidden />
-            {systemNav.map((item) => {
-              const active = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={item.title}
-                  data-testid={item.testId}
-                  className={cn(
-                    "relative flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors",
-                    active
-                      ? "bg-primary/10 text-foreground after:absolute after:inset-x-2 after:-bottom-[0.55rem] after:h-0.5 after:rounded-full after:bg-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-primary")} />
-                  <span className="hidden whitespace-nowrap xl:inline">{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="flex shrink-0 items-center gap-1 border-l border-border pl-2">
+          <div className="flex items-center gap-1 md:justify-center">
             <AttentionBell />
-            <a
-              href="https://app.hubspot.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="HubSpot CRM"
-              data-testid="link-sidebar-hubspot"
-              className="hidden h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              HubSpot
-            </a>
-            <a
-              href="https://ship.pirateship.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Pirate Ship"
-              data-testid="link-sidebar-pirateship"
-              className="hidden h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
-            >
-              <ShipWheel className="h-3.5 w-3.5" />
-              Ship
-            </a>
-            <ThemeToggle testId="button-theme-toggle" />
-            {isUnlocked ? (
-              <button
-                type="button"
-                onClick={lock}
-                title="Lock owner session"
-                data-testid="button-lock-owner-session"
-                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <Lock className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Lock</span>
-              </button>
-            ) : null}
+            <ThemeToggle className="md:hidden" testId="button-theme-toggle-mobile" />
           </div>
         </div>
-      </header>
 
-      <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-background">{children}</main>
+        <nav
+          aria-label="Primary navigation"
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:block md:overflow-y-auto md:overflow-x-visible"
+        >
+          {groups.map((group) => (
+            <div key={group} className="flex shrink-0 items-center gap-0.5 md:mb-2.5 md:block">
+              <p className="rule-label hidden px-2 pb-1 pt-0.5 md:block">{group}</p>
+              {NAV.filter((item) => item.group === group).map((item) => {
+                const active = location === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={item.title}
+                    data-testid={item.testId}
+                    className={cn(
+                      "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors md:mb-px md:w-full",
+                      active
+                        ? "bg-primary/10 font-semibold text-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
+                        : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                    )}
+                  >
+                    <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-primary")} />
+                    <span className="tracking-tight">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div className="mt-auto hidden space-y-0.5 border-t border-sidebar-border pt-2 md:block">
+          <p className="rule-label px-2 pb-1">Tools</p>
+          <a
+            href="https://app.hubspot.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="HubSpot CRM"
+            data-testid="link-sidebar-hubspot"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+            HubSpot
+          </a>
+          <a
+            href="https://ship.pirateship.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Pirate Ship"
+            data-testid="link-sidebar-pirateship"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          >
+            <ShipWheel className="h-3.5 w-3.5 shrink-0" />
+            Ship
+          </a>
+          <ThemeToolButton />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Lock className="h-3.5 w-3.5 shrink-0" />
+              Lock
+            </button>
+          ) : null}
+        </div>
+      </aside>
+
+      <main className="scroll-pane min-h-0 min-w-0 bg-background">{children}</main>
     </div>
+  );
+}
+
+function ThemeToolButton() {
+  const { theme, toggle } = useContext(ThemeContext);
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      data-testid="button-theme-toggle"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+    >
+      {theme === "dark" ? <Sun className="h-3.5 w-3.5 shrink-0" /> : <Moon className="h-3.5 w-3.5 shrink-0" />}
+      Theme
+    </button>
   );
 }
 
