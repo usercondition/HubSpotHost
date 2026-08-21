@@ -47,7 +47,37 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     name: "PUBLIC_BASE_URL",
     required: "Optional",
     note: "Signed URI base for v3 when running behind a proxy",
+  },,
+  {
+    name: "TELEGRAM_BOT_TOKEN",
+    required: "Optional",
+    note: "BotFather token for morning digests and health nudges",
   },
+  {
+    name: "TELEGRAM_CHAT_ID",
+    required: "Optional",
+    note: "Numeric Telegram chat id that receives digests and nudges",
+  },
+  {
+    name: "OWNER_DIGEST_SCHEDULE_ENABLED",
+    required: "Optional",
+    note: "true to send the morning briefing once per day",
+  },
+  {
+    name: "OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED",
+    required: "Optional",
+    note: "true to ping missing plates/costs/stale/intake on a schedule",
+  },
+  {
+    name: "OWNER_HEALTH_NUDGE_HOURS",
+    required: "Optional",
+    note: "Comma-separated local hours (default 12). Example: 9,12,17",
+  },
+  {
+    name: "OWNER_DIGEST_CRON_SECRET",
+    required: "Optional",
+    note: "Shared secret for POST /api/cron/owner-digest and /api/cron/health-nudge",
+  }
 ];
 
 const WEBHOOK_STEPS = [
@@ -111,6 +141,38 @@ export default function Setup() {
             </p>
           </Panel>
         ) : null}
+
+
+        <Panel
+          title="Telegram nudges"
+          description="Morning briefing vs health-check pings for missing plates, costs, stale jobs, and stuck intake."
+        >
+          <div className="space-y-2 text-sm" data-testid="panel-telegram-nudges">
+            <p>
+              Telegram:{" "}
+              <span className={health.data?.healthNudge?.telegramConfigured ? "text-chart-4" : "text-destructive"}>
+                {health.data?.healthNudge?.telegramConfigured || health.data?.ownerDigest?.telegramConfigured
+                  ? "configured"
+                  : "not configured"}
+              </span>
+            </p>
+            <p className="text-muted-foreground">
+              Morning digest schedule:{" "}
+              {health.data?.ownerDigest?.schedule?.enabled
+                ? `on · ${health.data.ownerDigest.schedule.hour}:00 ${health.data.ownerDigest.schedule.timeZone}`
+                : "off"}
+            </p>
+            <p className="text-muted-foreground">
+              Health nudge schedule:{" "}
+              {health.data?.healthNudge?.schedule?.enabled
+                ? `on · ${health.data.healthNudge.schedule.hours.join(":00, ")}:00 ${health.data.healthNudge.schedule.timeZone}`
+                : "off"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Manual send from Floor → Ask the tracker. Cron: <CodeLine>POST /api/cron/health-nudge</CodeLine>
+            </p>
+          </div>
+        </Panel>
 
         <Panel
           title="Daily production routes"

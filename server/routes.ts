@@ -44,6 +44,11 @@ import {
   startOwnerDigestScheduler,
   type OwnerDigestContext,
 } from "./lib/owner-digest";
+import {
+  getHealthNudgeSchedule,
+  sendHealthNudge,
+  startHealthNudgeScheduler,
+} from "./lib/health-nudge";
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
@@ -465,6 +470,7 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     supplySpend: buildSupplySpendSummary(),
     attachedPrintDealIds: attachedPrintFileDealIds(),
     hubspotPortalId,
+    dismissedAttentionKeys: activeAttentionOverrideKeys(),
   });
   const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({
     id: link.id,
@@ -763,6 +769,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         telegramConfigured: telegramConfigured(),
         cronSecretConfigured: Boolean(ownerDigestCronSecret()),
         schedule: getOwnerDigestSchedule(),
+      },
+      healthNudge: {
+        telegramConfigured: telegramConfigured(),
+        schedule: getHealthNudgeSchedule(),
       },
       properties: {
         inputs: [...INPUT_PROPERTIES],
@@ -1455,8 +1465,113 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Optional in-process daily schedule (OWNER_DIGEST_SCHEDULE_ENABLED=true).
-  startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
+  
+  /**
+   * Owner-only: send a health-check nudge (missing plates / costs / stale / intake).
+   * Skips Telegram when the shop is clear unless { "force": true }.
+   */
+  app.post("/api/health-nudge/send", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    if (!telegramConfigured()) {
+      return res.status(503).json({
+        ok: false,
+        error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on the host.",
+      });
+    }
+
+    const force =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as { force?: unknown }).force === true
+        : false;
+
+    try {
+      const ctx = await loadTrackerAssistantContext();
+      const result = await sendHealthNudge(ctx, process.env, {
+        title: "Print Ops — health check (manual)",
+        force,
+      });
+      if (!result.ok) {
+        return res.status(502).json({ ok: false, error: result.error });
+      }
+      if (result.skipped) {
+        return res.json({
+          ok: true,
+          skipped: true,
+          reason: result.reason,
+          fingerprint: result.fingerprint,
+          preview: result.text?.slice(0, 500),
+        });
+      }
+      return res.json({
+        ok: true,
+        channel: result.channel,
+        messageId: result.messageId,
+        fingerprint: result.fingerprint,
+        preview: result.text.slice(0, 500),
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not send health nudge",
+      });
+    }
+  });
+
+  /**
+   * Cron / scheduler entrypoint for health nudges. Reuses OWNER_DIGEST_CRON_SECRET
+   * (Authorization: Bearer … or x-owner-digest-cron-secret).
+   */
+  app.post("/api/cron/health-nudge", async (req: Request, res: Response) => {
+    if (rejectUnsecuredOwnerDigestCron(req, res)) return;
+    if (!telegramConfigured()) {
+      return res.status(503).json({ ok: false, error: "Telegram is not configured" });
+    }
+
+    const force =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as { force?: unknown }).force === true
+        : false;
+
+    try {
+      const ctx = await loadTrackerAssistantContext();
+      const result = await sendHealthNudge(ctx, process.env, {
+        title: "Print Ops — health check",
+        force,
+      });
+      if (!result.ok) {
+        return res.status(502).json({ ok: false, error: result.error });
+      }
+      if (result.skipped) {
+        return res.json({
+          ok: true,
+          skipped: true,
+          reason: result.reason,
+          fingerprint: result.fingerprint,
+        });
+      }
+      return res.json({
+        ok: true,
+        skipped: false,
+        channel: result.channel,
+        messageId: result.messageId,
+        fingerprint: result.fingerprint,
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not run health nudge cron",
+      });
+    }
+  });
+
+startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     console.log(`${new Date().toISOString()} [owner-digest] ${message}`);
+  });
+
+  startHealthNudgeScheduler(loadTrackerAssistantContext, process.env, (message) => {
+    console.log(`${new Date().toISOString()} [health-nudge] ${message}`);
   });
 
   /**

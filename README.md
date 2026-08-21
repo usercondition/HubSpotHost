@@ -98,9 +98,13 @@ For the initial single-service setup:
    OWNER_DIGEST_TZ=America/New_York
    OWNER_DIGEST_HOUR=7
    OWNER_DIGEST_CRON_SECRET=<long random secret for POST /api/cron/owner-digest>
+   # Optional health-check nudges (same Telegram bot):
+   OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED=true
+   OWNER_HEALTH_NUDGE_TZ=America/New_York
+   OWNER_HEALTH_NUDGE_HOURS=9,12,17
    ```
 
-   After deploy, unlock the Command center and use **Send to Telegram** on the tracker panel to verify. With `OWNER_DIGEST_SCHEDULE_ENABLED=true`, the service also sends once per day at the configured local hour.
+   After deploy, unlock the Command center and use **Send briefing** / **Send health nudge** on the tracker panel to verify. With schedules enabled, morning digests and mid-day health nudges send automatically.
 
 4. Keep `ENABLE_INTERNAL_ADMIN` unset. It deliberately leaves manual recalculation and local audit endpoints unavailable to public visitors.
 5. Add the Railway HTTPS URL plus `/api/webhooks/hubspot` as the HubSpot webhook target, then send a dry-run test before relying on automatic updates.
@@ -272,6 +276,8 @@ Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for 
 | `POST /api/tracker-assistant` | Protected. Read-only ops briefing / Q&A over live Performance + intake. |
 | `POST /api/owner-digest/send` | Protected. Sends the live tracker briefing to Telegram immediately. |
 | `POST /api/cron/owner-digest` | Secured by `OWNER_DIGEST_CRON_SECRET`. Daily digest entrypoint (skips if already sent today unless `force: true`). |
+| `POST /api/health-nudge/send` | Protected. Health-check nudge for missing plates/costs/stale deals/stuck intake; skips Telegram when clear. |
+| `POST /api/cron/health-nudge` | Secured by `OWNER_DIGEST_CRON_SECRET`. Scheduled health-check entrypoint. |
 | `GET /api/order-links/prior-client` | Protected. Looks up the last submitted intake for a Marketplace username and/or email. |
 | `POST /api/client-order/lookup` | Public. Token in the body. Returns only client-safe agreed-order details, plus saved contact/shipping when this is a returning buyer. |
 | `POST /api/client-order/saved-details` | Public. Token plus the email or username the buyer typed. Returns last contact/shipping or null. Never a directory search. |

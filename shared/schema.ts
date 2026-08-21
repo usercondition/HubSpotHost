@@ -115,6 +115,16 @@ export interface HealthResponse {
     retained: number;
     limit: number;
   };
+  ownerDigest?: {
+    telegramConfigured: boolean;
+    cronSecretConfigured: boolean;
+    schedule: { enabled: boolean; timeZone: string; hour: number };
+  };
+  healthNudge?: {
+    telegramConfigured: boolean;
+    schedule: { enabled: boolean; timeZone: string; hours: number[] };
+  };
+
   serverTime: string;
 }
 

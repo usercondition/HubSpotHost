@@ -50,6 +50,34 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
     },
   });
 
+  const sendNudge = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/health-nudge/send", {}, { headers });
+      return (await response.json()) as {
+        ok: boolean;
+        skipped?: boolean;
+        reason?: string;
+        messageId?: number;
+        error?: string;
+      };
+    },
+    onSuccess: (data) => {
+      setDigestNote(
+        data.skipped
+          ? data.reason || "Nothing needs a nudge right now."
+          : data.ok
+            ? `Health nudge sent to Telegram${data.messageId ? ` (#${data.messageId})` : ""}.`
+            : data.error || "Could not send health nudge.",
+      );
+    },
+    onError: (error) => {
+      setDigestNote(
+        (error as Error).message.replace(/^\d+:\s*/, "").slice(0, 200) || "Could not send health nudge.",
+      );
+    },
+  });
+
+
   const runAsk = (value: string) => {
     const cleaned = value.trim();
     if (!cleaned || ask.isPending) return;
@@ -71,7 +99,7 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
             Ops briefing from live queue data
           </h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Read-only helper — prioritizes intake, plates, costs, and stale deals. Telegram digests also include fleet, resin, and next-print suggestions.
+            Read-only helper — prioritizes intake, plates, costs, and stale deals. Morning Telegram digests cover the full briefing; health nudges only ping missing plates, costs, stale jobs, and stuck intake.
           </p>
         </div>
         {answer ? (
@@ -127,6 +155,19 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
             >
               {sendDigest.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
               Send to Telegram
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={sendNudge.isPending}
+              onClick={() => {
+                setDigestNote(null);
+                sendNudge.mutate();
+              }}
+              data-testid="button-health-nudge-send"
+            >
+              {sendNudge.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+              Send health nudge
             </Button>
           </div>
         </form>
