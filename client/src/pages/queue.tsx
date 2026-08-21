@@ -46,13 +46,9 @@ function QueueCard({
     <button
       type="button"
       onClick={onSelect}
+      className={cn("workspace-node w-full p-3 text-left", selected && "ring-0")}
+      data-active={selected ? "true" : "false"}
       data-testid={`button-queue-deal-${item.dealId}`}
-      className={cn(
-        "w-full rounded-xl border p-3 text-left shadow-sm transition-colors",
-        selected
-          ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-          : "border-card-border bg-card hover:bg-muted/40",
-      )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
@@ -178,7 +174,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Print jobs only — next print · in production · ship-ready. Shipping and fees stay out of this board."
+        subtitle="Print jobs only — next print · in production · ship-ready. Select a node for costs, stage, and packing."
         actions={
           isUnlocked ? (
             <Button

@@ -33,7 +33,7 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
 
   return (
     <section
-      className="rounded-md border border-card-border bg-card/90 p-3"
+      className="workspace-node p-3"
       aria-labelledby="system-status-title"
       data-testid="panel-system-status"
     >
@@ -123,7 +123,7 @@ function TodaysWork() {
 
   return (
     <section
-      className="rounded-md border border-card-border bg-card/95 shadow-sm"
+      className="workspace-node shadow-sm"
       aria-labelledby="todays-work-title"
       data-testid="panel-todays-work"
     >
@@ -272,7 +272,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Floor"
-        subtitle="Today’s board — Queue carries the work; HubSpot holds the CRM."
+        subtitle="Your shop workspace — Queue runs the day; HubSpot stays the CRM."
       />
 
       <div className="page-stack">
@@ -280,7 +280,7 @@ export default function Dashboard() {
         {isUnlocked ? <TrackerAssistantPanel headers={{ "x-paid-order-access-code": ownerCode }} /> : null}
 
         <section
-          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-card-border bg-card/90 p-3"
+          className="workspace-node flex flex-wrap items-center justify-between gap-3 p-3"
           aria-labelledby="start-order-title"
           data-testid="panel-start-order"
         >

@@ -30,16 +30,16 @@ import { cn } from "@/lib/utils";
 type Theme = "dark" | "light";
 
 const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: "light",
+  theme: "dark",
   toggle: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light";
+    if (typeof window === "undefined") return "dark";
     const saved = window.localStorage.getItem("print-ops-theme");
     if (saved === "light" || saved === "dark") return saved;
-    return "light";
+    return "dark";
   });
 
   useEffect(() => {
@@ -67,7 +67,7 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
       title={theme === "dark" ? "Switch to light" : "Switch to dark"}
       data-testid={testId}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
@@ -87,18 +87,18 @@ export function Mark({ className }: { className?: string }) {
       role="img"
       className={className}
     >
-      <rect x="4" y="4" width="24" height="24" rx="3" stroke="currentColor" strokeWidth="2" opacity="0.35" />
-      <path d="M8 22h16" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-      <path d="M10 17h12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" opacity="0.75" />
-      <path d="M12 12h8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" opacity="0.5" />
-      <circle cx="16" cy="7.5" r="1.6" fill="currentColor" />
+      <rect x="3.5" y="3.5" width="25" height="25" rx="7" stroke="currentColor" strokeWidth="1.8" opacity="0.35" />
+      <path d="M9 22h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M11 17h10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />
+      <path d="M13 12h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.5" />
+      <circle cx="16" cy="8" r="1.7" fill="currentColor" />
     </svg>
   );
 }
 
 /* ---------------------------------------------------------------- shell --- */
 
-/** Shop-floor groups: Run the day, Take work in, Keep the shop stocked, Office for numbers. */
+/** Shop-floor groups preserved — same routes, Railway workspace chrome. */
 type NavGroup = "Run" | "Take" | "Keep" | "Office";
 
 const NAV: Array<{
@@ -138,7 +138,6 @@ const GROUPS: Array<{ id: NavGroup; hint: string }> = [
   { id: "Office", hint: "Numbers & setup" },
 ];
 
-/** Always-visible production loop — the mental model for Print Ops. */
 const STAGES: Array<{ href: string; label: string; match: (path: string) => boolean }> = [
   {
     href: "/orders",
@@ -151,87 +150,99 @@ const STAGES: Array<{ href: string; label: string; match: (path: string) => bool
 ];
 
 /**
- * Floor Board shell: production-first left rail + stage strip.
- * HubSpot stays CRM of record; this chrome mirrors how the shop actually runs.
+ * Workspace shell — Railway-inspired canvas for Print Ops.
+ * Icon rail + top project bar + stage loop. HubSpot remains CRM of record.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { isUnlocked, lock } = useOwnerSession();
   const activeGroup = NAV.find((item) => item.href === location)?.group ?? "Run";
+  const activeItem = NAV.find((item) => item.href === location);
 
   useEffect(() => {
-    document.title = "Print Ops";
-  }, [location]);
+    document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
+  }, [location, activeItem]);
 
   return (
-    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[13rem_1fr] md:grid-rows-1">
-      <aside className="flex min-w-0 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-2.5 py-2 text-sidebar-foreground md:h-full md:flex-col md:items-stretch md:gap-3 md:border-b-0 md:border-r md:px-2 md:py-3">
-        <div className="flex min-w-0 items-center gap-2 md:flex-col md:items-stretch md:gap-2">
-          <Link
-            href="/"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring md:px-1.5"
-            data-testid="link-home"
-            title="Print Ops"
-          >
-            <Mark className="h-7 w-7 shrink-0 text-sidebar-primary" />
-            <span className="min-w-0 truncate">
-              <span className="block text-[0.9375rem] font-semibold tracking-tight">Print Ops</span>
-              <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45 md:block">
-                Floor Board
-              </span>
+    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[4.25rem_1fr] md:grid-rows-[auto_1fr]">
+      {/* Top project bar — Railway header energy */}
+      <header className="accent-wash col-span-full z-20 flex items-center gap-3 border-b border-border px-3 py-2 md:px-4">
+        <Link
+          href="/"
+          className="flex min-w-0 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="link-home"
+          title="Print Ops"
+        >
+          <Mark className="h-7 w-7 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
+            <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
+              Workspace · shop floor
             </span>
-          </Link>
-          <div className="flex items-center gap-1 md:justify-center">
-            <AttentionBell />
-            <ThemeToggle
-              className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
-              testId="button-theme-toggle-mobile"
-            />
-          </div>
+          </span>
+        </Link>
+
+        <span className="status-live hidden sm:inline-flex" data-testid="status-workspace-live">
+          Online
+        </span>
+
+        <div className="mx-auto hidden min-w-0 flex-1 justify-center md:flex">
+          <StageStrip location={location} />
         </div>
 
-        <nav
-          aria-label="Primary navigation"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:block md:overflow-x-visible md:overflow-y-auto"
-        >
+        <div className="ml-auto flex items-center gap-1.5">
+          <AttentionBell />
+          <ThemeToggle />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card/80 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Lock className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Lock</span>
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      {/* Icon rail — Railway left toolbar */}
+      <aside className="hidden flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar/95 px-1.5 py-3 text-sidebar-foreground backdrop-blur-md md:flex">
+        <nav aria-label="Primary navigation" className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto">
           {GROUPS.map((group) => {
             const isActiveGroup = activeGroup === group.id;
             return (
-              <div
-                key={group.id}
-                className={cn(
-                  "flex shrink-0 items-center gap-0.5 md:mb-3 md:block md:rounded-lg md:px-0.5 md:py-0.5",
-                  isActiveGroup && "md:bg-white/[0.04]",
-                )}
-              >
-                <div className="hidden px-2 pb-1 pt-0.5 md:block">
-                  <p
-                    className={cn(
-                      "text-[0.625rem] font-bold uppercase tracking-[0.14em]",
-                      isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/35",
-                    )}
-                  >
-                    {group.id}
-                  </p>
-                  <p className="text-[0.6rem] text-sidebar-foreground/30">{group.hint}</p>
-                </div>
+              <div key={group.id} className="flex w-full flex-col items-center gap-0.5">
+                <p
+                  className={cn(
+                    "mb-0.5 text-[0.55rem] font-bold uppercase tracking-[0.14em]",
+                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/30",
+                  )}
+                  title={group.hint}
+                >
+                  {group.id}
+                </p>
                 {NAV.filter((item) => item.group === group.id).map((item) => {
                   const active = location === item.href;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      title={item.title}
+                      title={`${item.label} — ${item.title}`}
                       data-testid={item.testId}
                       className={cn(
-                        "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors md:mb-px md:w-full",
+                        "group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all",
                         active
-                          ? "bg-sidebar-primary/18 font-semibold text-sidebar-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-sm before:bg-sidebar-primary"
-                          : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_0_0_1px_hsl(var(--sidebar-primary)/0.5)]"
+                          : "text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                       )}
                     >
-                      <item.icon className={cn("h-3.5 w-3.5 shrink-0", active && "text-sidebar-primary")} />
-                      {item.label}
+                      <item.icon className="h-4 w-4" />
+                      <span className="pointer-events-none absolute left-full z-30 ml-2 hidden whitespace-nowrap rounded-md border border-border bg-popover px-2 py-1 text-[0.6875rem] font-medium text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 xl:block">
+                        {item.label}
+                      </span>
                     </Link>
                   );
                 })}
@@ -240,20 +251,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-auto hidden space-y-0.5 border-t border-sidebar-border pt-2 md:block">
-          <p className="px-2 pb-1 text-[0.625rem] font-bold uppercase tracking-[0.14em] text-sidebar-foreground/35">
-            CRM & ship
-          </p>
+        <div className="mt-auto flex flex-col items-center gap-0.5 border-t border-sidebar-border pt-2">
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
-            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-            HubSpot
+            <ExternalLink className="h-4 w-4" />
           </a>
           <a
             href="https://ship.pirateship.com/"
@@ -261,29 +268,44 @@ export function AppShell({ children }: { children: ReactNode }) {
             rel="noopener noreferrer"
             title="Pirate Ship"
             data-testid="link-sidebar-pirateship"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
-            <ShipWheel className="h-3.5 w-3.5 shrink-0" />
-            Ship
+            <ShipWheel className="h-4 w-4" />
           </a>
-          <ThemeToolButton />
-          {isUnlocked ? (
-            <button
-              type="button"
-              onClick={lock}
-              title="Lock owner session"
-              data-testid="button-lock-owner-session"
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            >
-              <Lock className="h-3.5 w-3.5 shrink-0" />
-              Lock
-            </button>
-          ) : null}
         </div>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-col">
-        <StageStrip location={location} />
+      {/* Mobile stage + horizontal nav */}
+      <div className="flex min-h-0 min-w-0 flex-col md:col-start-2">
+        <div className="accent-wash border-b border-border px-3 py-1.5 md:hidden">
+          <StageStrip location={location} />
+        </div>
+        <nav
+          aria-label="Mobile navigation"
+          className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
+        >
+          {NAV.map((item) => {
+            const active = location === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.title}
+                data-testid={item.testId}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium",
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card/70 text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <item.icon className="h-3.5 w-3.5" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
         <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">{children}</main>
       </div>
     </div>
@@ -292,51 +314,29 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function StageStrip({ location }: { location: string }) {
   return (
-    <div
-      className="accent-wash flex items-center gap-2 border-b border-border px-3 py-1.5 md:px-4"
-      data-testid="strip-production-stages"
-      aria-label="Production stages"
-    >
-      <p className="hidden shrink-0 text-[0.625rem] font-bold uppercase tracking-[0.14em] text-muted-foreground sm:block">
-        Loop
-      </p>
-      <div className="stage-strip min-w-0 flex-1">
-        {STAGES.map((stage, index) => {
-          const active = stage.match(location);
-          return (
-            <span key={`${stage.label}-${index}`} className="inline-flex items-center gap-1">
-              {index > 0 ? <span className="stage-arrow" aria-hidden>→</span> : null}
-              <Link
-                href={stage.href}
-                className="stage-chip"
-                data-active={active ? "true" : "false"}
-                data-testid={`link-stage-${stage.label.toLowerCase()}`}
-              >
-                <span className="numeric text-[0.6rem] opacity-70">{index + 1}</span>
-                {stage.label}
-              </Link>
-            </span>
-          );
-        })}
-      </div>
+    <div className="stage-strip min-w-0" data-testid="strip-production-stages" aria-label="Production stages">
+      {STAGES.map((stage, index) => {
+        const active = stage.match(location);
+        return (
+          <span key={`${stage.label}-${index}`} className="inline-flex items-center gap-1">
+            {index > 0 ? (
+              <span className="stage-arrow" aria-hidden>
+                →
+              </span>
+            ) : null}
+            <Link
+              href={stage.href}
+              className="stage-chip"
+              data-active={active ? "true" : "false"}
+              data-testid={`link-stage-${stage.label.toLowerCase()}`}
+            >
+              <span className="numeric text-[0.6rem] opacity-70">{index + 1}</span>
+              {stage.label}
+            </Link>
+          </span>
+        );
+      })}
     </div>
-  );
-}
-
-function ThemeToolButton() {
-  const { theme, toggle } = useContext(ThemeContext);
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
-      data-testid="button-theme-toggle"
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-    >
-      {theme === "dark" ? <Sun className="h-3.5 w-3.5 shrink-0" /> : <Moon className="h-3.5 w-3.5 shrink-0" />}
-      Theme
-    </button>
   );
 }
 
@@ -350,11 +350,12 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-2 md:px-4">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-2.5 md:px-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
+          <p className="rule-label mb-0.5">Workspace</p>
           <h1
-            className="truncate text-base font-semibold tracking-tight text-foreground md:text-lg"
+            className="truncate text-lg font-semibold tracking-tight text-foreground md:text-xl"
             data-testid="text-page-title"
           >
             {title}
