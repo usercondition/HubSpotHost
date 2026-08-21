@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
   client_phone TEXT NOT NULL DEFAULT '',
   shipping_required INTEGER NOT NULL DEFAULT 0,
   shipping_street TEXT NOT NULL DEFAULT '',
+  shipping_street_2 TEXT NOT NULL DEFAULT '',
   shipping_city TEXT NOT NULL DEFAULT '',
   shipping_state TEXT NOT NULL DEFAULT '',
   shipping_postal_code TEXT NOT NULL DEFAULT '',
@@ -417,6 +418,7 @@ function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
 const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["line_items_json", "TEXT NOT NULL DEFAULT '[]'"],
   ["hubspot_deals_json", "TEXT NOT NULL DEFAULT '[]'"],
+  ["shipping_street_2", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function ensureOrderIntakeColumns(sqlite: Database.Database): void {
@@ -565,6 +567,7 @@ function savedDetailsFromLink(link: OrderIntakeLink): ClientOrderSavedDetails {
     clientPhone: link.clientPhone,
     shippingRequired: link.shippingRequired,
     shippingStreet: link.shippingStreet,
+    shippingStreet2: link.shippingStreet2,
     shippingCity: link.shippingCity,
     shippingState: link.shippingState,
     shippingPostalCode: link.shippingPostalCode,
@@ -713,6 +716,7 @@ export function applyReviewEdits(id: number, edits: ReviewEditInput): OrderIntak
   assign("clientPhone", edits.clientPhone);
   assign("shippingRequired", edits.shippingRequired);
   assign("shippingStreet", edits.shippingStreet);
+  assign("shippingStreet2", edits.shippingStreet2);
   assign("shippingCity", edits.shippingCity);
   assign("shippingState", edits.shippingState);
   assign("shippingPostalCode", edits.shippingPostalCode);
@@ -771,6 +775,7 @@ function publicSavedDetails(prior: PriorClientMatch | null): ClientOrderSavedDet
     clientPhone: prior.clientPhone,
     shippingRequired: prior.shippingRequired,
     shippingStreet: prior.shippingStreet,
+    shippingStreet2: prior.shippingStreet2,
     shippingCity: prior.shippingCity,
     shippingState: prior.shippingState,
     shippingPostalCode: prior.shippingPostalCode,
@@ -861,6 +866,7 @@ export function submitClientOrder(token: string, input: ClientOrderSubmission): 
       clientPhone: input.clientPhone,
       shippingRequired: input.shippingRequired,
       shippingStreet: input.shippingRequired ? input.shippingStreet : "",
+      shippingStreet2: input.shippingRequired ? input.shippingStreet2 : "",
       shippingCity: input.shippingRequired ? input.shippingCity : "",
       shippingState: input.shippingRequired ? input.shippingState : "",
       shippingPostalCode: input.shippingRequired ? input.shippingPostalCode : "",
