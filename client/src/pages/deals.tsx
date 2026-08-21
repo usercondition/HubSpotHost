@@ -138,12 +138,6 @@ export default function DealsPage() {
           <>
             {isUnlocked ? (
               <>
-                <Button asChild size="sm" data-testid="button-open-queue-from-deals">
-                  <Link href="/queue">
-                    <Package className="mr-2 h-3.5 w-3.5" />
-                    Queue
-                  </Link>
-                </Button>
                 <Button asChild size="sm" variant="ghost" data-testid="button-open-hubspot-deals">
                   <a href={hubspotDealsListHref(portalId)} target="_blank" rel="noopener noreferrer">
                     HubSpot

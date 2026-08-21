@@ -1,16 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import {
-  BarChart3,
-  CheckCircle2,
-  ClipboardCheck,
-  ExternalLink,
-  FileUp,
-  Link2,
-  ListOrdered,
-  PackageCheck,
-  SlidersHorizontal,
-} from "lucide-react";
+import { CheckCircle2, ExternalLink, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
@@ -128,48 +118,23 @@ function TodaysWork() {
       <WorkspaceSection
         eyebrow="Run"
         title="What needs you"
-        description="Glance metrics first — then open the work."
-        actions={
-          <>
-            <Button asChild size="sm" data-testid="button-todays-work-queue">
-              <Link href="/queue">
-                <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
-                Open Queue
-              </Link>
-            </Button>
-            <Button asChild size="sm" variant="outline" data-testid="button-todays-work-performance">
-              <Link href="/performance">
-                <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
-                Stats
-              </Link>
-            </Button>
-          </>
-        }
+        description="Counts for today — use the left menu to open Intake, Queue, or Prints."
+        testId="panel-todays-metrics"
       >
         <div className="metric-strip" aria-label="Today’s attention metrics">
-          <Link
-            href="/orders"
-            className="block transition-opacity hover:opacity-90"
-            data-testid="card-todays-pending-review"
-          >
-            <MetricTile
-              label="Pending review"
-              value={String(snapshot.intake.pendingReview)}
-              hint="Intake waiting on you"
-              tone={snapshot.intake.pendingReview > 0 ? "warn" : "neutral"}
-            />
-          </Link>
-          <Link
-            href="/orders"
-            className="block transition-opacity hover:opacity-90"
-            data-testid="card-todays-awaiting-client"
-          >
-            <MetricTile
-              label="Awaiting client"
-              value={String(snapshot.intake.awaitingClient)}
-              hint="Buyer form not finished"
-            />
-          </Link>
+          <MetricTile
+            label="Pending review"
+            value={String(snapshot.intake.pendingReview)}
+            hint="Intake waiting on you"
+            tone={snapshot.intake.pendingReview > 0 ? "warn" : "neutral"}
+            testId="card-todays-pending-review"
+          />
+          <MetricTile
+            label="Awaiting client"
+            value={String(snapshot.intake.awaitingClient)}
+            hint="Buyer form not finished"
+            testId="card-todays-awaiting-client"
+          />
           <MetricTile
             label="Open alerts"
             value={String(snapshot.summary.attentionCount)}
@@ -177,21 +142,6 @@ function TodaysWork() {
             tone={alertTone}
             testId="card-todays-attention"
           />
-        </div>
-
-        <div className="shortcut-grid mt-3" data-testid="panel-floor-shortcuts">
-          <Link href="/queue" className="shortcut-chip">
-            <ListOrdered className="h-3.5 w-3.5 text-primary" />
-            Queue — print & ship
-          </Link>
-          <Link href="/prints" className="shortcut-chip">
-            <FileUp className="h-3.5 w-3.5 text-primary" />
-            Prints — attach plates
-          </Link>
-          <Link href="/orders" className="shortcut-chip">
-            <Link2 className="h-3.5 w-3.5 text-primary" />
-            Intake — buyer forms
-          </Link>
         </div>
       </WorkspaceSection>
 
@@ -201,24 +151,6 @@ function TodaysWork() {
           title="Print jobs in flight"
           description="Charge-only shipping/fee deals stay out of this list."
           dense
-          actions={
-            <div className="flex items-center gap-2 text-xs">
-              <Link
-                href="/deals"
-                className="font-medium text-primary hover:underline"
-                data-testid="link-todays-all-deals"
-              >
-                Board
-              </Link>
-              <Link
-                href="/queue"
-                className="font-medium text-primary hover:underline"
-                data-testid="link-todays-queue"
-              >
-                Queue
-              </Link>
-            </div>
-          }
           testId="panel-todays-active-deals"
         >
           <DataList>
@@ -269,7 +201,7 @@ function TodaysWork() {
 
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const { isUnlocked, ownerCode, headers } = useOwnerSession();
+  const { isUnlocked, headers } = useOwnerSession();
   const live = health.data?.safety.liveWriteReady === true;
   const signing = health.data?.webhook.verification === "configured";
   const showSystem = !health.data || !live || !signing || Boolean(health.data.storage?.warning);
@@ -278,41 +210,12 @@ export default function Dashboard() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Floor"
-        subtitle="Grouped shop workspace — metrics, active jobs, then intake. HubSpot stays the CRM."
+        subtitle="Today’s metrics and active print jobs. Navigate from the left menu."
       />
 
       <div className="page-stack">
         <TodaysWork />
         {isUnlocked ? <TrackerAssistantPanel headers={headers} /> : null}
-
-        <WorkspaceSection
-          eyebrow="Take"
-          title="New paid order"
-          description="Send an intake link or enter manually — both land in HubSpot."
-          dense
-          actions={
-            <>
-              <Button asChild size="sm" data-testid="button-start-paid-order">
-                <Link href="/orders">
-                  <Link2 className="mr-1.5 h-3.5 w-3.5" />
-                  Intake
-                </Link>
-              </Button>
-              <Button asChild size="sm" variant="outline" data-testid="button-manual-order">
-                <Link href="/paid-orders">
-                  <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />
-                  Manual
-                </Link>
-              </Button>
-            </>
-          }
-          testId="panel-start-order"
-        >
-          <p className="text-xs text-muted-foreground">
-            Use Intake for buyer forms; Manual when you already have the address and amount.
-          </p>
-        </WorkspaceSection>
-
         {showSystem ? <SystemStatus health={health.data} /> : null}
       </div>
     </div>

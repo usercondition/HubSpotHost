@@ -138,20 +138,9 @@ const GROUPS: Array<{ id: NavGroup; hint: string }> = [
   { id: "Office", hint: "Numbers & setup" },
 ];
 
-const STAGES: Array<{ href: string; label: string; match: (path: string) => boolean }> = [
-  {
-    href: "/orders",
-    label: "Intake",
-    match: (path) => path === "/orders" || path === "/paid-orders" || path === "/clients",
-  },
-  { href: "/queue", label: "Queue", match: (path) => path === "/queue" || path === "/" },
-  { href: "/prints", label: "Plates", match: (path) => path === "/prints" },
-  { href: "/deals", label: "Board", match: (path) => path === "/deals" },
-];
-
 /**
  * Workspace shell — Railway-inspired canvas for Print Ops.
- * Icon rail + top project bar + stage loop. HubSpot remains CRM of record.
+ * Icon rail + top project bar. HubSpot remains CRM of record.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -185,10 +174,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <span className="status-live hidden sm:inline-flex" data-testid="status-workspace-live">
           Online
         </span>
-
-        <div className="mx-auto hidden min-w-0 flex-1 justify-center md:flex">
-          <StageStrip location={location} />
-        </div>
 
         <div className="ml-auto flex items-center gap-1.5">
           <AttentionBell />
@@ -275,11 +260,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile stage + horizontal nav */}
+      {/* Mobile horizontal nav */}
       <div className="flex min-h-0 min-w-0 flex-col md:col-start-2">
-        <div className="accent-wash border-b border-border px-3 py-1.5 md:hidden">
-          <StageStrip location={location} />
-        </div>
         <nav
           aria-label="Mobile navigation"
           className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
@@ -308,34 +290,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">{children}</main>
       </div>
-    </div>
-  );
-}
-
-function StageStrip({ location }: { location: string }) {
-  return (
-    <div className="stage-strip min-w-0" data-testid="strip-production-stages" aria-label="Production stages">
-      {STAGES.map((stage, index) => {
-        const active = stage.match(location);
-        return (
-          <span key={`${stage.label}-${index}`} className="inline-flex items-center gap-1">
-            {index > 0 ? (
-              <span className="stage-arrow" aria-hidden>
-                →
-              </span>
-            ) : null}
-            <Link
-              href={stage.href}
-              className="stage-chip"
-              data-active={active ? "true" : "false"}
-              data-testid={`link-stage-${stage.label.toLowerCase()}`}
-            >
-              <span className="numeric text-[0.6rem] opacity-70">{index + 1}</span>
-              {stage.label}
-            </Link>
-          </span>
-        );
-      })}
     </div>
   );
 }

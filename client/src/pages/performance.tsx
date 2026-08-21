@@ -1,5 +1,4 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
@@ -227,15 +226,6 @@ export default function Performance() {
               <Panel
                 title="Needs attention"
                 description="Also available from the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
-                actions={
-                  <Link
-                    href="/queue"
-                    className="text-xs font-medium text-primary hover:underline"
-                    data-testid="link-performance-queue"
-                  >
-                    Open Queue
-                  </Link>
-                }
               >
                 {snapshot.attention.length > 0 ? (
                   <div className="space-y-2">
@@ -300,19 +290,11 @@ export default function Performance() {
                     </div>
                   ))}
                 </div>
-                <Link href="/orders" className="mt-4 inline-flex text-sm font-medium text-primary hover:underline" data-testid="link-performance-order-intake">
-                  Open paid order intake
-                </Link>
               </Panel>
 
               <Panel
                 title="Supply spend detail"
                 description="Receipt totals by category from the Supply Spend ledger."
-                actions={
-                  <Link href="/supplies" className="text-xs font-medium text-primary hover:underline" data-testid="link-performance-supplies">
-                    Open supply spend
-                  </Link>
-                }
               >
                 {snapshot.supplySpend.byCategory.length > 0 ? (
                   <div className="space-y-2">
