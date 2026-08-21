@@ -6,7 +6,7 @@ type Tone = "neutral" | "good" | "warn" | "bad";
 
 const TONE_TEXT: Record<Tone, string> = {
   neutral: "text-muted-foreground",
-  good: "text-primary",
+  good: "text-accent",
   warn: "text-chart-4",
   bad: "text-destructive",
 };
@@ -16,6 +16,13 @@ const TONE_PILL: Record<Tone, string> = {
   good: "border-accent/40 bg-accent/12 text-accent",
   warn: "border-chart-4/40 bg-chart-4/12 text-chart-4",
   bad: "border-destructive/40 bg-destructive/12 text-destructive",
+};
+
+const TONE_METRIC: Record<Tone, string> = {
+  neutral: "text-foreground",
+  good: "text-accent",
+  warn: "text-chart-4",
+  bad: "text-destructive",
 };
 
 export function StatusPill({
@@ -43,6 +50,31 @@ export function StatusPill({
   );
 }
 
+/** Compact metric tile for digestible counts / money. */
+export function MetricTile({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+  testId,
+  className,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: Tone;
+  testId?: string;
+  className?: string;
+}) {
+  return (
+    <div data-testid={testId} className={cn("metric-tile", className)}>
+      <p className="rule-label">{label}</p>
+      <p className={cn("mt-1.5 text-2xl font-semibold tracking-tight numeric", TONE_METRIC[tone])}>{value}</p>
+      {hint ? <p className="mt-1 text-[0.6875rem] text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
 export function StatCard({
   label,
   value,
@@ -59,10 +91,7 @@ export function StatCard({
   testId?: string;
 }) {
   return (
-    <div
-      data-testid={testId}
-      className="rounded-xl border border-card-border bg-card p-3 shadow-sm transition-colors hover:border-border"
-    >
+    <div data-testid={testId} className="metric-tile">
       <div className="flex items-center justify-between gap-2">
         <p className="rule-label">{label}</p>
         <span className={cn("inline-flex h-7 w-7 items-center justify-center rounded-lg bg-muted/80", TONE_TEXT[tone])}>
@@ -77,6 +106,45 @@ export function StatCard({
   );
 }
 
+/**
+ * Primary workspace container — titled group for related shop data.
+ * Use for Floor sections, Queue lanes, and board columns.
+ */
+export function WorkspaceSection({
+  eyebrow,
+  title,
+  description,
+  actions,
+  children,
+  className,
+  testId,
+  dense = false,
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+  dense?: boolean;
+}) {
+  return (
+    <section className={cn("workspace-section", className)} data-testid={testId}>
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border/80 px-3.5 py-2.5">
+        <div className="min-w-0">
+          {eyebrow ? <p className="rule-label mb-0.5">{eyebrow}</p> : null}
+          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+          {description ? <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{description}</p> : null}
+        </div>
+        {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
+      </div>
+      <div className={cn(dense ? "p-2.5" : "p-3.5")}>{children}</div>
+    </section>
+  );
+}
+
+/** Back-compat alias — existing pages import Panel. */
 export function Panel({
   title,
   description,
@@ -89,16 +157,51 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-card-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border/80 px-3.5 py-2.5">
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
-          {description && <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{description}</p>}
-        </div>
-        {actions}
+    <WorkspaceSection title={title} description={description} actions={actions}>
+      {children}
+    </WorkspaceSection>
+  );
+}
+
+/** Grouped list of related rows (active orders, failures, etc.). */
+export function DataList({
+  children,
+  className,
+  testId,
+}: {
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <ul className={cn("data-list", className)} data-testid={testId}>
+      {children}
+    </ul>
+  );
+}
+
+export function DataRow({
+  title,
+  meta,
+  actions,
+  testId,
+}: {
+  title: string;
+  meta?: string;
+  actions?: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <li
+      className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
+      data-testid={testId}
+    >
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium">{title}</p>
+        {meta ? <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{meta}</p> : null}
       </div>
-      <div className="p-3.5">{children}</div>
-    </section>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2.5 text-xs">{actions}</div> : null}
+    </li>
   );
 }
 

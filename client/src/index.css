@@ -329,7 +329,7 @@
   }
 
   .page-stack {
-    @apply space-y-3 px-3 py-3 md:px-5 md:py-4;
+    @apply space-y-4 px-3 py-3 md:px-5 md:py-4;
   }
 
   .workspace-node {
@@ -352,6 +352,100 @@
     box-shadow:
       0 0 0 1px hsl(var(--primary) / 0.45),
       var(--shadow-md);
+  }
+
+  /* Titled group container — primary way to cluster related shop data */
+  .workspace-section {
+    border-radius: calc(var(--radius) + 4px);
+    border: 1px solid hsl(var(--card-border));
+    background: linear-gradient(
+      180deg,
+      hsl(var(--card) / 0.96) 0%,
+      hsl(var(--card) / 0.88) 100%
+    );
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .metric-tile {
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid hsl(var(--border) / 0.9);
+    background: hsl(var(--muted) / 0.35);
+    padding: 0.75rem 0.85rem;
+  }
+
+  .metric-strip {
+    display: grid;
+    gap: 0.65rem;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  }
+
+  .data-list {
+    display: flex;
+    flex-direction: column;
+    border-radius: calc(var(--radius) + 1px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--background) / 0.35);
+    overflow: hidden;
+  }
+
+  .data-list > li + li {
+    border-top: 1px solid hsl(var(--border) / 0.85);
+  }
+
+  .queue-lane {
+    display: flex;
+    flex-direction: column;
+    min-height: 12rem;
+    border-radius: calc(var(--radius) + 4px);
+    border: 1px solid hsl(var(--card-border));
+    background: hsl(var(--card) / 0.72);
+    overflow: hidden;
+  }
+
+  .queue-lane-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-bottom: 1px solid hsl(var(--border) / 0.85);
+    background: hsl(var(--muted) / 0.28);
+    padding: 0.7rem 0.85rem;
+  }
+
+  .queue-lane-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.7rem;
+    flex: 1;
+  }
+
+  .shortcut-grid {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  }
+
+  .shortcut-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: calc(var(--radius) + 1px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--background) / 0.4);
+    padding: 0.55rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 550;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .shortcut-chip:hover {
+    border-color: hsl(var(--primary) / 0.4);
+    background: hsl(var(--muted) / 0.55);
   }
 
   .stage-strip {

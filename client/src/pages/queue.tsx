@@ -116,30 +116,32 @@ function QueueColumn({
   testId: string;
 }) {
   return (
-    <section className="min-w-0" data-testid={testId}>
-      <div className="mb-3">
-        <h2 className="text-sm font-semibold tracking-tight">
-          {title}{" "}
-          <span className="text-muted-foreground">({items.length})</span>
-        </h2>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
+    <section className="queue-lane min-w-0" data-testid={testId}>
+      <div className="queue-lane-header">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold tracking-tight">
+            {title}{" "}
+            <span className="numeric text-muted-foreground">({items.length})</span>
+          </h2>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        </div>
       </div>
-      {items.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-          {empty}
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {items.map((item) => (
+      <div className="queue-lane-body">
+        {items.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+            {empty}
+          </p>
+        ) : (
+          items.map((item) => (
             <QueueCard
               key={item.dealId}
               item={item}
               selected={selectedId === item.dealId}
               onSelect={() => onSelect(item.dealId)}
             />
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
     </section>
   );
 }
@@ -218,7 +220,7 @@ export default function ProductionQueuePage() {
           </Panel>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="metric-strip">
               <StatCard label="Open orders" value={String(data.summary.openOrders)} hint="Active HubSpot deals" icon={PackageCheck} />
               <StatCard label="Next print" value={String(data.summary.nextPrint)} hint="Needs plates" icon={FileUp} />
               <StatCard label="In production" value={String(data.summary.inProduction)} hint="Plates attached" icon={Clock3} />

@@ -296,17 +296,17 @@ export default function DealsPage() {
                   {columns.map((column) => (
                     <div
                       key={column.id}
-                      className="flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col overflow-hidden rounded-md border border-border bg-muted/30"
+                      className="queue-lane flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col"
                       data-testid={`column-deal-stage-${column.id}`}
                     >
                       <div
                         className={cn(
-                          "shrink-0 border-b border-border bg-card px-3 py-2",
+                          "queue-lane-header",
                           column.closed && /lost/i.test(column.label) && "bg-destructive/10",
                           column.closed && !/lost/i.test(column.label) && "bg-chart-4/10",
                         )}
                       >
-                        <div className="flex items-start justify-between gap-2">
+                        <div className="flex w-full items-start justify-between gap-2">
                           <p
                             className={cn(
                               "min-w-0 truncate text-sm font-semibold text-foreground",
@@ -320,9 +320,14 @@ export default function DealsPage() {
                             {column.deals.length}
                           </span>
                         </div>
+                        {column.totalAmount > 0 ? (
+                          <p className="mt-1 text-[0.6875rem] text-muted-foreground numeric">
+                            {formatMoney(column.totalAmount)}
+                          </p>
+                        ) : null}
                       </div>
 
-                      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
+                      <div className="queue-lane-body overflow-y-auto overscroll-contain">
                         {column.deals.length === 0 ? (
                           <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-2 py-6">
                             <p className="text-center text-xs text-muted-foreground">No orders</p>
