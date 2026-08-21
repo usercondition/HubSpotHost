@@ -118,7 +118,7 @@ function TodaysWork() {
   }
 
   const snapshot = performance.data;
-  const activeDeals = snapshot.activeDeals ?? [];
+  const activeDeals = (snapshot.activeDeals ?? []).filter((deal) => deal.requiresPlates);
   const portalId = snapshot.hubspotPortalId;
 
   return (

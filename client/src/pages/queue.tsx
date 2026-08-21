@@ -178,7 +178,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Next print · in production · ship-ready. Select a deal for costs, stage, and packing."
+        subtitle="Print jobs only — next print · in production · ship-ready. Shipping and fees stay out of this board."
         actions={
           isUnlocked ? (
             <Button

@@ -204,7 +204,7 @@ test("production queue buckets next print vs in production", async () => {
   });
 });
 
-test("production queue keeps shipping and fee deals out of next print", async () => {
+test("production queue excludes shipping and fee charge deals entirely", async () => {
   await withTempDb(() => {
     const snapshot = sampleSnapshot([
       {
@@ -246,9 +246,13 @@ test("production queue keeps shipping and fee deals out of next print", async ()
     ]);
     const queue = buildProductionQueue(snapshot);
     assert.equal(queue.summary.nextPrint, 1);
+    assert.equal(queue.summary.openOrders, 1);
     assert.ok(queue.nextPrint.every((item) => item.dealId === "print-1"));
-    assert.ok(queue.inProduction.some((item) => item.dealId === "ship-1"));
-    assert.ok(queue.inProduction.some((item) => item.dealId === "fee-1"));
+    assert.equal(queue.inProduction.length, 0);
+    assert.ok(!queue.nextPrint.some((item) => item.dealId === "ship-1" || item.dealId === "fee-1"));
+    assert.ok(!queue.inProduction.some((item) => item.dealId === "ship-1" || item.dealId === "fee-1"));
+    assert.ok(!queue.shipReady.some((item) => item.dealId === "ship-1" || item.dealId === "fee-1"));
+    assert.ok(!queue.blocked.some((item) => item.dealId === "ship-1" || item.dealId === "fee-1"));
     assert.equal(queue.nextPrint[0]?.requiresPlates, true);
   });
 });

@@ -2,7 +2,12 @@ import { calculateProfit, round2 } from "./calc";
 import { attentionIssueKeyFromIssue, overrideKey } from "./attention";
 import { buildSupplyBooksBalance } from "./books";
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
-import { dealRequiresPlates, type SupplyBooksBalance } from "../../shared/schema";
+import {
+  dealRequiresPlates,
+  normalizeOrderLineKind,
+  PRINT_LINE_KIND_PROPERTY,
+  type SupplyBooksBalance,
+} from "../../shared/schema";
 
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
@@ -291,14 +296,35 @@ export function buildPerformanceSnapshot(input: {
     }
 
     if (missingCosts) {
-      pushAttention(
-        4,
-        "Cost details incomplete",
-        requiresPlates
-          ? "Add material, labor, packaging, and shipping costs as they become known"
-          : "Add actual shipping cost when known",
-        "neutral",
-      );
+      if (!requiresPlates) {
+        // Fee / surcharge charge lines never need cost entry here.
+        // Shipping charge lines can still remind for actual shipping cost.
+        const kind = normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]);
+        const isShippingCharge =
+          kind === "shipping" ||
+          (() => {
+            const lower = dealName.toLowerCase();
+            const product = lower.includes(" - ")
+              ? lower.slice(0, lower.lastIndexOf(" - ")).trim()
+              : lower;
+            return /^shipping\b/.test(product) || /^postage\b/.test(product) || /^freight\b/.test(product);
+          })();
+        if (isShippingCharge) {
+          pushAttention(
+            4,
+            "Cost details incomplete",
+            "Add actual shipping cost when known",
+            "neutral",
+          );
+        }
+      } else {
+        pushAttention(
+          4,
+          "Cost details incomplete",
+          "Add material, labor, packaging, and shipping costs as they become known",
+          "neutral",
+        );
+      }
     }
 
     if (requiresPlates && !hasPlates && calculation.amount > 0) {

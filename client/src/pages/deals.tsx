@@ -98,6 +98,8 @@ export default function DealsPage() {
     const byStage = new Map<string, BoardDeal[]>();
     let openValue = 0;
     for (const deal of snapshot.activeDeals) {
+      // Shipping / fee HubSpot deals are charges, not print jobs — keep them off the board.
+      if (!deal.requiresPlates) continue;
       openValue += deal.amount;
       const alerts = alertsByDeal.get(deal.dealId) ?? [];
       const key = deal.stageId || deal.stage;
@@ -131,7 +133,7 @@ export default function DealsPage() {
     <div className="mx-auto flex h-full min-h-0 max-w-[100rem] flex-col overflow-hidden">
       <PageHeader
         title="Orders"
-        subtitle="Print Orders board — advance stages and enter costs from Queue without leaving Print Ops."
+        subtitle="Print Orders board — print jobs only (shipping and fees stay in HubSpot as charges)."
         actions={
           <>
             {isUnlocked ? (

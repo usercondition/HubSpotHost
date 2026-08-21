@@ -41,7 +41,7 @@ function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket
 }
 
 function classifyBucket(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): ProductionQueueItem["bucket"] {
-  // Shipping / fee lines never wait on plates.
+  // Print deals only reach here; charge lines are filtered out upstream.
   if (item.requiresPlates && !item.hasPlates) return "next_print";
   if (item.requiresPlates && (item.kitReprint > 0 || item.kitNeeded > 0 || item.unassignedPlateCount > 0)) {
     return "blocked";
@@ -69,13 +69,16 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
     platesByDeal.set(plate.hubspotDealId, list);
   }
 
+  // Charge-only HubSpot deals (shipping / fees) are not production work.
+  const printDeals = snapshot.activeDeals.filter((deal) => deal.requiresPlates);
+
   const kitByDeal = new Map(listKitSummaries(200).map((kit) => [kit.hubspotDealId, kit]));
-  const checklists = listFulfillmentChecklists(snapshot.activeDeals.map((deal) => deal.dealId));
+  const checklists = listFulfillmentChecklists(printDeals.map((deal) => deal.dealId));
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
   );
 
-  const items: ProductionQueueItem[] = snapshot.activeDeals.map((deal) => {
+  const items: ProductionQueueItem[] = printDeals.map((deal) => {
     const dealPlates = platesByDeal.get(deal.dealId) ?? [];
     const assignedIds: number[] = [];
     let unassignedPlateCount = 0;
