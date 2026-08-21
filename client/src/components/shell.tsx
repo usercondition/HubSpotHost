@@ -220,7 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div key={group.id} className="flex w-full flex-col items-center gap-0.5">
                 <p
                   className={cn(
-                    "mb-0.5 text-[0.55rem] font-bold uppercase tracking-[0.14em]",
+                    "mb-0.5 max-w-full truncate px-0.5 text-center text-[0.55rem] font-bold uppercase tracking-[0.1em]",
                     isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/30",
                   )}
                   title={group.hint}
