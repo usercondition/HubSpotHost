@@ -209,8 +209,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* Icon rail — Railway left toolbar */}
-      <aside className="hidden flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar/95 px-1.5 py-3 text-sidebar-foreground backdrop-blur-md md:flex">
-        <nav aria-label="Primary navigation" className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto">
+      <aside className="hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar/95 px-1.5 py-3 text-sidebar-foreground backdrop-blur-md md:flex">
+        <nav
+          aria-label="Primary navigation"
+          className="flex w-full min-h-0 flex-1 flex-col items-center gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        >
           {GROUPS.map((group) => {
             const isActiveGroup = activeGroup === group.id;
             return (
@@ -233,16 +236,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                       title={`${item.label} — ${item.title}`}
                       data-testid={item.testId}
                       className={cn(
-                        "group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all",
+                        "flex h-10 w-10 items-center justify-center rounded-xl transition-all",
                         active
                           ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_0_0_1px_hsl(var(--sidebar-primary)/0.5)]"
                           : "text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                       )}
                     >
                       <item.icon className="h-4 w-4" />
-                      <span className="pointer-events-none absolute left-full z-30 ml-2 hidden whitespace-nowrap rounded-md border border-border bg-popover px-2 py-1 text-[0.6875rem] font-medium text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 xl:block">
-                        {item.label}
-                      </span>
                     </Link>
                   );
                 })}
