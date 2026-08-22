@@ -67,7 +67,7 @@ export function MetricTile({
   className?: string;
 }) {
   return (
-    <div data-testid={testId} className={cn("metric-tile", className)}>
+    <div data-testid={testId} data-tone={tone} className={cn("metric-tile glance-in", className)}>
       <p className="rule-label">{label}</p>
       <p className={cn("mt-1.5 text-2xl font-semibold tracking-tight numeric", TONE_METRIC[tone])}>{value}</p>
       {hint ? <p className="mt-1 text-[0.6875rem] text-muted-foreground">{hint}</p> : null}
@@ -184,20 +184,28 @@ export function DataRow({
   title,
   meta,
   actions,
+  tone,
+  badge,
   testId,
 }: {
   title: string;
   meta?: string;
   actions?: ReactNode;
+  tone?: Tone;
+  badge?: string;
   testId?: string;
 }) {
   return (
     <li
-      className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2"
+      className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2.5"
       data-testid={testId}
+      data-tone={tone}
     >
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{title}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-medium">{title}</p>
+          {badge ? <StatusPill tone={tone ?? "neutral"} label={badge} /> : null}
+        </div>
         {meta ? <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{meta}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2.5 text-xs">{actions}</div> : null}

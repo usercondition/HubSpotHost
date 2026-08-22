@@ -65,7 +65,7 @@ export function AttentionBell() {
           {performance.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
           {count > 0 ? (
             <span
-              className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold text-primary-foreground"
+              className="status-alert absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold"
               data-testid="badge-attention-count"
             >
               {count > 9 ? "9+" : count}

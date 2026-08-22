@@ -139,7 +139,7 @@ const GROUPS: Array<{ id: NavGroup; hint: string }> = [
 ];
 
 /**
- * Workspace shell — Railway-inspired canvas for Print Ops.
+ * Workspace shell — shop-floor canvas for Print Ops.
  * Icon rail + top project bar. HubSpot remains CRM of record.
  */
 export function AppShell({ children }: { children: ReactNode }) {
@@ -166,7 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
-              Workspace · shop floor
+              Shop floor · at a glance
             </span>
           </span>
         </Link>
@@ -304,18 +304,18 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-2.5 md:px-5">
+    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="rule-label mb-0.5">Workspace</p>
+          <p className="rule-label mb-0.5">Shop floor</p>
           <h1
-            className="truncate text-lg font-semibold tracking-tight text-foreground md:text-xl"
+            className="truncate text-xl font-semibold tracking-tight text-foreground md:text-2xl"
             data-testid="text-page-title"
           >
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 max-w-3xl truncate text-xs text-muted-foreground md:whitespace-normal">
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground md:whitespace-normal">
               {subtitle}
             </p>
           ) : null}
