@@ -47,7 +47,7 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     name: "PUBLIC_BASE_URL",
     required: "Optional",
     note: "Signed URI base for v3 when running behind a proxy",
-  },,
+  },
   {
     name: "TELEGRAM_BOT_TOKEN",
     required: "Optional",
@@ -77,7 +77,7 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     name: "OWNER_DIGEST_CRON_SECRET",
     required: "Optional",
     note: "Shared secret for POST /api/cron/owner-digest and /api/cron/health-nudge",
-  }
+  },
 ];
 
 const WEBHOOK_STEPS = [
