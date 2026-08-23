@@ -29,6 +29,7 @@ export async function sendTelegramMessage(
   text: string,
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
+  options?: { parseMode?: "HTML" },
 ): Promise<TelegramSendResult> {
   const config = getTelegramConfig(env);
   if (!config) {
@@ -48,6 +49,7 @@ export async function sendTelegramMessage(
         chat_id: config.chatId,
         text: clipped,
         disable_web_page_preview: true,
+        ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
       }),
       signal: AbortSignal.timeout(15_000),
     });

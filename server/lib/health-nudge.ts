@@ -149,24 +149,42 @@ export function healthNudgeFingerprint(snapshot: PerformanceResponse): string {
   return createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 16);
 }
 
-function groupLabel(issueKey: string): string {
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function shortLabel(value: string, limit = 42): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= limit) return cleaned;
+  return `${cleaned.slice(0, limit - 1).trim()}…`;
+}
+
+function htmlLink(label: string, href: string): string {
+  return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+}
+
+function groupHeading(issueKey: string): { title: string; hint: string } {
   switch (issueKey) {
     case "no_plates":
-      return "MISSING PLATES";
+      return { title: "Plates", hint: "attach sliced files" };
     case "costs_incomplete":
-      return "COSTS INCOMPLETE";
+      return { title: "Costs", hint: "add as they become known" };
     case "stale":
-      return "STALE / NO UPDATES";
+      return { title: "Stale", hint: "no HubSpot update in 7+ days" };
     default:
-      return "ATTENTION";
+      return { title: "Attention", hint: "needs a look" };
   }
 }
 
-function actionForIssue(issueKey: string, dealId: string): { label: string; href: string } {
+function hrefForIssue(issueKey: string, dealId: string): string {
   if (issueKey === "no_plates") {
-    return { label: "Attach plates", href: `/prints?dealId=${encodeURIComponent(dealId)}` };
+    return `/prints?dealId=${encodeURIComponent(dealId)}`;
   }
-  return { label: "Open in queue", href: `/queue?dealId=${encodeURIComponent(dealId)}` };
+  return `/queue?dealId=${encodeURIComponent(dealId)}`;
 }
 
 export function buildHealthNudgeText(
@@ -181,25 +199,33 @@ export function buildHealthNudgeText(
 
   if (!collected.hasWork) {
     return {
-      text: `${title}\n\nAll clear — no missing plates, incomplete costs, stale deals, or stuck intake.`,
+      text: `<b>${escapeHtml(title)}</b>\n\nAll clear — no missing plates, incomplete costs, stale deals, or stuck intake.`,
       fingerprint,
       hasWork: false,
     };
   }
 
-  const lines: string[] = [title, ""];
-  lines.push(
-    `Needs you: ${collected.attention.length} deal alert${collected.attention.length === 1 ? "" : "s"}` +
-      (collected.intakePending || collected.intakeAwaiting
-        ? ` · intake ${collected.intakePending} review / ${collected.intakeAwaiting} awaiting`
-        : ""),
-  );
+  const lines: string[] = [`<b>${escapeHtml(title)}</b>`];
+  const needBits: string[] = [];
+  if (collected.attention.length > 0) {
+    needBits.push(
+      `${collected.attention.length} deal${collected.attention.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (collected.intakePending > 0) {
+    needBits.push(`${collected.intakePending} to review`);
+  }
+  if (collected.intakeAwaiting > 0) {
+    needBits.push(`${collected.intakeAwaiting} awaiting buyer`);
+  }
+  lines.push(`Needs you: ${needBits.join(" · ")}`);
 
   if (collected.intakePending > 0 || collected.intakeAwaiting > 0) {
-    lines.push("", "INTAKE");
+    lines.push("");
+    lines.push(`<b>Intake</b> · ${htmlLink("open", absoluteActionHref("/orders", env))}`);
     if (collected.intakePending > 0) {
       lines.push(
-        `• ${collected.intakePending} paid order${collected.intakePending === 1 ? "" : "s"} waiting for your review`,
+        `• ${collected.intakePending} paid order${collected.intakePending === 1 ? "" : "s"} waiting for review`,
       );
     }
     if (collected.intakeAwaiting > 0) {
@@ -207,7 +233,6 @@ export function buildHealthNudgeText(
         `• ${collected.intakeAwaiting} buyer form${collected.intakeAwaiting === 1 ? "" : "s"} still open`,
       );
     }
-    lines.push(`• Open intake: ${absoluteActionHref("/orders", env)}`);
   }
 
   const byKey = new Map<string, typeof collected.attention>();
@@ -220,24 +245,28 @@ export function buildHealthNudgeText(
   for (const issueKey of ["no_plates", "costs_incomplete", "stale"]) {
     const items = byKey.get(issueKey);
     if (!items || items.length === 0) continue;
-    lines.push("", groupLabel(issueKey));
+    const heading = groupHeading(issueKey);
+    lines.push("");
+    lines.push(`<b>${heading.title}</b> · ${escapeHtml(heading.hint)}`);
     for (const item of items.slice(0, 6)) {
-      lines.push(`• ${item.dealName} — ${item.stage}`);
-      lines.push(`  ${item.detail}`);
-      const action = actionForIssue(item.issueKey, item.dealId);
-      lines.push(`  ${action.label}: ${absoluteActionHref(action.href, env)}`);
+      const href = absoluteActionHref(hrefForIssue(item.issueKey, item.dealId), env);
+      const name = htmlLink(shortLabel(item.dealName), href);
+      const stage = item.stage.trim() ? ` · ${escapeHtml(shortLabel(item.stage, 24))}` : "";
+      lines.push(`• ${name}${stage}`);
     }
     if (items.length > 6) {
-      lines.push(`• …and ${items.length - 6} more`);
+      const moreHref =
+        issueKey === "no_plates"
+          ? absoluteActionHref("/prints", env)
+          : absoluteActionHref("/queue", env);
+      lines.push(`• ${htmlLink(`and ${items.length - 6} more`, moreHref)}`);
     }
   }
 
   lines.push("");
   lines.push(
-    `Snapshot: ${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention`,
+    `${snapshot.summary.activeOrders} active · ${htmlLink("Floor", absoluteActionHref("/", env))} · ${htmlLink("Stats", absoluteActionHref("/performance", env))}`,
   );
-  lines.push(`Open floor: ${absoluteActionHref("/", env)}`);
-  lines.push(`Open stats: ${absoluteActionHref("/performance", env)}`);
 
   const text = lines.join("\n").trim();
   return {
@@ -289,7 +318,7 @@ export async function sendHealthNudge(
     }
   }
 
-  const sent = await sendTelegramMessage(built.text, env);
+  const sent = await sendTelegramMessage(built.text, env, fetch, { parseMode: "HTML" });
   if (!sent.ok) {
     return { ok: false, error: sent.error, text: built.text };
   }

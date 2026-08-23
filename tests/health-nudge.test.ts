@@ -97,12 +97,17 @@ test("collectHealthNudgeItems ignores low_margin and keeps actionable keys", () 
 test("buildHealthNudgeText lists plates, stale, and intake with deep links", () => {
   const built = buildHealthNudgeText(sampleCtx(), { PUBLIC_BASE_URL: "https://ops.example" });
   assert.equal(built.hasWork, true);
-  assert.match(built.text, /MISSING PLATES/);
+  assert.match(built.text, /<b>Plates<\/b>/);
   assert.match(built.text, /Castle Set/);
-  assert.match(built.text, /STALE/);
-  assert.match(built.text, /INTAKE/);
-  assert.match(built.text, /https:\/\/ops\.example\/#\/orders/);
+  assert.match(built.text, /<b>Stale<\/b>/);
+  assert.match(built.text, /<b>Intake<\/b>/);
+  assert.match(built.text, /<a href="https:\/\/ops\.example\/#\/orders">open<\/a>/);
+  assert.match(built.text, /<a href="https:\/\/ops\.example\/#\/prints\?dealId=101">Castle Set<\/a>/);
   assert.doesNotMatch(built.text, /Low margin toy/);
+  assert.doesNotMatch(built.text, /Open in queue:/);
+  assert.doesNotMatch(built.text, /Attach sliced plates before print/);
+  assert.doesNotMatch(built.text, /Open floor:/);
+  assert.doesNotMatch(built.text, /Needs you: .*deal alerts/);
 });
 
 test("buildHealthNudgeText is quiet when shop is clear", () => {

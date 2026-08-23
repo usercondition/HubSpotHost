@@ -378,6 +378,20 @@ test("sendTelegramMessage posts JSON without throwing on mock fetch", async () =
   const body = JSON.parse(String(calls[0]!.init?.body));
   assert.equal(body.chat_id, "99");
   assert.equal(body.text, "hello");
+  assert.equal(body.parse_mode, undefined);
+
+  const html = await sendTelegramMessage(
+    "<b>hello</b>",
+    {
+      TELEGRAM_BOT_TOKEN: "123:AA-token",
+      TELEGRAM_CHAT_ID: "99",
+    },
+    fetchImpl,
+    { parseMode: "HTML" },
+  );
+  assert.equal(html.ok, true);
+  const htmlBody = JSON.parse(String(calls[1]!.init?.body));
+  assert.equal(htmlBody.parse_mode, "HTML");
 });
 
 test("schedule gate respects timezone hour and once-per-day state", () => {
