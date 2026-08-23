@@ -241,6 +241,22 @@ export interface PerformanceResponse {
     closeDate: string | null;
     contactName: string | null;
   }>;
+  /**
+   * Closed / completed / lost Print Orders for the Orders board toggle.
+   * Same card shape as activeDeals; excluded from Floor, Queue, and attention.
+   */
+  closedDeals: Array<{
+    dealId: string;
+    dealName: string;
+    stageId: string;
+    stage: string;
+    amount: number;
+    hasPlates: boolean;
+    requiresPlates: boolean;
+    promptAttachPlates: boolean;
+    closeDate: string | null;
+    contactName: string | null;
+  }>;
   hubspotPortalId: string | null;
 }
 

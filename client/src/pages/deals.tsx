@@ -97,10 +97,14 @@ export default function DealsPage() {
 
     const byStage = new Map<string, BoardDeal[]>();
     let openValue = 0;
-    for (const deal of snapshot.activeDeals) {
+    const closedIds = new Set((snapshot.closedDeals ?? []).map((deal) => deal.dealId));
+    const boardSource = showClosedStages
+      ? [...snapshot.activeDeals, ...(snapshot.closedDeals ?? [])]
+      : snapshot.activeDeals;
+    for (const deal of boardSource) {
       // Shipping / fee HubSpot deals are charges, not print jobs — keep them off the board.
       if (!deal.requiresPlates) continue;
-      openValue += deal.amount;
+      if (!closedIds.has(deal.dealId)) openValue += deal.amount;
       const alerts = alertsByDeal.get(deal.dealId) ?? [];
       const key = deal.stageId || deal.stage;
       const list = byStage.get(key) ?? [];
@@ -252,7 +256,7 @@ export default function DealsPage() {
                     {showEmptyStages ? "Hide empty stages" : `Show empty (${emptyColumnCount})`}
                   </Button>
                 ) : null}
-                {closedColumnCount > 0 ? (
+                {closedColumnCount > 0 || (snapshot.closedDeals?.length ?? 0) > 0 ? (
                   <Button
                     type="button"
                     size="sm"

@@ -80,6 +80,9 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.activeDeals[0]?.hasPlates, false);
   assert.equal(snapshot.activeDeals[0]?.stageId, "deposit");
   assert.equal(snapshot.activeDeals[0]?.contactName, null);
+  assert.equal(snapshot.closedDeals.length, 1);
+  assert.equal(snapshot.closedDeals[0]?.dealName, "Finished order");
+  assert.equal(snapshot.closedDeals[0]?.stageId, "closed");
   assert.equal(snapshot.hubspotPortalId, null);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "deposit")?.count, 2);
   assert.equal(snapshot.pipeline.find((stage) => stage.id === "closed")?.count, 1);
@@ -163,6 +166,10 @@ test("HubSpot closed-won flag removes deals from attention without relying on st
 
   assert.equal(snapshot.summary.activeOrders, 0);
   assert.equal(snapshot.attention.length, 0);
+  assert.equal(snapshot.activeDeals.length, 0);
+  assert.equal(snapshot.closedDeals.length, 1);
+  assert.equal(snapshot.closedDeals[0]?.dealId, "won");
+  assert.equal(snapshot.closedDeals[0]?.dealName, "Finished knight");
 });
 
 test("attached print plates suppress the missing-plate attention item", () => {

@@ -71,6 +71,7 @@ function sampleSnapshot(overrides?: Partial<PerformanceResponse>): PerformanceRe
       },
     ],
     activeDeals: [],
+    closedDeals: [],
     hubspotPortalId: "123",
   };
   return { ...base, ...overrides, ...(overrides?.summary ? { summary: { ...base.summary, ...overrides.summary } } : {}), ...(overrides?.intake ? { intake: { ...base.intake, ...overrides.intake } } : {}) } as PerformanceResponse;

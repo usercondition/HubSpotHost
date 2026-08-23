@@ -99,6 +99,7 @@ function sampleSnapshot(overrides?: Partial<PerformanceResponse["activeDeals"][n
       },
     ],
     activeDeals: deals,
+    closedDeals: [],
     hubspotPortalId: "999",
   };
 }

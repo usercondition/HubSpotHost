@@ -262,6 +262,7 @@ function sampleContext(): OwnerDigestContext {
         closeDate: null,
       },
     ],
+    closedDeals: [],
     hubspotPortalId: "123",
   };
 

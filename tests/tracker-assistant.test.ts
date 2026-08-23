@@ -79,6 +79,7 @@ function sampleContext(overrides?: Partial<TrackerAssistantContext>): TrackerAss
         contactName: null,
       },
     ],
+    closedDeals: [],
     hubspotPortalId: "12345",
   };
 

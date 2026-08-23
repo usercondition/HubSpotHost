@@ -15,6 +15,8 @@ export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
 const ATTENTION_LIMIT = 8;
 /** Cap for Command Center + Orders page open-deal lists. */
 const ACTIVE_DEALS_LIMIT = 40;
+/** Cap for Orders board “Show completed & lost” cards. */
+const CLOSED_DEALS_LIMIT = 60;
 
 type QueueCounts = {
   awaiting_client: number;
@@ -105,6 +107,8 @@ export interface PerformanceSnapshot {
     /** Best-effort contact label from “Product - Client” deal names. */
     contactName: string | null;
   }>;
+  /** Closed HubSpot deals for Orders board completed/lost columns. */
+  closedDeals: Array<PerformanceSnapshot["activeDeals"][number]>;
   /** HubSpot portal id for deal deep links; null when account info is unavailable. */
   hubspotPortalId: string | null;
 }
@@ -198,6 +202,7 @@ export function buildPerformanceSnapshot(input: {
   let activeOrders = 0;
   const attention: Array<PerformanceSnapshot["attention"][number] & { priority: number }> = [];
   const openDeals: Array<PerformanceSnapshot["activeDeals"][number] & { sortAt: number }> = [];
+  const finishedDeals: Array<PerformanceSnapshot["activeDeals"][number] & { sortAt: number }> = [];
 
   for (const deal of input.deals) {
     const props = deal.properties;
@@ -229,15 +234,8 @@ export function buildPerformanceSnapshot(input: {
       grossProfit += calculation.grossProfit;
     }
 
-    if (closed) continue;
-    activeOrders += 1;
-
     const hasPlates = attachedPrintDealIds.has(deal.id);
-    const promptAttachPlates =
-      requiresPlates &&
-      !hasPlates &&
-      !dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
-    openDeals.push({
+    const boardDeal = {
       dealId: deal.id,
       dealName,
       stageId: stageId ?? "",
@@ -245,10 +243,26 @@ export function buildPerformanceSnapshot(input: {
       amount: round2(calculation.amount),
       hasPlates,
       requiresPlates,
-      promptAttachPlates,
+      promptAttachPlates: false as boolean,
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
+    };
+
+    if (closed) {
+      // Still list on Orders when “Show completed & lost” is on — never attention / Floor.
+      finishedDeals.push(boardDeal);
+      continue;
+    }
+    activeOrders += 1;
+
+    const promptAttachPlates =
+      requiresPlates &&
+      !hasPlates &&
+      !dismissedAttentionKeys.has(overrideKey(deal.id, "no_plates"));
+    openDeals.push({
+      ...boardDeal,
+      promptAttachPlates,
     });
 
     const pushAttention = (
@@ -345,6 +359,10 @@ export function buildPerformanceSnapshot(input: {
     .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
     .slice(0, ACTIVE_DEALS_LIMIT)
     .map(({ sortAt: _sortAt, ...item }) => item);
+  const closedDeals = finishedDeals
+    .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
+    .slice(0, CLOSED_DEALS_LIMIT)
+    .map(({ sortAt: _sortAt, ...item }) => item);
   const supplySpend = input.supplySpend ?? EMPTY_SUPPLY_SPEND;
   const books = buildSupplyBooksBalance({
     periodDays: PERFORMANCE_WINDOW_DAYS,
@@ -388,6 +406,7 @@ export function buildPerformanceSnapshot(input: {
     })),
     attention: sortedAttention.slice(0, ATTENTION_LIMIT),
     activeDeals,
+    closedDeals,
     hubspotPortalId: input.hubspotPortalId ?? null,
   };
 }
