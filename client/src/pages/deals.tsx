@@ -18,7 +18,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, hubspotDealsListHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsPanel } from "@/components/deal-ops-panel";
+import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import {
   OrderPartsDialog,
   formatPartsBadge,
@@ -361,9 +361,7 @@ export default function DealsPage() {
         )}
       </div>
 
-      {opsDealId ? (
-        <DealOpsPanel dealId={opsDealId} headers={headers} onClose={() => setOpsDealId(null)} />
-      ) : null}
+      <DealOpsDrawer dealId={opsDealId} headers={headers} onClose={() => setOpsDealId(null)} />
 
       <OrderPartsDialog
         dealId={partsDeal?.dealId ?? null}

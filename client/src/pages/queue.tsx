@@ -18,7 +18,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsPanel } from "@/components/deal-ops-panel";
+import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -190,7 +190,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Print jobs only — next print · in production · ship-ready. Select a node for costs, stage, and packing."
+        subtitle="Print jobs only — next print · in production · ship-ready. Select a card; ops slides in from the right."
         actions={
           isUnlocked ? (
             <Button
@@ -242,18 +242,13 @@ export default function ProductionQueuePage() {
               <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
             </div>
 
-            {selectedDealId ? (
-              <DealOpsPanel
-                dealId={selectedDealId}
-                headers={headers}
-                onClose={() => setSelectedDealId(null)}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Select an order to enter costs, advance stage, assign printers, run the ship checklist, or print a packing slip.
-                {selectedExists ? "" : ""}
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              {selectedDealId
+                ? selectedExists
+                  ? "Ops open on the right — click another card to switch without scrolling."
+                  : "That deal isn’t on the board anymore — pick another card or close ops."
+                : "Select an order for costs, stage, printers, ship checklist, or packing slip."}
+            </p>
 
             <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">
               <QueueColumn
@@ -293,6 +288,12 @@ export default function ProductionQueuePage() {
                 testId="column-ship-ready"
               />
             </div>
+
+            <DealOpsDrawer
+              dealId={selectedDealId}
+              headers={headers}
+              onClose={() => setSelectedDealId(null)}
+            />
 
             {data.recentFailures.length > 0 ? (
               <Panel title="Recent failures / reprints">
