@@ -48,6 +48,14 @@ type ParseResponse = {
   fields: LabelFields;
   suggestedNotes: string;
   matches: LabelMatch[];
+  alreadyAttached?: {
+    dealId: string;
+    dealName: string | null;
+    trackingNumber: string;
+    notes: string;
+    source: "local" | "hubspot";
+    updatedAt: string | null;
+  } | null;
 };
 
 type AttachedDraft = {
@@ -95,13 +103,22 @@ export default function ShippingLabelsPage() {
       setTracking(data.fields.trackingNumber ?? "");
       setNotes(data.suggestedNotes || "");
       setPostage(data.fields.postageUsd ?? "");
-      setDealId(data.matches[0]?.dealId ?? "");
-      toast({
-        title: "Label read",
-        description: data.fields.trackingNumber
-          ? `Tracking ${data.fields.trackingNumber}`
-          : "Check the fields and pick the matching order.",
-      });
+      setDealId(data.alreadyAttached?.dealId ?? data.matches[0]?.dealId ?? "");
+      if (data.alreadyAttached) {
+        toast({
+          title: "Already attached",
+          description: data.alreadyAttached.dealName
+            ? `${data.alreadyAttached.trackingNumber} is on ${data.alreadyAttached.dealName} — no action needed.`
+            : `${data.alreadyAttached.trackingNumber} is already saved — no action needed.`,
+        });
+      } else {
+        toast({
+          title: "Label read",
+          description: data.fields.trackingNumber
+            ? `Tracking ${data.fields.trackingNumber}`
+            : "Check the fields and pick the matching order.",
+        });
+      }
     },
     onError: (error: Error) => {
       toast({
@@ -129,13 +146,31 @@ export default function ShippingLabelsPage() {
       );
       return (await response.json()) as {
         ok: true;
+        duplicate?: boolean;
+        message?: string;
         contact?: { id: string | null; name: string; email: string };
+        alreadyAttached?: { dealId: string; trackingNumber: string };
       };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
+
+      if (data.duplicate) {
+        toast({
+          title: "Already attached",
+          description: data.message ?? "This tracking is already saved — nothing else to do.",
+        });
+        setParsed(null);
+        setTracking("");
+        setNotes("");
+        setPostage("");
+        setDealId("");
+        setAttachedDraft(null);
+        return;
+      }
+
       const match = parsed?.matches.find((row) => row.dealId === dealId) ?? null;
       const contactName =
         data.contact?.name?.trim() ||
@@ -396,6 +431,44 @@ export default function ShippingLabelsPage() {
                 description={parsed.fileName}
                 testId="panel-labels-confirm"
               >
+                {parsed.alreadyAttached ? (
+                  <div
+                    className="glance-item mb-3 flex-col items-stretch gap-2"
+                    data-tone="good"
+                    data-testid="panel-label-already-attached"
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                      Already attached — no action needed
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Tracking{" "}
+                      <span className="font-medium text-foreground">
+                        {parsed.alreadyAttached.trackingNumber}
+                      </span>{" "}
+                      is already on{" "}
+                      <span className="font-medium text-foreground">
+                        {parsed.alreadyAttached.dealName || `deal ${parsed.alreadyAttached.dealId}`}
+                      </span>
+                      . Re-uploading won’t change anything.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={queueDealHref(parsed.alreadyAttached.dealId)}>Open in Queue</Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setParsed(null);
+                          setDealId("");
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 {parsed.fields.warnings.length > 0 ? (
                   <ul className="mb-3 space-y-1">
                     {parsed.fields.warnings.map((warning) => (
@@ -556,13 +629,19 @@ export default function ShippingLabelsPage() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
                     size="sm"
-                    disabled={attach.isPending || !tracking.trim() || !/^[0-9]{1,20}$/.test(dealId)}
+                    disabled={
+                      Boolean(parsed.alreadyAttached) ||
+                      attach.isPending ||
+                      !tracking.trim() ||
+                      !/^[0-9]{1,20}$/.test(dealId)
+                    }
                     onClick={() => attach.mutate()}
                     data-testid="button-label-attach"
                   >
                     {attach.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
-                    Attach tracking
-                    {selected ? ` · ${selected.dealName.slice(0, 28)}` : ""}
+                    {parsed.alreadyAttached
+                      ? "Already attached"
+                      : `Attach tracking${selected ? ` · ${selected.dealName.slice(0, 28)}` : ""}`}
                   </Button>
                   {dealId ? (
                     <Button asChild size="sm" variant="outline">

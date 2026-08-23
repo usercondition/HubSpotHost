@@ -191,7 +191,7 @@ import {
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
-import { getFulfillmentChecklist, upsertFulfillmentChecklist } from "./lib/fulfillment";
+import { getFulfillmentChecklist, upsertFulfillmentChecklist, findExistingTrackingAttachment } from "./lib/fulfillment";
 import { buildProductionQueue } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 import {
@@ -1190,6 +1190,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ...snapshot.activeDeals.map((deal) => ({ ...deal, closed: false })),
           ...(snapshot.closedDeals ?? []).map((deal) => ({ ...deal, closed: true })),
         ]);
+        const alreadyAttached = findExistingTrackingAttachment(extracted.fields.trackingNumber, deals);
+        const attachedDealName =
+          alreadyAttached == null
+            ? null
+            : snapshot.activeDeals.find((deal) => deal.dealId === alreadyAttached.dealId)?.dealName ??
+              snapshot.closedDeals?.find((deal) => deal.dealId === alreadyAttached.dealId)?.dealName ??
+              deals.find((deal) => deal.id === alreadyAttached.dealId)?.properties.dealname ??
+              null;
         return res.json({
           ok: true,
           fileName: file.originalname || "label.pdf",
@@ -1198,6 +1206,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           suggestedNotes: buildShipNotesFromLabel(extracted.fields),
           matches: candidates,
           hubspotPortalId,
+          alreadyAttached: alreadyAttached
+            ? {
+                dealId: alreadyAttached.dealId,
+                dealName: attachedDealName ? String(attachedDealName) : null,
+                trackingNumber: alreadyAttached.trackingNumber,
+                notes: alreadyAttached.notes,
+                source: alreadyAttached.source,
+                updatedAt: alreadyAttached.updatedAt,
+              }
+            : null,
         });
       } catch (error) {
         return res.status(400).json({
@@ -1219,6 +1237,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const input = parsed.data;
     const notes = input.notes.trim();
+
+    const existing = findExistingTrackingAttachment(input.trackingNumber);
+    if (existing) {
+      const sameDeal = existing.dealId === input.dealId;
+      const contact = await fetchDealAssociatedContact(existing.dealId);
+      return res.json({
+        ok: true,
+        duplicate: true,
+        message: sameDeal
+          ? "This tracking is already attached to that Print Order — nothing else to do."
+          : `This tracking is already attached to deal ${existing.dealId} — nothing else to do.`,
+        checklist: getFulfillmentChecklist(existing.dealId),
+        hubspot: null,
+        costs: null,
+        costsError: null,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+        },
+        alreadyAttached: {
+          dealId: existing.dealId,
+          trackingNumber: existing.trackingNumber,
+          notes: existing.notes,
+          source: existing.source,
+          updatedAt: existing.updatedAt,
+        },
+      });
+    }
+
     const fulfillment = await upsertFulfillmentChecklist(input.dealId, {
       trackingNumber: input.trackingNumber,
       trackingPasted: true,

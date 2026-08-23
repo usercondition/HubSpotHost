@@ -23,6 +23,8 @@ export const PERFORMANCE_PROPERTIES = [
   "hs_is_closed",
   "hs_is_closed_won",
   "print_line_kind",
+  "print_tracking_number",
+  "print_ship_notes",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
