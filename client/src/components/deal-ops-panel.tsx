@@ -81,16 +81,17 @@ export function DealOpsDrawer({
       <button
         type="button"
         aria-label="Dismiss deal ops"
-        className="pointer-events-auto absolute inset-0 bg-black/35 md:bg-transparent md:pointer-events-none"
+        className="pointer-events-auto absolute inset-0 bg-black/40 transition-opacity"
         onClick={onClose}
         data-testid="button-deal-ops-scrim"
       />
       <aside
         role="dialog"
-        aria-modal="false"
+        aria-modal="true"
         aria-label="Deal ops"
         className="pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl animate-in fade-in slide-in-from-right duration-200 md:max-w-2xl"
         data-testid="drawer-deal-ops"
+        onClick={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           <p className="rule-label">Deal ops</p>

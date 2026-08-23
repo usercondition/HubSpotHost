@@ -245,7 +245,7 @@ export default function ProductionQueuePage() {
             <p className="text-sm text-muted-foreground">
               {selectedDealId
                 ? selectedExists
-                  ? "Ops open on the right — click another card to switch without scrolling."
+                  ? "Ops open on the right — click outside or press Esc to close."
                   : "That deal isn’t on the board anymore — pick another card or close ops."
                 : "Select an order for costs, stage, printers, ship checklist, or packing slip."}
             </p>
