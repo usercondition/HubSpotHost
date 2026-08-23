@@ -4,7 +4,6 @@ import { Link, useLocation } from "wouter";
 import {
   Activity,
   BarChart3,
-  Beaker,
   Boxes,
   ClipboardCheck,
   ExternalLink,
@@ -124,7 +123,8 @@ const NAV: Array<{
     group: "Take",
   },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep" },
-  { href: "/resin", label: "Resin", title: "Resin Inventory", icon: Beaker, testId: "link-nav-resin", group: "Keep" },
+  // Resin inventory stays at /resin (digest / direct URL) but is off the rail —
+  // bottle bookkeeping is optional; plate attach + APIs still work without the tab.
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office" },
