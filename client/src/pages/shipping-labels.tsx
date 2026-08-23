@@ -219,7 +219,7 @@ export default function ShippingLabelsPage() {
                   {parseLabel.isPending ? "Reading label…" : "Drop label PDF here"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Completing an order in HubSpot is enough for “shipped” — use this to attach the tracking after you buy the label.
+                  Completing an order in HubSpot is enough for “shipped.” Pirate Ship PDFs are often image-only — we still read tracking + client from the file name when needed.
                 </p>
               </button>
             </Panel>

@@ -18,6 +18,17 @@ San Diego, CA 92101
 9400111899223344556677
 `;
 
+test("image-only Pirate Ship filename fills UPS tracking and client", () => {
+  const fields = extractShippingLabelFields(
+    "",
+    "2026-08-22---Luke-Price---1ZXG9979YN44057388.pdf",
+  );
+  assert.equal(fields.trackingNumber, "1ZXG9979YN44057388");
+  assert.equal(fields.carrier, "UPS");
+  assert.equal(fields.recipientName, "Luke Price");
+  assert.ok(fields.warnings.some((warning) => /file name/i.test(warning)));
+});
+
 test("shipping label extract pulls USPS tracking, service, postage, and recipient", () => {
   const fields = extractShippingLabelFields(PIRATE_SHIP_LIKE);
   assert.equal(fields.trackingNumber, "9400111899223344556677");

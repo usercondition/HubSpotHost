@@ -1170,7 +1170,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       try {
-        const extracted = await extractShippingLabelFromPdf(file.path);
+        const extracted = await extractShippingLabelFromPdf(file.path, file.originalname || "label.pdf");
         const [deals, stages, hubspotPortalId] = await Promise.all([
           fetchPrintOrderDeals(),
           fetchPrintOrderPipelineStages(),

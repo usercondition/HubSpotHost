@@ -173,21 +173,33 @@ export function extractRecipient(text: string): {
   return { name, city, state, postalCode };
 }
 
-export function extractShippingLabelFields(text: string): ShippingLabelFields {
+export function extractShippingLabelFields(text: string, fileName?: string): ShippingLabelFields {
   const warnings: string[] = [];
   const cleaned = text.replace(/\u0000/g, " ").trim();
+  const fromName = extractFieldsFromFileName(fileName ?? "");
+
   if (!cleaned) {
-    return {
-      trackingNumber: null,
-      service: null,
-      carrier: null,
+    const fields: ShippingLabelFields = {
+      trackingNumber: fromName.trackingNumber,
+      service: fromName.service,
+      carrier: fromName.carrier,
       postageUsd: null,
-      recipientName: null,
+      recipientName: fromName.recipientName,
       recipientCity: null,
       recipientState: null,
       recipientPostalCode: null,
-      warnings: ["No readable text in that PDF — try another export or enter tracking manually."],
+      warnings: [],
     };
+    if (fromName.trackingNumber || fromName.recipientName) {
+      fields.warnings.push(
+        "Label PDF has no text layer (common for Pirate Ship) — filled tracking/client from the file name. Confirm postage if you want it saved.",
+      );
+      return fields;
+    }
+    fields.warnings.push(
+      "No readable text in that PDF — try another export or enter tracking manually.",
+    );
+    return fields;
   }
 
   const tracking = extractTrackingNumber(cleaned);
@@ -195,15 +207,26 @@ export function extractShippingLabelFields(text: string): ShippingLabelFields {
   const postageUsd = extractPostageUsd(cleaned);
   const recipient = extractRecipient(cleaned);
 
-  if (!tracking.tracking) warnings.push("Could not find a tracking number — confirm before saving.");
-  if (!recipient.name) warnings.push("Could not read the recipient name — pick the order manually if needed.");
+  const trackingNumber = tracking.tracking ?? fromName.trackingNumber;
+  const carrier = tracking.carrier ?? service.carrier ?? fromName.carrier;
+  const serviceLabel = service.service ?? fromName.service;
+  const recipientName = recipient.name ?? fromName.recipientName;
+
+  if (!trackingNumber) warnings.push("Could not find a tracking number — confirm before saving.");
+  if (!recipientName) warnings.push("Could not read the recipient name — pick the order manually if needed.");
+  if (!tracking.tracking && fromName.trackingNumber) {
+    warnings.push("Tracking taken from the file name.");
+  }
+  if (!recipient.name && fromName.recipientName) {
+    warnings.push("Client name taken from the file name.");
+  }
 
   return {
-    trackingNumber: tracking.tracking,
-    service: service.service,
-    carrier: tracking.carrier ?? service.carrier,
+    trackingNumber,
+    service: serviceLabel,
+    carrier,
     postageUsd,
-    recipientName: recipient.name,
+    recipientName,
     recipientCity: recipient.city,
     recipientState: recipient.state,
     recipientPostalCode: recipient.postalCode,
@@ -211,7 +234,78 @@ export function extractShippingLabelFields(text: string): ShippingLabelFields {
   };
 }
 
-export async function extractShippingLabelFromPdf(filePath: string): Promise<{
+/**
+ * Pirate Ship / common exports often name files:
+ * `2026-08-22---Luke-Price---1ZXG9979YN44057388.pdf`
+ */
+export function extractFieldsFromFileName(fileName: string): {
+  trackingNumber: string | null;
+  carrier: string | null;
+  service: string | null;
+  recipientName: string | null;
+} {
+  const base = fileName.replace(/^.*[\\/]/, "").replace(/\.pdf$/i, "").trim();
+  if (!base) {
+    return { trackingNumber: null, carrier: null, service: null, recipientName: null };
+  }
+
+  const parts = base.split("---").map((part) => part.trim()).filter(Boolean);
+  let trackingNumber: string | null = null;
+  let carrier: string | null = null;
+  let recipientName: string | null = null;
+
+  for (const part of parts) {
+    const hit = extractTrackingNumber(part);
+    if (hit.tracking) {
+      trackingNumber = hit.tracking;
+      carrier = hit.carrier;
+      break;
+    }
+    // Filename segments sometimes glue letters to tracking; still catch 1Z…
+    const upsEmbedded = part.match(/(1Z[0-9A-Z]{16})/i);
+    if (upsEmbedded?.[1]) {
+      trackingNumber = upsEmbedded[1].toUpperCase();
+      carrier = "UPS";
+      break;
+    }
+    const uspsEmbedded = part.match(/((?:94|93|92|91|95)\d{18})/);
+    if (uspsEmbedded?.[1]) {
+      trackingNumber = uspsEmbedded[1];
+      carrier = "USPS";
+      break;
+    }
+  }
+
+  // date---Client-Name---TRACKING
+  if (parts.length >= 3 && /^\d{4}-\d{2}-\d{2}$/.test(parts[0] ?? "")) {
+    const middle = parts[1] ?? "";
+    if (middle && !extractTrackingNumber(middle).tracking && !/(1Z[0-9A-Z]{16})/i.test(middle)) {
+      recipientName = middle.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+  } else if (parts.length >= 2) {
+    const maybeName = parts.find((part) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(part)) return false;
+      if (trackingNumber && part.toUpperCase().includes(trackingNumber)) return false;
+      if (extractTrackingNumber(part).tracking) return false;
+      return /[A-Za-z]{2}/.test(part);
+    });
+    if (maybeName) recipientName = maybeName.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  if (recipientName && recipientName.length < 2) recipientName = null;
+
+  return {
+    trackingNumber,
+    carrier,
+    service: trackingNumber?.startsWith("1Z") ? "UPS" : null,
+    recipientName,
+  };
+}
+
+export async function extractShippingLabelFromPdf(
+  filePath: string,
+  fileName?: string,
+): Promise<{
   fields: ShippingLabelFields;
   pageCount: number;
   textPreview: string;
@@ -227,7 +321,8 @@ export async function extractShippingLabelFromPdf(filePath: string): Promise<{
     throw new Error("The shipping label PDF could not be read.");
   }
   const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
-  const fields = extractShippingLabelFields(text);
+  const resolvedName = fileName || filePath.split(/[\\/]/).pop() || "";
+  const fields = extractShippingLabelFields(text, resolvedName);
   return {
     fields,
     pageCount: typeof parsed.numpages === "number" ? parsed.numpages : 1,
