@@ -12,7 +12,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { PerformanceResponse } from "../../shared/schema";
 import type { TrackerAssistantContext } from "./tracker-assistant";
-import { sendTelegramMessage, telegramConfigured } from "./telegram";
+import {
+  buildHealthDigestEdition,
+  healthDigestCaption,
+  renderHealthDigestPng,
+} from "./health-digest-card";
+import {
+  sendTelegramMessage,
+  sendTelegramPhoto,
+  telegramConfigured,
+  type TelegramReplyMarkup,
+  type TelegramSendResult,
+} from "./telegram";
 
 const NUDGE_ISSUE_KEYS = new Set(["no_plates", "costs_incomplete", "stale"]);
 
@@ -163,10 +174,6 @@ function shortLabel(value: string, limit = 42): string {
   return `${cleaned.slice(0, limit - 1).trim()}…`;
 }
 
-function htmlLink(label: string, href: string): string {
-  return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
-}
-
 function groupHeading(issueKey: string): { title: string; hint: string } {
   switch (issueKey) {
     case "no_plates":
@@ -180,59 +187,66 @@ function groupHeading(issueKey: string): { title: string; hint: string } {
   }
 }
 
-function hrefForIssue(issueKey: string, dealId: string): string {
-  if (issueKey === "no_plates") {
-    return `/prints?dealId=${encodeURIComponent(dealId)}`;
-  }
-  return `/queue?dealId=${encodeURIComponent(dealId)}`;
+export function buildHealthNudgeButtons(
+  collected: ReturnType<typeof collectHealthNudgeItems>,
+  env: NodeJS.ProcessEnv = process.env,
+): TelegramReplyMarkup | undefined {
+  const https = (href: string) => {
+    const url = absoluteActionHref(href, env);
+    return /^https:\/\//i.test(url) ? url : "";
+  };
+  const floor = https("/");
+  const queue = https("/queue");
+  const intake = https("/orders");
+  const prints = https("/prints");
+  const row1 = [
+    floor ? { text: "Floor", url: floor } : null,
+    queue ? { text: "Queue", url: queue } : null,
+  ].filter((button): button is { text: string; url: string } => Boolean(button));
+  const row2 = [
+    collected.intakePending > 0 || collected.intakeAwaiting > 0
+      ? intake
+        ? { text: "Intake", url: intake }
+        : null
+      : null,
+    collected.attention.some((item) => item.issueKey === "no_plates")
+      ? prints
+        ? { text: "Prints", url: prints }
+        : null
+      : null,
+  ].filter((button): button is { text: string; url: string } => Boolean(button));
+  const inline_keyboard = [row1, row2].filter((row) => row.length > 0);
+  return inline_keyboard.length > 0 ? { inline_keyboard } : undefined;
 }
 
 export function buildHealthNudgeText(
   ctx: TrackerAssistantContext,
   env: NodeJS.ProcessEnv = process.env,
-  options?: { title?: string },
+  options?: { title?: string; now?: Date; timeZone?: string },
 ): { text: string; fingerprint: string; hasWork: boolean } {
-  const snapshot = ctx.snapshot;
-  const collected = collectHealthNudgeItems(snapshot);
-  const fingerprint = healthNudgeFingerprint(snapshot);
-  const title = options?.title?.trim() || "Print Ops — health check";
+  void env;
+  const collected = collectHealthNudgeItems(ctx.snapshot);
+  const fingerprint = healthNudgeFingerprint(ctx.snapshot);
+  const title = (options?.title?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops";
 
+  const edition = buildHealthDigestEdition(ctx, { title, now: options?.now, timeZone: options?.timeZone });
   if (!collected.hasWork) {
     return {
-      text: `<b>${escapeHtml(title)}</b>\n\nAll clear — no missing plates, incomplete costs, stale deals, or stuck intake.`,
+      text: `<b>${escapeHtml(edition.title)}</b>\n\n${escapeHtml(edition.lede)}\n${escapeHtml(edition.deck)}`,
       fingerprint,
       hasWork: false,
     };
   }
 
-  const lines: string[] = [`<b>${escapeHtml(title)}</b>`];
-  const needBits: string[] = [];
-  if (collected.attention.length > 0) {
-    needBits.push(
-      `${collected.attention.length} deal${collected.attention.length === 1 ? "" : "s"}`,
-    );
-  }
-  if (collected.intakePending > 0) {
-    needBits.push(`${collected.intakePending} to review`);
-  }
-  if (collected.intakeAwaiting > 0) {
-    needBits.push(`${collected.intakeAwaiting} awaiting buyer`);
-  }
-  lines.push(`Needs you: ${needBits.join(" · ")}`);
-
-  if (collected.intakePending > 0 || collected.intakeAwaiting > 0) {
+  const lines: string[] = [`<b>${escapeHtml(edition.kicker)}</b>`, `<b>${escapeHtml(edition.title)}</b>`];
+  lines.push(escapeHtml(edition.dateLine));
+  lines.push("");
+  lines.push(escapeHtml(edition.lede));
+  if (edition.deck) lines.push(escapeHtml(edition.deck));
+  if (edition.intakeLine) {
     lines.push("");
-    lines.push(`<b>Intake</b> · ${htmlLink("open", absoluteActionHref("/orders", env))}`);
-    if (collected.intakePending > 0) {
-      lines.push(
-        `• ${collected.intakePending} paid order${collected.intakePending === 1 ? "" : "s"} waiting for review`,
-      );
-    }
-    if (collected.intakeAwaiting > 0) {
-      lines.push(
-        `• ${collected.intakeAwaiting} buyer form${collected.intakeAwaiting === 1 ? "" : "s"} still open`,
-      );
-    }
+    lines.push(`<b>Intake</b>`);
+    lines.push(escapeHtml(edition.intakeLine));
   }
 
   const byKey = new Map<string, typeof collected.attention>();
@@ -248,25 +262,17 @@ export function buildHealthNudgeText(
     const heading = groupHeading(issueKey);
     lines.push("");
     lines.push(`<b>${heading.title}</b> · ${escapeHtml(heading.hint)}`);
-    for (const item of items.slice(0, 6)) {
-      const href = absoluteActionHref(hrefForIssue(item.issueKey, item.dealId), env);
-      const name = htmlLink(shortLabel(item.dealName), href);
+    for (const item of items.slice(0, 5)) {
       const stage = item.stage.trim() ? ` · ${escapeHtml(shortLabel(item.stage, 24))}` : "";
-      lines.push(`• ${name}${stage}`);
+      lines.push(`• ${escapeHtml(shortLabel(item.dealName))}${stage}`);
     }
-    if (items.length > 6) {
-      const moreHref =
-        issueKey === "no_plates"
-          ? absoluteActionHref("/prints", env)
-          : absoluteActionHref("/queue", env);
-      lines.push(`• ${htmlLink(`and ${items.length - 6} more`, moreHref)}`);
+    if (items.length > 5) {
+      lines.push(`• and ${items.length - 5} more in the shop`);
     }
   }
 
   lines.push("");
-  lines.push(
-    `${snapshot.summary.activeOrders} active · ${htmlLink("Floor", absoluteActionHref("/", env))} · ${htmlLink("Stats", absoluteActionHref("/performance", env))}`,
-  );
+  lines.push(escapeHtml(edition.folio));
 
   const text = lines.join("\n").trim();
   return {
@@ -289,7 +295,12 @@ export async function sendHealthNudge(
   const now = options?.now ?? new Date();
   const dateKey = localNudgeDateKey(schedule.timeZone, now);
   const hour = localNudgeHour(schedule.timeZone, now);
-  const built = buildHealthNudgeText(ctx, env, { title: options?.title });
+  const built = buildHealthNudgeText(ctx, env, {
+    title: options?.title,
+    now,
+    timeZone: schedule.timeZone,
+  });
+  const buttons = buildHealthNudgeButtons(collectHealthNudgeItems(ctx.snapshot), env);
 
   if (!built.hasWork && !options?.force) {
     return {
@@ -318,7 +329,34 @@ export async function sendHealthNudge(
     }
   }
 
-  const sent = await sendTelegramMessage(built.text, env, fetch, { parseMode: "HTML" });
+  let sent: TelegramSendResult = { ok: false, error: "not sent" };
+  try {
+    const edition = buildHealthDigestEdition(ctx, {
+      title: (options?.title?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops",
+      now,
+      timeZone: schedule.timeZone,
+    });
+    const png = renderHealthDigestPng(edition);
+    const photo = await sendTelegramPhoto(png, healthDigestCaption(edition), env, fetch, {
+      replyMarkup: buttons,
+    });
+    if (photo.ok) sent = photo;
+    else sent = { ok: false, error: photo.error };
+  } catch (error) {
+    sent = { ok: false, error: error instanceof Error ? error.message : "Could not render the digest card" };
+  }
+
+  if (!sent.ok) {
+    const fallback = await sendTelegramMessage(built.text, env, fetch, {
+      parseMode: "HTML",
+      replyMarkup: buttons,
+    });
+    if (!fallback.ok) {
+      return { ok: false, error: fallback.error, text: built.text };
+    }
+    sent = fallback;
+  }
+
   if (!sent.ok) {
     return { ok: false, error: sent.error, text: built.text };
   }

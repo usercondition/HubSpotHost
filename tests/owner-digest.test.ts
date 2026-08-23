@@ -14,7 +14,7 @@ import {
   readLastDigestDateKey,
   type OwnerDigestContext,
 } from "../server/lib/owner-digest";
-import { getTelegramConfig, sendTelegramMessage } from "../server/lib/telegram";
+import { getTelegramConfig, sendTelegramMessage, sendTelegramPhoto } from "../server/lib/telegram";
 import type {
   PerformanceResponse,
   PrintFileRecord,
@@ -392,6 +392,31 @@ test("sendTelegramMessage posts JSON without throwing on mock fetch", async () =
   assert.equal(html.ok, true);
   const htmlBody = JSON.parse(String(calls[1]!.init?.body));
   assert.equal(htmlBody.parse_mode, "HTML");
+});
+
+test("sendTelegramPhoto posts a PNG with caption and buttons", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 11 } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const result = await sendTelegramPhoto(
+    png,
+    "2 deals need you.",
+    {
+      TELEGRAM_BOT_TOKEN: "123:AA-token",
+      TELEGRAM_CHAT_ID: "99",
+    },
+    fetchImpl,
+    { replyMarkup: { inline_keyboard: [[{ text: "Floor", url: "https://ops.example/#/" }]] } },
+  );
+  assert.equal(result.ok, true);
+  assert.match(calls[0]!.url, /sendPhoto/);
+  assert.ok(calls[0]!.init?.body instanceof FormData);
 });
 
 test("schedule gate respects timezone hour and once-per-day state", () => {

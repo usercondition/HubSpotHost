@@ -1,0 +1,2 @@
+Liberation Serif is licensed under the SIL Open Font License.
+Source: https://github.com/liberationfonts/liberation-fonts

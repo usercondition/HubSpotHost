@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildHealthNudgeButtons,
   buildHealthNudgeText,
   collectHealthNudgeItems,
   getHealthNudgeSchedule,
@@ -94,20 +95,29 @@ test("collectHealthNudgeItems ignores low_margin and keeps actionable keys", () 
   assert.equal(collected.hasWork, true);
 });
 
-test("buildHealthNudgeText lists plates, stale, and intake with deep links", () => {
+test("buildHealthNudgeText lists plates, stale, and intake without raw URLs", () => {
   const built = buildHealthNudgeText(sampleCtx(), { PUBLIC_BASE_URL: "https://ops.example" });
   assert.equal(built.hasWork, true);
   assert.match(built.text, /<b>Plates<\/b>/);
   assert.match(built.text, /Castle Set/);
   assert.match(built.text, /<b>Stale<\/b>/);
   assert.match(built.text, /<b>Intake<\/b>/);
-  assert.match(built.text, /<a href="https:\/\/ops\.example\/#\/orders">open<\/a>/);
-  assert.match(built.text, /<a href="https:\/\/ops\.example\/#\/prints\?dealId=101">Castle Set<\/a>/);
+  assert.match(built.text, /2 deals need you/);
+  assert.doesNotMatch(built.text, /https?:\/\//);
   assert.doesNotMatch(built.text, /Low margin toy/);
   assert.doesNotMatch(built.text, /Open in queue:/);
   assert.doesNotMatch(built.text, /Attach sliced plates before print/);
-  assert.doesNotMatch(built.text, /Open floor:/);
-  assert.doesNotMatch(built.text, /Needs you: .*deal alerts/);
+});
+
+test("health nudge buttons are a short shop row, not per-deal links", () => {
+  const buttons = buildHealthNudgeButtons(collectHealthNudgeItems(sampleSnapshot()), {
+    PUBLIC_BASE_URL: "https://ops.example",
+  });
+  assert.ok(buttons);
+  const labels = buttons.inline_keyboard.flat().map((button) => button.text);
+  assert.deepEqual(labels, ["Floor", "Queue", "Intake", "Prints"]);
+  assert.ok(buttons.inline_keyboard.flat().every((button) => button.url.startsWith("https://ops.example/#/")));
+  assert.equal(buttons.inline_keyboard.flat().some((button) => button.url.includes("dealId=")), false);
 });
 
 test("buildHealthNudgeText is quiet when shop is clear", () => {
@@ -126,7 +136,7 @@ test("buildHealthNudgeText is quiet when shop is clear", () => {
   });
   const built = buildHealthNudgeText(sampleCtx(snapshot));
   assert.equal(built.hasWork, false);
-  assert.match(built.text, /All clear/i);
+  assert.match(built.text, /All quiet/i);
 });
 
 test("fingerprint changes when open work changes", () => {

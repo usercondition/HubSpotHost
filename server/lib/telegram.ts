@@ -12,6 +12,17 @@ export type TelegramSendResult =
   | { ok: true; messageId: number }
   | { ok: false; error: string; status?: number };
 
+export type TelegramInlineButton = { text: string; url: string };
+
+export type TelegramReplyMarkup = {
+  inline_keyboard: TelegramInlineButton[][];
+};
+
+export type TelegramSendOptions = {
+  parseMode?: "HTML";
+  replyMarkup?: TelegramReplyMarkup;
+};
+
 export function getTelegramConfig(env: NodeJS.ProcessEnv = process.env): TelegramConfig | null {
   const token = env.TELEGRAM_BOT_TOKEN?.trim() || "";
   const chatId = env.TELEGRAM_CHAT_ID?.trim() || "";
@@ -29,7 +40,7 @@ export async function sendTelegramMessage(
   text: string,
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
-  options?: { parseMode?: "HTML" },
+  options?: TelegramSendOptions,
 ): Promise<TelegramSendResult> {
   const config = getTelegramConfig(env);
   if (!config) {
@@ -50,6 +61,7 @@ export async function sendTelegramMessage(
         text: clipped,
         disable_web_page_preview: true,
         ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
+        ...(options?.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
       }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -71,6 +83,53 @@ export async function sendTelegramMessage(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Telegram request failed",
+    };
+  }
+}
+
+export async function sendTelegramPhoto(
+  png: Buffer,
+  caption: string,
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: typeof fetch = fetch,
+  options?: TelegramSendOptions,
+): Promise<TelegramSendResult> {
+  const config = getTelegramConfig(env);
+  if (!config) {
+    return { ok: false, error: "Telegram is not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)" };
+  }
+  if (!png?.length) return { ok: false, error: "Photo is empty" };
+
+  const form = new FormData();
+  form.append("chat_id", config.chatId);
+  form.append("photo", new Blob([new Uint8Array(png)], { type: "image/png" }), "health-check.png");
+  const trimmed = caption.trim().slice(0, 1024);
+  if (trimmed) form.append("caption", trimmed);
+  form.append("disable_web_page_preview", "true");
+  if (options?.parseMode) form.append("parse_mode", options.parseMode);
+  if (options?.replyMarkup) form.append("reply_markup", JSON.stringify(options.replyMarkup));
+
+  try {
+    const response = await fetchImpl(`https://api.telegram.org/bot${config.token}/sendPhoto`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; description?: string; result?: { message_id?: number } }
+      | null;
+    if (!response.ok || !payload?.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: payload?.description || `Telegram photo send failed (${response.status})`,
+      };
+    }
+    return { ok: true, messageId: Number(payload.result?.message_id) || 0 };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Telegram photo request failed",
     };
   }
 }
