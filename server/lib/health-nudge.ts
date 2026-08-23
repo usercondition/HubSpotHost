@@ -210,7 +210,7 @@ export function buildHealthNudgeText(
   });
   if (!collected.hasWork) {
     return {
-      text: `<b>${escapeHtml(edition.kicker)}</b>\n${escapeHtml(edition.lede)}\n${escapeHtml(edition.deck)}`,
+      text: `<b>${escapeHtml(edition.title)}</b>\n${escapeHtml(edition.lede)}\n${escapeHtml(edition.deck)}`,
       fingerprint,
       hasWork: false,
       edition,
@@ -218,8 +218,8 @@ export function buildHealthNudgeText(
   }
 
   const lines: string[] = [
-    `<b>${escapeHtml(edition.kicker)}</b>`,
-    escapeHtml(edition.dateLine),
+    `<b>${escapeHtml(edition.title)}</b>`,
+    `${escapeHtml(edition.kicker)} · ${escapeHtml(edition.dateLine)}`,
     "",
     escapeHtml(edition.lede),
   ];

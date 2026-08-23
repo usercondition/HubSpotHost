@@ -98,17 +98,17 @@ test("collectHealthNudgeItems ignores low_margin and keeps actionable keys", () 
 test("buildHealthNudgeText lists plates, stale, and intake without raw URLs", () => {
   const built = buildHealthNudgeText(sampleCtx(), { PUBLIC_BASE_URL: "https://ops.example" });
   assert.equal(built.hasWork, true);
-  assert.match(built.text, /<b>Plates<\/b>/);
+  assert.match(built.text, /<b>Need plates<\/b>/);
   assert.match(built.text, /Castle Set/);
   assert.match(built.text, /<b>Stale<\/b>/);
   assert.match(built.text, /<b>Intake<\/b>/);
-  assert.match(built.text, /2 deals need you/);
-  assert.match(built.text, /Need a slice/);
+  assert.match(built.text, /Do this next/);
+  assert.match(built.text, /Attach CTB \/ slice files/);
   assert.doesNotMatch(built.text, /https?:\/\//);
   assert.doesNotMatch(built.text, /Low margin toy/);
   assert.doesNotMatch(built.text, /Open in queue:/);
   assert.doesNotMatch(built.text, /Attach sliced plates before print/);
-  assert.doesNotMatch(built.text, /add as they become known/);
+  assert.doesNotMatch(built.text, /Need a slice/);
 });
 
 test("health nudge buttons are a short shop row, not per-deal links", () => {
@@ -157,7 +157,7 @@ test("buildHealthNudgeText is quiet when shop is clear", () => {
   });
   const built = buildHealthNudgeText(sampleCtx(snapshot));
   assert.equal(built.hasWork, false);
-  assert.match(built.text, /All quiet/i);
+  assert.match(built.text, /Floor is clear/);
 });
 
 test("fingerprint changes when open work changes", () => {

@@ -89,35 +89,40 @@ test("shopDigestTitle strips the health-check suffix", () => {
   assert.equal(shopDigestTitle(""), "Print Ops");
 });
 
-test("newspaper edition reads as a digest, not a link list", () => {
+test("floor card uses Print Ops glance language, not a newspaper masthead", () => {
   const edition = buildHealthDigestEdition(ctx(), {
     now: new Date("2026-08-23T18:00:00.000Z"),
     timeZone: "UTC",
   });
   assert.equal(edition.allClear, false);
-  assert.equal(edition.kicker, "The Daily Floor");
-  assert.equal(edition.lede, "4 deals need you.");
-  assert.equal(edition.deck, "1 without plates  ·  2 without costs  ·  1 gone quiet");
-  assert.match(edition.intakeLine || "", /waiting review/);
-  assert.doesNotMatch(edition.deck, /to review|awaiting buyer/);
+  assert.equal(edition.kicker, "Floor");
+  assert.equal(edition.lede, "Do this next");
+  assert.equal(edition.deck, "1 need plates · 2 need costs · 1 stale");
+  assert.match(edition.intakeLine || "", /intake form/);
+  assert.equal(edition.rows[0]?.badge, "Intake review");
   assert.deepEqual(
     edition.sections.map((section) => section.kicker),
-    ["Plates", "Costs", "Stale"],
+    ["Need plates", "Need costs", "Stale"],
+  );
+  assert.deepEqual(
+    edition.metrics.map((metric) => metric.label),
+    ["Need plates", "Need costs", "Stale", "Intake review", "Awaiting buyer"],
   );
   const svg = renderHealthDigestSvg(edition).svg;
-  assert.match(svg, /THE DAILY FLOOR/);
-  assert.match(svg, /PRINT OPS/);
-  assert.match(svg, /HEALTH CHECK/);
+  assert.match(svg, /Print Ops/);
+  assert.match(svg, /GLANCE/);
+  assert.match(svg, /Do this next/);
+  assert.match(svg, /NEED PLATES|Needs plates/);
   assert.match(svg, /Armigers - Jose/);
-  assert.match(svg, /Sunday edition/);
+  assert.doesNotMatch(svg, /THE DAILY FLOOR/);
+  assert.doesNotMatch(svg, /Sunday edition/);
+  assert.doesNotMatch(svg, /Vol\. I/);
   assert.doesNotMatch(svg, /https:\/\/(?!www\.w3\.org)/);
   assert.doesNotMatch(svg, /#\/queue|#\/prints/);
   assert.doesNotMatch(svg, /Add material, labor, packaging/);
-  assert.doesNotMatch(svg, /Attach sliced/);
-  assert.doesNotMatch(svg, /1 to review/);
 });
 
-test("caption stays short and does not repeat the intake band twice when only intake is open", () => {
+test("caption stays short and does not repeat intake when only intake is open", () => {
   const edition = buildHealthDigestEdition(
     ctx({
       attention: [],
@@ -125,14 +130,14 @@ test("caption stays short and does not repeat the intake band twice when only in
     }),
     { now: new Date("2026-08-23T18:00:00.000Z"), timeZone: "UTC" },
   );
-  assert.equal(edition.lede, "Intake needs you.");
+  assert.equal(edition.lede, "Do this next");
   assert.equal(edition.intakeLine, null);
-  assert.match(edition.deck, /waiting review/);
-  assert.match(healthDigestCaption(edition), /Intake needs you/);
-  assert.doesNotMatch(healthDigestCaption(edition), /waiting review.*waiting review/);
+  assert.match(edition.deck, /intake form/);
+  assert.match(healthDigestCaption(edition), /Do this next/);
+  assert.doesNotMatch(healthDigestCaption(edition), /intake form.*intake form/);
 });
 
-test("all-clear edition is a thin extra, not an empty grid", () => {
+test("all-clear card says Floor is clear", () => {
   const edition = buildHealthDigestEdition(
     ctx({
       attention: [],
@@ -141,20 +146,20 @@ test("all-clear edition is a thin extra, not an empty grid", () => {
     { now: new Date("2026-08-23T18:00:00.000Z"), timeZone: "UTC" },
   );
   assert.equal(edition.allClear, true);
-  assert.match(edition.lede, /All quiet/);
+  assert.equal(edition.lede, "Floor is clear");
   assert.equal(edition.sections.length, 0);
-  assert.match(healthDigestCaption(edition), /Sunday edition · all quiet/);
+  assert.equal(healthDigestCaption(edition), "Floor is clear.");
   const rendered = renderHealthDigestSvg(edition);
-  assert.ok(rendered.height < 640);
-  assert.match(rendered.svg, /Nothing in the queue/);
+  assert.match(rendered.svg, /Floor is clear/);
+  assert.match(rendered.svg, /When something needs plates/);
 });
 
-test("health digest card renders a PNG newspaper page", () => {
+test("health digest card renders a PNG Floor board", () => {
   const edition = buildHealthDigestEdition(ctx(), {
     now: new Date("2026-08-23T18:00:00.000Z"),
     timeZone: "UTC",
   });
-  assert.ok(digestFontFiles().length > 0, "serif fonts should be available");
+  assert.ok(digestFontFiles().some((path) => path.includes("SpaceGrotesk")), "Space Grotesk should be bundled");
   const png = renderHealthDigestPng(edition);
   assert.ok(isPngBuffer(png));
   assert.ok(png.length > 20_000);

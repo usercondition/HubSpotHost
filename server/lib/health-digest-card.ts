@@ -1,8 +1,8 @@
 /**
- * Newspaper-style health-check card for Telegram.
+ * Floor-style health-check card for Telegram.
  *
- * Renders a shop-floor edition as PNG so the ping reads like a digest
- * instead of a list of URLs. Buttons under the photo open the app.
+ * Same charcoal bench, amber marks, and glance language as Print Ops —
+ * a status board, not a newspaper. Buttons under the photo open the app.
  */
 
 import { existsSync } from "node:fs";
@@ -14,12 +14,18 @@ import type { TrackerAssistantContext } from "./tracker-assistant";
 const CARD_WIDTH = 1080;
 const ISSUE_ORDER = ["no_plates", "costs_incomplete", "stale"] as const;
 
-const FONT = "Liberation Serif, Noto Serif, DejaVu Serif, Times New Roman, serif";
-const INK = "#1c1612";
-const MUTED = "#6a6156";
-const CRIMSON = "#7c1d1d";
-const PAPER = "#f3ead8";
-const BAND = "#ead9c0";
+const SANS = "Space Grotesk, Liberation Sans, DejaVu Sans, sans-serif";
+const MONO = "IBM Plex Mono, Liberation Mono, DejaVu Sans Mono, monospace";
+
+const BENCH = "#0f1114";
+const CARD = "#16181d";
+const BORDER = "#2a2e35";
+const INK = "#f1f0ee";
+const MUTED = "#93979f";
+const AMBER = "#f69323";
+const WARN = "#f9a410";
+const LIVE = "#34b277";
+const BAD = "#df3a3a";
 
 export type DigestSection = {
   key: string;
@@ -29,48 +35,73 @@ export type DigestSection = {
   overflow: number;
 };
 
+export type DigestGlanceRow = {
+  name: string;
+  badge: string;
+  detail: string;
+  tone: "warn" | "bad";
+};
+
+export type DigestMetric = {
+  label: string;
+  value: number;
+  hint: string;
+  tone: "warn" | "bad" | "good" | "neutral";
+};
+
 export type HealthDigestEdition = {
   title: string;
   kicker: string;
   dateLine: string;
   weekday: string;
-  issueLine: string;
   lede: string;
   deck: string;
   intakeLine: string | null;
   sections: DigestSection[];
+  rows: DigestGlanceRow[];
+  metrics: DigestMetric[];
   folio: string;
   allClear: boolean;
+  openCount: number;
 };
 
 export function shopDigestTitle(raw?: string): string {
   return (raw?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops";
 }
 
-export function digestSectionMeta(issueKey: string): { kicker: string; hint: string; deck: (count: number) => string } {
+export function digestSectionMeta(issueKey: string): {
+  kicker: string;
+  hint: string;
+  badge: string;
+  deck: (count: number) => string;
+} {
   switch (issueKey) {
     case "no_plates":
       return {
-        kicker: "Plates",
-        hint: "Need a slice",
-        deck: (count) => (count === 1 ? "1 without plates" : `${count} without plates`),
+        kicker: "Need plates",
+        hint: "Attach CTB / slice files",
+        badge: "Needs plates",
+        deck: (count) => (count === 1 ? "1 need plates" : `${count} need plates`),
       };
     case "costs_incomplete":
       return {
-        kicker: "Costs",
-        hint: "Books still open",
-        deck: (count) => (count === 1 ? "1 without costs" : `${count} without costs`),
+        kicker: "Need costs",
+        hint: "Material / labor / ship",
+        badge: "Needs costs",
+        deck: (count) => (count === 1 ? "1 need costs" : `${count} need costs`),
       };
     case "stale":
       return {
         kicker: "Stale",
-        hint: "Quiet for a week",
-        deck: (count) => (count === 1 ? "1 gone quiet" : `${count} gone quiet`),
+        hint: "No HubSpot update lately",
+        badge: "Stale",
+        deck: (count) => (count === 1 ? "1 stale" : `${count} stale`),
       };
     default:
       return {
         kicker: "Attention",
         hint: "Needs a look",
+        badge: "Open",
         deck: (count) => `${count} open`,
       };
   }
@@ -90,51 +121,37 @@ function clip(value: string, limit: number): string {
   return `${cleaned.slice(0, limit - 1).trim()}…`;
 }
 
-function localParts(now: Date, timeZone: string): { year: number; month: number; day: number; weekday: string } {
+function localParts(now: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "long",
-    year: "numeric",
-    month: "numeric",
+    month: "short",
     day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   }).formatToParts(now);
   const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
   return {
-    year: Number(read("year")),
-    month: Number(read("month")),
-    day: Number(read("day")),
     weekday: read("weekday"),
+    month: read("month"),
+    day: read("day"),
+    hour: read("hour"),
+    minute: read("minute"),
+    dayPeriod: read("dayPeriod"),
   };
 }
 
-function weekdayDate(now: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(now);
+function shopDateLine(now: Date, timeZone: string): string {
+  const { weekday, month, day, hour, minute, dayPeriod } = localParts(now, timeZone);
+  return `${weekday.slice(0, 3)} ${day} ${month} · ${hour}:${minute} ${dayPeriod}`;
 }
 
-function dayOfYear(now: Date, timeZone: string): number {
-  const { year, month, day } = localParts(now, timeZone);
-  const utc = Date.UTC(year, month - 1, day);
-  const start = Date.UTC(year, 0, 1);
-  return Math.floor((utc - start) / 86_400_000) + 1;
-}
-
-function nameLimitForWidth(width: number): number {
-  if (width >= 800) return 42;
-  if (width >= 400) return 26;
-  return 18;
-}
-
-function shortStage(stage: string, limit: number): string {
-  const cleaned = stage.replace(/\s+/g, " ").trim();
-  if (/^queued to print$/i.test(cleaned)) return "Queued";
-  if (/^ready to print$/i.test(cleaned)) return "Ready";
-  return clip(cleaned, limit);
+function toneHex(tone: DigestMetric["tone"] | DigestGlanceRow["tone"]): string {
+  if (tone === "bad") return BAD;
+  if (tone === "good") return LIVE;
+  if (tone === "warn") return WARN;
+  return MUTED;
 }
 
 export function buildHealthDigestEdition(
@@ -151,7 +168,6 @@ export function buildHealthDigestEdition(
   const now = options?.now ?? new Date();
   const timeZone = options?.timeZone || "America/New_York";
   const { weekday } = localParts(now, timeZone);
-  const dateLine = weekdayDate(now, timeZone);
 
   const sections: DigestSection[] = [];
   const deckBits: string[] = [];
@@ -159,15 +175,13 @@ export function buildHealthDigestEdition(
     const rows = attention.filter((item) => item.issueKey === key);
     if (rows.length === 0) continue;
     const meta = digestSectionMeta(key);
-    const widthGuess = attention.length >= 3 ? 300 : attention.length === 2 ? 460 : 900;
-    const limit = widthGuess < 360 ? 28 : nameLimitForWidth(widthGuess);
     sections.push({
       key,
       kicker: meta.kicker,
       hint: meta.hint,
       items: rows.slice(0, 4).map((item) => ({
-        name: clip(item.dealName, limit),
-        stage: shortStage(item.stage, widthGuess >= 400 ? 18 : 16),
+        name: clip(item.dealName, 36),
+        stage: clip(item.stage, 22),
       })),
       overflow: Math.max(0, rows.length - 4),
     });
@@ -175,37 +189,76 @@ export function buildHealthDigestEdition(
   }
 
   let intakeLine: string | null = null;
-  if (pending > 0 || awaiting > 0) {
-    const bits: string[] = [];
-    if (pending > 0) bits.push(`${pending} waiting review`);
-    if (awaiting > 0) bits.push(`${awaiting} buyer form${awaiting === 1 ? "" : "s"} open`);
-    intakeLine = bits.join("  ·  ");
+  if (pending > 0) {
+    intakeLine = `${pending} intake form${pending === 1 ? "" : "s"} waiting for review`;
+  } else if (awaiting > 0 && attention.length === 0) {
+    intakeLine = `${awaiting} buyer form${awaiting === 1 ? "" : "s"} still open`;
   }
 
-  const lede = allClear
-    ? "All quiet on the floor."
-    : attention.length === 0
-      ? "Intake needs you."
-      : attention.length === 1
-        ? "1 deal needs you."
-        : `${attention.length} deals need you.`;
+  const rows: DigestGlanceRow[] = [];
+  if (pending > 0) {
+    rows.push({
+      name: `${pending} intake form${pending === 1 ? "" : "s"} waiting for review`,
+      badge: "Intake review",
+      detail: "Approve or reject paid order intake",
+      tone: "warn",
+    });
+  } else if (awaiting > 0 && attention.length === 0) {
+    rows.push({
+      name: `${awaiting} buyer form${awaiting === 1 ? "" : "s"} still open`,
+      badge: "Awaiting buyer",
+      detail: "Form not finished",
+      tone: "warn",
+    });
+  }
+  for (const item of attention.slice(0, pending > 0 ? 4 : 5)) {
+    const meta = digestSectionMeta(item.issueKey);
+    rows.push({
+      name: clip(item.dealName, 34),
+      badge: meta.badge,
+      detail: clip([item.stage, meta.hint].filter(Boolean).join(" · "), 52),
+      tone: item.issueKey === "stale" || item.severity === "bad" ? "bad" : "warn",
+    });
+  }
+  const hidden = attention.length - (pending > 0 ? 4 : 5);
+  if (hidden > 0) {
+    rows.push({
+      name: `and ${hidden} more on the floor`,
+      badge: "Open",
+      detail: "Queue has the rest",
+      tone: "warn",
+    });
+  }
+
+  const plates = attention.filter((item) => item.issueKey === "no_plates").length;
+  const costs = attention.filter((item) => item.issueKey === "costs_incomplete").length;
+  const stale = attention.filter((item) => item.issueKey === "stale").length;
+  const metrics: DigestMetric[] = [
+    { label: "Need plates", value: plates, hint: "CTB / slice files", tone: plates > 0 ? "warn" : "good" },
+    { label: "Need costs", value: costs, hint: "Material / ship", tone: costs > 0 ? "warn" : "good" },
+    { label: "Stale", value: stale, hint: "No HubSpot update", tone: stale > 0 ? "bad" : "good" },
+    { label: "Intake review", value: pending, hint: "Waiting on you", tone: pending > 0 ? "warn" : "neutral" },
+    { label: "Awaiting buyer", value: awaiting, hint: "Form not finished", tone: awaiting > 0 ? "warn" : "neutral" },
+  ];
 
   const deck = allClear
-    ? "Nothing waiting on plates, costs, or intake."
-    : deckBits.join("  ·  ") || intakeLine || "Open items listed below.";
+    ? "No missing plates, costs, stale jobs, or intake waiting on you."
+    : deckBits.join(" · ") || intakeLine || "Open items on the floor.";
 
   return {
     title: shopDigestTitle(options?.title),
-    kicker: "The Daily Floor",
-    dateLine,
+    kicker: "Floor",
+    dateLine: shopDateLine(now, timeZone),
     weekday,
-    issueLine: `Vol. I  ·  No. ${dayOfYear(now, timeZone)}`,
-    lede,
+    lede: allClear ? "Floor is clear" : "Do this next",
     deck,
-    intakeLine: attention.length > 0 ? intakeLine : null,
+    intakeLine: attention.length > 0 ? (pending > 0 ? intakeLine : null) : null,
     sections,
+    rows,
+    metrics,
     folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
     allClear,
+    openCount: attention.length + pending,
   };
 }
 
@@ -217,20 +270,23 @@ function fontSearchDirs(): string[] {
     join(here, "fonts"),
     join(here, "../fonts"),
     "/usr/share/fonts/truetype/liberation",
-    "/usr/share/fonts/truetype/dejavu",
-    "/usr/share/fonts/truetype/noto",
+    "/usr/share/fonts/opentype",
+    "/usr/share/fonts/truetype",
   ];
 }
 
 export function digestFontFiles(): string[] {
   const names = [
+    "SpaceGrotesk-Regular.otf",
+    "SpaceGrotesk-Medium.otf",
+    "SpaceGrotesk-Bold.otf",
+    "IBMPlexMono-Regular.ttf",
+    "IBMPlexMono-Medium.ttf",
+    "LiberationSans-Regular.ttf",
+    "LiberationSans-Bold.ttf",
+    "LiberationMono-Regular.ttf",
     "LiberationSerif-Regular.ttf",
     "LiberationSerif-Bold.ttf",
-    "LiberationSerif-Italic.ttf",
-    "DejaVuSerif.ttf",
-    "DejaVuSerif-Bold.ttf",
-    "NotoSerif-Regular.ttf",
-    "NotoSerif-Bold.ttf",
   ];
   return fontSearchDirs()
     .flatMap((dir) => names.map((name) => join(dir, name)))
@@ -242,220 +298,198 @@ function text(opts: {
   y: number;
   size: number;
   value: string;
+  font?: string;
   anchor?: "start" | "middle" | "end";
-  weight?: 400 | 700;
-  italic?: boolean;
+  weight?: 400 | 500 | 600 | 700;
   fill?: string;
   tracking?: number;
 }): string {
+  const font = opts.font || SANS;
   const anchor = opts.anchor ? ` text-anchor="${opts.anchor}"` : "";
   const weight = opts.weight ? ` font-weight="${opts.weight}"` : "";
-  const italic = opts.italic ? ` font-style="italic"` : "";
   const tracking = opts.tracking != null ? ` letter-spacing="${opts.tracking}"` : "";
-  return `<text x="${opts.x}" y="${opts.y}" font-family="${FONT}" font-size="${opts.size}"${anchor}${weight}${italic} fill="${opts.fill || INK}"${tracking}>${escapeXml(opts.value)}</text>`;
+  return `<text x="${opts.x}" y="${opts.y}" font-family="${font}" font-size="${opts.size}"${anchor}${weight} fill="${opts.fill || INK}"${tracking}>${escapeXml(opts.value)}</text>`;
 }
 
-function rule(x1: number, x2: number, y: number, width = 1): string {
-  return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${INK}" stroke-width="${width}"/>`;
+function markSvg(x: number, y: number, size: number): string {
+  const scale = size / 32;
+  return `<g transform="translate(${x} ${y}) scale(${scale})" fill="none" stroke="${AMBER}">
+    <rect x="3.5" y="3.5" width="25" height="25" rx="7" stroke-width="1.8" opacity="0.35"/>
+    <path d="M9 22h14" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M11 17h10" stroke-width="2.2" stroke-linecap="round" opacity="0.75"/>
+    <path d="M13 12h6" stroke-width="2.2" stroke-linecap="round" opacity="0.5"/>
+    <circle cx="16" cy="8" r="1.7" fill="${AMBER}" stroke="none"/>
+  </g>`;
 }
 
-function doubleRule(x1: number, x2: number, y: number): { svg: string; height: number } {
-  return {
-    svg: `${rule(x1, x2, y, 2.4)}\n${rule(x1, x2, y + 5, 0.7)}`,
-    height: 5,
-  };
+function pill(x: number, y: number, label: string, tone: "warn" | "bad" | "good" | "alert"): { svg: string; width: number } {
+  const color = tone === "good" ? LIVE : tone === "bad" ? BAD : WARN;
+  const width = Math.max(92, 22 + label.length * 8.2);
+  const height = 28;
+  const svg = `<g>
+    <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="14" fill="${color}24" stroke="${color}66"/>
+    <circle cx="${x + 14}" cy="${y + 14}" r="4" fill="${color}"/>
+    ${text({ x: x + 26, y: y + 19, size: 12, value: label, weight: 700, fill: color, tracking: 1.1, font: SANS })}
+  </g>`;
+  return { svg, width };
 }
 
-function sectionBlock(section: DigestSection, x: number, y: number, width: number): { svg: string; height: number } {
-  const lines: string[] = [];
-  let cursor = y;
-  const showStage = width >= 360;
-  lines.push(
-    text({
-      x,
-      y: cursor,
-      size: 18,
-      value: section.kicker.toUpperCase(),
-      weight: 700,
-      fill: CRIMSON,
-      tracking: 2.4,
-    }),
-  );
-  cursor += 24;
-  lines.push(text({ x, y: cursor, size: 17, value: section.hint, italic: true, fill: MUTED }));
-  cursor += 12;
-  lines.push(rule(x, x + width, cursor, 0.8));
-  cursor += 30;
-  for (const item of section.items) {
-    lines.push(text({ x, y: cursor, size: 23, value: item.name, weight: 700 }));
-    if (showStage && item.stage) {
-      lines.push(
-        text({
-          x: x + width,
-          y: cursor,
-          size: 16,
-          value: item.stage,
-          anchor: "end",
-          italic: true,
-          fill: MUTED,
-        }),
-      );
-    }
-    cursor += 34;
-  }
-  if (section.overflow > 0) {
-    lines.push(
-      text({
-        x,
-        y: cursor,
-        size: 17,
-        value: `and ${section.overflow} more`,
-        italic: true,
-        fill: MUTED,
-      }),
-    );
-    cursor += 26;
-  }
-  return { svg: lines.join("\n"), height: cursor - y };
+function badge(x: number, y: number, label: string, tone: DigestGlanceRow["tone"]): { svg: string; width: number } {
+  const color = toneHex(tone);
+  const width = Math.max(78, 16 + label.length * 7.4);
+  const svg = `<g>
+    <rect x="${x}" y="${y}" width="${width}" height="24" rx="6" fill="${color}22" stroke="${color}59"/>
+    ${text({ x: x + width / 2, y: y + 16, size: 12, value: label, anchor: "middle", weight: 600, fill: color })}
+  </g>`;
+  return { svg, width };
 }
 
-function renderSectionGrid(
-  sections: DigestSection[],
-  x: number,
-  y: number,
-  totalWidth: number,
-): { svg: string; height: number } {
-  if (sections.length === 0) return { svg: "", height: 0 };
-  const cols = Math.min(3, sections.length);
-  const gap = 28;
-  const colWidth = (totalWidth - gap * (cols - 1)) / cols;
-  const blocks = sections.slice(0, cols).map((section, index) =>
-    sectionBlock(section, x + index * (colWidth + gap), y, colWidth),
-  );
-  const height = Math.max(...blocks.map((block) => block.height));
-  const gutters = blocks.slice(0, -1).map((_, index) => {
-    const gx = x + (index + 1) * colWidth + index * gap + gap / 2;
-    return `<line x1="${gx}" y1="${y - 4}" x2="${gx}" y2="${y + height}" stroke="${INK}" stroke-width="0.7"/>`;
-  });
-  return { svg: [...gutters, ...blocks.map((block) => block.svg)].join("\n"), height };
+function renderGlanceRow(row: DigestGlanceRow, x: number, y: number, width: number): string {
+  const stripe = toneHex(row.tone);
+  const pillBadge = badge(x + width - 16 - Math.max(78, 16 + row.badge.length * 7.4), y + 16, row.badge, row.tone);
+  return `<g>
+    <rect x="${x}" y="${y}" width="${width}" height="68" rx="12" fill="${BENCH}73" stroke="${BORDER}"/>
+    <rect x="${x}" y="${y + 10}" width="3" height="48" rx="1.5" fill="${stripe}"/>
+    ${text({ x: x + 22, y: y + 28, size: 20, value: row.name, weight: 600 })}
+    ${text({ x: x + 22, y: y + 50, size: 14, value: row.detail, fill: MUTED })}
+    ${pillBadge.svg}
+  </g>`;
+}
+
+function renderMetric(metric: DigestMetric, x: number, y: number, width: number): string {
+  const color = toneHex(metric.tone);
+  const border =
+    metric.tone === "good" ? `${LIVE}66` : metric.tone === "bad" ? `${BAD}73` : metric.tone === "warn" ? `${WARN}73` : BORDER;
+  const wash =
+    metric.tone === "good" ? `${LIVE}1a` : metric.tone === "bad" ? `${BAD}1a` : metric.tone === "warn" ? `${WARN}1f` : `${CARD}`;
+  return `<g>
+    <rect x="${x}" y="${y}" width="${width}" height="118" rx="12" fill="${wash}" stroke="${border}"/>
+    ${text({ x: x + 14, y: y + 28, size: 12, value: metric.label.toUpperCase(), weight: 600, fill: MUTED, tracking: 1.4 })}
+    ${text({ x: x + 14, y: y + 70, size: 34, value: String(metric.value), weight: 700, fill: color, font: MONO })}
+    ${text({ x: x + 14, y: y + 96, size: 13, value: metric.hint, fill: MUTED })}
+  </g>`;
+}
+
+function sectionChrome(x: number, y: number, width: number, height: number): string {
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="16" fill="${CARD}" stroke="${BORDER}"/>`;
 }
 
 export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: string; width: number; height: number } {
-  const pad = 72;
-  const contentWidth = CARD_WIDTH - pad * 2;
-  const parts: string[] = [];
-  let y = 70;
-  parts.push(rule(pad, CARD_WIDTH - pad, y, 0.8));
-  y += 52;
+  const pad = 40;
+  const inner = CARD_WIDTH - pad * 2;
+  const glancePad = 22;
+  const header: string[] = [];
+  const glance: string[] = [];
+  const counts: string[] = [];
+  const footer: string[] = [];
+  let y = 44;
 
-  parts.push(
+  header.push(markSvg(pad, y, 44));
+  header.push(text({ x: pad + 56, y: y + 20, size: 22, value: edition.title, weight: 700 }));
+  header.push(
     text({
-      x: CARD_WIDTH / 2,
-      y,
-      size: 52,
-      value: edition.kicker.toUpperCase(),
-      anchor: "middle",
-      weight: 700,
-      tracking: 3.5,
-    }),
-  );
-  y += 34;
-  parts.push(
-    text({
-      x: CARD_WIDTH / 2,
-      y,
-      size: 16,
-      value: edition.title.toUpperCase(),
-      anchor: "middle",
-      fill: CRIMSON,
-      tracking: 6,
-    }),
-  );
-  y += 22;
-  const mastheadRule = doubleRule(pad, CARD_WIDTH - pad, y);
-  parts.push(mastheadRule.svg);
-  y += 32;
-  parts.push(text({ x: pad, y, size: 17, value: edition.issueLine, fill: MUTED }));
-  parts.push(
-    text({
-      x: CARD_WIDTH / 2,
-      y,
-      size: 15,
-      value: "HEALTH CHECK",
-      anchor: "middle",
-      weight: 700,
-      fill: CRIMSON,
-      tracking: 3.2,
-    }),
-  );
-  parts.push(text({ x: CARD_WIDTH - pad, y, size: 17, value: edition.dateLine, anchor: "end", fill: MUTED }));
-  y += 16;
-  parts.push(rule(pad, CARD_WIDTH - pad, y, 1));
-  y += 58;
-  parts.push(text({ x: pad, y, size: 40, value: edition.lede, weight: 700 }));
-  y += 34;
-  parts.push(text({ x: pad, y, size: 22, value: edition.deck, italic: true, fill: MUTED }));
-  y += 28;
-
-  if (edition.intakeLine) {
-    parts.push(`<rect x="${pad}" y="${y}" width="${contentWidth}" height="48" fill="${BAND}"/>`);
-    parts.push(
-      text({
-        x: pad + 16,
-        y: y + 31,
-        size: 16,
-        value: "INTAKE",
-        weight: 700,
-        fill: CRIMSON,
-        tracking: 2.2,
-      }),
-    );
-    parts.push(text({ x: pad + 112, y: y + 31, size: 20, value: edition.intakeLine }));
-    y += 68;
-  }
-
-  if (edition.sections.length === 0) {
-    y += 12;
-    parts.push(
-      text({
-        x: CARD_WIDTH / 2,
-        y,
-        size: 24,
-        value: edition.allClear ? "Nothing in the queue that needs a nudge." : "Open Intake to clear the desk.",
-        anchor: "middle",
-        italic: true,
-        fill: MUTED,
-      }),
-    );
-    y += 40;
-  } else {
-    const grid = renderSectionGrid(edition.sections, pad, y, contentWidth);
-    parts.push(grid.svg);
-    y += grid.height + 18;
-  }
-
-  const foot = doubleRule(pad, CARD_WIDTH - pad, y);
-  parts.push(foot.svg);
-  y += 34;
-  parts.push(text({ x: pad, y, size: 17, value: edition.folio, fill: MUTED }));
-  parts.push(
-    text({
-      x: CARD_WIDTH - pad,
-      y,
-      size: 17,
-      value: `${edition.weekday} edition`,
-      anchor: "end",
+      x: pad + 56,
+      y: y + 40,
+      size: 14,
+      value: `${edition.kicker} · ${edition.dateLine}`,
+      font: MONO,
       fill: MUTED,
     }),
   );
+  const status = pill(
+    CARD_WIDTH - pad - 148,
+    y + 8,
+    edition.allClear ? "CLEAR" : "HEALTH CHECK",
+    edition.allClear ? "good" : "alert",
+  );
+  header.push(status.svg);
+  y += 72;
+
+  const glanceTop = y;
+  let gy = glanceTop + 28;
+  glance.push(text({ x: pad + glancePad, y: gy, size: 11, value: "GLANCE", weight: 700, fill: MUTED, tracking: 2.2 }));
+  gy += 36;
+  glance.push(text({ x: pad + glancePad, y: gy, size: 32, value: edition.lede, weight: 700 }));
+  if (!edition.allClear) {
+    glance.push(pill(CARD_WIDTH - pad - glancePad - 96, gy - 24, `${edition.openCount} OPEN`, "alert").svg);
+  } else {
+    glance.push(pill(CARD_WIDTH - pad - glancePad - 86, gy - 24, "CLEAR", "good").svg);
+  }
+  gy += 30;
+  glance.push(text({ x: pad + glancePad, y: gy, size: 17, value: edition.deck, fill: MUTED }));
+  gy += 22;
+
+  if (edition.allClear) {
+    gy += 8;
+    glance.push(
+      text({
+        x: pad + glancePad,
+        y: gy + 8,
+        size: 16,
+        value: "When something needs plates, costs, or review, it shows up here first.",
+        fill: MUTED,
+      }),
+    );
+    gy += 36;
+  } else {
+    for (const row of edition.rows) {
+      glance.push(renderGlanceRow(row, pad + glancePad, gy, inner - glancePad * 2));
+      gy += 78;
+    }
+  }
+  const glanceHeight = gy - glanceTop + 18;
+  y = glanceTop + glanceHeight + 16;
+
+  const countsTop = y;
+  let cy = countsTop + 28;
+  counts.push(text({ x: pad + glancePad, y: cy, size: 11, value: "COUNTS", weight: 700, fill: MUTED, tracking: 2.2 }));
+  cy += 32;
+  counts.push(text({ x: pad + glancePad, y: cy, size: 24, value: "At a glance", weight: 700 }));
+  cy += 20;
+  const gap = 12;
+  const tileW = (inner - glancePad * 2 - gap * 4) / 5;
+  edition.metrics.forEach((metric, index) => {
+    counts.push(
+      renderMetric(
+        { ...metric, hint: clip(metric.hint, 18) },
+        pad + glancePad + index * (tileW + gap),
+        cy,
+        tileW,
+      ),
+    );
+  });
+  cy += 130;
+  const countsHeight = cy - countsTop + 10;
+  y = countsTop + countsHeight + 28;
+
+  footer.push(text({ x: pad, y, size: 14, value: edition.folio, font: MONO, fill: MUTED }));
+  footer.push(text({ x: CARD_WIDTH - pad, y, size: 14, value: edition.weekday, font: MONO, fill: MUTED, anchor: "end" }));
   y += 36;
 
-  const height = y + 22;
+  const parts = [
+    ...header,
+    sectionChrome(pad, glanceTop, inner, glanceHeight),
+    ...glance,
+    sectionChrome(pad, countsTop, inner, countsHeight),
+    ...counts,
+    ...footer,
+  ];
+
+  const height = y + 8;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${height}" viewBox="0 0 ${CARD_WIDTH} ${height}">
-  <rect width="100%" height="100%" fill="${PAPER}"/>
-  <rect x="22" y="22" width="${CARD_WIDTH - 44}" height="${height - 44}" fill="none" stroke="${INK}" stroke-width="2.2"/>
-  <rect x="30" y="30" width="${CARD_WIDTH - 60}" height="${height - 60}" fill="none" stroke="${INK}" stroke-width="0.7"/>
+  <defs>
+    <radialGradient id="wash" cx="12%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="${AMBER}" stop-opacity="0.14"/>
+      <stop offset="70%" stop-color="${BENCH}" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.7" fill="#ffffff" opacity="0.045"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="${BENCH}"/>
+  <rect width="100%" height="100%" fill="url(#wash)"/>
+  <rect width="100%" height="100%" fill="url(#dots)"/>
   ${parts.join("\n  ")}
 </svg>`;
   return { svg, width: CARD_WIDTH, height };
@@ -469,17 +503,17 @@ export function renderHealthDigestPng(edition: HealthDigestEdition): Buffer {
     font: {
       loadSystemFonts: true,
       fontFiles: fonts,
-      defaultFontFamily: "Liberation Serif",
+      defaultFontFamily: "Space Grotesk",
     },
-    background: PAPER,
+    background: BENCH,
   });
   return Buffer.from(resvg.render().asPng());
 }
 
 export function healthDigestCaption(edition: HealthDigestEdition): string {
-  if (edition.allClear) return `${edition.weekday} edition · all quiet on the floor.`;
-  const bits = [edition.lede.replace(/\.$/, ""), edition.deck.replace(/\s+·\s+/g, " · ")];
-  if (edition.intakeLine) bits.push(edition.intakeLine.replace(/\s+·\s+/g, " · "));
+  if (edition.allClear) return "Floor is clear.";
+  const bits = [edition.lede, edition.deck];
+  if (edition.intakeLine && !edition.deck.includes("intake")) bits.push(edition.intakeLine);
   return bits.filter(Boolean).join(" · ");
 }
 

@@ -1,2 +1,8 @@
-Liberation Serif is licensed under the SIL Open Font License.
-Source: https://github.com/liberationfonts/liberation-fonts
+Print Ops ships these typefaces for the Telegram Floor card:
+
+- Space Grotesk — SIL Open Font License (OFL-SpaceGrotesk.txt)
+  https://github.com/floriankarsten/space-grotesk
+- IBM Plex Mono — SIL Open Font License (OFL-IBMPlex.txt)
+  https://github.com/IBM/plex
+- Liberation Serif — SIL Open Font License (fallback if the shop fonts are missing)
+  https://github.com/liberationfonts/liberation-fonts
