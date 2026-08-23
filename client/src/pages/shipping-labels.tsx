@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle } from "lucide-react";
+import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { queueDealHref } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
+import { draftBuyerTrackingMessage } from "@shared/shipping-draft";
 
 type LabelFields = {
   trackingNumber: string | null;
@@ -45,6 +46,16 @@ type ParseResponse = {
   matches: LabelMatch[];
 };
 
+type AttachedDraft = {
+  dealId: string;
+  dealName: string;
+  contactName: string | null;
+  trackingNumber: string;
+  service: string | null;
+  carrier: string | null;
+  message: string;
+};
+
 /**
  * Drop Pirate Ship / carrier label PDFs → extract tracking → confirm Print Order.
  * Complete in HubSpot already means shipped — no separate Shipped board needed.
@@ -64,6 +75,7 @@ export default function ShippingLabelsPage() {
   const [notes, setNotes] = useState("");
   const [postage, setPostage] = useState("");
   const [dealId, setDealId] = useState("");
+  const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
 
   const parseLabel = useMutation({
     mutationFn: async (file: File) => {
@@ -73,6 +85,7 @@ export default function ShippingLabelsPage() {
       return (await response.json()) as ParseResponse;
     },
     onSuccess: (data) => {
+      setAttachedDraft(null);
       setParsed(data);
       setTracking(data.fields.trackingNumber ?? "");
       setNotes(data.suggestedNotes || "");
@@ -115,9 +128,26 @@ export default function ShippingLabelsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
+      const match = parsed?.matches.find((row) => row.dealId === dealId) ?? null;
+      const message = draftBuyerTrackingMessage({
+        contactName: match?.contactName ?? parsed?.fields.recipientName ?? null,
+        dealName: match?.dealName ?? null,
+        trackingNumber: tracking.trim(),
+        service: parsed?.fields.service ?? null,
+        carrier: parsed?.fields.carrier ?? null,
+      });
+      setAttachedDraft({
+        dealId,
+        dealName: match?.dealName ?? `Deal ${dealId}`,
+        contactName: match?.contactName ?? parsed?.fields.recipientName ?? null,
+        trackingNumber: tracking.trim(),
+        service: parsed?.fields.service ?? null,
+        carrier: parsed?.fields.carrier ?? null,
+        message,
+      });
       toast({
         title: "Tracking attached",
-        description: "Saved on the Print Order checklist and HubSpot when writes are live.",
+        description: "Draft buyer message is ready to copy — Print Ops does not auto-send.",
       });
       setParsed(null);
       setTracking("");
@@ -138,6 +168,30 @@ export default function ShippingLabelsPage() {
     () => parsed?.matches.find((row) => row.dealId === dealId) ?? null,
     [parsed, dealId],
   );
+
+  const liveDraft = useMemo(() => {
+    if (!tracking.trim()) return "";
+    return draftBuyerTrackingMessage({
+      contactName: selected?.contactName ?? parsed?.fields.recipientName ?? null,
+      dealName: selected?.dealName ?? null,
+      trackingNumber: tracking.trim(),
+      service: parsed?.fields.service ?? null,
+      carrier: parsed?.fields.carrier ?? null,
+    });
+  }, [tracking, selected, parsed]);
+
+  async function copyMessage(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Copied", description: "Paste into Marketplace or your buyer chat." });
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: "Select the draft text and copy manually.",
+        variant: "destructive",
+      });
+    }
+  }
 
   function onFiles(files: FileList | File[] | null) {
     const file = files?.[0];
@@ -223,6 +277,47 @@ export default function ShippingLabelsPage() {
                 </p>
               </button>
             </Panel>
+
+            {attachedDraft ? (
+              <Panel
+                title="Message the buyer"
+                description={`${attachedDraft.dealName} · tracking saved — copy this into Marketplace (not sent automatically).`}
+                testId="panel-labels-buyer-draft"
+              >
+                <div className="glance-item glance-in flex-col items-stretch gap-3" data-tone="good">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <MessageSquareText className="h-4 w-4 text-primary" />
+                    Draft ready
+                    <StatusPill tone="good" icon={CheckCircle2} label="Tracking attached" />
+                  </div>
+                  <pre
+                    className="whitespace-pre-wrap rounded-md border border-border/80 bg-muted/35 px-3 py-2.5 font-sans text-sm leading-relaxed text-foreground"
+                    data-testid="text-buyer-tracking-draft"
+                  >
+                    {attachedDraft.message}
+                  </pre>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void copyMessage(attachedDraft.message)}
+                      data-testid="button-copy-buyer-draft"
+                    >
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      Copy message
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={queueDealHref(attachedDraft.dealId)}>Open in Queue</Link>
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setAttachedDraft(null)}>
+                      Done
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Auto-send to the client is not wired yet. This draft is the practical step — paste where you already talk to the buyer.
+                  </p>
+                </div>
+              </Panel>
+            ) : null}
 
             {parsed ? (
               <Panel
@@ -341,6 +436,32 @@ export default function ShippingLabelsPage() {
                     />
                   </div>
                 </div>
+
+                {liveDraft ? (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold">Buyer message preview</p>
+                    <div
+                      className="glance-item flex-col items-stretch gap-2"
+                      data-tone="good"
+                      data-testid="panel-labels-draft-preview"
+                    >
+                      <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
+                        {liveDraft}
+                      </pre>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="w-fit"
+                        onClick={() => void copyMessage(liveDraft)}
+                        data-testid="button-copy-draft-preview"
+                      >
+                        <Copy className="mr-2 h-3.5 w-3.5" />
+                        Copy draft
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
