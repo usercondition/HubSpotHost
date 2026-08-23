@@ -331,11 +331,10 @@ export default function ShippingLabelsPage() {
           <OwnerUnlockPanel
             title="Unlock Labels"
             description="Owner code required to read label PDFs and write tracking onto HubSpot deals."
-            value={unlock.code}
-            onChange={unlock.setCode}
-            onSubmit={unlock.submit}
-            pending={unlock.pending}
-            error={unlock.error}
+            buttonLabel="Unlock Labels"
+            testIdPrefix="labels"
+            pending={unlock.isPending}
+            onUnlock={(code) => unlock.mutate(code)}
           />
         ) : (
           <>

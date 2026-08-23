@@ -1797,7 +1797,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
     try {
       const [deals, stages] = await Promise.all([
-        fetchPrintOrderDeals(),
+        fetchPrintOrderDeals({ bypassCache: true }),
         fetchPrintOrderPipelineStages(),
       ]);
       refreshPrintFileStagesFromHubSpot(deals, stages);

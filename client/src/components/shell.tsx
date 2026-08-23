@@ -168,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
-              Shop floor · at a glance
+              Shop floor
             </span>
           </span>
         </Link>

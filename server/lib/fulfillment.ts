@@ -11,7 +11,7 @@ import {
   type UpdateFulfillmentChecklistInput,
 } from "../../shared/schema";
 import { getConfig, resolveWriteDecision } from "./config";
-import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError } from "./hubspot";
+import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError, invalidatePrintOrderDealsCache } from "./hubspot";
 import { getDb } from "./order-links";
 
 function nowIso(): string {
@@ -198,6 +198,7 @@ export async function syncDealShippingToHubSpot(
     method: "PATCH",
     body: JSON.stringify({ properties }),
   });
+  invalidatePrintOrderDealsCache();
   return { attempted: true, dryRun: false, gate: decision.reason, wrote: true };
 }
 

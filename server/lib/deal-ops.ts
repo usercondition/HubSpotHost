@@ -21,6 +21,7 @@ import {
   fetchPrintOrderPipelineStages,
   hubspotRequest,
   HubSpotError,
+  invalidatePrintOrderDealsCache,
   PRINT_ORDERS_PIPELINE,
 } from "./hubspot";
 import { getKitForDeal } from "./kits";
@@ -211,6 +212,7 @@ export async function updateDealCosts(
         method: "PATCH",
         body: JSON.stringify({ properties }),
       });
+      invalidatePrintOrderDealsCache();
       const recalc = await recalculateDeal({
         dealId: id,
         origin: "manual",
@@ -276,6 +278,7 @@ export async function advanceDealStage(
           },
         }),
       });
+      invalidatePrintOrderDealsCache();
     }
     return {
       ok: true,
