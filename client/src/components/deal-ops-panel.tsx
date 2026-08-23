@@ -13,6 +13,7 @@ import {
   Package,
   Printer,
   Ship,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,14 +49,83 @@ function invalidateOps(dealId?: string) {
   }
 }
 
-export function DealOpsPanel({
+/**
+ * Right-side ops drawer — overlays the board so columns don’t jump.
+ * Desktop: board stays clickable (switch orders without closing).
+ * Mobile: light scrim to dismiss.
+ */
+export function DealOpsDrawer({
   dealId,
   headers,
   onClose,
 }: {
+  dealId: string | null;
+  headers: Record<string, string>;
+  onClose: () => void;
+}) {
+  const open = Boolean(dealId);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open || !dealId) return null;
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-40" data-testid="drawer-deal-ops-root">
+      <button
+        type="button"
+        aria-label="Dismiss deal ops"
+        className="pointer-events-auto absolute inset-0 bg-black/40 transition-opacity"
+        onClick={onClose}
+        data-testid="button-deal-ops-scrim"
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="Deal ops"
+        className="pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl animate-in fade-in slide-in-from-right duration-200 md:max-w-2xl"
+        data-testid="drawer-deal-ops"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+          <p className="rule-label">Deal ops</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            onClick={onClose}
+            data-testid="button-close-deal-ops-drawer"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
+          <DealOpsPanel dealId={dealId} headers={headers} onClose={onClose} flush />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function DealOpsPanel({
+  dealId,
+  headers,
+  onClose,
+  flush = false,
+}: {
   dealId: string;
   headers: Record<string, string>;
   onClose?: () => void;
+  /** Drop outer card chrome when nested in the drawer. */
+  flush?: boolean;
 }) {
   const { toast } = useToast();
   const detail = useQuery<DealOpsResponse>({
@@ -235,7 +305,12 @@ export function DealOpsPanel({
 
   if (detail.isLoading) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
+      <div
+        className={cn(
+          "flex items-center gap-2 text-sm text-muted-foreground",
+          !flush && "rounded-lg border border-border bg-card p-6",
+        )}
+      >
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading deal ops…
       </div>
@@ -244,7 +319,7 @@ export function DealOpsPanel({
 
   if (detail.isError || !detail.data) {
     return (
-      <div className="rounded-lg border border-destructive/35 bg-card p-5">
+      <div className={cn(!flush && "rounded-lg border border-destructive/35 bg-card p-5")}>
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
           <div>
@@ -262,10 +337,16 @@ export function DealOpsPanel({
   const slip = data.packingSlip;
 
   return (
-    <section className="space-y-3 rounded-md border border-border bg-card p-3 md:p-3.5" data-testid="panel-deal-ops">
+    <section
+      className={cn(
+        "space-y-3",
+        !flush && "rounded-md border border-border bg-card p-3 md:p-3.5",
+      )}
+      data-testid="panel-deal-ops"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="rule-label">Deal ops</p>
+          {!flush ? <p className="rule-label">Deal ops</p> : null}
           <h2 className="truncate text-lg font-semibold tracking-tight">{data.dealName}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {data.stage} · {formatMoney(data.amount)}
@@ -285,7 +366,7 @@ export function DealOpsPanel({
               Pirate Ship
             </a>
           </Button>
-          {onClose ? (
+          {onClose && !flush ? (
             <Button size="sm" variant="ghost" onClick={onClose} data-testid="button-close-deal-ops">
               Close
             </Button>

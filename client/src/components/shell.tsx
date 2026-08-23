@@ -14,9 +14,10 @@ import {
   ListOrdered,
   LayoutDashboard,
   Printer,
-  ShoppingBag,
   Settings2,
+  Ship,
   ShipWheel,
+  ShoppingBag,
   Sun,
   Users,
 } from "lucide-react";
@@ -110,6 +111,7 @@ const NAV: Array<{
 }> = [
   { href: "/", label: "Floor", title: "Today’s floor board", icon: LayoutDashboard, testId: "link-nav-home", group: "Run" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run" },
+  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run" },
   { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Run" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run" },
   { href: "/clients", label: "Clients", title: "HubSpot clients", icon: Users, testId: "link-nav-clients", group: "Take" },
@@ -166,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
-              Shop floor · at a glance
+              Shop floor
             </span>
           </span>
         </Link>

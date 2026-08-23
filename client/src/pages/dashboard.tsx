@@ -19,11 +19,11 @@ import { PageHeader } from "@/components/shell";
 import {
   DataList,
   DataRow,
-  MetricTile,
   StatusPill,
   WorkspaceSection,
 } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
 
 function SystemStatus({ health }: { health: HealthResponse | undefined }) {
@@ -32,7 +32,7 @@ function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   const storageWarn = health?.storage?.warning;
 
   if (!health) {
-    return <Skeleton className="h-16 w-full rounded-md" data-testid="skeleton-system-status" />;
+    return <Skeleton className="h-14 w-full rounded-lg" data-testid="skeleton-system-status" />;
   }
 
   return (
@@ -77,6 +77,44 @@ function countByIssueKey(attention: PerformanceResponse["attention"], key: strin
   return attention.filter((item) => item.issueKey === key).length;
 }
 
+function PressureChip({
+  label,
+  value,
+  tone,
+  testId,
+}: {
+  label: string;
+  value: number;
+  tone: "neutral" | "good" | "warn" | "bad";
+  testId: string;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      data-tone={tone === "neutral" ? undefined : tone}
+      className={cn(
+        "inline-flex min-w-[4.5rem] flex-col rounded-md border px-2.5 py-1.5",
+        tone === "warn" && "border-chart-4/40 bg-chart-4/10",
+        tone === "bad" && "border-destructive/40 bg-destructive/10",
+        tone === "good" && "border-accent/35 bg-accent/10",
+        tone === "neutral" && "border-border bg-muted/40",
+      )}
+    >
+      <span className="rule-label">{label}</span>
+      <span
+        className={cn(
+          "mt-0.5 text-lg font-semibold numeric tracking-tight",
+          tone === "warn" && "text-chart-4",
+          tone === "bad" && "text-destructive",
+          tone === "good" && "text-accent",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function TodaysWork() {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlockMutation = useOwnerUnlock({
@@ -107,7 +145,7 @@ function TodaysWork() {
   }
 
   if (performance.isLoading) {
-    return <Skeleton className="h-48 rounded-md" data-testid="skeleton-todays-work" />;
+    return <Skeleton className="h-48 rounded-lg" data-testid="skeleton-todays-work" />;
   }
 
   if (performance.isError || !performance.data) {
@@ -139,12 +177,12 @@ function TodaysWork() {
   return (
     <div className="space-y-3" data-testid="panel-todays-work">
       <WorkspaceSection
-        eyebrow="Glance"
-        title={clearFloor ? "Floor is clear" : "Do this next"}
+        eyebrow="Floor"
+        title={clearFloor ? "Clear" : "Do this next"}
         description={
           clearFloor
-            ? "No missing plates, costs, stale jobs, or intake waiting on you."
-            : "One list for what’s blocking you — act here, don’t hunt other tabs."
+            ? "Nothing blocking plates, costs, stale jobs, or intake."
+            : "One list — act here, don’t hunt other tabs."
         }
         actions={
           clearFloor ? (
@@ -160,6 +198,43 @@ function TodaysWork() {
         }
         testId="panel-floor-glance"
       >
+        <div
+          className="mb-3 flex flex-wrap gap-1.5"
+          aria-label="Today’s attention metrics"
+          data-testid="panel-todays-metrics"
+        >
+          <PressureChip
+            label="Plates"
+            value={platesNeeded}
+            tone={platesNeeded > 0 ? "warn" : "good"}
+            testId="card-todays-plates"
+          />
+          <PressureChip
+            label="Costs"
+            value={costsNeeded}
+            tone={costsNeeded > 0 ? "warn" : "good"}
+            testId="card-todays-costs"
+          />
+          <PressureChip
+            label="Stale"
+            value={staleJobs}
+            tone={staleJobs > 0 ? "bad" : "good"}
+            testId="card-todays-stale"
+          />
+          <PressureChip
+            label="Intake"
+            value={pendingReview}
+            tone={pendingReview > 0 ? "warn" : "neutral"}
+            testId="card-todays-pending-review"
+          />
+          <PressureChip
+            label="Buyer"
+            value={awaitingClient}
+            tone={awaitingClient > 0 ? "warn" : "neutral"}
+            testId="card-todays-awaiting-client"
+          />
+        </div>
+
         {clearFloor ? (
           <p className="text-sm text-muted-foreground" data-testid="text-floor-clear">
             When something needs plates, costs, or review, it shows up here first.
@@ -227,56 +302,11 @@ function TodaysWork() {
       </WorkspaceSection>
 
       <WorkspaceSection
-        eyebrow="Counts"
-        title="At a glance"
-        description="Broken out so you can see pressure without opening every page."
-        testId="panel-todays-metrics"
-      >
-        <div className="metric-strip" aria-label="Today’s attention metrics">
-          <MetricTile
-            label="Need plates"
-            value={String(platesNeeded)}
-            hint="Attach CTB / slice files"
-            tone={platesNeeded > 0 ? "warn" : "good"}
-            testId="card-todays-plates"
-          />
-          <MetricTile
-            label="Need costs"
-            value={String(costsNeeded)}
-            hint="Material / labor / ship"
-            tone={costsNeeded > 0 ? "warn" : "good"}
-            testId="card-todays-costs"
-          />
-          <MetricTile
-            label="Stale"
-            value={String(staleJobs)}
-            hint="No HubSpot update lately"
-            tone={staleJobs > 0 ? "bad" : "good"}
-            testId="card-todays-stale"
-          />
-          <MetricTile
-            label="Intake review"
-            value={String(pendingReview)}
-            hint="Waiting on you"
-            tone={pendingReview > 0 ? "warn" : "neutral"}
-            testId="card-todays-pending-review"
-          />
-          <MetricTile
-            label="Awaiting buyer"
-            value={String(awaitingClient)}
-            hint="Form not finished"
-            tone={awaitingClient > 0 ? "warn" : "neutral"}
-            testId="card-todays-awaiting-client"
-          />
-        </div>
-      </WorkspaceSection>
-
-      <WorkspaceSection
         eyebrow="Active"
-        title="Print jobs in flight"
+        title="Jobs in flight"
         description={
           activeDeals.length > 0
-            ? `${activeDeals.length} open print job${activeDeals.length === 1 ? "" : "s"} — badges show what each still needs.`
+            ? `${activeDeals.length} open print job${activeDeals.length === 1 ? "" : "s"}`
             : "No open print jobs right now."
         }
         dense
@@ -361,7 +391,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Floor"
-        subtitle="At-a-glance shop board — next actions, pressure counts, then jobs in flight."
+        subtitle="What needs you now — then jobs in flight."
       />
 
       <div className="page-stack">

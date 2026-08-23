@@ -11,7 +11,7 @@ import {
   type UpdateFulfillmentChecklistInput,
 } from "../../shared/schema";
 import { getConfig, resolveWriteDecision } from "./config";
-import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError } from "./hubspot";
+import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError, invalidatePrintOrderDealsCache } from "./hubspot";
 import { getDb } from "./order-links";
 
 function nowIso(): string {
@@ -83,6 +83,76 @@ export function getFulfillmentChecklist(dealId: string): FulfillmentChecklistVie
   return toChecklistView(id, row ?? null);
 }
 
+/** Normalize carrier tracking for duplicate checks (case / spaces / dashes). */
+export function normalizeTrackingNumber(value: string | null | undefined): string {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "");
+}
+
+export type ExistingTrackingAttachment = {
+  dealId: string;
+  trackingNumber: string;
+  notes: string;
+  updatedAt: string | null;
+  source: "local" | "hubspot";
+};
+
+/** Find a Print Order that already has this tracking in the local checklist. */
+export function findLocalTrackingAttachment(
+  trackingNumber: string | null | undefined,
+): ExistingTrackingAttachment | null {
+  const needle = normalizeTrackingNumber(trackingNumber);
+  if (needle.length < 6) return null;
+
+  const rows = getDb().select().from(fulfillmentChecklists).all();
+  for (const row of rows) {
+    const stored = normalizeTrackingNumber(row.trackingNumber);
+    if (!stored || stored !== needle) continue;
+    return {
+      dealId: row.hubspotDealId,
+      trackingNumber: row.trackingNumber.trim(),
+      notes: row.notes ?? "",
+      updatedAt: row.updatedAt ?? null,
+      source: "local",
+    };
+  }
+  return null;
+}
+
+/**
+ * Find tracking already stored on a HubSpot deal property (when present in the
+ * fetched deal payload).
+ */
+export function findHubSpotTrackingAttachment(
+  trackingNumber: string | null | undefined,
+  deals: Array<{ id: string; properties: Record<string, string | null> }>,
+): ExistingTrackingAttachment | null {
+  const needle = normalizeTrackingNumber(trackingNumber);
+  if (needle.length < 6) return null;
+
+  for (const deal of deals) {
+    const stored = normalizeTrackingNumber(deal.properties.print_tracking_number);
+    if (!stored || stored !== needle) continue;
+    return {
+      dealId: deal.id,
+      trackingNumber: String(deal.properties.print_tracking_number ?? "").trim(),
+      notes: String(deal.properties.print_ship_notes ?? "").trim(),
+      updatedAt: null,
+      source: "hubspot",
+    };
+  }
+  return null;
+}
+
+export function findExistingTrackingAttachment(
+  trackingNumber: string | null | undefined,
+  deals?: Array<{ id: string; properties: Record<string, string | null> }>,
+): ExistingTrackingAttachment | null {
+  return findLocalTrackingAttachment(trackingNumber) ?? findHubSpotTrackingAttachment(trackingNumber, deals ?? []);
+}
+
 export function listFulfillmentChecklists(dealIds: string[]): Map<string, FulfillmentChecklistView> {
   const map = new Map<string, FulfillmentChecklistView>();
   const ids = Array.from(new Set(dealIds.map((id) => id.trim()).filter(Boolean)));
@@ -128,6 +198,7 @@ export async function syncDealShippingToHubSpot(
     method: "PATCH",
     body: JSON.stringify({ properties }),
   });
+  invalidatePrintOrderDealsCache();
   return { attempted: true, dryRun: false, gate: decision.reason, wrote: true };
 }
 

@@ -4,65 +4,65 @@
 
 /*
  * Print Ops — Shop Floor Workspace
- * Charcoal bench canvas, status-led color (green live / amber warn / red blocked),
+ * Cool slate canvas, teal primary, status-led color (green live / amber warn / red blocked),
  * Space Grotesk + IBM Plex Mono. Glance-first, low clutter.
  */
 
-  /* LIGHT MODE — warm paper bench (secondary) */
+  /* LIGHT MODE — cool paper bench */
 :root {
-  --button-outline: rgba(20, 16, 30, 0.12);
-  --badge-outline: rgba(20, 16, 30, 0.06);
+  --button-outline: rgba(15, 23, 42, 0.12);
+  --badge-outline: rgba(15, 23, 42, 0.06);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(20, 16, 30, 0.04);
-  --elevate-2: rgba(20, 16, 30, 0.08);
+  --elevate-1: rgba(15, 23, 42, 0.04);
+  --elevate-2: rgba(15, 23, 42, 0.08);
 
-  --background: 40 12% 96%;
-  --foreground: 220 18% 12%;
-  --border: 220 10% 86%;
+  --background: 210 20% 97%;
+  --foreground: 215 28% 12%;
+  --border: 210 14% 88%;
   --card: 0 0% 100%;
-  --card-foreground: 220 18% 12%;
-  --card-border: 220 10% 88%;
-  --sidebar: 220 16% 12%;
-  --sidebar-foreground: 40 8% 92%;
-  --sidebar-border: 220 12% 18%;
-  --sidebar-primary: 32 92% 48%;
-  --sidebar-primary-foreground: 220 20% 8%;
-  --sidebar-accent: 220 12% 16%;
-  --sidebar-accent-foreground: 40 8% 94%;
-  --sidebar-ring: 32 92% 48%;
+  --card-foreground: 215 28% 12%;
+  --card-border: 210 14% 90%;
+  --sidebar: 215 28% 11%;
+  --sidebar-foreground: 200 12% 92%;
+  --sidebar-border: 215 22% 16%;
+  --sidebar-primary: 186 72% 38%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 215 22% 15%;
+  --sidebar-accent-foreground: 200 12% 94%;
+  --sidebar-ring: 186 72% 38%;
   --popover: 0 0% 100%;
-  --popover-foreground: 220 18% 12%;
-  --popover-border: 220 10% 88%;
-  --primary: 32 92% 42%;
+  --popover-foreground: 215 28% 12%;
+  --popover-border: 210 14% 88%;
+  --primary: 186 72% 32%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 40 10% 93%;
-  --secondary-foreground: 220 14% 22%;
-  --muted: 40 8% 94%;
-  --muted-foreground: 220 8% 40%;
-  --accent: 152 60% 36%;
+  --secondary: 210 16% 94%;
+  --secondary-foreground: 215 20% 22%;
+  --muted: 210 14% 94%;
+  --muted-foreground: 215 10% 40%;
+  --accent: 158 52% 34%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 48%;
   --destructive-foreground: 0 0% 98%;
-  --input: 220 10% 72%;
-  --ring: 32 92% 42%;
-  --chart-1: 32 92% 42%;
-  --chart-2: 152 60% 36%;
-  --chart-3: 220 10% 40%;
-  --chart-4: 38 95% 48%;
+  --input: 210 12% 72%;
+  --ring: 186 72% 32%;
+  --chart-1: 186 72% 36%;
+  --chart-2: 158 52% 34%;
+  --chart-3: 215 12% 42%;
+  --chart-4: 38 92% 46%;
   --chart-5: 350 55% 44%;
 
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --radius: 0.65rem;
+  --radius: 0.55rem;
   --shadow-2xs: 0 0 0 0 transparent;
-  --shadow-xs: 0 1px 2px hsl(250 25% 12% / 0.05);
-  --shadow-sm: 0 1px 3px hsl(250 25% 12% / 0.06);
-  --shadow: 0 2px 8px hsl(250 25% 12% / 0.07);
-  --shadow-md: 0 8px 24px hsl(250 25% 12% / 0.08);
-  --shadow-lg: 0 16px 40px hsl(250 25% 12% / 0.1);
-  --shadow-xl: 0 24px 48px hsl(250 25% 12% / 0.12);
-  --shadow-2xl: 0 32px 64px hsl(250 25% 12% / 0.14);
+  --shadow-xs: 0 1px 2px hsl(215 30% 12% / 0.05);
+  --shadow-sm: 0 1px 3px hsl(215 30% 12% / 0.06);
+  --shadow: 0 2px 8px hsl(215 30% 12% / 0.07);
+  --shadow-md: 0 8px 24px hsl(215 30% 12% / 0.08);
+  --shadow-lg: 0 16px 40px hsl(215 30% 12% / 0.1);
+  --shadow-xl: 0 24px 48px hsl(215 30% 12% / 0.12);
+  --shadow-2xl: 0 32px 64px hsl(215 30% 12% / 0.14);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -103,40 +103,40 @@
   --elevate-1: rgba(255, 255, 255, 0.03);
   --elevate-2: rgba(255, 255, 255, 0.06);
 
-  /* Charcoal shop bench — less violet SaaS, more ink & steel */
-  --background: 220 14% 7%;
-  --foreground: 40 8% 94%;
-  --border: 220 10% 16%;
-  --card: 220 12% 10%;
-  --card-foreground: 40 8% 94%;
-  --card-border: 220 10% 15%;
-  --sidebar: 220 16% 5%;
-  --sidebar-foreground: 40 6% 90%;
-  --sidebar-border: 220 12% 12%;
-  --sidebar-primary: 32 92% 55%;
-  --sidebar-primary-foreground: 220 20% 8%;
-  --sidebar-accent: 220 12% 11%;
-  --sidebar-accent-foreground: 40 6% 94%;
-  --sidebar-ring: 32 92% 55%;
-  --popover: 220 12% 11%;
-  --popover-foreground: 40 8% 94%;
-  --popover-border: 220 10% 18%;
-  --primary: 32 92% 55%;
-  --primary-foreground: 220 20% 8%;
-  --secondary: 220 10% 14%;
-  --secondary-foreground: 40 6% 92%;
-  --muted: 220 10% 13%;
-  --muted-foreground: 220 6% 60%;
-  --accent: 152 55% 45%;
+  /* Cool slate shop floor — teal signal, less amber SaaS */
+  --background: 215 18% 7%;
+  --foreground: 200 12% 94%;
+  --border: 215 12% 15%;
+  --card: 215 16% 9%;
+  --card-foreground: 200 12% 94%;
+  --card-border: 215 12% 14%;
+  --sidebar: 215 22% 5%;
+  --sidebar-foreground: 200 10% 90%;
+  --sidebar-border: 215 14% 11%;
+  --sidebar-primary: 186 72% 48%;
+  --sidebar-primary-foreground: 215 28% 8%;
+  --sidebar-accent: 215 14% 10%;
+  --sidebar-accent-foreground: 200 10% 94%;
+  --sidebar-ring: 186 72% 48%;
+  --popover: 215 16% 10%;
+  --popover-foreground: 200 12% 94%;
+  --popover-border: 215 12% 17%;
+  --primary: 186 72% 48%;
+  --primary-foreground: 215 28% 8%;
+  --secondary: 215 12% 13%;
+  --secondary-foreground: 200 10% 92%;
+  --muted: 215 12% 12%;
+  --muted-foreground: 215 8% 60%;
+  --accent: 158 50% 44%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 55%;
   --destructive-foreground: 0 0% 98%;
-  --input: 220 10% 22%;
-  --ring: 32 92% 55%;
-  --chart-1: 32 92% 55%;
-  --chart-2: 152 55% 45%;
-  --chart-3: 220 8% 62%;
-  --chart-4: 38 95% 52%;
+  --input: 215 12% 20%;
+  --ring: 186 72% 48%;
+  --chart-1: 186 72% 48%;
+  --chart-2: 158 50% 44%;
+  --chart-3: 215 8% 62%;
+  --chart-4: 38 92% 52%;
   --chart-5: 350 55% 58%;
 
   --shadow-2xs: 0 0 0 0 transparent;
@@ -273,18 +273,18 @@
     font-feature-settings: 'kern', 'ss01';
     letter-spacing: -0.015em;
     background-color: hsl(var(--background));
-    /* Soft shop-floor grain — less “dashboard dots” */
+    /* Soft shop-floor grain — teal wash, less “dashboard dots” */
     background-image:
-      radial-gradient(ellipse 80% 50% at 10% -10%, hsl(32 80% 45% / 0.08), transparent 55%),
-      radial-gradient(hsl(var(--foreground) / 0.05) 1px, transparent 1px);
+      radial-gradient(ellipse 80% 50% at 10% -10%, hsl(186 70% 40% / 0.07), transparent 55%),
+      radial-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px);
     background-size: auto, 22px 22px;
     background-attachment: fixed;
   }
 
   .dark body {
     background-image:
-      radial-gradient(ellipse 70% 45% at 8% -8%, hsl(32 90% 50% / 0.1), transparent 50%),
-      radial-gradient(hsl(var(--foreground) / 0.07) 1px, transparent 1px);
+      radial-gradient(ellipse 70% 45% at 8% -8%, hsl(186 72% 45% / 0.09), transparent 50%),
+      radial-gradient(hsl(var(--foreground) / 0.06) 1px, transparent 1px);
   }
 
   .numeric {
@@ -357,6 +357,56 @@
     box-shadow:
       0 0 0 1px hsl(var(--primary) / 0.45),
       var(--shadow-md);
+  }
+
+  .workspace-node[data-tone='warn'] {
+    border-left: 3px solid hsl(var(--chart-4));
+    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='bad'] {
+    border-left: 3px solid hsl(var(--destructive));
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='good'] {
+    border-left: 3px solid hsl(var(--accent));
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='plates'] {
+    border-left: 3px solid hsl(var(--primary));
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .board-card {
+    border-radius: calc(var(--radius) + 1px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-xs);
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .board-card[data-tone='warn'] {
+    border-left: 3px solid hsl(var(--chart-4));
+    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='bad'] {
+    border-left: 3px solid hsl(var(--destructive));
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='good'] {
+    border-left: 3px solid hsl(var(--accent));
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='plates'] {
+    border-left: 3px solid hsl(var(--primary));
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card)) 45%);
   }
 
   /* Titled group container — primary way to cluster related shop data */

@@ -77,6 +77,9 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
   );
+  const staleDealIds = new Set(
+    snapshot.attention.filter((item) => item.issueKey === "stale").map((item) => item.dealId),
+  );
 
   const items: ProductionQueueItem[] = printDeals.map((deal) => {
     const dealPlates = platesByDeal.get(deal.dealId) ?? [];
@@ -108,6 +111,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       kitNeeded: kit?.needed ?? 0,
       kitReprint: kit?.reprint ?? 0,
       costsIncomplete: costsIncomplete.has(deal.dealId),
+      isStale: staleDealIds.has(deal.dealId),
       fulfillment: checklists.get(deal.dealId) ?? {
         dealId: deal.dealId,
         addressVerified: false,

@@ -18,7 +18,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsPanel } from "@/components/deal-ops-panel";
+import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -42,12 +42,24 @@ function QueueCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const needsPlates = item.requiresPlates && !item.hasPlates;
+  const tone = item.isStale
+    ? "bad"
+    : needsPlates
+      ? "plates"
+      : item.costsIncomplete || item.bucket === "blocked"
+        ? "warn"
+        : item.fulfillment.shipReady || item.bucket === "ship_ready"
+          ? "good"
+          : undefined;
+
   return (
     <button
       type="button"
       onClick={onSelect}
       className={cn("workspace-node w-full p-3 text-left", selected && "ring-0")}
       data-active={selected ? "true" : "false"}
+      data-tone={tone}
       data-testid={`button-queue-deal-${item.dealId}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -61,10 +73,12 @@ function QueueCard({
         <p className="text-sm font-medium">{formatMoney(item.amount)}</p>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {item.requiresPlates && !item.hasPlates ? (
-          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-        ) : null}
+        {item.isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
+        {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
         {!item.requiresPlates ? <StatusPill tone="neutral" icon={Package} label="No plates" /> : null}
+        {item.costsIncomplete ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+        ) : null}
         {item.plateCount > 0 ? (
           <StatusPill tone="neutral" icon={Clock3} label={`${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}`} />
         ) : null}
@@ -176,7 +190,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Print jobs only — next print · in production · ship-ready. Select a node for costs, stage, and packing."
+        subtitle="Print jobs only — next print · in production · ship-ready. Select a card; ops slides in from the right."
         actions={
           isUnlocked ? (
             <Button
@@ -228,18 +242,13 @@ export default function ProductionQueuePage() {
               <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
             </div>
 
-            {selectedDealId ? (
-              <DealOpsPanel
-                dealId={selectedDealId}
-                headers={headers}
-                onClose={() => setSelectedDealId(null)}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Select an order to enter costs, advance stage, assign printers, run the ship checklist, or print a packing slip.
-                {selectedExists ? "" : ""}
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              {selectedDealId
+                ? selectedExists
+                  ? "Ops open on the right — click outside or press Esc to close."
+                  : "That deal isn’t on the board anymore — pick another card or close ops."
+                : "Select an order for costs, stage, printers, ship checklist, or packing slip."}
+            </p>
 
             <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">
               <QueueColumn
@@ -279,6 +288,12 @@ export default function ProductionQueuePage() {
                 testId="column-ship-ready"
               />
             </div>
+
+            <DealOpsDrawer
+              dealId={selectedDealId}
+              headers={headers}
+              onClose={() => setSelectedDealId(null)}
+            />
 
             {data.recentFailures.length > 0 ? (
               <Panel title="Recent failures / reprints">

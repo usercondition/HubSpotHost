@@ -133,6 +133,16 @@ test("fulfillment checklist upserts and reports ship-ready progress", async () =
     assert.equal(done.checklist.trackingNumber, "9400TEST");
     assert.ok(done.hubspot);
     assert.equal(done.hubspot?.dryRun, true);
+
+    const { findLocalTrackingAttachment, normalizeTrackingNumber } = await import(
+      "../server/lib/fulfillment"
+    );
+    assert.equal(normalizeTrackingNumber("1z xg99-79"), "1ZXG9979");
+    const hit = findLocalTrackingAttachment("9400TEST");
+    assert.ok(hit);
+    assert.equal(hit?.dealId, "1001");
+    assert.equal(findLocalTrackingAttachment("9400test")?.dealId, "1001");
+    assert.equal(findLocalTrackingAttachment("NOPE"), null);
   });
 });
 

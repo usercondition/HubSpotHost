@@ -21,6 +21,7 @@ import {
   fetchPrintOrderPipelineStages,
   hubspotRequest,
   HubSpotError,
+  invalidatePrintOrderDealsCache,
   PRINT_ORDERS_PIPELINE,
 } from "./hubspot";
 import { getKitForDeal } from "./kits";
@@ -81,7 +82,7 @@ async function fetchDealWithCosts(dealId: string): Promise<{
   };
 }
 
-async function fetchAssociatedContact(dealId: string): Promise<{
+export async function fetchDealAssociatedContact(dealId: string): Promise<{
   id: string | null;
   name: string;
   email: string;
@@ -126,6 +127,11 @@ async function fetchAssociatedContact(dealId: string): Promise<{
   } catch {
     return { id: null, name: "", email: "", phone: "", addressLines: [] };
   }
+}
+
+/** @deprecated use fetchDealAssociatedContact */
+async function fetchAssociatedContact(dealId: string) {
+  return fetchDealAssociatedContact(dealId);
 }
 
 function costsFromProperties(props: Record<string, string | null>): DealCostFields {
@@ -206,6 +212,7 @@ export async function updateDealCosts(
         method: "PATCH",
         body: JSON.stringify({ properties }),
       });
+      invalidatePrintOrderDealsCache();
       const recalc = await recalculateDeal({
         dealId: id,
         origin: "manual",
@@ -271,6 +278,7 @@ export async function advanceDealStage(
           },
         }),
       });
+      invalidatePrintOrderDealsCache();
     }
     return {
       ok: true,

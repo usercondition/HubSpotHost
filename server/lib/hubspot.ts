@@ -23,6 +23,8 @@ export const PERFORMANCE_PROPERTIES = [
   "hs_is_closed",
   "hs_is_closed_won",
   "print_line_kind",
+  "print_tracking_number",
+  "print_ship_notes",
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
@@ -266,6 +268,7 @@ export async function patchDealOutputs(
     method: "PATCH",
     body: JSON.stringify({ properties }),
   });
+  invalidatePrintOrderDealsCache();
 }
 
 function numericString(value: number | null, digits = 3): string | null {
@@ -359,13 +362,25 @@ export async function patchDealPrintFileMetrics(
     method: "PATCH",
     body: JSON.stringify({ properties: printFileProperties(summary, attachedAt) }),
   });
+  invalidatePrintOrderDealsCache();
 }
 
-/**
- * Read the Print Orders pipeline in pages of 100. This is intentionally
- * read-only and capped to keep one dashboard refresh bounded.
- */
-export async function fetchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
+/** Short TTL so Floor / Queue / AttentionBell / Orders share one HubSpot search burst. */
+const PRINT_ORDER_DEALS_CACHE_MS = 20_000;
+const PRINT_ORDER_STAGES_CACHE_MS = 10 * 60 * 1000;
+
+let printOrderDealsCache: { value: HubSpotDealRecord[]; fetchedAt: number } | null = null;
+let printOrderDealsInflight: Promise<HubSpotDealRecord[]> | null = null;
+let printOrderStagesCache: { value: HubSpotPipelineStage[]; fetchedAt: number } | null = null;
+let printOrderStagesInflight: Promise<HubSpotPipelineStage[]> | null = null;
+
+/** Drop deal search cache after HubSpot writes so Floor/Queue see fresh data. */
+export function invalidatePrintOrderDealsCache(): void {
+  printOrderDealsCache = null;
+  printOrderDealsInflight = null;
+}
+
+async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
   const deals: HubSpotDealRecord[] = [];
   let after: string | undefined;
 
@@ -404,6 +419,38 @@ export async function fetchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
   return deals;
 }
 
+/**
+ * Read the Print Orders pipeline in pages of 100. This is intentionally
+ * read-only and capped to keep one dashboard refresh bounded.
+ * Concurrent callers share one in-flight search; results cache ~20s.
+ */
+export async function fetchPrintOrderDeals(options?: {
+  bypassCache?: boolean;
+}): Promise<HubSpotDealRecord[]> {
+  const now = Date.now();
+  if (
+    !options?.bypassCache &&
+    printOrderDealsCache &&
+    now - printOrderDealsCache.fetchedAt < PRINT_ORDER_DEALS_CACHE_MS
+  ) {
+    return printOrderDealsCache.value;
+  }
+  if (!options?.bypassCache && printOrderDealsInflight) {
+    return printOrderDealsInflight;
+  }
+
+  const pending = searchPrintOrderDeals()
+    .then((deals) => {
+      printOrderDealsCache = { value: deals, fetchedAt: Date.now() };
+      return deals;
+    })
+    .finally(() => {
+      if (printOrderDealsInflight === pending) printOrderDealsInflight = null;
+    });
+  printOrderDealsInflight = pending;
+  return pending;
+}
+
 let cachedPortalId: { value: string; fetchedAt: number } | null = null;
 const PORTAL_ID_CACHE_MS = 60 * 60 * 1000;
 
@@ -428,8 +475,7 @@ export async function fetchHubSpotPortalId(): Promise<string | null> {
   }
 }
 
-/** Read the stage labels and closure metadata used to make the workload readable. */
-export async function fetchPrintOrderPipelineStages(): Promise<HubSpotPipelineStage[]> {
+async function loadPrintOrderPipelineStages(): Promise<HubSpotPipelineStage[]> {
   const data = await request(`/crm/v3/pipelines/deals/${encodeURIComponent(PRINT_ORDERS_PIPELINE)}`, {
     method: "GET",
   });
@@ -447,4 +493,27 @@ export async function fetchPrintOrderPipelineStages(): Promise<HubSpotPipelineSt
     }))
     .filter((stage) => stage.id.length > 0)
     .sort((a, b) => a.displayOrder - b.displayOrder || a.label.localeCompare(b.label));
+}
+
+/** Read the stage labels and closure metadata used to make the workload readable. */
+export async function fetchPrintOrderPipelineStages(): Promise<HubSpotPipelineStage[]> {
+  const now = Date.now();
+  if (
+    printOrderStagesCache &&
+    now - printOrderStagesCache.fetchedAt < PRINT_ORDER_STAGES_CACHE_MS
+  ) {
+    return printOrderStagesCache.value;
+  }
+  if (printOrderStagesInflight) return printOrderStagesInflight;
+
+  const pending = loadPrintOrderPipelineStages()
+    .then((stages) => {
+      printOrderStagesCache = { value: stages, fetchedAt: Date.now() };
+      return stages;
+    })
+    .finally(() => {
+      if (printOrderStagesInflight === pending) printOrderStagesInflight = null;
+    });
+  printOrderStagesInflight = pending;
+  return pending;
 }

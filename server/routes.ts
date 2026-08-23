@@ -187,12 +187,19 @@ import {
   advanceDealStage,
   assignPlateToPrinter,
   buildDealOpsDetail,
+  fetchDealAssociatedContact,
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
-import { getFulfillmentChecklist, upsertFulfillmentChecklist } from "./lib/fulfillment";
+import { getFulfillmentChecklist, upsertFulfillmentChecklist, findExistingTrackingAttachment } from "./lib/fulfillment";
 import { buildProductionQueue } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
+import {
+  attachShippingLabelSchema,
+  buildShipNotesFromLabel,
+  extractShippingLabelFromPdf,
+  matchShippingLabelToDeals,
+} from "./lib/shipping-label";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
@@ -265,6 +272,18 @@ const supplyInvoiceUpload = multer({
     },
   }),
   limits: { fileSize: SUPPLY_INVOICE_MAX_BYTES, files: 1 },
+});
+
+const SHIPPING_LABEL_MAX_BYTES = 12 * 1024 * 1024;
+const shippingLabelUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase() || ".pdf";
+      cb(null, `shipping-label-${crypto.randomUUID()}${ext === ".pdf" ? ext : ".pdf"}`);
+    },
+  }),
+  limits: { fileSize: SHIPPING_LABEL_MAX_BYTES, files: 1 },
 });
 
 function removeTempUpload(filePath: string | undefined): void {
@@ -1122,6 +1141,199 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ ok: true, checklist: result.checklist, hubspot: result.hubspot });
   });
 
+  /**
+   * Prefill tracking from a Pirate Ship / carrier label PDF.
+   * Does not write HubSpot — owner confirms the matched Print Order next.
+   */
+  app.post(
+    "/api/shipping-labels/parse",
+    (req: Request, res: Response, next) => {
+      if (rejectUnsecuredIntake(req, res)) return;
+      next();
+    },
+    shippingLabelUpload.single("file"),
+    async (req: Request, res: Response) => {
+      const file = req.file;
+      if (!file?.path) {
+        return res.status(400).json({
+          ok: false,
+          error: "Drop one shipping label PDF to extract tracking",
+        });
+      }
+      const mime = String(file.mimetype || "").toLowerCase();
+      const name = String(file.originalname || "").toLowerCase();
+      if (mime !== "application/pdf" && !name.endsWith(".pdf")) {
+        removeTempUpload(file.path);
+        return res.status(400).json({
+          ok: false,
+          error: "Use a PDF shipping label export from Pirate Ship or the carrier",
+        });
+      }
+
+      try {
+        const extracted = await extractShippingLabelFromPdf(file.path, file.originalname || "label.pdf");
+        const [deals, stages, hubspotPortalId] = await Promise.all([
+          fetchPrintOrderDeals(),
+          fetchPrintOrderPipelineStages(),
+          fetchHubSpotPortalId(),
+        ]);
+        const snapshot = buildPerformanceSnapshot({
+          deals,
+          stages,
+          intakeCounts: orderLinkCounts(),
+          supplySpend: buildSupplySpendSummary(),
+          attachedPrintDealIds: attachedPrintFileDealIds(),
+          dismissedAttentionKeys: activeAttentionOverrideKeys(),
+          hubspotPortalId,
+        });
+        const candidates = matchShippingLabelToDeals(extracted.fields, [
+          ...snapshot.activeDeals.map((deal) => ({ ...deal, closed: false })),
+          ...(snapshot.closedDeals ?? []).map((deal) => ({ ...deal, closed: true })),
+        ]);
+        const alreadyAttached = findExistingTrackingAttachment(extracted.fields.trackingNumber, deals);
+        const attachedDealName =
+          alreadyAttached == null
+            ? null
+            : snapshot.activeDeals.find((deal) => deal.dealId === alreadyAttached.dealId)?.dealName ??
+              snapshot.closedDeals?.find((deal) => deal.dealId === alreadyAttached.dealId)?.dealName ??
+              deals.find((deal) => deal.id === alreadyAttached.dealId)?.properties.dealname ??
+              null;
+        return res.json({
+          ok: true,
+          fileName: file.originalname || "label.pdf",
+          pageCount: extracted.pageCount,
+          fields: extracted.fields,
+          suggestedNotes: buildShipNotesFromLabel(extracted.fields),
+          matches: candidates,
+          hubspotPortalId,
+          alreadyAttached: alreadyAttached
+            ? {
+                dealId: alreadyAttached.dealId,
+                dealName: attachedDealName ? String(attachedDealName) : null,
+                trackingNumber: alreadyAttached.trackingNumber,
+                notes: alreadyAttached.notes,
+                source: alreadyAttached.source,
+                updatedAt: alreadyAttached.updatedAt,
+              }
+            : null,
+        });
+      } catch (error) {
+        return res.status(400).json({
+          ok: false,
+          error: error instanceof Error ? error.message : "Could not read that shipping label PDF",
+        });
+      } finally {
+        removeTempUpload(file.path);
+      }
+    },
+  );
+
+  /** Confirm label → write tracking (+ optional postage) onto the Print Order. */
+  app.post("/api/shipping-labels/attach", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = attachShippingLabelSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const input = parsed.data;
+    const notes = input.notes.trim();
+
+    const existing = findExistingTrackingAttachment(input.trackingNumber);
+    if (existing) {
+      const sameDeal = existing.dealId === input.dealId;
+      const contact = await fetchDealAssociatedContact(existing.dealId);
+      return res.json({
+        ok: true,
+        duplicate: true,
+        message: sameDeal
+          ? "This tracking is already attached to that Print Order — nothing else to do."
+          : `This tracking is already attached to deal ${existing.dealId} — nothing else to do.`,
+        checklist: getFulfillmentChecklist(existing.dealId),
+        hubspot: null,
+        costs: null,
+        costsError: null,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+        },
+        alreadyAttached: {
+          dealId: existing.dealId,
+          trackingNumber: existing.trackingNumber,
+          notes: existing.notes,
+          source: existing.source,
+          updatedAt: existing.updatedAt,
+        },
+      });
+    }
+
+    const fulfillment = await upsertFulfillmentChecklist(input.dealId, {
+      trackingNumber: input.trackingNumber,
+      trackingPasted: true,
+      labelBought: input.labelBought,
+      packingDone: input.packingDone,
+      notes,
+      liveWrite: input.liveWrite !== false,
+    });
+    if ("error" in fulfillment) {
+      return res.status(400).json({ ok: false, error: fulfillment.error });
+    }
+
+    let costs: Awaited<ReturnType<typeof updateDealCosts>> | null = null;
+    const postage = input.postageUsd.replace(/[$,\s]/g, "").trim();
+    if (postage) {
+      costs = await updateDealCosts(input.dealId, {
+        material: "",
+        labor: "",
+        packaging: "",
+        shipping: postage,
+        liveWrite: input.liveWrite !== false,
+      });
+    }
+
+    const contact = await fetchDealAssociatedContact(input.dealId);
+
+    return res.json({
+      ok: true,
+      checklist: fulfillment.checklist,
+      hubspot: fulfillment.hubspot,
+      costs: costs && costs.ok ? costs.costs : null,
+      costsError: costs && !costs.ok ? costs.error : null,
+      contact: {
+        id: contact.id,
+        name: contact.name,
+        email: contact.email,
+      },
+    });
+  });
+
+  /** HubSpot contact email/name for a Print Order (Labels draft → mailto). */
+  app.get("/api/shipping-labels/contact/:dealId", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    try {
+      const contact = await fetchDealAssociatedContact(dealId);
+      return res.json({
+        ok: true,
+        dealId,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+        },
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load HubSpot contact email",
+      });
+    }
+  });
+
   app.post("/api/plates/assign-printer", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const parsed = assignPlatePrinterSchema.safeParse(req.body ?? {});
@@ -1585,7 +1797,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
     try {
       const [deals, stages] = await Promise.all([
-        fetchPrintOrderDeals(),
+        fetchPrintOrderDeals({ bypassCache: true }),
         fetchPrintOrderPipelineStages(),
       ]);
       refreshPrintFileStagesFromHubSpot(deals, stages);

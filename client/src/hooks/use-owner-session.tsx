@@ -85,29 +85,36 @@ export function useOwnerSession(): OwnerSessionValue {
   return value;
 }
 
-/** One unlock probe for every Daily Work page — hits `GET /api/owner/session`. */
+/**
+ * Unlock probe for every Daily Work page — hits `GET /api/owner/session`.
+ * Unlocks the UI immediately, then verifies the code; wrong codes lock again.
+ */
 export function useOwnerUnlock(options: {
   successTitle: string;
   successDescription?: string;
 }) {
   const { toast } = useToast();
-  const { unlock } = useOwnerSession();
+  const { unlock, lock } = useOwnerSession();
 
   return useMutation({
     mutationFn: async (code: string) => {
+      const trimmed = code.trim();
+      if (!trimmed) throw new Error("Enter your owner access code.");
+      // Instant UI: open the page while the cheap session probe runs.
+      unlock(trimmed);
       await apiRequest("GET", "/api/owner/session", undefined, {
-        headers: { "x-paid-order-access-code": code },
+        headers: { "x-paid-order-access-code": trimmed },
       });
-      return code;
+      return trimmed;
     },
-    onSuccess: (code) => {
-      unlock(code);
+    onSuccess: () => {
       toast({
         title: options.successTitle,
         description: options.successDescription,
       });
     },
     onError: (error: Error) => {
+      lock();
       toast({
         title: "That owner code was not accepted",
         description: describeOwnerAuthError(error),
@@ -136,21 +143,22 @@ export function OwnerUnlockPanel({
 
   return (
     <section
-      className="rounded-md border border-card-border bg-card p-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] md:items-end md:gap-6 md:p-4"
+      className="rounded-lg border border-card-border bg-card/90 p-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(15rem,19rem)] md:items-end md:gap-6"
       aria-labelledby={`${testIdPrefix}-unlock-title`}
       data-testid={`panel-${testIdPrefix}-unlock`}
     >
       <div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/12 text-primary">
           <KeyRound className="h-4 w-4" />
         </div>
-        <p className="mt-4 rule-label">Owner access</p>
+        <p className="mt-3 rule-label">Owner access</p>
         <h2 id={`${testIdPrefix}-unlock-title`} className="mt-1 text-lg font-semibold tracking-tight">
           {title}
         </h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
-        <p className="mt-3 text-xs leading-5 text-muted-foreground md:mt-4">
-          Unlock once for this browser tab — Intake, Manual, Orders, Print files, Supplies, and Performance share the same session until you lock or reload.
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          One unlock covers Floor, Queue, Labels, Orders, Prints, and the rest of Daily Work in this
+          tab — until you Lock or reload.
         </p>
       </div>
       <form
@@ -167,6 +175,7 @@ export function OwnerUnlockPanel({
             id={`${testIdPrefix}-owner-code`}
             type="password"
             autoComplete="off"
+            autoFocus
             value={codeDraft}
             onChange={(event) => setCodeDraft(event.target.value)}
             placeholder="Enter your code"
