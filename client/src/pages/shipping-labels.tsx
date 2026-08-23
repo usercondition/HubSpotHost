@@ -519,7 +519,7 @@ export default function ShippingLabelsPage() {
                       data-testid="button-open-email-template-attached"
                     >
                       <Mail className="mr-2 h-3.5 w-3.5" />
-                      Email template
+                      Shipped email
                     </Button>
                     {attachedMailto ? (
                       <Button asChild size="sm" data-testid="button-email-buyer-draft">
@@ -816,7 +816,7 @@ export default function ShippingLabelsPage() {
                           data-testid="button-open-email-template-preview"
                         >
                           <Mail className="mr-2 h-3.5 w-3.5" />
-                          Email template
+                          Shipped email
                         </Button>
                         {previewMailto ? (
                           <Button asChild type="button" size="sm" data-testid="button-email-draft-preview">
