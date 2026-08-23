@@ -162,5 +162,6 @@ test("health digest card renders a PNG Floor board", () => {
   assert.ok(digestFontFiles().some((path) => path.includes("SpaceGrotesk")), "Space Grotesk should be bundled");
   const png = renderHealthDigestPng(edition);
   assert.ok(isPngBuffer(png));
-  assert.ok(png.length > 20_000);
+  assert.equal(png.readUInt32BE(16), 2560, "card should rasterize at Telegram HD width");
+  assert.ok(png.length > 40_000);
 });

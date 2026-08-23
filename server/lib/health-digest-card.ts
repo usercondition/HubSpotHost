@@ -12,6 +12,8 @@ import { Resvg } from "@resvg/resvg-js";
 import type { TrackerAssistantContext } from "./tracker-assistant";
 
 const CARD_WIDTH = 1080;
+/** Telegram compresses sendPhoto; a 2.5× raster stays sharp on a phone. */
+const RENDER_WIDTH = 2560;
 const ISSUE_ORDER = ["no_plates", "costs_incomplete", "stale"] as const;
 
 const SANS = "Space Grotesk, Liberation Sans, DejaVu Sans, sans-serif";
@@ -293,6 +295,18 @@ export function digestFontFiles(): string[] {
     .filter((path) => existsSync(path));
 }
 
+function px(value: number): number {
+  return Math.round(value);
+}
+
+function rgba(hex: string, alpha: number): string {
+  const raw = hex.replace("#", "");
+  const r = Number.parseInt(raw.slice(0, 2), 16);
+  const g = Number.parseInt(raw.slice(2, 4), 16);
+  const b = Number.parseInt(raw.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function text(opts: {
   x: number;
   y: number;
@@ -308,88 +322,91 @@ function text(opts: {
   const anchor = opts.anchor ? ` text-anchor="${opts.anchor}"` : "";
   const weight = opts.weight ? ` font-weight="${opts.weight}"` : "";
   const tracking = opts.tracking != null ? ` letter-spacing="${opts.tracking}"` : "";
-  return `<text x="${opts.x}" y="${opts.y}" font-family="${font}" font-size="${opts.size}"${anchor}${weight} fill="${opts.fill || INK}"${tracking}>${escapeXml(opts.value)}</text>`;
+  return `<text x="${px(opts.x)}" y="${px(opts.y)}" font-family="${font}" font-size="${px(opts.size)}"${anchor}${weight} fill="${opts.fill || INK}"${tracking}>${escapeXml(opts.value)}</text>`;
 }
 
 function markSvg(x: number, y: number, size: number): string {
   const scale = size / 32;
-  return `<g transform="translate(${x} ${y}) scale(${scale})" fill="none" stroke="${AMBER}">
-    <rect x="3.5" y="3.5" width="25" height="25" rx="7" stroke-width="1.8" opacity="0.35"/>
+  return `<g transform="translate(${px(x)} ${px(y)}) scale(${scale})" fill="none" stroke="${AMBER}">
+    <rect x="4" y="4" width="24" height="24" rx="7" stroke-width="2" opacity="0.4"/>
     <path d="M9 22h14" stroke-width="2.2" stroke-linecap="round"/>
     <path d="M11 17h10" stroke-width="2.2" stroke-linecap="round" opacity="0.75"/>
     <path d="M13 12h6" stroke-width="2.2" stroke-linecap="round" opacity="0.5"/>
-    <circle cx="16" cy="8" r="1.7" fill="${AMBER}" stroke="none"/>
+    <circle cx="16" cy="8" r="2" fill="${AMBER}" stroke="none"/>
   </g>`;
 }
 
 function pill(x: number, y: number, label: string, tone: "warn" | "bad" | "good" | "alert"): { svg: string; width: number } {
   const color = tone === "good" ? LIVE : tone === "bad" ? BAD : WARN;
-  const width = Math.max(92, 22 + label.length * 8.2);
-  const height = 28;
+  const width = px(Math.max(96, 28 + label.length * 8));
+  const height = 30;
   const svg = `<g>
-    <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="14" fill="${color}24" stroke="${color}66"/>
-    <circle cx="${x + 14}" cy="${y + 14}" r="4" fill="${color}"/>
-    ${text({ x: x + 26, y: y + 19, size: 12, value: label, weight: 700, fill: color, tracking: 1.1, font: SANS })}
+    <rect x="${px(x)}" y="${px(y)}" width="${width}" height="${height}" rx="15" fill="${rgba(color, 0.14)}" stroke="${rgba(color, 0.45)}" stroke-width="2"/>
+    <circle cx="${px(x + 15)}" cy="${px(y + 15)}" r="4" fill="${color}"/>
+    ${text({ x: x + 28, y: y + 20, size: 13, value: label, weight: 700, fill: color, tracking: 1, font: SANS })}
   </g>`;
   return { svg, width };
 }
 
 function badge(x: number, y: number, label: string, tone: DigestGlanceRow["tone"]): { svg: string; width: number } {
   const color = toneHex(tone);
-  const width = Math.max(78, 16 + label.length * 7.4);
+  const width = px(Math.max(80, 20 + label.length * 7.2));
   const svg = `<g>
-    <rect x="${x}" y="${y}" width="${width}" height="24" rx="6" fill="${color}22" stroke="${color}59"/>
-    ${text({ x: x + width / 2, y: y + 16, size: 12, value: label, anchor: "middle", weight: 600, fill: color })}
+    <rect x="${px(x)}" y="${px(y)}" width="${width}" height="26" rx="7" fill="${rgba(color, 0.14)}" stroke="${rgba(color, 0.4)}" stroke-width="1.5"/>
+    ${text({ x: x + width / 2, y: y + 17, size: 13, value: label, anchor: "middle", weight: 600, fill: color })}
   </g>`;
   return { svg, width };
 }
 
-function renderGlanceRow(row: DigestGlanceRow, x: number, y: number, width: number): string {
-  const stripe = toneHex(row.tone);
-  const pillBadge = badge(x + width - 16 - Math.max(78, 16 + row.badge.length * 7.4), y + 16, row.badge, row.tone);
-  return `<g>
-    <rect x="${x}" y="${y}" width="${width}" height="68" rx="12" fill="${BENCH}73" stroke="${BORDER}"/>
-    <rect x="${x}" y="${y + 10}" width="3" height="48" rx="1.5" fill="${stripe}"/>
-    ${text({ x: x + 22, y: y + 28, size: 20, value: row.name, weight: 600 })}
-    ${text({ x: x + 22, y: y + 50, size: 14, value: row.detail, fill: MUTED })}
-    ${pillBadge.svg}
-  </g>`;
+function renderGlanceList(rows: DigestGlanceRow[], x: number, y: number, width: number): { svg: string; height: number } {
+  const rowH = 70;
+  const height = rows.length * rowH;
+  const lines: string[] = [
+    `<rect x="${px(x)}" y="${px(y)}" width="${px(width)}" height="${px(height)}" rx="14" fill="${CARD}" stroke="${BORDER}" stroke-width="2"/>`,
+  ];
+  rows.forEach((row, index) => {
+    const top = y + index * rowH;
+    const stripe = toneHex(row.tone);
+    const badgeW = px(Math.max(80, 20 + row.badge.length * 7.2));
+    if (index > 0) {
+      lines.push(
+        `<line x1="${px(x + 18)}" y1="${px(top)}" x2="${px(x + width - 18)}" y2="${px(top)}" stroke="${BORDER}" stroke-width="1"/>`,
+      );
+    }
+    lines.push(`<rect x="${px(x)}" y="${px(top + 12)}" width="4" height="46" rx="2" fill="${stripe}"/>`);
+    lines.push(text({ x: x + 24, y: top + 30, size: 20, value: row.name, weight: 600 }));
+    lines.push(text({ x: x + 24, y: top + 52, size: 14, value: row.detail, fill: MUTED }));
+    lines.push(badge(x + width - 16 - badgeW, top + 22, row.badge, row.tone).svg);
+  });
+  return { svg: lines.join("\n"), height };
 }
 
 function renderMetric(metric: DigestMetric, x: number, y: number, width: number): string {
   const color = toneHex(metric.tone);
   const border =
-    metric.tone === "good" ? `${LIVE}66` : metric.tone === "bad" ? `${BAD}73` : metric.tone === "warn" ? `${WARN}73` : BORDER;
+    metric.tone === "good" ? rgba(LIVE, 0.4) : metric.tone === "bad" ? rgba(BAD, 0.45) : metric.tone === "warn" ? rgba(WARN, 0.45) : BORDER;
   const wash =
-    metric.tone === "good" ? `${LIVE}1a` : metric.tone === "bad" ? `${BAD}1a` : metric.tone === "warn" ? `${WARN}1f` : `${CARD}`;
+    metric.tone === "good" ? rgba(LIVE, 0.1) : metric.tone === "bad" ? rgba(BAD, 0.1) : metric.tone === "warn" ? rgba(WARN, 0.12) : CARD;
   return `<g>
-    <rect x="${x}" y="${y}" width="${width}" height="118" rx="12" fill="${wash}" stroke="${border}"/>
-    ${text({ x: x + 14, y: y + 28, size: 12, value: metric.label.toUpperCase(), weight: 600, fill: MUTED, tracking: 1.4 })}
-    ${text({ x: x + 14, y: y + 70, size: 34, value: String(metric.value), weight: 700, fill: color, font: MONO })}
-    ${text({ x: x + 14, y: y + 96, size: 13, value: metric.hint, fill: MUTED })}
+    <rect x="${px(x)}" y="${px(y)}" width="${px(width)}" height="112" rx="14" fill="${wash}" stroke="${border}" stroke-width="2"/>
+    ${text({ x: x + 14, y: y + 26, size: 12, value: metric.label.toUpperCase(), weight: 600, fill: MUTED, tracking: 1.2 })}
+    ${text({ x: x + 14, y: y + 68, size: 34, value: String(metric.value), weight: 700, fill: color, font: MONO })}
+    ${text({ x: x + 14, y: y + 94, size: 13, value: metric.hint, fill: MUTED })}
   </g>`;
 }
 
-function sectionChrome(x: number, y: number, width: number, height: number): string {
-  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="16" fill="${CARD}" stroke="${BORDER}"/>`;
-}
-
 export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: string; width: number; height: number } {
-  const pad = 40;
+  const pad = 44;
   const inner = CARD_WIDTH - pad * 2;
-  const glancePad = 22;
-  const header: string[] = [];
-  const glance: string[] = [];
-  const counts: string[] = [];
-  const footer: string[] = [];
-  let y = 44;
+  const parts: string[] = [];
+  let y = 40;
 
-  header.push(markSvg(pad, y, 44));
-  header.push(text({ x: pad + 56, y: y + 20, size: 22, value: edition.title, weight: 700 }));
-  header.push(
+  parts.push(markSvg(pad, y, 40));
+  parts.push(text({ x: pad + 52, y: y + 18, size: 22, value: edition.title, weight: 700 }));
+  parts.push(
     text({
-      x: pad + 56,
-      y: y + 40,
+      x: pad + 52,
+      y: y + 38,
       size: 14,
       value: `${edition.kicker} · ${edition.dateLine}`,
       font: MONO,
@@ -397,109 +414,85 @@ export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: stri
     }),
   );
   const status = pill(
-    CARD_WIDTH - pad - 148,
-    y + 8,
+    CARD_WIDTH - pad - (edition.allClear ? 108 : 150),
+    y + 6,
     edition.allClear ? "CLEAR" : "HEALTH CHECK",
     edition.allClear ? "good" : "alert",
   );
-  header.push(status.svg);
-  y += 72;
+  parts.push(status.svg);
+  y += 70;
 
-  const glanceTop = y;
-  let gy = glanceTop + 28;
-  glance.push(text({ x: pad + glancePad, y: gy, size: 11, value: "GLANCE", weight: 700, fill: MUTED, tracking: 2.2 }));
-  gy += 36;
-  glance.push(text({ x: pad + glancePad, y: gy, size: 32, value: edition.lede, weight: 700 }));
-  if (!edition.allClear) {
-    glance.push(pill(CARD_WIDTH - pad - glancePad - 96, gy - 24, `${edition.openCount} OPEN`, "alert").svg);
-  } else {
-    glance.push(pill(CARD_WIDTH - pad - glancePad - 86, gy - 24, "CLEAR", "good").svg);
-  }
-  gy += 30;
-  glance.push(text({ x: pad + glancePad, y: gy, size: 17, value: edition.deck, fill: MUTED }));
-  gy += 22;
+  parts.push(text({ x: pad, y, size: 11, value: "GLANCE", weight: 700, fill: MUTED, tracking: 2.2 }));
+  y += 34;
+  parts.push(text({ x: pad, y, size: 32, value: edition.lede, weight: 700 }));
+  const statusPill = edition.allClear
+    ? pill(CARD_WIDTH - pad - 108, y - 24, "CLEAR", "good")
+    : pill(CARD_WIDTH - pad - 108, y - 24, `${edition.openCount} OPEN`, "alert");
+  parts.push(statusPill.svg);
+  y += 28;
+  parts.push(text({ x: pad, y, size: 17, value: edition.deck, fill: MUTED }));
+  y += 20;
 
   if (edition.allClear) {
-    gy += 8;
-    glance.push(
+    parts.push(
       text({
-        x: pad + glancePad,
-        y: gy + 8,
+        x: pad,
+        y: y + 18,
         size: 16,
         value: "When something needs plates, costs, or review, it shows up here first.",
         fill: MUTED,
       }),
     );
-    gy += 36;
+    y += 44;
   } else {
-    for (const row of edition.rows) {
-      glance.push(renderGlanceRow(row, pad + glancePad, gy, inner - glancePad * 2));
-      gy += 78;
-    }
+    const list = renderGlanceList(edition.rows, pad, y, inner);
+    parts.push(list.svg);
+    y += list.height + 28;
   }
-  const glanceHeight = gy - glanceTop + 18;
-  y = glanceTop + glanceHeight + 16;
 
-  const countsTop = y;
-  let cy = countsTop + 28;
-  counts.push(text({ x: pad + glancePad, y: cy, size: 11, value: "COUNTS", weight: 700, fill: MUTED, tracking: 2.2 }));
-  cy += 32;
-  counts.push(text({ x: pad + glancePad, y: cy, size: 24, value: "At a glance", weight: 700 }));
-  cy += 20;
+  parts.push(text({ x: pad, y, size: 11, value: "COUNTS", weight: 700, fill: MUTED, tracking: 2.2 }));
+  y += 32;
+  parts.push(text({ x: pad, y, size: 24, value: "At a glance", weight: 700 }));
+  y += 18;
   const gap = 12;
-  const tileW = (inner - glancePad * 2 - gap * 4) / 5;
+  const tileW = Math.floor((inner - gap * 4) / 5);
   edition.metrics.forEach((metric, index) => {
-    counts.push(
+    parts.push(
       renderMetric(
         { ...metric, hint: clip(metric.hint, 18) },
-        pad + glancePad + index * (tileW + gap),
-        cy,
+        pad + index * (tileW + gap),
+        y,
         tileW,
       ),
     );
   });
-  cy += 130;
-  const countsHeight = cy - countsTop + 10;
-  y = countsTop + countsHeight + 28;
+  y += 132;
 
-  footer.push(text({ x: pad, y, size: 14, value: edition.folio, font: MONO, fill: MUTED }));
-  footer.push(text({ x: CARD_WIDTH - pad, y, size: 14, value: edition.weekday, font: MONO, fill: MUTED, anchor: "end" }));
+  parts.push(text({ x: pad, y, size: 14, value: edition.folio, font: MONO, fill: MUTED }));
+  parts.push(text({ x: CARD_WIDTH - pad, y, size: 14, value: edition.weekday, font: MONO, fill: MUTED, anchor: "end" }));
   y += 36;
-
-  const parts = [
-    ...header,
-    sectionChrome(pad, glanceTop, inner, glanceHeight),
-    ...glance,
-    sectionChrome(pad, countsTop, inner, countsHeight),
-    ...counts,
-    ...footer,
-  ];
 
   const height = y + 8;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${height}" viewBox="0 0 ${CARD_WIDTH} ${height}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${height}" viewBox="0 0 ${CARD_WIDTH} ${height}" text-rendering="geometricPrecision" shape-rendering="geometricPrecision">
   <defs>
-    <radialGradient id="wash" cx="12%" cy="0%" r="70%">
-      <stop offset="0%" stop-color="${AMBER}" stop-opacity="0.14"/>
+    <radialGradient id="wash" cx="8%" cy="0%" r="55%">
+      <stop offset="0%" stop-color="${AMBER}" stop-opacity="0.1"/>
       <stop offset="70%" stop-color="${BENCH}" stop-opacity="0"/>
     </radialGradient>
-    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="0.7" fill="#ffffff" opacity="0.045"/>
-    </pattern>
   </defs>
   <rect width="100%" height="100%" fill="${BENCH}"/>
   <rect width="100%" height="100%" fill="url(#wash)"/>
-  <rect width="100%" height="100%" fill="url(#dots)"/>
   ${parts.join("\n  ")}
 </svg>`;
   return { svg, width: CARD_WIDTH, height };
 }
 
 export function renderHealthDigestPng(edition: HealthDigestEdition): Buffer {
-  const { svg, width } = renderHealthDigestSvg(edition);
+  const { svg } = renderHealthDigestSvg(edition);
   const fonts = digestFontFiles();
   const resvg = new Resvg(svg, {
-    fitTo: { mode: "width", value: width },
+    fitTo: { mode: "width", value: RENDER_WIDTH },
     font: {
       loadSystemFonts: true,
       fontFiles: fonts,
