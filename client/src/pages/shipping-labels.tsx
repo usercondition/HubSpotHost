@@ -18,6 +18,8 @@ import {
   buyerTrackingMailtoHref,
   draftBuyerTrackingMessage,
 } from "@shared/shipping-draft";
+import { ShippingEmailPreviewDialog } from "@/components/shipping-email-preview-dialog";
+import type { ShippingEmailTemplateInput } from "@shared/shipping-email-template";
 
 type LabelFields = {
   trackingNumber: string | null;
@@ -89,6 +91,7 @@ export default function ShippingLabelsPage() {
   const [postage, setPostage] = useState("");
   const [dealId, setDealId] = useState("");
   const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
+  const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
 
   const parseLabel = useMutation({
     mutationFn: async (file: File) => {
@@ -270,6 +273,25 @@ export default function ShippingLabelsPage() {
     });
   }, [attachedDraft]);
 
+  const emailTemplateInput = useMemo((): ShippingEmailTemplateInput | null => {
+    const trackingNumber = attachedDraft?.trackingNumber || tracking.trim();
+    if (!trackingNumber) return null;
+    return {
+      contactName:
+        attachedDraft?.contactName ||
+        hubspotContactName ||
+        selected?.contactName ||
+        parsed?.fields.recipientName ||
+        null,
+      dealName: attachedDraft?.dealName || selected?.dealName || null,
+      trackingNumber,
+      service: attachedDraft?.service || parsed?.fields.service || null,
+      carrier: attachedDraft?.carrier || parsed?.fields.carrier || null,
+    };
+  }, [attachedDraft, tracking, hubspotContactName, selected, parsed]);
+
+  const emailDialogContact = attachedDraft?.contactEmail || hubspotEmail || null;
+
   async function copyMessage(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -392,11 +414,20 @@ export default function ShippingLabelsPage() {
                     {attachedDraft.message}
                   </pre>
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEmailPreviewOpen(true)}
+                      data-testid="button-open-email-template-attached"
+                    >
+                      <Mail className="mr-2 h-3.5 w-3.5" />
+                      Email template
+                    </Button>
                     {attachedMailto ? (
                       <Button asChild size="sm" data-testid="button-email-buyer-draft">
                         <a href={attachedMailto}>
                           <Mail className="mr-2 h-3.5 w-3.5" />
-                          Email buyer
+                          Open mail app
                         </a>
                       </Button>
                     ) : null}
@@ -602,11 +633,21 @@ export default function ShippingLabelsPage() {
                         {liveDraft}
                       </pre>
                       <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEmailPreviewOpen(true)}
+                          data-testid="button-open-email-template-preview"
+                        >
+                          <Mail className="mr-2 h-3.5 w-3.5" />
+                          Email template
+                        </Button>
                         {previewMailto ? (
                           <Button asChild type="button" size="sm" data-testid="button-email-draft-preview">
                             <a href={previewMailto}>
                               <Mail className="mr-2 h-3.5 w-3.5" />
-                              Email buyer
+                              Open mail app
                             </a>
                           </Button>
                         ) : null}
@@ -664,6 +705,14 @@ export default function ShippingLabelsPage() {
           </>
         )}
       </div>
+
+      <ShippingEmailPreviewDialog
+        open={emailPreviewOpen}
+        onOpenChange={setEmailPreviewOpen}
+        input={emailTemplateInput}
+        contactEmail={emailDialogContact}
+        onCopyText={(text) => void copyMessage(text)}
+      />
     </div>
   );
 }
