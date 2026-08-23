@@ -24,7 +24,8 @@ const CARD = "#16181d";
 const BORDER = "#2a2e35";
 const INK = "#f1f0ee";
 const MUTED = "#93979f";
-const AMBER = "#f69323";
+const TEAL = "#22c1d3";
+const AMBER = TEAL;
 const WARN = "#f9a410";
 const LIVE = "#34b277";
 const BAD = "#df3a3a";
@@ -41,7 +42,7 @@ export type DigestGlanceRow = {
   name: string;
   badge: string;
   detail: string;
-  tone: "warn" | "bad";
+  tone: "warn" | "bad" | "good" | "neutral";
 };
 
 export type DigestMetric = {
@@ -51,6 +52,12 @@ export type DigestMetric = {
   tone: "warn" | "bad" | "good" | "neutral";
 };
 
+export type DigestList = {
+  eyebrow: string;
+  title: string;
+  rows: DigestGlanceRow[];
+};
+
 export type HealthDigestEdition = {
   title: string;
   kicker: string;
@@ -58,9 +65,11 @@ export type HealthDigestEdition = {
   weekday: string;
   lede: string;
   deck: string;
+  pill: string;
   intakeLine: string | null;
   sections: DigestSection[];
   rows: DigestGlanceRow[];
+  lists: DigestList[];
   metrics: DigestMetric[];
   folio: string;
   allClear: boolean;
@@ -68,7 +77,11 @@ export type HealthDigestEdition = {
 };
 
 export function shopDigestTitle(raw?: string): string {
-  return (raw?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops";
+  return (
+    (raw?.trim() || "Print Ops")
+      .replace(/\s+[—-]\s+(health check|morning briefing).*$/i, "")
+      .trim() || "Print Ops"
+  );
 }
 
 export function digestSectionMeta(issueKey: string): {
@@ -254,9 +267,11 @@ export function buildHealthDigestEdition(
     weekday,
     lede: allClear ? "Floor is clear" : "Do this next",
     deck,
+    pill: "HEALTH CHECK",
     intakeLine: attention.length > 0 ? (pending > 0 ? intakeLine : null) : null,
     sections,
     rows,
+    lists: [],
     metrics,
     folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
     allClear,
@@ -414,10 +429,10 @@ export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: stri
     }),
   );
   const status = pill(
-    CARD_WIDTH - pad - (edition.allClear ? 108 : 150),
+    CARD_WIDTH - pad - (edition.pill.length > 8 ? 150 : 120),
     y + 6,
-    edition.allClear ? "CLEAR" : "HEALTH CHECK",
-    edition.allClear ? "good" : "alert",
+    edition.allClear ? "CLEAR" : edition.pill,
+    edition.allClear ? "good" : edition.pill === "MORNING" ? "good" : "alert",
   );
   parts.push(status.svg);
   y += 70;
@@ -433,21 +448,36 @@ export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: stri
   parts.push(text({ x: pad, y, size: 17, value: edition.deck, fill: MUTED }));
   y += 20;
 
-  if (edition.allClear) {
-    parts.push(
-      text({
-        x: pad,
-        y: y + 18,
-        size: 16,
-        value: "When something needs plates, costs, or review, it shows up here first.",
-        fill: MUTED,
-      }),
-    );
-    y += 44;
+  if (edition.rows.length === 0) {
+    if (edition.allClear) {
+      parts.push(
+        text({
+          x: pad,
+          y: y + 18,
+          size: 16,
+          value: "When something needs plates, costs, or review, it shows up here first.",
+          fill: MUTED,
+        }),
+      );
+      y += 44;
+    }
   } else {
     const list = renderGlanceList(edition.rows, pad, y, inner);
     parts.push(list.svg);
     y += list.height + 28;
+  }
+
+  for (const extra of edition.lists) {
+    if (extra.rows.length === 0) continue;
+    parts.push(text({ x: pad, y, size: 11, value: extra.eyebrow, weight: 700, fill: MUTED, tracking: 2.2 }));
+    y += 28;
+    if (extra.title) {
+      parts.push(text({ x: pad, y, size: 22, value: extra.title, weight: 700 }));
+      y += 18;
+    }
+    const extraList = renderGlanceList(extra.rows, pad, y, inner);
+    parts.push(extraList.svg);
+    y += extraList.height + 24;
   }
 
   parts.push(text({ x: pad, y, size: 11, value: "COUNTS", weight: 700, fill: MUTED, tracking: 2.2 }));
@@ -504,7 +534,7 @@ export function renderHealthDigestPng(edition: HealthDigestEdition): Buffer {
 }
 
 export function healthDigestCaption(edition: HealthDigestEdition): string {
-  if (edition.allClear) return "Floor is clear.";
+  if (edition.allClear && edition.pill !== "MORNING") return "Floor is clear.";
   const bits = [edition.lede, edition.deck];
   if (edition.intakeLine && !edition.deck.includes("intake")) bits.push(edition.intakeLine);
   return bits.filter(Boolean).join(" · ");

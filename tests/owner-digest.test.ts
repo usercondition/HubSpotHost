@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildOwnerDigestButtons,
+  buildOwnerDigestEdition,
   buildOwnerDigestText,
   localDigestDateKey,
   localDigestHour,
@@ -15,6 +17,9 @@ import {
   type OwnerDigestContext,
 } from "../server/lib/owner-digest";
 import { getTelegramConfig, sendTelegramMessage, sendTelegramPhoto } from "../server/lib/telegram";
+import {
+  renderHealthDigestSvg,
+} from "../server/lib/health-digest-card";
 import type {
   PerformanceResponse,
   PrintFileRecord,
@@ -326,8 +331,25 @@ test("owner digest includes do-first, next print, production, fleet, resin", () 
   assert.match(text, /RESIN/);
   assert.match(text, /ABS-Like Grey/);
   assert.match(text, /Low sealed/);
-  assert.match(text, /Open:/);
-  assert.match(text, /https:\/\/example\.com\/#\/printers/);
+  assert.doesNotMatch(text, /Open:/);
+  assert.doesNotMatch(text, /https?:\/\//);
+});
+
+test("morning briefing card is a Floor board without raw URLs", () => {
+  const ctx = sampleContext();
+  const edition = buildOwnerDigestEdition(ctx, {
+    now: new Date("2026-08-05T12:00:00.000Z"),
+    timeZone: "UTC",
+  });
+  assert.equal(edition.pill, "MORNING");
+  assert.equal(edition.lede, "Do this first");
+  assert.ok(edition.lists.some((list) => list.eyebrow === "NEXT PRINT"));
+  assert.ok(edition.lists.some((list) => list.eyebrow === "IN PRODUCTION"));
+  const svg = renderHealthDigestSvg(edition).svg;
+  assert.match(svg, /Print Ops/);
+  assert.match(svg, /MORNING/);
+  assert.match(svg, /Knight bust/);
+  assert.doesNotMatch(svg, /https:\/\/(?!www\.w3\.org)/);
 });
 
 test("next print candidates prefer deals missing plates by close date", () => {

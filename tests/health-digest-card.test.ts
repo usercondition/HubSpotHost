@@ -86,6 +86,7 @@ function ctx(overrides?: { attention?: PerformanceResponse["attention"]; intake?
 
 test("shopDigestTitle strips the health-check suffix", () => {
   assert.equal(shopDigestTitle("Print Ops — health check (manual)"), "Print Ops");
+  assert.equal(shopDigestTitle("Print Ops — morning briefing"), "Print Ops");
   assert.equal(shopDigestTitle(""), "Print Ops");
 });
 

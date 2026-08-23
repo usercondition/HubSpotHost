@@ -18,7 +18,16 @@ import {
   answerTrackerQuestionRules,
   type TrackerAssistantContext,
 } from "./tracker-assistant";
-import { sendTelegramMessage, telegramConfigured } from "./telegram";
+import { sendTelegramMessage, sendTelegramPhoto, telegramConfigured, type TelegramReplyMarkup } from "./telegram";
+import {
+  healthDigestCaption,
+  renderHealthDigestPng,
+  shopDigestTitle,
+  type DigestGlanceRow,
+  type DigestList,
+  type DigestMetric,
+  type HealthDigestEdition,
+} from "./health-digest-card";
 
 export type OwnerDigestContext = TrackerAssistantContext & {
   fleet: PrinterFleetSnapshot;
@@ -165,11 +174,162 @@ export function nextPrintCandidates(snapshot: PerformanceResponse, limit = 4) {
     .slice(0, limit);
 }
 
+function clip(value: string, limit: number): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= limit) return cleaned;
+  return `${cleaned.slice(0, limit - 1).trim()}…`;
+}
+
+function shopHttps(href: string, env: NodeJS.ProcessEnv): string {
+  const url = absoluteActionHref(href, env);
+  return /^https:\/\//i.test(url) ? url : "";
+}
+
+export function buildOwnerDigestButtons(env: NodeJS.ProcessEnv = process.env): TelegramReplyMarkup | undefined {
+  const row = [
+    { text: "Floor", url: shopHttps("/", env) },
+    { text: "Queue", url: shopHttps("/queue", env) },
+    { text: "Prints", url: shopHttps("/prints", env) },
+    { text: "Printers", url: shopHttps("/printers", env) },
+  ].filter((button) => Boolean(button.url));
+  return row.length > 0 ? { inline_keyboard: [row] } : undefined;
+}
+
+function doFirstRows(ctx: OwnerDigestContext): DigestGlanceRow[] {
+  const briefing = answerTrackerQuestionRules("What should I do next?", ctx);
+  const lines = briefing.reply
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^\d+\./.test(line));
+  return lines.slice(0, 4).map((line) => {
+    const body = line.replace(/^\d+\.\s*/, "");
+    return {
+      name: clip(body.replace(/\s+—\s+.*$/, ""), 42),
+      badge: "Do first",
+      detail: clip(body, 52),
+      tone: /intake|review/i.test(body) ? "warn" : /stale|quiet/i.test(body) ? "bad" : "warn",
+    };
+  });
+}
+
+export function buildOwnerDigestEdition(
+  ctx: OwnerDigestContext,
+  options?: { title?: string; now?: Date; timeZone?: string },
+): HealthDigestEdition {
+  const now = options?.now ?? new Date();
+  const timeZone = options?.timeZone || "America/New_York";
+  const { snapshot, fleet, resin } = ctx;
+  const attention = snapshot.attention;
+  const plates = attention.filter((item) => item.issueKey === "no_plates").length;
+  const costs = attention.filter((item) => item.issueKey === "costs_incomplete").length;
+  const stale = attention.filter((item) => item.issueKey === "stale").length;
+  const pending = snapshot.intake.pendingReview;
+  const next = nextPrintCandidates(snapshot, 4);
+  const inProd = platesOnOpenOrders(snapshot, ctx.recentPlates, 4);
+  const active = fleet.printers.filter((printer) => printer.status === "active");
+  const fep = active.filter(fepDue);
+  const remainingPct = resin.activeBottle
+    ? resin.activeBottle.initialMassG > 0
+      ? Math.round((Math.max(0, resin.activeBottle.remainingMassG) / resin.activeBottle.initialMassG) * 100)
+      : Math.max(0, Math.round(100 - resin.activeBottle.usedPercent))
+    : 0;
+
+  const rows = doFirstRows(ctx);
+  const lists: DigestList[] = [];
+  if (next.length > 0) {
+    lists.push({
+      eyebrow: "NEXT PRINT",
+      title: "Waiting on plates",
+      rows: next.map((deal) => ({
+        name: clip(deal.dealName, 34),
+        badge: "Needs plates",
+        detail: clip([deal.stage, deal.closeDate ? `due ${shortDate(deal.closeDate)}` : ""].filter(Boolean).join(" · "), 52),
+        tone: "warn" as const,
+      })),
+    });
+  }
+  if (inProd.length > 0) {
+    lists.push({
+      eyebrow: "IN PRODUCTION",
+      title: "Plates on the floor",
+      rows: inProd.map((row) => ({
+        name: clip(row.dealName, 34),
+        badge: "On press",
+        detail: clip([row.fileName, row.printerProfile, hoursLabel(row.printTimeSeconds)].filter(Boolean).join(" · "), 52),
+        tone: "good" as const,
+      })),
+    });
+  }
+  if (fep.length > 0) {
+    lists.push({
+      eyebrow: "FLEET",
+      title: "Maintenance soon",
+      rows: fep.slice(0, 3).map((printer) => ({
+        name: clip(printer.name, 34),
+        badge: "FEP due",
+        detail: clip(printerLine(printer, now).replace(/^•\s+/, "").replace(/^.*? — /, ""), 52),
+        tone: "bad" as const,
+      })),
+    });
+  }
+
+  const deckBits: string[] = [];
+  if (plates > 0) deckBits.push(plates === 1 ? "1 need plates" : `${plates} need plates`);
+  if (pending > 0) deckBits.push(pending === 1 ? "1 to review" : `${pending} to review`);
+  if (fep.length > 0) deckBits.push(fep.length === 1 ? "1 FEP due" : `${fep.length} FEP due`);
+  const allClear = rows.length === 0 && next.length === 0 && fep.length === 0 && pending === 0;
+
+  const metrics: DigestMetric[] = [
+    { label: "Need plates", value: plates, hint: "CTB / slice files", tone: plates > 0 ? "warn" : "good" },
+    { label: "Need costs", value: costs, hint: "Material / ship", tone: costs > 0 ? "warn" : "good" },
+    { label: "Stale", value: stale, hint: "No HubSpot update", tone: stale > 0 ? "bad" : "good" },
+    { label: "FEP due", value: fep.length, hint: "Change soon", tone: fep.length > 0 ? "bad" : "good" },
+    {
+      label: "Resin left",
+      value: remainingPct,
+      hint: resin.activeBottle ? clip(resin.activeBottle.productName, 16) : "No open bottle",
+      tone: remainingPct > 0 && remainingPct <= 20 ? "warn" : remainingPct > 0 ? "good" : "neutral",
+    },
+  ];
+
+  const dateLine = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(now).replace(/,/g, " ·");
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long" }).format(now);
+
+  return {
+    title: shopDigestTitle(options?.title || "Print Ops"),
+    kicker: "Floor",
+    dateLine,
+    weekday,
+    lede: allClear ? "Floor is clear" : "Do this first",
+    deck: allClear
+      ? "No missing plates, stuck intake, or FEP warnings."
+      : deckBits.join(" · ") || "Shop briefing for the floor.",
+    pill: "MORNING",
+    intakeLine: pending > 0 ? `${pending} intake form${pending === 1 ? "" : "s"} waiting for review` : null,
+    sections: [],
+    rows,
+    lists,
+    metrics,
+    folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
+    allClear,
+    openCount: plates + costs + stale + pending,
+  };
+}
+
 export function buildOwnerDigestText(
   ctx: OwnerDigestContext,
   env: NodeJS.ProcessEnv = process.env,
   options?: { title?: string; now?: Date },
 ): string {
+  void env;
   const now = options?.now ?? new Date();
   const { snapshot, fleet, resin } = ctx;
   const briefing = answerTrackerQuestionRules("What should I do next?", ctx);
@@ -289,23 +449,6 @@ export function buildOwnerDigestText(
     `Snapshot: ${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention · intake ${snapshot.intake.pendingReview}/${snapshot.intake.awaitingClient} (review/awaiting)`,
   );
 
-  const actions = [...briefing.actions];
-  const extra = [
-    { label: "Printers", href: "/printers" },
-    { label: "Resin", href: "/resin" },
-    { label: "Print files", href: "/prints" },
-  ];
-  for (const action of extra) {
-    if (!actions.some((item) => item.href === action.href)) actions.push(action);
-  }
-
-  if (actions.length > 0) {
-    lines.push("", "Open:");
-    for (const action of actions.slice(0, 6)) {
-      lines.push(`• ${action.label}: ${absoluteActionHref(action.href, env)}`);
-    }
-  }
-
   const text = lines.join("\n").trim();
   // Keep headroom under Telegram's 4096 limit.
   return text.length > 3900 ? `${text.slice(0, 3890)}\n…` : text;
@@ -388,7 +531,13 @@ export async function sendOwnerDigest(
   const schedule = getOwnerDigestSchedule(env);
   const now = options?.now ?? new Date();
   const dateKey = localDigestDateKey(schedule.timeZone, now);
+  const edition = buildOwnerDigestEdition(ctx, {
+    title: options?.title,
+    now,
+    timeZone: schedule.timeZone,
+  });
   const text = buildOwnerDigestText(ctx, env, { title: options?.title, now });
+  const buttons = buildOwnerDigestButtons(env);
 
   if (!options?.force) {
     const last = readLastDigestDateKey(env);
@@ -397,7 +546,16 @@ export async function sendOwnerDigest(
     }
   }
 
-  const sent = await sendTelegramMessage(text, env);
+  let sent: { ok: true; messageId: number } | { ok: false; error: string } = { ok: false, error: "not sent" };
+  try {
+    const png = renderHealthDigestPng(edition);
+    sent = await sendTelegramPhoto(png, healthDigestCaption(edition), env, fetch, { replyMarkup: buttons });
+  } catch (error) {
+    sent = { ok: false, error: error instanceof Error ? error.message : "Could not render the briefing card" };
+  }
+  if (!sent.ok) {
+    sent = await sendTelegramMessage(text, env, fetch, { replyMarkup: buttons });
+  }
   if (!sent.ok) {
     return { ok: false, error: sent.error, text };
   }
