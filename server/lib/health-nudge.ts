@@ -14,8 +14,11 @@ import type { PerformanceResponse } from "../../shared/schema";
 import type { TrackerAssistantContext } from "./tracker-assistant";
 import {
   buildHealthDigestEdition,
+  digestSectionMeta,
   healthDigestCaption,
   renderHealthDigestPng,
+  shopDigestTitle,
+  type HealthDigestEdition,
 } from "./health-digest-card";
 import {
   sendTelegramMessage,
@@ -26,6 +29,7 @@ import {
 } from "./telegram";
 
 const NUDGE_ISSUE_KEYS = new Set(["no_plates", "costs_incomplete", "stale"]);
+const ISSUE_ORDER_KEYS = ["no_plates", "costs_incomplete", "stale"] as const;
 
 export type HealthNudgeResult =
   | {
@@ -174,79 +178,55 @@ function shortLabel(value: string, limit = 42): string {
   return `${cleaned.slice(0, limit - 1).trim()}…`;
 }
 
-function groupHeading(issueKey: string): { title: string; hint: string } {
-  switch (issueKey) {
-    case "no_plates":
-      return { title: "Plates", hint: "attach sliced files" };
-    case "costs_incomplete":
-      return { title: "Costs", hint: "add as they become known" };
-    case "stale":
-      return { title: "Stale", hint: "no HubSpot update in 7+ days" };
-    default:
-      return { title: "Attention", hint: "needs a look" };
-  }
-}
-
 export function buildHealthNudgeButtons(
-  collected: ReturnType<typeof collectHealthNudgeItems>,
+  _collected: ReturnType<typeof collectHealthNudgeItems>,
   env: NodeJS.ProcessEnv = process.env,
 ): TelegramReplyMarkup | undefined {
   const https = (href: string) => {
     const url = absoluteActionHref(href, env);
     return /^https:\/\//i.test(url) ? url : "";
   };
-  const floor = https("/");
-  const queue = https("/queue");
-  const intake = https("/orders");
-  const prints = https("/prints");
-  const row1 = [
-    floor ? { text: "Floor", url: floor } : null,
-    queue ? { text: "Queue", url: queue } : null,
-  ].filter((button): button is { text: string; url: string } => Boolean(button));
-  const row2 = [
-    collected.intakePending > 0 || collected.intakeAwaiting > 0
-      ? intake
-        ? { text: "Intake", url: intake }
-        : null
-      : null,
-    collected.attention.some((item) => item.issueKey === "no_plates")
-      ? prints
-        ? { text: "Prints", url: prints }
-        : null
-      : null,
-  ].filter((button): button is { text: string; url: string } => Boolean(button));
-  const inline_keyboard = [row1, row2].filter((row) => row.length > 0);
-  return inline_keyboard.length > 0 ? { inline_keyboard } : undefined;
+  const row = [
+    { text: "Floor", url: https("/") },
+    { text: "Queue", url: https("/queue") },
+    { text: "Intake", url: https("/orders") },
+    { text: "Prints", url: https("/prints") },
+  ].filter((button) => Boolean(button.url));
+  return row.length > 0 ? { inline_keyboard: [row] } : undefined;
 }
 
 export function buildHealthNudgeText(
   ctx: TrackerAssistantContext,
   env: NodeJS.ProcessEnv = process.env,
   options?: { title?: string; now?: Date; timeZone?: string },
-): { text: string; fingerprint: string; hasWork: boolean } {
+): { text: string; fingerprint: string; hasWork: boolean; edition: HealthDigestEdition } {
   void env;
   const collected = collectHealthNudgeItems(ctx.snapshot);
   const fingerprint = healthNudgeFingerprint(ctx.snapshot);
-  const title = (options?.title?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops";
-
-  const edition = buildHealthDigestEdition(ctx, { title, now: options?.now, timeZone: options?.timeZone });
+  const edition = buildHealthDigestEdition(ctx, {
+    title: shopDigestTitle(options?.title),
+    now: options?.now,
+    timeZone: options?.timeZone,
+  });
   if (!collected.hasWork) {
     return {
-      text: `<b>${escapeHtml(edition.title)}</b>\n\n${escapeHtml(edition.lede)}\n${escapeHtml(edition.deck)}`,
+      text: `<b>${escapeHtml(edition.kicker)}</b>\n${escapeHtml(edition.lede)}\n${escapeHtml(edition.deck)}`,
       fingerprint,
       hasWork: false,
+      edition,
     };
   }
 
-  const lines: string[] = [`<b>${escapeHtml(edition.kicker)}</b>`, `<b>${escapeHtml(edition.title)}</b>`];
-  lines.push(escapeHtml(edition.dateLine));
-  lines.push("");
-  lines.push(escapeHtml(edition.lede));
+  const lines: string[] = [
+    `<b>${escapeHtml(edition.kicker)}</b>`,
+    escapeHtml(edition.dateLine),
+    "",
+    escapeHtml(edition.lede),
+  ];
   if (edition.deck) lines.push(escapeHtml(edition.deck));
   if (edition.intakeLine) {
     lines.push("");
-    lines.push(`<b>Intake</b>`);
-    lines.push(escapeHtml(edition.intakeLine));
+    lines.push(`<b>Intake</b> · ${escapeHtml(edition.intakeLine)}`);
   }
 
   const byKey = new Map<string, typeof collected.attention>();
@@ -256,18 +236,18 @@ export function buildHealthNudgeText(
     byKey.set(item.issueKey, list);
   }
 
-  for (const issueKey of ["no_plates", "costs_incomplete", "stale"]) {
+  for (const issueKey of ISSUE_ORDER_KEYS) {
     const items = byKey.get(issueKey);
     if (!items || items.length === 0) continue;
-    const heading = groupHeading(issueKey);
+    const heading = digestSectionMeta(issueKey);
     lines.push("");
-    lines.push(`<b>${heading.title}</b> · ${escapeHtml(heading.hint)}`);
-    for (const item of items.slice(0, 5)) {
+    lines.push(`<b>${heading.kicker}</b> · ${escapeHtml(heading.hint)}`);
+    for (const item of items.slice(0, 4)) {
       const stage = item.stage.trim() ? ` · ${escapeHtml(shortLabel(item.stage, 24))}` : "";
       lines.push(`• ${escapeHtml(shortLabel(item.dealName))}${stage}`);
     }
-    if (items.length > 5) {
-      lines.push(`• and ${items.length - 5} more in the shop`);
+    if (items.length > 4) {
+      lines.push(`• and ${items.length - 4} more`);
     }
   }
 
@@ -279,6 +259,7 @@ export function buildHealthNudgeText(
     text: text.length > 3900 ? `${text.slice(0, 3890)}\n…` : text,
     fingerprint,
     hasWork: true,
+    edition,
   };
 }
 
@@ -301,6 +282,7 @@ export async function sendHealthNudge(
     timeZone: schedule.timeZone,
   });
   const buttons = buildHealthNudgeButtons(collectHealthNudgeItems(ctx.snapshot), env);
+  const edition = built.edition;
 
   if (!built.hasWork && !options?.force) {
     return {
@@ -331,11 +313,6 @@ export async function sendHealthNudge(
 
   let sent: TelegramSendResult = { ok: false, error: "not sent" };
   try {
-    const edition = buildHealthDigestEdition(ctx, {
-      title: (options?.title?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops",
-      now,
-      timeZone: schedule.timeZone,
-    });
     const png = renderHealthDigestPng(edition);
     const photo = await sendTelegramPhoto(png, healthDigestCaption(edition), env, fetch, {
       replyMarkup: buttons,

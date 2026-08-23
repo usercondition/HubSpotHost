@@ -14,6 +14,13 @@ import type { TrackerAssistantContext } from "./tracker-assistant";
 const CARD_WIDTH = 1080;
 const ISSUE_ORDER = ["no_plates", "costs_incomplete", "stale"] as const;
 
+const FONT = "Liberation Serif, Noto Serif, DejaVu Serif, Times New Roman, serif";
+const INK = "#1c1612";
+const MUTED = "#6a6156";
+const CRIMSON = "#7c1d1d";
+const PAPER = "#f3ead8";
+const BAND = "#ead9c0";
+
 export type DigestSection = {
   key: string;
   kicker: string;
@@ -26,6 +33,8 @@ export type HealthDigestEdition = {
   title: string;
   kicker: string;
   dateLine: string;
+  weekday: string;
+  issueLine: string;
   lede: string;
   deck: string;
   intakeLine: string | null;
@@ -33,6 +42,39 @@ export type HealthDigestEdition = {
   folio: string;
   allClear: boolean;
 };
+
+export function shopDigestTitle(raw?: string): string {
+  return (raw?.trim() || "Print Ops").replace(/\s+[—-]\s+health check.*$/i, "").trim() || "Print Ops";
+}
+
+export function digestSectionMeta(issueKey: string): { kicker: string; hint: string; deck: (count: number) => string } {
+  switch (issueKey) {
+    case "no_plates":
+      return {
+        kicker: "Plates",
+        hint: "Need a slice",
+        deck: (count) => (count === 1 ? "1 without plates" : `${count} without plates`),
+      };
+    case "costs_incomplete":
+      return {
+        kicker: "Costs",
+        hint: "Books still open",
+        deck: (count) => (count === 1 ? "1 without costs" : `${count} without costs`),
+      };
+    case "stale":
+      return {
+        kicker: "Stale",
+        hint: "Quiet for a week",
+        deck: (count) => (count === 1 ? "1 gone quiet" : `${count} gone quiet`),
+      };
+    default:
+      return {
+        kicker: "Attention",
+        hint: "Needs a look",
+        deck: (count) => `${count} open`,
+      };
+  }
+}
 
 function escapeXml(value: string): string {
   return value
@@ -48,6 +90,23 @@ function clip(value: string, limit: number): string {
   return `${cleaned.slice(0, limit - 1).trim()}…`;
 }
 
+function localParts(now: Date, timeZone: string): { year: number; month: number; day: number; weekday: string } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(now);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return {
+    year: Number(read("year")),
+    month: Number(read("month")),
+    day: Number(read("day")),
+    weekday: read("weekday"),
+  };
+}
+
 function weekdayDate(now: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -58,17 +117,24 @@ function weekdayDate(now: Date, timeZone: string): string {
   }).format(now);
 }
 
-function sectionMeta(issueKey: string): { kicker: string; hint: string } {
-  switch (issueKey) {
-    case "no_plates":
-      return { kicker: "Plates", hint: "Attach sliced files before print" };
-    case "costs_incomplete":
-      return { kicker: "Costs", hint: "Add material, labor, pack, and ship" };
-    case "stale":
-      return { kicker: "Stale", hint: "No HubSpot update in 7+ days" };
-    default:
-      return { kicker: "Attention", hint: "Needs a look" };
-  }
+function dayOfYear(now: Date, timeZone: string): number {
+  const { year, month, day } = localParts(now, timeZone);
+  const utc = Date.UTC(year, month - 1, day);
+  const start = Date.UTC(year, 0, 1);
+  return Math.floor((utc - start) / 86_400_000) + 1;
+}
+
+function nameLimitForWidth(width: number): number {
+  if (width >= 800) return 42;
+  if (width >= 400) return 26;
+  return 18;
+}
+
+function shortStage(stage: string, limit: number): string {
+  const cleaned = stage.replace(/\s+/g, " ").trim();
+  if (/^queued to print$/i.test(cleaned)) return "Queued";
+  if (/^ready to print$/i.test(cleaned)) return "Ready";
+  return clip(cleaned, limit);
 }
 
 export function buildHealthDigestEdition(
@@ -84,11 +150,38 @@ export function buildHealthDigestEdition(
   const allClear = attention.length === 0 && pending === 0 && awaiting === 0;
   const now = options?.now ?? new Date();
   const timeZone = options?.timeZone || "America/New_York";
+  const { weekday } = localParts(now, timeZone);
   const dateLine = weekdayDate(now, timeZone);
 
-  const needBits: string[] = [];
-  if (pending > 0) needBits.push(`${pending} to review`);
-  if (awaiting > 0) needBits.push(`${awaiting} awaiting buyer`);
+  const sections: DigestSection[] = [];
+  const deckBits: string[] = [];
+  for (const key of ISSUE_ORDER) {
+    const rows = attention.filter((item) => item.issueKey === key);
+    if (rows.length === 0) continue;
+    const meta = digestSectionMeta(key);
+    const widthGuess = attention.length >= 3 ? 300 : attention.length === 2 ? 460 : 900;
+    const limit = widthGuess < 360 ? 28 : nameLimitForWidth(widthGuess);
+    sections.push({
+      key,
+      kicker: meta.kicker,
+      hint: meta.hint,
+      items: rows.slice(0, 4).map((item) => ({
+        name: clip(item.dealName, limit),
+        stage: shortStage(item.stage, widthGuess >= 400 ? 18 : 16),
+      })),
+      overflow: Math.max(0, rows.length - 4),
+    });
+    deckBits.push(meta.deck(rows.length));
+  }
+
+  let intakeLine: string | null = null;
+  if (pending > 0 || awaiting > 0) {
+    const bits: string[] = [];
+    if (pending > 0) bits.push(`${pending} waiting review`);
+    if (awaiting > 0) bits.push(`${awaiting} buyer form${awaiting === 1 ? "" : "s"} open`);
+    intakeLine = bits.join("  ·  ");
+  }
+
   const lede = allClear
     ? "All quiet on the floor."
     : attention.length === 0
@@ -97,42 +190,21 @@ export function buildHealthDigestEdition(
         ? "1 deal needs you."
         : `${attention.length} deals need you.`;
 
-  const sections: DigestSection[] = [];
-  for (const key of ISSUE_ORDER) {
-    const rows = attention.filter((item) => item.issueKey === key);
-    if (rows.length === 0) continue;
-    const meta = sectionMeta(key);
-    sections.push({
-      key,
-      kicker: meta.kicker,
-      hint: meta.hint,
-      items: rows.slice(0, 5).map((item) => ({
-        name: clip(item.dealName, 36),
-        stage: clip(item.stage, 22),
-      })),
-      overflow: Math.max(0, rows.length - 5),
-    });
-  }
-
-  let intakeLine: string | null = null;
-  if (pending > 0 || awaiting > 0) {
-    const bits: string[] = [];
-    if (pending > 0) bits.push(`${pending} paid order${pending === 1 ? "" : "s"} waiting review`);
-    if (awaiting > 0) bits.push(`${awaiting} buyer form${awaiting === 1 ? "" : "s"} still open`);
-    intakeLine = bits.join(" · ");
-  }
+  const deck = allClear
+    ? "Nothing waiting on plates, costs, or intake."
+    : deckBits.join("  ·  ") || intakeLine || "Open items listed below.";
 
   return {
-    title: options?.title?.trim() || "Print Ops",
+    title: shopDigestTitle(options?.title),
     kicker: "The Daily Floor",
     dateLine,
+    weekday,
+    issueLine: `Vol. I  ·  No. ${dayOfYear(now, timeZone)}`,
     lede,
-    deck: allClear
-      ? "No missing plates, incomplete costs, stale deals, or stuck intake."
-      : needBits.join(" · ") || "Open items listed below.",
-    intakeLine,
+    deck,
+    intakeLine: attention.length > 0 ? intakeLine : null,
     sections,
-    folio: `${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention`,
+    folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
     allClear,
   };
 }
@@ -150,141 +222,240 @@ function fontSearchDirs(): string[] {
   ];
 }
 
-function firstExisting(paths: string[]): string[] {
-  return paths.filter((path) => existsSync(path));
-}
-
 export function digestFontFiles(): string[] {
-  const dirs = fontSearchDirs();
   const names = [
     "LiberationSerif-Regular.ttf",
     "LiberationSerif-Bold.ttf",
+    "LiberationSerif-Italic.ttf",
     "DejaVuSerif.ttf",
     "DejaVuSerif-Bold.ttf",
     "NotoSerif-Regular.ttf",
     "NotoSerif-Bold.ttf",
   ];
-  return firstExisting(dirs.flatMap((dir) => names.map((name) => join(dir, name))));
+  return fontSearchDirs()
+    .flatMap((dir) => names.map((name) => join(dir, name)))
+    .filter((path) => existsSync(path));
+}
+
+function text(opts: {
+  x: number;
+  y: number;
+  size: number;
+  value: string;
+  anchor?: "start" | "middle" | "end";
+  weight?: 400 | 700;
+  italic?: boolean;
+  fill?: string;
+  tracking?: number;
+}): string {
+  const anchor = opts.anchor ? ` text-anchor="${opts.anchor}"` : "";
+  const weight = opts.weight ? ` font-weight="${opts.weight}"` : "";
+  const italic = opts.italic ? ` font-style="italic"` : "";
+  const tracking = opts.tracking != null ? ` letter-spacing="${opts.tracking}"` : "";
+  return `<text x="${opts.x}" y="${opts.y}" font-family="${FONT}" font-size="${opts.size}"${anchor}${weight}${italic} fill="${opts.fill || INK}"${tracking}>${escapeXml(opts.value)}</text>`;
+}
+
+function rule(x1: number, x2: number, y: number, width = 1): string {
+  return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${INK}" stroke-width="${width}"/>`;
+}
+
+function doubleRule(x1: number, x2: number, y: number): { svg: string; height: number } {
+  return {
+    svg: `${rule(x1, x2, y, 2.4)}\n${rule(x1, x2, y + 5, 0.7)}`,
+    height: 5,
+  };
 }
 
 function sectionBlock(section: DigestSection, x: number, y: number, width: number): { svg: string; height: number } {
   const lines: string[] = [];
   let cursor = y;
+  const showStage = width >= 360;
   lines.push(
-    `<text x="${x}" y="${cursor}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="22" font-weight="700" letter-spacing="3" fill="#8b1e1e">${escapeXml(section.kicker.toUpperCase())}</text>`,
+    text({
+      x,
+      y: cursor,
+      size: 18,
+      value: section.kicker.toUpperCase(),
+      weight: 700,
+      fill: CRIMSON,
+      tracking: 2.4,
+    }),
   );
-  cursor += 28;
-  lines.push(
-    `<text x="${x}" y="${cursor}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" font-style="italic" fill="#5c564c">${escapeXml(section.hint)}</text>`,
-  );
-  cursor += 18;
-  lines.push(`<line x1="${x}" y1="${cursor}" x2="${x + width}" y2="${cursor}" stroke="#1a1714" stroke-width="1"/>`);
-  cursor += 34;
+  cursor += 24;
+  lines.push(text({ x, y: cursor, size: 17, value: section.hint, italic: true, fill: MUTED }));
+  cursor += 12;
+  lines.push(rule(x, x + width, cursor, 0.8));
+  cursor += 30;
   for (const item of section.items) {
-    lines.push(
-      `<text x="${x}" y="${cursor}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="26" fill="#1a1714">${escapeXml(item.name)}</text>`,
-    );
-    cursor += 28;
-    if (item.stage) {
+    lines.push(text({ x, y: cursor, size: 23, value: item.name, weight: 700 }));
+    if (showStage && item.stage) {
       lines.push(
-        `<text x="${x}" y="${cursor}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" fill="#5c564c">${escapeXml(item.stage)}</text>`,
+        text({
+          x: x + width,
+          y: cursor,
+          size: 16,
+          value: item.stage,
+          anchor: "end",
+          italic: true,
+          fill: MUTED,
+        }),
       );
-      cursor += 30;
-    } else {
-      cursor += 8;
     }
+    cursor += 34;
   }
   if (section.overflow > 0) {
     lines.push(
-      `<text x="${x}" y="${cursor}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" font-style="italic" fill="#5c564c">and ${section.overflow} more in the shop</text>`,
+      text({
+        x,
+        y: cursor,
+        size: 17,
+        value: `and ${section.overflow} more`,
+        italic: true,
+        fill: MUTED,
+      }),
     );
-    cursor += 28;
+    cursor += 26;
   }
-  return { svg: lines.join("\n"), height: cursor - y + 8 };
+  return { svg: lines.join("\n"), height: cursor - y };
+}
+
+function renderSectionGrid(
+  sections: DigestSection[],
+  x: number,
+  y: number,
+  totalWidth: number,
+): { svg: string; height: number } {
+  if (sections.length === 0) return { svg: "", height: 0 };
+  const cols = Math.min(3, sections.length);
+  const gap = 28;
+  const colWidth = (totalWidth - gap * (cols - 1)) / cols;
+  const blocks = sections.slice(0, cols).map((section, index) =>
+    sectionBlock(section, x + index * (colWidth + gap), y, colWidth),
+  );
+  const height = Math.max(...blocks.map((block) => block.height));
+  const gutters = blocks.slice(0, -1).map((_, index) => {
+    const gx = x + (index + 1) * colWidth + index * gap + gap / 2;
+    return `<line x1="${gx}" y1="${y - 4}" x2="${gx}" y2="${y + height}" stroke="${INK}" stroke-width="0.7"/>`;
+  });
+  return { svg: [...gutters, ...blocks.map((block) => block.svg)].join("\n"), height };
 }
 
 export function renderHealthDigestSvg(edition: HealthDigestEdition): { svg: string; width: number; height: number } {
-  const pad = 64;
+  const pad = 72;
   const contentWidth = CARD_WIDTH - pad * 2;
   const parts: string[] = [];
-  let y = 78;
+  let y = 70;
+  parts.push(rule(pad, CARD_WIDTH - pad, y, 0.8));
+  y += 52;
 
   parts.push(
-    `<text x="${CARD_WIDTH / 2}" y="${y}" text-anchor="middle" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" letter-spacing="8" fill="#8b1e1e">${escapeXml(edition.kicker.toUpperCase())}</text>`,
+    text({
+      x: CARD_WIDTH / 2,
+      y,
+      size: 52,
+      value: edition.kicker.toUpperCase(),
+      anchor: "middle",
+      weight: 700,
+      tracking: 3.5,
+    }),
   );
-  y += 62;
+  y += 34;
   parts.push(
-    `<text x="${CARD_WIDTH / 2}" y="${y}" text-anchor="middle" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="72" font-weight="700" fill="#1a1714">${escapeXml(edition.title.toUpperCase())}</text>`,
+    text({
+      x: CARD_WIDTH / 2,
+      y,
+      size: 16,
+      value: edition.title.toUpperCase(),
+      anchor: "middle",
+      fill: CRIMSON,
+      tracking: 6,
+    }),
   );
+  y += 22;
+  const mastheadRule = doubleRule(pad, CARD_WIDTH - pad, y);
+  parts.push(mastheadRule.svg);
+  y += 32;
+  parts.push(text({ x: pad, y, size: 17, value: edition.issueLine, fill: MUTED }));
+  parts.push(
+    text({
+      x: CARD_WIDTH / 2,
+      y,
+      size: 15,
+      value: "HEALTH CHECK",
+      anchor: "middle",
+      weight: 700,
+      fill: CRIMSON,
+      tracking: 3.2,
+    }),
+  );
+  parts.push(text({ x: CARD_WIDTH - pad, y, size: 17, value: edition.dateLine, anchor: "end", fill: MUTED }));
+  y += 16;
+  parts.push(rule(pad, CARD_WIDTH - pad, y, 1));
+  y += 58;
+  parts.push(text({ x: pad, y, size: 40, value: edition.lede, weight: 700 }));
+  y += 34;
+  parts.push(text({ x: pad, y, size: 22, value: edition.deck, italic: true, fill: MUTED }));
   y += 28;
-  parts.push(`<line x1="${pad}" y1="${y}" x2="${CARD_WIDTH - pad}" y2="${y}" stroke="#1a1714" stroke-width="3"/>`);
-  y += 36;
-  parts.push(
-    `<text x="${CARD_WIDTH / 2}" y="${y}" text-anchor="middle" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="24" fill="#1a1714">Health Check  ·  ${escapeXml(edition.dateLine)}</text>`,
-  );
-  y += 18;
-  parts.push(`<line x1="${pad}" y1="${y}" x2="${CARD_WIDTH - pad}" y2="${y}" stroke="#1a1714" stroke-width="1.5"/>`);
-  y += 70;
-  parts.push(
-    `<text x="${pad}" y="${y}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="44" font-weight="700" fill="#1a1714">${escapeXml(edition.lede)}</text>`,
-  );
-  y += 40;
-  parts.push(
-    `<text x="${pad}" y="${y}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="24" fill="#5c564c">${escapeXml(edition.deck)}</text>`,
-  );
-  y += 36;
 
   if (edition.intakeLine) {
-    parts.push(`<rect x="${pad}" y="${y}" width="${contentWidth}" height="56" fill="#efe6d6"/>`);
+    parts.push(`<rect x="${pad}" y="${y}" width="${contentWidth}" height="48" fill="${BAND}"/>`);
     parts.push(
-      `<text x="${pad + 18}" y="${y + 36}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="22" fill="#1a1714"><tspan font-weight="700" fill="#8b1e1e">INTAKE</tspan>   ${escapeXml(edition.intakeLine)}</text>`,
+      text({
+        x: pad + 16,
+        y: y + 31,
+        size: 16,
+        value: "INTAKE",
+        weight: 700,
+        fill: CRIMSON,
+        tracking: 2.2,
+      }),
     );
-    y += 80;
+    parts.push(text({ x: pad + 112, y: y + 31, size: 20, value: edition.intakeLine }));
+    y += 68;
   }
 
-  if (edition.sections.length === 0 && edition.allClear) {
-    y += 24;
+  if (edition.sections.length === 0) {
+    y += 12;
     parts.push(
-      `<text x="${CARD_WIDTH / 2}" y="${y}" text-anchor="middle" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="28" font-style="italic" fill="#5c564c">Nothing in the queue that needs a nudge.</text>`,
+      text({
+        x: CARD_WIDTH / 2,
+        y,
+        size: 24,
+        value: edition.allClear ? "Nothing in the queue that needs a nudge." : "Open Intake to clear the desk.",
+        anchor: "middle",
+        italic: true,
+        fill: MUTED,
+      }),
     );
-    y += 48;
-  } else if (edition.sections.length === 1) {
-    const block = sectionBlock(edition.sections[0]!, pad, y, contentWidth);
-    parts.push(block.svg);
-    y += block.height + 16;
-  } else if (edition.sections.length >= 2) {
-    const colGap = 40;
-    const colWidth = (contentWidth - colGap) / 2;
-    const left = sectionBlock(edition.sections[0]!, pad, y, colWidth);
-    const right = sectionBlock(edition.sections[1]!, pad + colWidth + colGap, y, colWidth);
-    parts.push(`<line x1="${pad + colWidth + colGap / 2}" y1="${y - 8}" x2="${pad + colWidth + colGap / 2}" y2="${y + Math.max(left.height, right.height)}" stroke="#1a1714" stroke-width="1"/>`);
-    parts.push(left.svg, right.svg);
-    y += Math.max(left.height, right.height) + 28;
-    if (edition.sections[2]) {
-      parts.push(`<line x1="${pad}" y1="${y}" x2="${CARD_WIDTH - pad}" y2="${y}" stroke="#1a1714" stroke-width="1"/>`);
-      y += 36;
-      const third = sectionBlock(edition.sections[2], pad, y, contentWidth);
-      parts.push(third.svg);
-      y += third.height + 16;
-    }
+    y += 40;
+  } else {
+    const grid = renderSectionGrid(edition.sections, pad, y, contentWidth);
+    parts.push(grid.svg);
+    y += grid.height + 18;
   }
 
-  y += 12;
-  parts.push(`<line x1="${pad}" y1="${y}" x2="${CARD_WIDTH - pad}" y2="${y}" stroke="#1a1714" stroke-width="3"/>`);
+  const foot = doubleRule(pad, CARD_WIDTH - pad, y);
+  parts.push(foot.svg);
+  y += 34;
+  parts.push(text({ x: pad, y, size: 17, value: edition.folio, fill: MUTED }));
+  parts.push(
+    text({
+      x: CARD_WIDTH - pad,
+      y,
+      size: 17,
+      value: `${edition.weekday} edition`,
+      anchor: "end",
+      fill: MUTED,
+    }),
+  );
   y += 36;
-  parts.push(
-    `<text x="${pad}" y="${y}" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" fill="#5c564c">${escapeXml(edition.folio)}</text>`,
-  );
-  parts.push(
-    `<text x="${CARD_WIDTH - pad}" y="${y}" text-anchor="end" font-family="Liberation Serif, Noto Serif, DejaVu Serif, serif" font-size="20" fill="#5c564c">Shop edition</text>`,
-  );
-  y += 56;
 
-  const height = Math.max(900, y + 8);
+  const height = y + 22;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${height}" viewBox="0 0 ${CARD_WIDTH} ${height}">
-  <rect width="100%" height="100%" fill="#f4efe4"/>
-  <rect x="28" y="28" width="${CARD_WIDTH - 56}" height="${height - 56}" fill="none" stroke="#1a1714" stroke-width="2"/>
+  <rect width="100%" height="100%" fill="${PAPER}"/>
+  <rect x="22" y="22" width="${CARD_WIDTH - 44}" height="${height - 44}" fill="none" stroke="${INK}" stroke-width="2.2"/>
+  <rect x="30" y="30" width="${CARD_WIDTH - 60}" height="${height - 60}" fill="none" stroke="${INK}" stroke-width="0.7"/>
   ${parts.join("\n  ")}
 </svg>`;
   return { svg, width: CARD_WIDTH, height };
@@ -300,14 +471,16 @@ export function renderHealthDigestPng(edition: HealthDigestEdition): Buffer {
       fontFiles: fonts,
       defaultFontFamily: "Liberation Serif",
     },
-    background: "#f4efe4",
+    background: PAPER,
   });
   return Buffer.from(resvg.render().asPng());
 }
 
 export function healthDigestCaption(edition: HealthDigestEdition): string {
-  if (edition.allClear) return `${edition.dateLine.split(",")[0]} edition · all quiet on the floor.`;
-  return `${edition.lede} ${edition.deck}`.trim();
+  if (edition.allClear) return `${edition.weekday} edition · all quiet on the floor.`;
+  const bits = [edition.lede.replace(/\.$/, ""), edition.deck.replace(/\s+·\s+/g, " · ")];
+  if (edition.intakeLine) bits.push(edition.intakeLine.replace(/\s+·\s+/g, " · "));
+  return bits.filter(Boolean).join(" · ");
 }
 
 export function isPngBuffer(buffer: Buffer): boolean {

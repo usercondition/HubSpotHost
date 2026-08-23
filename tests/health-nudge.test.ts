@@ -103,10 +103,12 @@ test("buildHealthNudgeText lists plates, stale, and intake without raw URLs", ()
   assert.match(built.text, /<b>Stale<\/b>/);
   assert.match(built.text, /<b>Intake<\/b>/);
   assert.match(built.text, /2 deals need you/);
+  assert.match(built.text, /Need a slice/);
   assert.doesNotMatch(built.text, /https?:\/\//);
   assert.doesNotMatch(built.text, /Low margin toy/);
   assert.doesNotMatch(built.text, /Open in queue:/);
   assert.doesNotMatch(built.text, /Attach sliced plates before print/);
+  assert.doesNotMatch(built.text, /add as they become known/);
 });
 
 test("health nudge buttons are a short shop row, not per-deal links", () => {
@@ -114,10 +116,29 @@ test("health nudge buttons are a short shop row, not per-deal links", () => {
     PUBLIC_BASE_URL: "https://ops.example",
   });
   assert.ok(buttons);
+  assert.equal(buttons.inline_keyboard.length, 1);
   const labels = buttons.inline_keyboard.flat().map((button) => button.text);
   assert.deepEqual(labels, ["Floor", "Queue", "Intake", "Prints"]);
   assert.ok(buttons.inline_keyboard.flat().every((button) => button.url.startsWith("https://ops.example/#/")));
   assert.equal(buttons.inline_keyboard.flat().some((button) => button.url.includes("dealId=")), false);
+});
+
+test("shop buttons stay on the card even when the floor is clear", () => {
+  const buttons = buildHealthNudgeButtons(
+    collectHealthNudgeItems(
+      sampleSnapshot({
+        attention: [],
+        intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
+      }),
+    ),
+    { PUBLIC_BASE_URL: "https://ops.example" },
+  );
+  assert.deepEqual(buttons?.inline_keyboard.flat().map((button) => button.text), [
+    "Floor",
+    "Queue",
+    "Intake",
+    "Prints",
+  ]);
 });
 
 test("buildHealthNudgeText is quiet when shop is clear", () => {
