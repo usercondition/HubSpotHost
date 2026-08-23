@@ -42,12 +42,24 @@ function QueueCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const needsPlates = item.requiresPlates && !item.hasPlates;
+  const tone = item.isStale
+    ? "bad"
+    : needsPlates
+      ? "plates"
+      : item.costsIncomplete || item.bucket === "blocked"
+        ? "warn"
+        : item.fulfillment.shipReady || item.bucket === "ship_ready"
+          ? "good"
+          : undefined;
+
   return (
     <button
       type="button"
       onClick={onSelect}
       className={cn("workspace-node w-full p-3 text-left", selected && "ring-0")}
       data-active={selected ? "true" : "false"}
+      data-tone={tone}
       data-testid={`button-queue-deal-${item.dealId}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -61,10 +73,12 @@ function QueueCard({
         <p className="text-sm font-medium">{formatMoney(item.amount)}</p>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {item.requiresPlates && !item.hasPlates ? (
-          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-        ) : null}
+        {item.isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
+        {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
         {!item.requiresPlates ? <StatusPill tone="neutral" icon={Package} label="No plates" /> : null}
+        {item.costsIncomplete ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+        ) : null}
         {item.plateCount > 0 ? (
           <StatusPill tone="neutral" icon={Clock3} label={`${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}`} />
         ) : null}

@@ -1826,6 +1826,8 @@ export interface ProductionQueueItem {
   kitNeeded: number;
   kitReprint: number;
   costsIncomplete: boolean;
+  /** True when HubSpot has not updated this deal recently (Floor “Stale”). */
+  isStale: boolean;
   fulfillment: FulfillmentChecklistView;
   bucket: "next_print" | "in_production" | "ship_ready" | "blocked";
   priorityScore: number;

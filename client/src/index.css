@@ -359,6 +359,56 @@
       var(--shadow-md);
   }
 
+  .workspace-node[data-tone='warn'] {
+    border-left: 3px solid hsl(var(--chart-4));
+    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='bad'] {
+    border-left: 3px solid hsl(var(--destructive));
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='good'] {
+    border-left: 3px solid hsl(var(--accent));
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .workspace-node[data-tone='plates'] {
+    border-left: 3px solid hsl(var(--primary));
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card) / 0.92) 42%);
+  }
+
+  .board-card {
+    border-radius: calc(var(--radius) + 1px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-xs);
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .board-card[data-tone='warn'] {
+    border-left: 3px solid hsl(var(--chart-4));
+    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='bad'] {
+    border-left: 3px solid hsl(var(--destructive));
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='good'] {
+    border-left: 3px solid hsl(var(--accent));
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card)) 45%);
+  }
+
+  .board-card[data-tone='plates'] {
+    border-left: 3px solid hsl(var(--primary));
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card)) 45%);
+  }
+
   /* Titled group container — primary way to cluster related shop data */
   .workspace-section {
     border-radius: calc(var(--radius) + 2px);

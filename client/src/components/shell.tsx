@@ -14,9 +14,10 @@ import {
   ListOrdered,
   LayoutDashboard,
   Printer,
-  ShoppingBag,
   Settings2,
+  Ship,
   ShipWheel,
+  ShoppingBag,
   Sun,
   Users,
 } from "lucide-react";
@@ -110,6 +111,7 @@ const NAV: Array<{
 }> = [
   { href: "/", label: "Floor", title: "Today’s floor board", icon: LayoutDashboard, testId: "link-nav-home", group: "Run" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run" },
+  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run" },
   { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Run" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run" },
   { href: "/clients", label: "Clients", title: "HubSpot clients", icon: Users, testId: "link-nav-clients", group: "Take" },

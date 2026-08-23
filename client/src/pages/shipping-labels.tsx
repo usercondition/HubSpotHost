@@ -1,0 +1,379 @@
+import { useMemo, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
+import { PageHeader } from "@/components/shell";
+import { Panel, StatusPill } from "@/components/primitives";
+import { formatMoney } from "@/lib/format";
+import { queueDealHref } from "@/lib/workflow";
+import { cn } from "@/lib/utils";
+
+type LabelFields = {
+  trackingNumber: string | null;
+  service: string | null;
+  carrier: string | null;
+  postageUsd: string | null;
+  recipientName: string | null;
+  recipientCity: string | null;
+  recipientState: string | null;
+  recipientPostalCode: string | null;
+  warnings: string[];
+};
+
+type LabelMatch = {
+  dealId: string;
+  dealName: string;
+  stage: string;
+  contactName: string | null;
+  amount: number;
+  closed: boolean;
+  score: number;
+  reason: string;
+};
+
+type ParseResponse = {
+  ok: true;
+  fileName: string;
+  fields: LabelFields;
+  suggestedNotes: string;
+  matches: LabelMatch[];
+};
+
+/**
+ * Drop Pirate Ship / carrier label PDFs → extract tracking → confirm Print Order.
+ * Complete in HubSpot already means shipped — no separate Shipped board needed.
+ */
+export default function ShippingLabelsPage() {
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { isUnlocked, headers } = useOwnerSession();
+  const unlock = useOwnerUnlock({
+    successTitle: "Labels unlocked",
+    successDescription: "Drop label PDFs to pull tracking onto Print Orders.",
+  });
+
+  const [dragOver, setDragOver] = useState(false);
+  const [parsed, setParsed] = useState<ParseResponse | null>(null);
+  const [tracking, setTracking] = useState("");
+  const [notes, setNotes] = useState("");
+  const [postage, setPostage] = useState("");
+  const [dealId, setDealId] = useState("");
+
+  const parseLabel = useMutation({
+    mutationFn: async (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await apiRequest("POST", "/api/shipping-labels/parse", body, { headers });
+      return (await response.json()) as ParseResponse;
+    },
+    onSuccess: (data) => {
+      setParsed(data);
+      setTracking(data.fields.trackingNumber ?? "");
+      setNotes(data.suggestedNotes || "");
+      setPostage(data.fields.postageUsd ?? "");
+      setDealId(data.matches[0]?.dealId ?? "");
+      toast({
+        title: "Label read",
+        description: data.fields.trackingNumber
+          ? `Tracking ${data.fields.trackingNumber}`
+          : "Check the fields and pick the matching order.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not read label",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 220),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const attach = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest(
+        "POST",
+        "/api/shipping-labels/attach",
+        {
+          dealId,
+          trackingNumber: tracking.trim(),
+          notes: notes.trim(),
+          postageUsd: postage.trim(),
+          packingDone: true,
+          labelBought: true,
+        },
+        { headers },
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
+      toast({
+        title: "Tracking attached",
+        description: "Saved on the Print Order checklist and HubSpot when writes are live.",
+      });
+      setParsed(null);
+      setTracking("");
+      setNotes("");
+      setPostage("");
+      setDealId("");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not attach tracking",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 220),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const selected = useMemo(
+    () => parsed?.matches.find((row) => row.dealId === dealId) ?? null,
+    [parsed, dealId],
+  );
+
+  function onFiles(files: FileList | File[] | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+      toast({
+        title: "PDF only",
+        description: "Drop a shipping label PDF from Pirate Ship or the carrier.",
+        variant: "destructive",
+      });
+      return;
+    }
+    parseLabel.mutate(file);
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="Labels"
+        subtitle="Drop a shipping label PDF — we pull tracking, service, and postage, then attach it to the matching Print Order (including Completed)."
+      />
+
+      <div className="page-stack">
+        {!isUnlocked ? (
+          <OwnerUnlockPanel
+            title="Unlock Labels"
+            description="Owner code required to read label PDFs and write tracking onto HubSpot deals."
+            value={unlock.code}
+            onChange={unlock.setCode}
+            onSubmit={unlock.submit}
+            pending={unlock.pending}
+            error={unlock.error}
+          />
+        ) : (
+          <>
+            <Panel
+              title="Drop shipping label"
+              description="Pirate Ship / USPS PDF exports work best. Nothing is saved until you confirm the order below."
+              testId="panel-labels-drop"
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                data-testid="input-shipping-label-file"
+                onChange={(event) => {
+                  onFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className={cn(
+                  "glance-item glance-in w-full flex-col items-stretch gap-2 border-dashed py-10 text-center",
+                  dragOver && "border-primary bg-primary/5",
+                )}
+                data-tone="good"
+                data-testid="button-shipping-label-dropzone"
+                disabled={parseLabel.isPending}
+                onClick={() => inputRef.current?.click()}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragOver(false);
+                  onFiles(event.dataTransfer.files);
+                }}
+              >
+                {parseLabel.isPending ? (
+                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
+                ) : (
+                  <FileUp className="mx-auto h-6 w-6 text-primary" />
+                )}
+                <p className="text-sm font-semibold">
+                  {parseLabel.isPending ? "Reading label…" : "Drop label PDF here"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Completing an order in HubSpot is enough for “shipped” — use this to attach the tracking after you buy the label.
+                </p>
+              </button>
+            </Panel>
+
+            {parsed ? (
+              <Panel
+                title="Confirm & attach"
+                description={parsed.fileName}
+                testId="panel-labels-confirm"
+              >
+                {parsed.fields.warnings.length > 0 ? (
+                  <ul className="mb-3 space-y-1">
+                    {parsed.fields.warnings.map((warning) => (
+                      <li key={warning} className="flex items-start gap-2 text-xs text-chart-4">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        {warning}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="label-tracking">Tracking number</Label>
+                    <Input
+                      id="label-tracking"
+                      value={tracking}
+                      onChange={(event) => setTracking(event.target.value)}
+                      data-testid="input-label-tracking"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="label-postage">Postage (optional)</Label>
+                    <Input
+                      id="label-postage"
+                      value={postage}
+                      onChange={(event) => setPostage(event.target.value)}
+                      placeholder="0.00"
+                      data-testid="input-label-postage"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="label-notes">Ship notes</Label>
+                    <Input
+                      id="label-notes"
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                      data-testid="input-label-notes"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  {parsed.fields.service ? (
+                    <StatusPill tone="neutral" icon={Ship} label={parsed.fields.service} />
+                  ) : parsed.fields.carrier ? (
+                    <StatusPill tone="neutral" icon={Ship} label={parsed.fields.carrier} />
+                  ) : null}
+                  {parsed.fields.recipientName ? (
+                    <StatusPill tone="good" icon={CheckCircle2} label={parsed.fields.recipientName} />
+                  ) : null}
+                  {parsed.fields.recipientCity ? (
+                    <span>
+                      {parsed.fields.recipientCity}
+                      {parsed.fields.recipientState ? `, ${parsed.fields.recipientState}` : ""}{" "}
+                      {parsed.fields.recipientPostalCode ?? ""}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-semibold">Match to Print Order</p>
+                  {parsed.matches.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No automatic match — paste the HubSpot deal id below, or open{" "}
+                      <Link href="/deals" className="text-primary hover:underline">
+                        Orders
+                      </Link>{" "}
+                      and use Ops → Save tracking.
+                    </p>
+                  ) : (
+                    <ul className="glance-list">
+                      {parsed.matches.map((match) => (
+                        <li key={match.dealId}>
+                          <button
+                            type="button"
+                            className="glance-item w-full text-left"
+                            data-tone={match.closed ? "good" : match.score >= 70 ? "warn" : undefined}
+                            data-testid={`button-label-match-${match.dealId}`}
+                            onClick={() => setDealId(match.dealId)}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold">{match.dealName}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {match.stage}
+                                {match.closed ? " · completed" : ""}
+                                {match.contactName ? ` · ${match.contactName}` : ""} · {formatMoney(match.amount)}
+                              </span>
+                              <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">{match.reason}</span>
+                            </span>
+                            {dealId === match.dealId ? (
+                              <StatusPill tone="good" icon={CheckCircle2} label="Selected" />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Score {match.score}</span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="pt-1">
+                    <Label htmlFor="label-deal-id">Deal id</Label>
+                    <Input
+                      id="label-deal-id"
+                      value={dealId}
+                      onChange={(event) => setDealId(event.target.value.trim())}
+                      placeholder="HubSpot deal id"
+                      data-testid="input-label-deal-id"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={attach.isPending || !tracking.trim() || !/^[0-9]{1,20}$/.test(dealId)}
+                    onClick={() => attach.mutate()}
+                    data-testid="button-label-attach"
+                  >
+                    {attach.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                    Attach tracking
+                    {selected ? ` · ${selected.dealName.slice(0, 28)}` : ""}
+                  </Button>
+                  {dealId ? (
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={queueDealHref(dealId)}>Open in Queue</Link>
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setParsed(null);
+                      setDealId("");
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </Panel>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

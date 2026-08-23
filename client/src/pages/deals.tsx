@@ -393,10 +393,19 @@ function DealCard({
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
+  const isStale = deal.alerts.some((item) => item.issueKey === "stale");
+  const tone = isStale
+    ? "bad"
+    : deal.needsPlates
+      ? "plates"
+      : deal.needsCosts
+        ? "warn"
+        : "good";
 
   return (
     <article
-      className="group shrink-0 rounded-md border border-border bg-card p-2.5 shadow-xs transition-colors hover:border-accent/40"
+      className="board-card group shrink-0 p-2.5"
+      data-tone={tone}
       data-testid={`card-deal-${deal.dealId}`}
     >
       <a
@@ -428,7 +437,7 @@ function DealCard({
         ) : null}
       </div>
 
-      {(deal.needsPlates || deal.needsCosts || partsSummary) && (
+      {(deal.needsPlates || deal.needsCosts || isStale || partsSummary) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {deal.needsPlates ? (
             <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-primary">
@@ -436,8 +445,13 @@ function DealCard({
             </span>
           ) : null}
           {deal.needsCosts ? (
-            <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
-              Costs incomplete
+            <span className="rounded border border-chart-4/35 bg-chart-4/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-chart-4">
+              Needs costs
+            </span>
+          ) : null}
+          {isStale ? (
+            <span className="rounded border border-destructive/35 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-destructive">
+              Stale
             </span>
           ) : null}
           {partsSummary && partsSummary.total > 0 ? (
