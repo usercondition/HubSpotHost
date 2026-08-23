@@ -81,7 +81,7 @@ async function fetchDealWithCosts(dealId: string): Promise<{
   };
 }
 
-async function fetchAssociatedContact(dealId: string): Promise<{
+export async function fetchDealAssociatedContact(dealId: string): Promise<{
   id: string | null;
   name: string;
   email: string;
@@ -126,6 +126,11 @@ async function fetchAssociatedContact(dealId: string): Promise<{
   } catch {
     return { id: null, name: "", email: "", phone: "", addressLines: [] };
   }
+}
+
+/** @deprecated use fetchDealAssociatedContact */
+async function fetchAssociatedContact(dealId: string) {
+  return fetchDealAssociatedContact(dealId);
 }
 
 function costsFromProperties(props: Record<string, string | null>): DealCostFields {

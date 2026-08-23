@@ -36,3 +36,24 @@ export function draftBuyerTrackingMessage(input: {
     "Reply here if you need anything.",
   ].join("\n");
 }
+
+export function buyerTrackingEmailSubject(dealName?: string | null): string {
+  const cleaned = String(dealName ?? "").trim();
+  if (cleaned) return `Your order shipped — ${cleaned.slice(0, 80)}`;
+  return "Your print order shipped";
+}
+
+/** Opens the owner's mail app with HubSpot contact email + draft body. */
+export function buyerTrackingMailtoHref(input: {
+  email: string;
+  subject: string;
+  body: string;
+}): string | null {
+  const email = input.email.trim();
+  if (!email.includes("@")) return null;
+  const params = new URLSearchParams({
+    subject: input.subject,
+    body: input.body,
+  });
+  return `mailto:${encodeURIComponent(email)}?${params.toString()}`;
+}

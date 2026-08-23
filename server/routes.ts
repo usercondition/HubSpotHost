@@ -187,6 +187,7 @@ import {
   advanceDealStage,
   assignPlateToPrinter,
   buildDealOpsDetail,
+  fetchDealAssociatedContact,
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
@@ -1242,13 +1243,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     }
 
+    const contact = await fetchDealAssociatedContact(input.dealId);
+
     return res.json({
       ok: true,
       checklist: fulfillment.checklist,
       hubspot: fulfillment.hubspot,
       costs: costs && costs.ok ? costs.costs : null,
       costsError: costs && !costs.ok ? costs.error : null,
+      contact: {
+        id: contact.id,
+        name: contact.name,
+        email: contact.email,
+      },
     });
+  });
+
+  /** HubSpot contact email/name for a Print Order (Labels draft → mailto). */
+  app.get("/api/shipping-labels/contact/:dealId", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    try {
+      const contact = await fetchDealAssociatedContact(dealId);
+      return res.json({
+        ok: true,
+        dealId,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+        },
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load HubSpot contact email",
+      });
+    }
   });
 
   app.post("/api/plates/assign-printer", (req: Request, res: Response) => {

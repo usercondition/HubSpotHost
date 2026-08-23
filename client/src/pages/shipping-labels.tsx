@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText } from "lucide-react";
+import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,11 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { queueDealHref } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
-import { draftBuyerTrackingMessage } from "@shared/shipping-draft";
+import {
+  buyerTrackingEmailSubject,
+  buyerTrackingMailtoHref,
+  draftBuyerTrackingMessage,
+} from "@shared/shipping-draft";
 
 type LabelFields = {
   trackingNumber: string | null;
@@ -50,6 +54,7 @@ type AttachedDraft = {
   dealId: string;
   dealName: string;
   contactName: string | null;
+  contactEmail: string | null;
   trackingNumber: string;
   service: string | null;
   carrier: string | null;
@@ -63,7 +68,7 @@ type AttachedDraft = {
 export default function ShippingLabelsPage() {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
-  const { isUnlocked, headers } = useOwnerSession();
+  const { isUnlocked, headers, ownerCode } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Labels unlocked",
     successDescription: "Drop label PDFs to pull tracking onto Print Orders.",
@@ -122,15 +127,24 @@ export default function ShippingLabelsPage() {
         },
         { headers },
       );
-      return response.json();
+      return (await response.json()) as {
+        ok: true;
+        contact?: { id: string | null; name: string; email: string };
+      };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
       const match = parsed?.matches.find((row) => row.dealId === dealId) ?? null;
+      const contactName =
+        data.contact?.name?.trim() ||
+        match?.contactName ||
+        parsed?.fields.recipientName ||
+        null;
+      const contactEmail = data.contact?.email?.trim() || null;
       const message = draftBuyerTrackingMessage({
-        contactName: match?.contactName ?? parsed?.fields.recipientName ?? null,
+        contactName,
         dealName: match?.dealName ?? null,
         trackingNumber: tracking.trim(),
         service: parsed?.fields.service ?? null,
@@ -139,7 +153,8 @@ export default function ShippingLabelsPage() {
       setAttachedDraft({
         dealId,
         dealName: match?.dealName ?? `Deal ${dealId}`,
-        contactName: match?.contactName ?? parsed?.fields.recipientName ?? null,
+        contactName,
+        contactEmail,
         trackingNumber: tracking.trim(),
         service: parsed?.fields.service ?? null,
         carrier: parsed?.fields.carrier ?? null,
@@ -147,7 +162,9 @@ export default function ShippingLabelsPage() {
       });
       toast({
         title: "Tracking attached",
-        description: "Draft buyer message is ready to copy — Print Ops does not auto-send.",
+        description: contactEmail
+          ? `Draft ready for ${contactEmail}`
+          : "Draft ready — no HubSpot email on this contact; copy for Marketplace.",
       });
       setParsed(null);
       setTracking("");
@@ -169,16 +186,54 @@ export default function ShippingLabelsPage() {
     [parsed, dealId],
   );
 
+  const contactLookup = useQuery<{
+    ok: true;
+    contact: { id: string | null; name: string; email: string };
+  }>({
+    queryKey: ["/api/shipping-labels/contact", dealId, ownerCode],
+    enabled: isUnlocked && /^[0-9]{1,20}$/.test(dealId) && Boolean(parsed),
+    queryFn: async () => {
+      const response = await apiRequest(
+        "GET",
+        `/api/shipping-labels/contact/${encodeURIComponent(dealId)}`,
+        undefined,
+        { headers },
+      );
+      return response.json();
+    },
+  });
+
+  const hubspotEmail = contactLookup.data?.contact.email?.trim() || "";
+  const hubspotContactName = contactLookup.data?.contact.name?.trim() || "";
+
   const liveDraft = useMemo(() => {
     if (!tracking.trim()) return "";
     return draftBuyerTrackingMessage({
-      contactName: selected?.contactName ?? parsed?.fields.recipientName ?? null,
+      contactName: hubspotContactName || selected?.contactName || parsed?.fields.recipientName || null,
       dealName: selected?.dealName ?? null,
       trackingNumber: tracking.trim(),
       service: parsed?.fields.service ?? null,
       carrier: parsed?.fields.carrier ?? null,
     });
-  }, [tracking, selected, parsed]);
+  }, [tracking, selected, parsed, hubspotContactName]);
+
+  const previewMailto = useMemo(() => {
+    if (!hubspotEmail || !liveDraft) return null;
+    return buyerTrackingMailtoHref({
+      email: hubspotEmail,
+      subject: buyerTrackingEmailSubject(selected?.dealName),
+      body: liveDraft,
+    });
+  }, [hubspotEmail, liveDraft, selected?.dealName]);
+
+  const attachedMailto = useMemo(() => {
+    if (!attachedDraft?.contactEmail) return null;
+    return buyerTrackingMailtoHref({
+      email: attachedDraft.contactEmail,
+      subject: buyerTrackingEmailSubject(attachedDraft.dealName),
+      body: attachedDraft.message,
+    });
+  }, [attachedDraft]);
 
   async function copyMessage(text: string) {
     try {
@@ -285,10 +340,15 @@ export default function ShippingLabelsPage() {
                 testId="panel-labels-buyer-draft"
               >
                 <div className="glance-item glance-in flex-col items-stretch gap-3" data-tone="good">
-                  <div className="flex items-center gap-2 text-sm font-semibold">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                     <MessageSquareText className="h-4 w-4 text-primary" />
                     Draft ready
                     <StatusPill tone="good" icon={CheckCircle2} label="Tracking attached" />
+                    {attachedDraft.contactEmail ? (
+                      <StatusPill tone="neutral" icon={Mail} label={attachedDraft.contactEmail} />
+                    ) : (
+                      <StatusPill tone="warn" icon={AlertTriangle} label="No HubSpot email" />
+                    )}
                   </div>
                   <pre
                     className="whitespace-pre-wrap rounded-md border border-border/80 bg-muted/35 px-3 py-2.5 font-sans text-sm leading-relaxed text-foreground"
@@ -297,8 +357,17 @@ export default function ShippingLabelsPage() {
                     {attachedDraft.message}
                   </pre>
                   <div className="flex flex-wrap gap-2">
+                    {attachedMailto ? (
+                      <Button asChild size="sm" data-testid="button-email-buyer-draft">
+                        <a href={attachedMailto}>
+                          <Mail className="mr-2 h-3.5 w-3.5" />
+                          Email buyer
+                        </a>
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
+                      variant={attachedMailto ? "outline" : "default"}
                       onClick={() => void copyMessage(attachedDraft.message)}
                       data-testid="button-copy-buyer-draft"
                     >
@@ -313,7 +382,9 @@ export default function ShippingLabelsPage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Auto-send to the client is not wired yet. This draft is the practical step — paste where you already talk to the buyer.
+                    {attachedDraft.contactEmail
+                      ? "Email buyer opens your mail app with the HubSpot contact address and this draft filled in. Print Ops does not send email by itself yet."
+                      : "No email on the HubSpot contact — copy for Marketplace, or add email on the contact and try again."}
                   </p>
                 </div>
               </Panel>
@@ -445,20 +516,39 @@ export default function ShippingLabelsPage() {
                       data-tone="good"
                       data-testid="panel-labels-draft-preview"
                     >
+                      {hubspotEmail ? (
+                        <p className="text-xs text-muted-foreground">
+                          HubSpot contact: <span className="font-medium text-foreground">{hubspotEmail}</span>
+                        </p>
+                      ) : contactLookup.isFetching ? (
+                        <p className="text-xs text-muted-foreground">Looking up HubSpot email…</p>
+                      ) : dealId ? (
+                        <p className="text-xs text-muted-foreground">No email on the linked HubSpot contact.</p>
+                      ) : null}
                       <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
                         {liveDraft}
                       </pre>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="w-fit"
-                        onClick={() => void copyMessage(liveDraft)}
-                        data-testid="button-copy-draft-preview"
-                      >
-                        <Copy className="mr-2 h-3.5 w-3.5" />
-                        Copy draft
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        {previewMailto ? (
+                          <Button asChild type="button" size="sm" data-testid="button-email-draft-preview">
+                            <a href={previewMailto}>
+                              <Mail className="mr-2 h-3.5 w-3.5" />
+                              Email buyer
+                            </a>
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="w-fit"
+                          onClick={() => void copyMessage(liveDraft)}
+                          data-testid="button-copy-draft-preview"
+                        >
+                          <Copy className="mr-2 h-3.5 w-3.5" />
+                          Copy draft
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ) : null}
