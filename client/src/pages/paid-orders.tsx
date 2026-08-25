@@ -402,7 +402,7 @@ export default function PaidOrders() {
                 className="mt-3 rounded-md border border-border bg-muted/25 px-3 py-2.5 text-xs text-muted-foreground"
                 data-testid="panel-messenger-extension-install"
               >
-                <p className="font-medium text-foreground">Messenger scan (V1 live test)</p>
+                <p className="font-medium text-foreground">Marketplace secretary (Chrome helper)</p>
                 <ol className="mt-1.5 list-decimal space-y-1 pl-4">
                   <li>
                     <a
@@ -423,7 +423,9 @@ export default function PaidOrders() {
                     Extension Options: keep the Print Ops URL, paste your owner access code, Save
                   </li>
                   <li>
-                    Open a Messenger thread → click green <strong className="font-medium text-foreground">Send to Print Ops</strong>
+                    Open Messenger → extension → <strong className="font-medium text-foreground">Run inbox brief</strong>{" "}
+                    (secretary summary on the <Link href="/marketplace-brief" className="hs-link">Brief</Link> page).
+                    Optional: send one thread into Manual.
                   </li>
                 </ol>
                 <p className="mt-1.5">

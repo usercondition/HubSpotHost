@@ -18,6 +18,7 @@ import {
   Ship,
   ShipWheel,
   ShoppingBag,
+  MessageSquareText,
   Sun,
   Users,
 } from "lucide-react";
@@ -122,6 +123,14 @@ const NAV: Array<{
     title: "Manual Order Entry",
     icon: ClipboardCheck,
     testId: "link-nav-paid-orders",
+    group: "Take",
+  },
+  {
+    href: "/marketplace-brief",
+    label: "Brief",
+    title: "Marketplace secretary brief",
+    icon: MessageSquareText,
+    testId: "link-nav-marketplace-brief",
     group: "Take",
   },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep" },

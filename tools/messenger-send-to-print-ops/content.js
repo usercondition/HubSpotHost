@@ -174,38 +174,152 @@
     };
   }
 
+  /**
+   * Prefer mock inbox dump; else click through listed chats (best-effort).
+   */
+  async function scrapeInboxThreads(options = {}) {
+    const maxThreads = options.maxThreads ?? 20;
+
+    if (typeof window.__mockMarketplaceInbox?.listThreads === "function") {
+      const listed = window.__mockMarketplaceInbox.listThreads().slice(0, maxThreads);
+      return {
+        threads: listed.map((row) => ({
+          id: row.id,
+          title: row.title,
+          unread: Boolean(row.unread),
+          conversation: row.conversation,
+        })),
+        source: "mock-inbox",
+      };
+    }
+
+    const listRoot =
+      document.querySelector("[data-print-ops-thread-list]") ||
+      document.querySelector('[aria-label="Chats"]') ||
+      document.querySelector('[aria-label*="Conversations"]') ||
+      document.querySelector('div[role="navigation"]');
+
+    const items = listRoot
+      ? Array.from(
+          listRoot.querySelectorAll(
+            '[data-print-ops-thread-item], a[role="link"], div[role="row"], div[role="listitem"]',
+          ),
+        )
+      : [];
+
+    const picks = [];
+    const seen = new Set();
+    for (const el of items) {
+      const title = cleanBubbleText(
+        el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+      );
+      if (!title || title.length < 2 || seen.has(title)) continue;
+      // Skip obvious chrome.
+      if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
+      seen.add(title);
+      const unread =
+        el.getAttribute("data-unread") === "true" ||
+        Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
+        /unread/i.test(el.getAttribute("aria-label") || "");
+      picks.push({ el, title, unread });
+      if (picks.length >= maxThreads) break;
+    }
+
+    if (!picks.length) {
+      // Fallback: brief the open thread only.
+      const one = await scrapeSelectedThread();
+      return {
+        threads: [
+          {
+            id: one.href || "open-thread",
+            title: one.title,
+            unread: false,
+            conversation: one.conversation,
+          },
+        ],
+        source: "open-thread-fallback",
+      };
+    }
+
+    // Unread first.
+    picks.sort((a, b) => Number(b.unread) - Number(a.unread));
+
+    const threads = [];
+    for (const pick of picks) {
+      try {
+        pick.el.click();
+        await sleep(700);
+        const scraped = await scrapeSelectedThread();
+        threads.push({
+          id: pick.title,
+          title: scraped.title || pick.title,
+          unread: pick.unread,
+          conversation: scraped.conversation,
+        });
+      } catch {
+        // Skip stubborn rows.
+      }
+    }
+
+    if (!threads.length) {
+      throw new Error("Could not read any inbox threads. Open Messenger and try again.");
+    }
+    return { threads, source: "inbox-clickthrough" };
+  }
+
   function ensureFab() {
     if (document.getElementById("print-ops-messenger-scan-fab")) return;
-    const btn = document.createElement("button");
-    btn.id = "print-ops-messenger-scan-fab";
-    btn.type = "button";
-    btn.textContent = "Send to Print Ops";
-    Object.assign(btn.style, {
+    const wrap = document.createElement("div");
+    wrap.id = "print-ops-messenger-scan-fab";
+    Object.assign(wrap.style, {
       position: "fixed",
       right: "16px",
       bottom: "16px",
       zIndex: "2147483646",
-      border: "none",
-      borderRadius: "999px",
-      padding: "10px 14px",
-      font: "650 13px/1.2 Segoe UI, system-ui, sans-serif",
-      color: "#fff",
-      background: "#0a7c4a",
-      boxShadow: "0 8px 24px rgba(0,0,0,.18)",
-      cursor: "pointer",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
     });
-    btn.addEventListener("click", () => {
-      chrome.runtime.sendMessage({ type: "print-ops-scan-request" });
-    });
-    document.documentElement.appendChild(btn);
+
+    function makeBtn(label, type, primary) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      Object.assign(btn.style, {
+        border: "none",
+        borderRadius: "999px",
+        padding: "10px 14px",
+        font: "650 13px/1.2 Segoe UI, system-ui, sans-serif",
+        color: primary ? "#fff" : "#0a7c4a",
+        background: primary ? "#0a7c4a" : "#eef6f1",
+        boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+        cursor: "pointer",
+      });
+      btn.addEventListener("click", () => {
+        chrome.runtime.sendMessage({ type });
+      });
+      return btn;
+    }
+
+    wrap.appendChild(makeBtn("Inbox brief", "print-ops-inbox-brief", true));
+    wrap.appendChild(makeBtn("This thread → Manual", "print-ops-scan-request", false));
+    document.documentElement.appendChild(wrap);
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== "print-ops-scrape-thread") return;
-    scrapeSelectedThread()
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
+    if (!message) return;
+    if (message.type === "print-ops-scrape-thread") {
+      scrapeSelectedThread()
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
+    if (message.type === "print-ops-scrape-inbox") {
+      scrapeInboxThreads({ maxThreads: message.maxThreads || 20 })
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
   });
 
   ensureFab();

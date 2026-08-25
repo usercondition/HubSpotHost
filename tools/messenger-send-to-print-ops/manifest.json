@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Print Ops — Messenger scan (V1)",
-  "version": "0.1.0",
-  "description": "Send the selected Messenger thread (full scroll-load) to Print Ops Manual entry.",
+  "name": "Print Ops — Marketplace secretary",
+  "version": "0.2.0",
+  "description": "Inbox brief: read Marketplace chats and suggest who to reply to and what’s next.",
   "action": {
-    "default_title": "Send thread to Print Ops",
+    "default_title": "Print Ops secretary",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -133,6 +133,7 @@ import {
   redeemMessengerScanBridge,
 } from "./lib/messenger-scan-bridge";
 import { registerMessengerScanTestUi } from "./lib/messenger-scan-test-ui";
+import { createMarketplaceInboxBrief, getMarketplaceInboxBrief } from "./lib/marketplace-inbox-brief-store";
 import { createPaidOrder } from "./lib/paid-orders";
 import {
   applyReviewEdits,
@@ -2523,6 +2524,52 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       title: payload.title,
       source: payload.source,
     });
+  });
+
+  /**
+   * Marketplace secretary brief — batch of scanned threads → prioritized next actions.
+   * Create requires owner access code. Read is by capability id (30 min TTL).
+   */
+  app.post("/api/marketplace-brief", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const threadsRaw = body.threads;
+    if (!Array.isArray(threadsRaw)) {
+      return res.status(400).json({ ok: false, error: "Expected { threads: [...] }" });
+    }
+    try {
+      const threads = threadsRaw.map((row, index) => {
+        const item = row && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : {};
+        return {
+          id: typeof item.id === "string" ? item.id : `t-${index}`,
+          title: typeof item.title === "string" ? item.title : `Thread ${index + 1}`,
+          conversation: typeof item.conversation === "string" ? item.conversation : "",
+          unread: item.unread === true,
+          lastActivityAt: typeof item.lastActivityAt === "string" ? item.lastActivityAt : null,
+        };
+      });
+      const created = createMarketplaceInboxBrief(threads);
+      return res.status(201).json({ ok: true, id: created.id, expiresAt: created.expiresAt, brief: created.brief });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not build marketplace brief",
+      });
+    }
+  });
+
+  app.get("/api/marketplace-brief/:id", (req: Request, res: Response) => {
+    const brief = getMarketplaceInboxBrief(String(req.params.id || ""));
+    if (!brief) {
+      return res.status(404).json({
+        ok: false,
+        error: "Brief expired. Run Inbox brief from the Chrome helper again.",
+      });
+    }
+    return res.json({ ok: true, brief });
   });
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {

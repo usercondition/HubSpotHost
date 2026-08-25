@@ -3,209 +3,191 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mock Messenger — Print Ops scan test</title>
+    <title>Mock Marketplace inbox — Print Ops brief test</title>
     <style>
       :root {
         color-scheme: light;
         --bg: #f0f2f5;
-        --pane: #ffffff;
+        --pane: #fff;
         --ink: #050505;
         --muted: #65676b;
         --you: #0084ff;
         --buyer: #e4e6eb;
         --accent: #0a7c4a;
+        --unread: #0084ff;
       }
       * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "Segoe UI", system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--ink);
+      body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+      .app { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; max-width: 1100px; margin: 0 auto; background: var(--pane); box-shadow: 0 0 0 1px rgba(0,0,0,.06); }
+      aside { border-right: 1px solid #dddfe2; display: flex; flex-direction: column; }
+      aside header, main header { padding: 12px 14px; border-bottom: 1px solid #dddfe2; }
+      aside h1, main h1 { margin: 0; font-size: 0.95rem; }
+      aside p, main header p { margin: 2px 0 0; font-size: 0.75rem; color: var(--muted); }
+      #thread-list { overflow-y: auto; flex: 1; }
+      .thread-item {
+        display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #eee;
+        background: transparent; padding: 10px 12px; cursor: pointer; font: inherit;
       }
-      .shell {
-        max-width: 720px;
-        margin: 0 auto;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        background: var(--pane);
-        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
-      }
-      header {
-        padding: 14px 16px;
-        border-bottom: 1px solid #dddfe2;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-      }
-      header h1 {
-        margin: 0;
-        font-size: 1rem;
-        font-weight: 650;
-      }
-      header p {
-        margin: 2px 0 0;
-        font-size: 0.8rem;
-        color: var(--muted);
-      }
-      .badge {
-        font-size: 0.72rem;
-        font-weight: 650;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--accent);
-        border: 1px solid color-mix(in srgb, var(--accent) 35%, white);
-        background: color-mix(in srgb, var(--accent) 10%, white);
-        border-radius: 999px;
-        padding: 4px 10px;
-        white-space: nowrap;
-      }
-      #thread {
-        flex: 1;
-        overflow-y: auto;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        min-height: 420px;
-        max-height: calc(100vh - 140px);
-      }
-      .row {
-        display: flex;
-        flex-direction: column;
-        max-width: 78%;
-      }
+      .thread-item:hover, .thread-item[aria-current="true"] { background: #f5f6f7; }
+      .thread-item .name { font-weight: 650; font-size: 0.9rem; display: flex; justify-content: space-between; gap: 8px; }
+      .thread-item .snip { color: var(--muted); font-size: 0.78rem; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unread); display: inline-block; }
+      main { display: flex; flex-direction: column; min-width: 0; }
+      #thread { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 360px; }
+      .row { display: flex; flex-direction: column; max-width: 78%; }
       .row[data-outgoing="true"] { align-self: flex-end; align-items: flex-end; }
       .row[data-outgoing="false"] { align-self: flex-start; align-items: flex-start; }
-      .bubble {
-        border-radius: 18px;
-        padding: 8px 12px;
-        line-height: 1.35;
-        font-size: 0.95rem;
-        white-space: pre-wrap;
-      }
-      .row[data-outgoing="true"] .bubble {
-        background: var(--you);
-        color: #fff;
-      }
-      .row[data-outgoing="false"] .bubble {
-        background: var(--buyer);
-        color: var(--ink);
-      }
-      .meta {
-        font-size: 0.7rem;
-        color: var(--muted);
-        margin-top: 2px;
-        padding: 0 4px;
-      }
-      footer {
-        border-top: 1px solid #dddfe2;
-        padding: 12px 16px;
-        font-size: 0.85rem;
-        color: var(--muted);
-      }
-      code { font-size: 0.8em; }
+      .bubble { border-radius: 18px; padding: 8px 12px; line-height: 1.35; font-size: 0.95rem; white-space: pre-wrap; }
+      .row[data-outgoing="true"] .bubble { background: var(--you); color: #fff; }
+      .row[data-outgoing="false"] .bubble { background: var(--buyer); }
+      .meta { font-size: 0.7rem; color: var(--muted); margin-top: 2px; padding: 0 4px; }
+      footer { border-top: 1px solid #dddfe2; padding: 10px 14px; font-size: 0.8rem; color: var(--muted); }
+      .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, #fff); background: color-mix(in srgb, var(--accent) 10%, #fff); border-radius: 999px; padding: 3px 8px; }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <header data-print-ops-header>
-        <div>
-          <h1 data-print-ops-thread-title>Jane Smith (Marketplace)</h1>
-          <p>Local test thread — scroll up loads older messages (simulates Messenger).</p>
-        </div>
-        <span class="badge">Test UI</span>
-      </header>
-
-      <div
-        id="thread"
-        data-print-ops-thread
-        data-testid="mock-messenger-thread"
-        aria-label="Conversation"
-      ></div>
-
-      <footer>
-        Load the unpacked extension from <code>tools/messenger-send-to-print-ops</code>, open this
-        page, click the toolbar icon or the in-page <strong>Send to Print Ops</strong> button.
-        Configure extension options with this app’s base URL and owner access code.
-      </footer>
+    <div class="app" data-print-ops-inbox>
+      <aside>
+        <header>
+          <h1>Marketplace inbox</h1>
+          <p>Mock list for Inbox brief testing</p>
+        </header>
+        <div id="thread-list" data-print-ops-thread-list role="list"></div>
+      </aside>
+      <main>
+        <header data-print-ops-header style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+          <div>
+            <h1 data-print-ops-thread-title>Select a chat</h1>
+            <p>Extension scans all listed threads for the secretary brief.</p>
+          </div>
+          <span class="badge">Test UI</span>
+        </header>
+        <div id="thread" data-print-ops-thread data-testid="mock-messenger-thread" aria-label="Conversation"></div>
+        <footer>
+          Load the extension → click <strong>Inbox brief</strong> (toolbar) to scan every thread in this list.
+          Single-thread <strong>Send to Print Ops</strong> still works on the open chat.
+        </footer>
+      </main>
     </div>
-
     <script>
-      /**
-       * Oldest → newest. Only a trailing window is mounted; scrolling to top
-       * prepends older batches so the extension’s full-thread scroll can be tested.
-       */
-      const ALL = [
-        { outgoing: false, text: "Hi! Saw your Marketplace listing for resin prints." },
-        { outgoing: true, text: "Hey — yes, still taking custom orders." },
-        { outgoing: false, text: "Looking for an Acastus Knight, painted quality." },
-        { outgoing: true, text: "I can do that. $350 shipped for the kit you described." },
-        { outgoing: false, text: "Sounds good. Name is Jane Smith." },
-        { outgoing: false, text: "My Marketplace username is jane.prints.91" },
-        { outgoing: true, text: "Perfect. PayPal is fine — send when ready." },
-        { outgoing: false, text: "Paid $350 via PayPal just now." },
-        { outgoing: false, text: "Ship to 123 Resin Way, San Diego CA 92101" },
-        { outgoing: true, text: "Got it — I'll confirm once it hits and start the plate." },
-        { outgoing: false, text: "Email is jane.smith.printops@example.com if you need it." },
-        { outgoing: false, text: "Thanks!" },
+      const THREADS = [
+        {
+          id: "alex",
+          title: "Alex Rivera (Marketplace)",
+          unread: true,
+          messages: [
+            { outgoing: false, text: "Hi, do you still print Acastus Knights?" },
+            { outgoing: false, text: "How much shipped to 92101?" },
+          ],
+        },
+        {
+          id: "sam",
+          title: "Sam Lee",
+          unread: false,
+          messages: [
+            { outgoing: false, text: "Looking for Titanicus legs" },
+            { outgoing: true, text: "$180 shipped works. PayPal when ready." },
+            { outgoing: false, text: "Paid $180 via PayPal" },
+            { outgoing: false, text: "Ship to 9 Oak Ave, Austin TX 78701" },
+            { outgoing: false, text: "Email sam.lee.printops@example.com" },
+          ],
+        },
+        {
+          id: "jordan",
+          title: "Jordan",
+          unread: false,
+          messages: [
+            { outgoing: false, text: "Can you do a custom bust?" },
+            { outgoing: true, text: "Yes — send references when ready." },
+            { outgoing: true, text: "Let me know whenever you're ready." },
+          ],
+        },
+        {
+          id: "casey",
+          title: "Casey Ng",
+          unread: true,
+          messages: [
+            { outgoing: true, text: "Quote is $95 local pickup." },
+            { outgoing: false, text: "Ok I can do that — where do I pay?" },
+          ],
+        },
+        {
+          id: "riley",
+          title: "Riley",
+          unread: false,
+          messages: [
+            { outgoing: false, text: "Got the package, looks great!" },
+            { outgoing: true, text: "Awesome — thanks again." },
+            { outgoing: false, text: "Order complete on my end." },
+          ],
+        },
       ];
 
-      const thread = document.getElementById("thread");
-      let loadedFrom = ALL.length; // index of oldest loaded message
-      const PAGE = 4;
+      const listEl = document.getElementById("thread-list");
+      const threadEl = document.getElementById("thread");
+      const titleEl = document.querySelector("[data-print-ops-thread-title]");
+      let activeId = THREADS[0].id;
 
-      function rowEl(msg, index) {
-        const row = document.createElement("div");
-        row.className = "row";
-        row.dataset.outgoing = msg.outgoing ? "true" : "false";
-        row.dataset.printOpsMessage = "true";
-        row.dataset.messageIndex = String(index);
-        const bubble = document.createElement("div");
-        bubble.className = "bubble";
-        bubble.dataset.printOpsBubble = "true";
-        bubble.textContent = msg.text;
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = msg.outgoing ? "You sent" : "Jane Smith";
-        row.appendChild(bubble);
-        row.appendChild(meta);
-        return row;
+      function renderList() {
+        listEl.innerHTML = "";
+        THREADS.forEach((t) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "thread-item";
+          btn.dataset.printOpsThreadItem = "true";
+          btn.dataset.threadId = t.id;
+          btn.dataset.unread = t.unread ? "true" : "false";
+          btn.setAttribute("role", "listitem");
+          if (t.id === activeId) btn.setAttribute("aria-current", "true");
+          btn.innerHTML = `<div class="name"><span>${t.title}</span>${t.unread ? '<span class="dot" title="Unread"></span>' : ""}</div><div class="snip">${t.messages[t.messages.length - 1].text}</div>`;
+          btn.addEventListener("click", () => {
+            activeId = t.id;
+            renderList();
+            renderThread();
+          });
+          listEl.appendChild(btn);
+        });
       }
 
-      function renderWindow() {
-        const start = loadedFrom;
-        const slice = ALL.slice(start);
-        thread.innerHTML = "";
-        slice.forEach((msg, i) => thread.appendChild(rowEl(msg, start + i)));
-        if (start === ALL.length - Math.min(PAGE, ALL.length)) {
-          thread.scrollTop = thread.scrollHeight;
-        }
+      function renderThread() {
+        const t = THREADS.find((x) => x.id === activeId);
+        titleEl.textContent = t.title;
+        threadEl.innerHTML = "";
+        t.messages.forEach((msg, index) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          row.dataset.outgoing = msg.outgoing ? "true" : "false";
+          row.dataset.printOpsMessage = "true";
+          row.dataset.messageIndex = String(index);
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          bubble.dataset.printOpsBubble = "true";
+          bubble.textContent = msg.text;
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.textContent = msg.outgoing ? "You sent" : t.title;
+          row.append(bubble, meta);
+          threadEl.appendChild(row);
+        });
+        threadEl.scrollTop = threadEl.scrollHeight;
       }
 
-      function loadOlder() {
-        if (loadedFrom <= 0) return false;
-        const prevHeight = thread.scrollHeight;
-        const prevTop = thread.scrollTop;
-        const nextFrom = Math.max(0, loadedFrom - PAGE);
-        loadedFrom = nextFrom;
-        renderWindow();
-        thread.scrollTop = thread.scrollHeight - prevHeight + prevTop;
-        return true;
-      }
+      window.__mockMarketplaceInbox = {
+        listThreads() {
+          return THREADS.map((t) => ({
+            id: t.id,
+            title: t.title,
+            unread: t.unread,
+            conversation: [
+              `Thread: ${t.title}`,
+              ...t.messages.map((m) => `${m.outgoing ? "You" : "Buyer"}: ${m.text}`),
+            ].join("\n"),
+          }));
+        },
+      };
 
-      // Initial: only last PAGE messages visible.
-      loadedFrom = Math.max(0, ALL.length - PAGE);
-      renderWindow();
-      thread.scrollTop = thread.scrollHeight;
-
-      thread.addEventListener("scroll", () => {
-        if (thread.scrollTop <= 24) loadOlder();
-      });
-
-      // Expose for manual debugging in DevTools.
-      window.__mockMessenger = { ALL, loadOlder, getLoadedFrom: () => loadedFrom };
+      renderList();
+      renderThread();
     </script>
   </body>
 </html>

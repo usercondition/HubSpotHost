@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Print Ops</title>
+    <style>
+      body {
+        margin: 0;
+        font: 13px/1.35 "Segoe UI", system-ui, sans-serif;
+        min-width: 260px;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 13px;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 0 0 10px;
+        color: #444;
+        font-size: 12px;
+      }
+      button {
+        display: block;
+        width: 100%;
+        margin: 0 0 8px;
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .primary {
+        background: #0a7c4a;
+        color: #fff;
+      }
+      .secondary {
+        background: #eef2f0;
+        color: #122;
+      }
+      .status {
+        min-height: 1.2em;
+        color: #0a7c4a;
+        font-size: 11px;
+      }
+      a {
+        color: #0a7c4a;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Print Ops secretary</h1>
+    <p>Inbox brief reads recent Marketplace chats and tells you who to reply to and what’s next.</p>
+    <button class="primary" id="inbox" type="button">Run inbox brief</button>
+    <button class="secondary" id="thread" type="button">Send this thread only</button>
+    <div class="status" id="status"></div>
+    <p><a href="options.html" id="options">Options</a></p>
+    <script src="popup.js"></script>
+  </body>
+</html>
