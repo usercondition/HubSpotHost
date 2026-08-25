@@ -119,26 +119,30 @@
   }
 
   async function loadFullThread(scrollEl, options = {}) {
-    const maxScrolls = options.maxScrolls ?? 100;
-    const settleMs = options.settleMs ?? 350;
+    const maxScrolls = options.maxScrolls ?? 120;
+    const settleMs = options.settleMs ?? 450;
     let stableRounds = 0;
-    let lastCount = collectBubbles(scrollEl).length;
+    let lastCount = collectBubbles(findThreadRoot() || scrollEl).length;
     let lastHeight = scrollEl.scrollHeight;
 
     for (let i = 0; i < maxScrolls; i++) {
-      scrollEl.scrollTop = 0;
+      // Nudge upward in chunks — Messenger often virtualizes and ignores a single jump to 0.
+      const step = Math.max(400, Math.floor(scrollEl.clientHeight * 0.85));
+      scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop - step);
+      if (scrollEl.scrollTop <= 2) scrollEl.scrollTop = 0;
       scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
       await sleep(settleMs);
 
-      const count = collectBubbles(findThreadRoot() || scrollEl).length;
+      const root = findThreadRoot() || scrollEl;
+      const count = collectBubbles(root).length;
       const height = scrollEl.scrollHeight;
-      if (count <= lastCount && height <= lastHeight) {
+      if (count <= lastCount && height <= lastHeight && scrollEl.scrollTop <= 2) {
         stableRounds += 1;
-        if (stableRounds >= 3) break;
+        if (stableRounds >= 4) break;
       } else {
         stableRounds = 0;
-        lastCount = count;
-        lastHeight = height;
+        lastCount = Math.max(lastCount, count);
+        lastHeight = Math.max(lastHeight, height);
       }
     }
 

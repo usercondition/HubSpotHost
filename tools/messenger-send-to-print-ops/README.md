@@ -3,7 +3,15 @@
 One-click bridge: open a Messenger thread (or the local mock) → scroll-load the full
 selected conversation → send cleaned text into Print Ops Manual entry.
 
-## Test environment (do this before Railway)
+## Live install (after deploy)
+
+1. Open Manual entry on Print Ops and use **Download the Chrome helper zip**, or:
+   `https://print-orders-margin.pplx.app/port/5000/downloads/messenger-send-to-print-ops-v1.zip`
+2. Unzip → Load unpacked the `messenger-send-to-print-ops` folder in `chrome://extensions` (Developer mode on).
+3. Options: base URL should already be the Railway host; paste your owner access code → Save.
+4. Open a real Messenger thread → **Send to Print Ops**.
+
+## Test environment (local mock)
 
 1. Run Print Ops locally with an owner intake code configured:
 

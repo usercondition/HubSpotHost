@@ -59,12 +59,13 @@
   <body>
     <h1>Print Ops Messenger scan</h1>
     <p>
-      V1 test settings. Use your local app (<code>http://127.0.0.1:5000</code>) before pointing at
-      Railway. The owner access code is the same code used to unlock Manual entry.
+      V1 settings for live Print Ops. Default base URL is the Railway deployment.
+      Use <code>http://127.0.0.1:5000</code> only when testing the mock page locally.
+      The owner access code is the same code used to unlock Manual entry.
     </p>
 
     <label for="baseUrl">Print Ops base URL</label>
-    <input id="baseUrl" type="url" placeholder="http://127.0.0.1:5000" autocomplete="off" />
+    <input id="baseUrl" type="url" placeholder="https://print-orders-margin.pplx.app/port/5000" autocomplete="off" />
 
     <label for="accessCode">Owner access code</label>
     <input id="accessCode" type="password" placeholder="Owner unlock code" autocomplete="off" />

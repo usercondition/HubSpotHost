@@ -398,6 +398,38 @@ export default function PaidOrders() {
                 </Link>{" "}
                 when the buyer still needs a details link. Conversation paste is optional assist only.
               </p>
+              <div
+                className="mt-3 rounded-md border border-border bg-muted/25 px-3 py-2.5 text-xs text-muted-foreground"
+                data-testid="panel-messenger-extension-install"
+              >
+                <p className="font-medium text-foreground">Messenger scan (V1 live test)</p>
+                <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+                  <li>
+                    <a
+                      className="hs-link font-medium"
+                      href="/downloads/messenger-send-to-print-ops-v1.zip"
+                      download
+                    >
+                      Download the Chrome helper zip
+                    </a>
+                  </li>
+                  <li>Unzip → open the folder that contains <code className="text-[0.7rem]">manifest.json</code></li>
+                  <li>
+                    Chrome → <code className="text-[0.7rem]">chrome://extensions</code> → enable{" "}
+                    <strong className="font-medium text-foreground">Developer mode</strong> →{" "}
+                    <strong className="font-medium text-foreground">Load unpacked</strong> → select that folder
+                  </li>
+                  <li>
+                    Extension Options: keep the Print Ops URL, paste your owner access code, Save
+                  </li>
+                  <li>
+                    Open a Messenger thread → click green <strong className="font-medium text-foreground">Send to Print Ops</strong>
+                  </li>
+                </ol>
+                <p className="mt-1.5">
+                  If Meta’s UI breaks the scrape, tell me what you saw — we improve or remove.
+                </p>
+              </div>
             </section>
 
             <Panel

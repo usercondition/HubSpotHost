@@ -17,7 +17,7 @@ const TTL_MS = 10 * 60 * 1000;
 const MAX_CONVERSATION_CHARS = 100_000;
 
 function sweep(now = Date.now()): void {
-  for (const [id, payload] of bridges) {
+  for (const [id, payload] of Array.from(bridges.entries())) {
     if (now - payload.createdAt > TTL_MS) bridges.delete(id);
   }
 }
