@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { attentionNextStep, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
+import { attentionNextStep, floorFocusHref, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader } from "@/components/shell";
@@ -81,19 +81,23 @@ function PressureChip({
   label,
   value,
   tone,
+  href,
   testId,
 }: {
   label: string;
   value: number;
   tone: "neutral" | "good" | "warn" | "bad";
+  href: string;
   testId: string;
 }) {
   return (
-    <div
+    <Link
+      href={href}
       data-testid={testId}
       data-tone={tone === "neutral" ? undefined : tone}
+      title={`Open ${label} shortcut`}
       className={cn(
-        "inline-flex min-w-[4.5rem] flex-col rounded-md border px-2.5 py-1.5",
+        "inline-flex min-w-[4.5rem] flex-col rounded-md border px-2.5 py-1.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         tone === "warn" && "border-chart-4/40 bg-chart-4/10",
         tone === "bad" && "border-destructive/40 bg-destructive/10",
         tone === "good" && "border-accent/35 bg-accent/10",
@@ -111,7 +115,7 @@ function PressureChip({
       >
         {value}
       </span>
-    </div>
+    </Link>
   );
 }
 
@@ -207,30 +211,35 @@ function TodaysWork() {
             label="Plates"
             value={platesNeeded}
             tone={platesNeeded > 0 ? "warn" : "good"}
+            href={floorFocusHref("plates")}
             testId="card-todays-plates"
           />
           <PressureChip
             label="Costs"
             value={costsNeeded}
             tone={costsNeeded > 0 ? "warn" : "good"}
+            href={floorFocusHref("costs")}
             testId="card-todays-costs"
           />
           <PressureChip
             label="Stale"
             value={staleJobs}
             tone={staleJobs > 0 ? "bad" : "good"}
+            href={floorFocusHref("stale")}
             testId="card-todays-stale"
           />
           <PressureChip
             label="Intake"
             value={pendingReview}
             tone={pendingReview > 0 ? "warn" : "neutral"}
+            href={floorFocusHref("intake")}
             testId="card-todays-pending-review"
           />
           <PressureChip
             label="Buyer"
             value={awaitingClient}
             tone={awaitingClient > 0 ? "warn" : "neutral"}
+            href={floorFocusHref("buyer")}
             testId="card-todays-awaiting-client"
           />
         </div>
