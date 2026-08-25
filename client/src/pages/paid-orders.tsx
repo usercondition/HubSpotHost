@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -84,6 +84,34 @@ export default function PaidOrders() {
   const [assistHints, setAssistHints] = useState<PaidOrderAnalysis | null>(null);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
   const [buyerHint, setBuyerHint] = useState<string | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const bridgeHandled = useRef<string | null>(null);
+  const search = useSearch();
+
+  const applyAnalysis = (analysis: PaidOrderAnalysis) => {
+    setAssistHints(analysis);
+    setContact((current) => ({
+      fullName: current.fullName || analysis.fullName,
+      marketplaceUsername: current.marketplaceUsername || analysis.marketplaceUsername,
+      email: current.email || analysis.email,
+      phone: current.phone || analysis.phone,
+      address: current.address || analysis.address,
+      city: current.city || analysis.city,
+      state: current.state || analysis.state,
+      postalCode: current.postalCode || analysis.postalCode,
+      country: current.country || analysis.country || "United States",
+      conversationSummary: current.conversationSummary || analysis.conversationSummary,
+    }));
+    setLines((current) => {
+      const first = current[0];
+      const blank = current.length === 1 && !first?.productName.trim() && !first?.amount.trim();
+      if (blank && (analysis.productName || analysis.amount)) {
+        return [newLine({ productName: analysis.productName, amount: analysis.amount })];
+      }
+      return current;
+    });
+    if (analysis.paymentLanguageDetected) setPaymentConfirmed(true);
+  };
 
   const lineTotal = useMemo(() => {
     return lines.reduce((sum, line) => {
@@ -146,30 +174,7 @@ export default function PaidOrders() {
       return (await response.json()) as { ok: true; analysis: PaidOrderAnalysis };
     },
     onSuccess: ({ analysis }) => {
-      setAssistHints(analysis);
-      setContact((current) => ({
-        fullName: current.fullName || analysis.fullName,
-        marketplaceUsername: current.marketplaceUsername || analysis.marketplaceUsername,
-        email: current.email || analysis.email,
-        phone: current.phone || analysis.phone,
-        address: current.address || analysis.address,
-        city: current.city || analysis.city,
-        state: current.state || analysis.state,
-        postalCode: current.postalCode || analysis.postalCode,
-        country: current.country || analysis.country || "United States",
-        conversationSummary: current.conversationSummary || analysis.conversationSummary,
-      }));
-      setLines((current) => {
-        const first = current[0];
-        const blank = current.length === 1 && !first?.productName.trim() && !first?.amount.trim();
-        if (blank && (analysis.productName || analysis.amount)) {
-          return [newLine({ productName: analysis.productName, amount: analysis.amount })];
-        }
-        return current;
-      });
-      if (analysis.paymentLanguageDetected) {
-        setPaymentConfirmed(true);
-      }
+      applyAnalysis(analysis);
       setCreated(null);
       toast({
         title: "Suggestions applied to the form",
@@ -191,6 +196,58 @@ export default function PaidOrders() {
       });
     },
   });
+
+  // Chrome extension deep-link: /paid-orders?bridge=<id>
+  useEffect(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
+    const bridgeId = params.get("bridge")?.trim() || "";
+    if (!bridgeId || bridgeHandled.current === bridgeId) return;
+    bridgeHandled.current = bridgeId;
+    setBridgeStatus("loading");
+    setShowAssist(true);
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/paid-orders/messenger-bridge/${encodeURIComponent(bridgeId)}`);
+        const body = (await response.json()) as {
+          ok?: boolean;
+          conversation?: string;
+          title?: string;
+          error?: string;
+        };
+        if (!response.ok || !body.ok || !body.conversation) {
+          throw new Error(body.error || "Messenger scan bridge expired");
+        }
+        setConversation(body.conversation);
+        setBridgeStatus("ready");
+        toast({
+          title: "Messenger thread loaded",
+          description: body.title
+            ? `Imported “${body.title}”. Unlock if needed, then apply suggestions.`
+            : "Imported from the Chrome extension. Unlock if needed, then apply suggestions.",
+        });
+        // Strip bridge id so refresh doesn't 404 on consumed token.
+        const next = new URL(window.location.href);
+        next.searchParams.delete("bridge");
+        window.history.replaceState({}, "", `${next.pathname}${next.search}${next.hash}`);
+      } catch (error) {
+        setBridgeStatus("error");
+        toast({
+          title: "Could not load Messenger scan",
+          description: error instanceof Error ? error.message : String(error),
+          variant: "destructive",
+        });
+      }
+    })();
+  }, [search, toast]);
+
+  // After unlock, auto-apply if a bridge thread is sitting in the assist box.
+  useEffect(() => {
+    if (!isUnlocked || bridgeStatus !== "ready") return;
+    if (conversation.trim().length < 20 || assistHints) return;
+    analyze.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when unlock + bridge ready
+  }, [isUnlocked, bridgeStatus]);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -341,6 +398,40 @@ export default function PaidOrders() {
                 </Link>{" "}
                 when the buyer still needs a details link. Conversation paste is optional assist only.
               </p>
+              <div
+                className="mt-3 rounded-md border border-border bg-muted/25 px-3 py-2.5 text-xs text-muted-foreground"
+                data-testid="panel-messenger-extension-install"
+              >
+                <p className="font-medium text-foreground">Marketplace secretary (Chrome helper)</p>
+                <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+                  <li>
+                    <a
+                      className="hs-link font-medium"
+                      href="/downloads/messenger-send-to-print-ops-v1.zip"
+                      download
+                    >
+                      Download the Chrome helper zip
+                    </a>
+                  </li>
+                  <li>Unzip → open the folder that contains <code className="text-[0.7rem]">manifest.json</code></li>
+                  <li>
+                    Chrome → <code className="text-[0.7rem]">chrome://extensions</code> → enable{" "}
+                    <strong className="font-medium text-foreground">Developer mode</strong> →{" "}
+                    <strong className="font-medium text-foreground">Load unpacked</strong> → select that folder
+                  </li>
+                  <li>
+                    Extension Options: keep the Print Ops URL, paste your owner access code, Save
+                  </li>
+                  <li>
+                    Open Messenger → extension → <strong className="font-medium text-foreground">Run inbox brief</strong>{" "}
+                    (secretary summary on the <Link href="/marketplace-brief" className="hs-link">Brief</Link> page).
+                    Optional: send one thread into Manual.
+                  </li>
+                </ol>
+                <p className="mt-1.5">
+                  If Meta’s UI breaks the scrape, tell me what you saw — we improve or remove.
+                </p>
+              </div>
             </section>
 
             <Panel
@@ -362,7 +453,16 @@ export default function PaidOrders() {
               {showAssist ? (
                 <div className="mb-5 space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-conversation-assist">
                   <p className="text-xs text-muted-foreground">
-                    Paste a Marketplace thread to suggest fields. Nothing is saved until you create the order.
+                    Paste a Marketplace thread, or use the Chrome extension “Send to Print Ops”
+                    (loads the full selected chat via <code className="text-[0.7rem]">?bridge=</code>
+                    ). Nothing is saved until you create the order.
+                    {bridgeStatus === "loading"
+                      ? " Loading Messenger scan…"
+                      : bridgeStatus === "ready"
+                        ? " Messenger scan loaded — apply suggestions after unlock."
+                        : bridgeStatus === "error"
+                          ? " Messenger scan failed — run Send to Print Ops again."
+                          : ""}
                   </p>
                   <Textarea
                     id="marketplace-conversation"

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Print Ops Messenger scan — options</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 1.15rem;
+        margin: 0 0 8px;
+      }
+      p {
+        color: #444;
+        line-height: 1.4;
+        font-size: 0.92rem;
+      }
+      label {
+        display: block;
+        font-weight: 650;
+        margin: 14px 0 6px;
+        font-size: 0.85rem;
+      }
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font: inherit;
+      }
+      button {
+        margin-top: 16px;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        background: #0a7c4a;
+        color: #fff;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .ok {
+        margin-top: 10px;
+        color: #0a7c4a;
+        font-size: 0.85rem;
+        min-height: 1.2em;
+      }
+      code {
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Print Ops Messenger scan</h1>
+    <p>
+      V1 settings for live Print Ops. Default base URL is the Railway deployment.
+      Use <code>http://127.0.0.1:5000</code> only when testing the mock page locally.
+      The owner access code is the same code used to unlock Manual entry.
+    </p>
+
+    <label for="baseUrl">Print Ops base URL</label>
+    <input id="baseUrl" type="url" placeholder="https://print-orders-margin.pplx.app/port/5000" autocomplete="off" />
+
+    <label for="accessCode">Owner access code</label>
+    <input id="accessCode" type="password" placeholder="Owner unlock code" autocomplete="off" />
+
+    <button type="button" id="save">Save</button>
+    <div class="ok" id="status"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
