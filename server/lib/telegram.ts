@@ -1,5 +1,5 @@
 /**
- * Minimal Telegram Bot API helper for owner digests.
+ * Minimal Telegram Bot API helper for owner digests / health nudges.
  * Credentials stay in env — never logged.
  */
 
@@ -11,6 +11,19 @@ export type TelegramConfig = {
 export type TelegramSendResult =
   | { ok: true; messageId: number }
   | { ok: false; error: string; status?: number };
+
+export type TelegramInlineButton = {
+  text: string;
+  url: string;
+};
+
+export type TelegramSendOptions = {
+  /** Default HTML so digests can use <a href> instead of raw URLs. */
+  parseMode?: "HTML" | "MarkdownV2";
+  /** Optional URL button rows (max ~8 per row; keep short labels). */
+  inlineKeyboard?: TelegramInlineButton[][];
+  fetchImpl?: typeof fetch;
+};
 
 export function getTelegramConfig(env: NodeJS.ProcessEnv = process.env): TelegramConfig | null {
   const token = env.TELEGRAM_BOT_TOKEN?.trim() || "";
@@ -25,10 +38,24 @@ export function telegramConfigured(env: NodeJS.ProcessEnv = process.env): boolea
   return getTelegramConfig(env) !== null;
 }
 
+/** Escape text for Telegram HTML parse_mode. */
+export function escapeTelegramHtml(value: string): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Compact HTML anchor — label only shows in chat, full URL stays in the href. */
+export function telegramHtmlLink(label: string, href: string): string {
+  const safeHref = String(href ?? "").replace(/"/g, "%22");
+  return `<a href="${safeHref}">${escapeTelegramHtml(label)}</a>`;
+}
+
 export async function sendTelegramMessage(
   text: string,
   env: NodeJS.ProcessEnv = process.env,
-  fetchImpl: typeof fetch = fetch,
+  options: TelegramSendOptions = {},
 ): Promise<TelegramSendResult> {
   const config = getTelegramConfig(env);
   if (!config) {
@@ -39,16 +66,29 @@ export async function sendTelegramMessage(
   if (!body) return { ok: false, error: "Message text is empty" };
   // Telegram hard limit is 4096 characters.
   const clipped = body.length > 4000 ? `${body.slice(0, 3990)}\n…` : body;
+  const parseMode = options.parseMode ?? "HTML";
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  const payloadBody: Record<string, unknown> = {
+    chat_id: config.chatId,
+    text: clipped,
+    disable_web_page_preview: true,
+    parse_mode: parseMode,
+  };
+
+  if (options.inlineKeyboard && options.inlineKeyboard.length > 0) {
+    payloadBody.reply_markup = {
+      inline_keyboard: options.inlineKeyboard.map((row) =>
+        row.map((button) => ({ text: button.text, url: button.url })),
+      ),
+    };
+  }
 
   try {
     const response = await fetchImpl(`https://api.telegram.org/bot${config.token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: config.chatId,
-        text: clipped,
-        disable_web_page_preview: true,
-      }),
+      body: JSON.stringify(payloadBody),
       signal: AbortSignal.timeout(15_000),
     });
 

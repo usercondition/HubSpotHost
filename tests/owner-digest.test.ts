@@ -308,9 +308,10 @@ test("telegram config requires token and chat id shape", () => {
 
 test("owner digest includes do-first, next print, production, fleet, resin", () => {
   const ctx = sampleContext();
-  const text = buildOwnerDigestText(ctx, { PUBLIC_BASE_URL: "https://example.com" }, {
+  const built = buildOwnerDigestText(ctx, { PUBLIC_BASE_URL: "https://example.com" }, {
     now: new Date("2026-08-05T12:00:00.000Z"),
   });
+  const text = built.text;
 
   assert.match(text, /Print Ops — morning briefing/);
   assert.match(text, /DO FIRST/);
@@ -327,7 +328,9 @@ test("owner digest includes do-first, next print, production, fleet, resin", () 
   assert.match(text, /ABS-Like Grey/);
   assert.match(text, /Low sealed/);
   assert.match(text, /Open:/);
-  assert.match(text, /https:\/\/example\.com\/#\/printers/);
+  assert.match(text, /<a href="https:\/\/example\.com\/#\/printers">Printers<\/a>/);
+  assert.doesNotMatch(text, /Printers: https:\/\//);
+  assert.ok(built.inlineKeyboard.length >= 1);
 });
 
 test("next print candidates prefer deals missing plates by close date", () => {
@@ -369,7 +372,7 @@ test("sendTelegramMessage posts JSON without throwing on mock fetch", async () =
       TELEGRAM_BOT_TOKEN: "123:AA-token",
       TELEGRAM_CHAT_ID: "99",
     },
-    fetchImpl,
+    { fetchImpl },
   );
 
   assert.equal(result.ok, true);
@@ -378,6 +381,7 @@ test("sendTelegramMessage posts JSON without throwing on mock fetch", async () =
   const body = JSON.parse(String(calls[0]!.init?.body));
   assert.equal(body.chat_id, "99");
   assert.equal(body.text, "hello");
+  assert.equal(body.parse_mode, "HTML");
 });
 
 test("schedule gate respects timezone hour and once-per-day state", () => {

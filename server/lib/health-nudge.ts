@@ -12,7 +12,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { PerformanceResponse } from "../../shared/schema";
 import type { TrackerAssistantContext } from "./tracker-assistant";
-import { sendTelegramMessage, telegramConfigured } from "./telegram";
+import {
+  escapeTelegramHtml,
+  sendTelegramMessage,
+  telegramConfigured,
+  telegramHtmlLink,
+  type TelegramInlineButton,
+} from "./telegram";
 
 const NUDGE_ISSUE_KEYS = new Set(["no_plates", "costs_incomplete", "stale"]);
 
@@ -173,30 +179,45 @@ export function buildHealthNudgeText(
   ctx: TrackerAssistantContext,
   env: NodeJS.ProcessEnv = process.env,
   options?: { title?: string },
-): { text: string; fingerprint: string; hasWork: boolean } {
+): {
+  text: string;
+  fingerprint: string;
+  hasWork: boolean;
+  inlineKeyboard: TelegramInlineButton[][];
+} {
   const snapshot = ctx.snapshot;
   const collected = collectHealthNudgeItems(snapshot);
   const fingerprint = healthNudgeFingerprint(snapshot);
   const title = options?.title?.trim() || "Print Ops — health check";
+  const floorUrl = absoluteActionHref("/", env);
+  const intakeUrl = absoluteActionHref("/orders", env);
+  const statsUrl = absoluteActionHref("/performance", env);
+  const queueUrl = absoluteActionHref("/queue", env);
 
   if (!collected.hasWork) {
     return {
-      text: `${title}\n\nAll clear — no missing plates, incomplete costs, stale deals, or stuck intake.`,
+      text: `<b>${escapeTelegramHtml(title)}</b>\n\nAll clear — no missing plates, incomplete costs, stale deals, or stuck intake.`,
       fingerprint,
       hasWork: false,
+      inlineKeyboard: [[
+        { text: "Floor", url: floorUrl },
+        { text: "Queue", url: queueUrl },
+      ]],
     };
   }
 
-  const lines: string[] = [title, ""];
+  const lines: string[] = [`<b>${escapeTelegramHtml(title)}</b>`, ""];
   lines.push(
-    `Needs you: ${collected.attention.length} deal alert${collected.attention.length === 1 ? "" : "s"}` +
+    `Needs you: <b>${collected.attention.length}</b> deal alert${collected.attention.length === 1 ? "" : "s"}` +
       (collected.intakePending || collected.intakeAwaiting
-        ? ` · intake ${collected.intakePending} review / ${collected.intakeAwaiting} awaiting`
+        ? ` · intake <b>${collected.intakePending}</b> review / <b>${collected.intakeAwaiting}</b> awaiting`
         : ""),
   );
 
+  const inlineKeyboard: TelegramInlineButton[][] = [];
+
   if (collected.intakePending > 0 || collected.intakeAwaiting > 0) {
-    lines.push("", "INTAKE");
+    lines.push("", "<b>INTAKE</b>");
     if (collected.intakePending > 0) {
       lines.push(
         `• ${collected.intakePending} paid order${collected.intakePending === 1 ? "" : "s"} waiting for your review`,
@@ -207,7 +228,7 @@ export function buildHealthNudgeText(
         `• ${collected.intakeAwaiting} buyer form${collected.intakeAwaiting === 1 ? "" : "s"} still open`,
       );
     }
-    lines.push(`• Open intake: ${absoluteActionHref("/orders", env)}`);
+    lines.push(`• ${telegramHtmlLink("Open intake", intakeUrl)}`);
   }
 
   const byKey = new Map<string, typeof collected.attention>();
@@ -217,15 +238,26 @@ export function buildHealthNudgeText(
     byKey.set(item.issueKey, list);
   }
 
+  const dealButtons: TelegramInlineButton[] = [];
+
   for (const issueKey of ["no_plates", "costs_incomplete", "stale"]) {
     const items = byKey.get(issueKey);
     if (!items || items.length === 0) continue;
-    lines.push("", groupLabel(issueKey));
+    lines.push("", `<b>${escapeTelegramHtml(groupLabel(issueKey))}</b>`);
     for (const item of items.slice(0, 6)) {
-      lines.push(`• ${item.dealName} — ${item.stage}`);
-      lines.push(`  ${item.detail}`);
+      lines.push(`• <b>${escapeTelegramHtml(item.dealName)}</b> — ${escapeTelegramHtml(item.stage)}`);
+      lines.push(`  ${escapeTelegramHtml(item.detail)}`);
       const action = actionForIssue(item.issueKey, item.dealId);
-      lines.push(`  ${action.label}: ${absoluteActionHref(action.href, env)}`);
+      const href = absoluteActionHref(action.href, env);
+      lines.push(`  ${telegramHtmlLink(action.label, href)}`);
+      if (dealButtons.length < 6 && /^https?:\/\//i.test(href)) {
+        const shortName =
+          item.dealName.length > 28 ? `${item.dealName.slice(0, 26)}…` : item.dealName;
+        dealButtons.push({
+          text: `${issueKey === "no_plates" ? "Plates" : issueKey === "stale" ? "Stale" : "Costs"} · ${shortName}`,
+          url: href,
+        });
+      }
     }
     if (items.length > 6) {
       lines.push(`• …and ${items.length - 6} more`);
@@ -236,14 +268,26 @@ export function buildHealthNudgeText(
   lines.push(
     `Snapshot: ${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention`,
   );
-  lines.push(`Open floor: ${absoluteActionHref("/", env)}`);
-  lines.push(`Open stats: ${absoluteActionHref("/performance", env)}`);
+
+  // Summary row always present when we have absolute URLs.
+  const navRow: TelegramInlineButton[] = [];
+  if (/^https?:\/\//i.test(floorUrl)) navRow.push({ text: "Floor", url: floorUrl });
+  if (/^https?:\/\//i.test(queueUrl)) navRow.push({ text: "Queue", url: queueUrl });
+  if (/^https?:\/\//i.test(intakeUrl)) navRow.push({ text: "Intake", url: intakeUrl });
+  if (/^https?:\/\//i.test(statsUrl)) navRow.push({ text: "Stats", url: statsUrl });
+  if (navRow.length > 0) inlineKeyboard.push(navRow);
+
+  // One button per deal (up to 6), two per row — tappable instead of raw URLs.
+  for (let i = 0; i < dealButtons.length; i += 2) {
+    inlineKeyboard.push(dealButtons.slice(i, i + 2));
+  }
 
   const text = lines.join("\n").trim();
   return {
     text: text.length > 3900 ? `${text.slice(0, 3890)}\n…` : text,
     fingerprint,
     hasWork: true,
+    inlineKeyboard,
   };
 }
 
@@ -289,7 +333,10 @@ export async function sendHealthNudge(
     }
   }
 
-  const sent = await sendTelegramMessage(built.text, env);
+  const sent = await sendTelegramMessage(built.text, env, {
+    parseMode: "HTML",
+    inlineKeyboard: built.inlineKeyboard,
+  });
   if (!sent.ok) {
     return { ok: false, error: sent.error, text: built.text };
   }

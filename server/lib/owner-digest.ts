@@ -18,7 +18,13 @@ import {
   answerTrackerQuestionRules,
   type TrackerAssistantContext,
 } from "./tracker-assistant";
-import { sendTelegramMessage, telegramConfigured } from "./telegram";
+import {
+  escapeTelegramHtml,
+  sendTelegramMessage,
+  telegramConfigured,
+  telegramHtmlLink,
+  type TelegramInlineButton,
+} from "./telegram";
 
 export type OwnerDigestContext = TrackerAssistantContext & {
   fleet: PrinterFleetSnapshot;
@@ -169,12 +175,12 @@ export function buildOwnerDigestText(
   ctx: OwnerDigestContext,
   env: NodeJS.ProcessEnv = process.env,
   options?: { title?: string; now?: Date },
-): string {
+): { text: string; inlineKeyboard: TelegramInlineButton[][] } {
   const now = options?.now ?? new Date();
   const { snapshot, fleet, resin } = ctx;
   const briefing = answerTrackerQuestionRules("What should I do next?", ctx);
   const title = options?.title?.trim() || "Print Ops — morning briefing";
-  const lines: string[] = [title, ""];
+  const lines: string[] = [`<b>${escapeTelegramHtml(title)}</b>`, ""];
 
   // —— Do first (admin priorities from tracker rules) ——
   lines.push("DO FIRST");
@@ -302,13 +308,26 @@ export function buildOwnerDigestText(
   if (actions.length > 0) {
     lines.push("", "Open:");
     for (const action of actions.slice(0, 6)) {
-      lines.push(`• ${action.label}: ${absoluteActionHref(action.href, env)}`);
+      lines.push(`• ${telegramHtmlLink(action.label, absoluteActionHref(action.href, env))}`);
     }
+  }
+
+  const inlineKeyboard: TelegramInlineButton[][] = [];
+  const nav: TelegramInlineButton[] = [];
+  for (const action of actions.slice(0, 4)) {
+    const url = absoluteActionHref(action.href, env);
+    if (/^https?:\/\//i.test(url)) nav.push({ text: action.label.slice(0, 32), url });
+  }
+  if (nav.length > 0) {
+    for (let i = 0; i < nav.length; i += 2) inlineKeyboard.push(nav.slice(i, i + 2));
   }
 
   const text = lines.join("\n").trim();
   // Keep headroom under Telegram's 4096 limit.
-  return text.length > 3900 ? `${text.slice(0, 3890)}\n…` : text;
+  return {
+    text: text.length > 3900 ? `${text.slice(0, 3890)}\n…` : text,
+    inlineKeyboard,
+  };
 }
 
 function digestStatePath(env: NodeJS.ProcessEnv = process.env): string {
@@ -388,7 +407,8 @@ export async function sendOwnerDigest(
   const schedule = getOwnerDigestSchedule(env);
   const now = options?.now ?? new Date();
   const dateKey = localDigestDateKey(schedule.timeZone, now);
-  const text = buildOwnerDigestText(ctx, env, { title: options?.title, now });
+  const built = buildOwnerDigestText(ctx, env, { title: options?.title, now });
+  const text = built.text;
 
   if (!options?.force) {
     const last = readLastDigestDateKey(env);
@@ -397,7 +417,10 @@ export async function sendOwnerDigest(
     }
   }
 
-  const sent = await sendTelegramMessage(text, env);
+  const sent = await sendTelegramMessage(text, env, {
+    parseMode: "HTML",
+    inlineKeyboard: built.inlineKeyboard,
+  });
   if (!sent.ok) {
     return { ok: false, error: sent.error, text };
   }
