@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Print Ops — Messenger scan (V1)",
+  "version": "0.1.0",
+  "description": "Send the selected Messenger thread (full scroll-load) to Print Ops Manual entry.",
+  "action": {
+    "default_title": "Send thread to Print Ops",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5000/*",
+    "https://www.messenger.com/*",
+    "https://messenger.com/*",
+    "https://www.facebook.com/messages/*",
+    "https://facebook.com/messages/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1:5000/dev/mock-messenger*",
+        "http://localhost:5000/dev/mock-messenger*",
+        "https://www.messenger.com/*",
+        "https://messenger.com/*",
+        "https://www.facebook.com/messages/*",
+        "https://facebook.com/messages/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
