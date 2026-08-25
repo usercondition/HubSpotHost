@@ -23,6 +23,69 @@ export function queueDealHref(dealId: string): string {
   return `/queue?dealId=${encodeURIComponent(dealId)}`;
 }
 
+/** Floor pressure-chip shortcuts — temporary focused lists (not in the nav rail). */
+export const FLOOR_FOCUS_KINDS = ["plates", "costs", "stale", "intake", "buyer"] as const;
+export type FloorFocusKind = (typeof FLOOR_FOCUS_KINDS)[number];
+
+export function isFloorFocusKind(value: string | null | undefined): value is FloorFocusKind {
+  return FLOOR_FOCUS_KINDS.includes(String(value ?? "") as FloorFocusKind);
+}
+
+export function floorFocusHref(kind: FloorFocusKind): string {
+  return `/focus?kind=${encodeURIComponent(kind)}`;
+}
+
+export function floorFocusMeta(kind: FloorFocusKind): {
+  title: string;
+  description: string;
+  issueKey: string | null;
+  workspaceHref: string;
+  workspaceLabel: string;
+} {
+  switch (kind) {
+    case "plates":
+      return {
+        title: "Need plates",
+        description: "Open print orders still missing CTB / slice files.",
+        issueKey: "no_plates",
+        workspaceHref: "/prints",
+        workspaceLabel: "Open Prints",
+      };
+    case "costs":
+      return {
+        title: "Need costs",
+        description: "Orders missing material, labor, packaging, or shipping costs.",
+        issueKey: "costs_incomplete",
+        workspaceHref: "/queue",
+        workspaceLabel: "Open Queue",
+      };
+    case "stale":
+      return {
+        title: "Stale jobs",
+        description: "Orders with no HubSpot update lately — poke them or advance stage.",
+        issueKey: "stale",
+        workspaceHref: "/queue",
+        workspaceLabel: "Open Queue",
+      };
+    case "intake":
+      return {
+        title: "Intake review",
+        description: "Paid order forms waiting for you to approve or reject.",
+        issueKey: null,
+        workspaceHref: "/orders",
+        workspaceLabel: "Open Intake",
+      };
+    case "buyer":
+      return {
+        title: "Awaiting buyer",
+        description: "Intake links sent but the buyer hasn’t finished the form yet.",
+        issueKey: null,
+        workspaceHref: "/orders",
+        workspaceLabel: "Open Intake",
+      };
+  }
+}
+
 export function hubspotAppHref(): string {
   return "https://app.hubspot.com/";
 }

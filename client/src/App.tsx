@@ -21,6 +21,7 @@ import ShippingLabelsPage from "@/pages/shipping-labels";
 import ProductionQueuePage from "@/pages/queue";
 import ClientsPage from "@/pages/clients";
 import ClientOrder from "@/pages/client-order";
+import FloorFocusPage from "@/pages/floor-focus";
 import NotFound from "@/pages/not-found";
 
 /** Owner-facing routes live inside the operations shell. */
@@ -30,6 +31,7 @@ function ShellRoutes() {
       <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/focus" component={FloorFocusPage} />
           <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/labels" component={ShippingLabelsPage} />
           <Route path="/deals" component={DealsPage} />
