@@ -1325,12 +1325,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         primaryHubspot = fulfillment.hubspot;
       }
 
-      // Postage is once per package — apply only to the first newly attached order.
-      if (postage && index === 0) {
+      // Once per package on the first newly attached order: postage when known,
+      // plus labor/packaging $0 (absorbed labor · free USPS Large Flat Rate).
+      if (index === 0) {
         costs = await updateDealCosts(dealId, {
           material: "",
-          labor: "",
-          packaging: "",
+          labor: "0",
+          packaging: "0",
           shipping: postage,
           liveWrite: input.liveWrite !== false,
         });

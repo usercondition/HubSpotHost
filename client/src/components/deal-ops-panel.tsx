@@ -385,12 +385,15 @@ export function DealOpsPanel({
               label={data.costs.costsComplete ? "Complete" : "Incomplete"}
             />
           </div>
+          <p className="text-xs text-muted-foreground">
+            Need material + shipping. Labor is absorbed ($0). Packaging is free USPS Large Flat Rate ($0).
+          </p>
           <div className="grid grid-cols-2 gap-2">
             {(
               [
                 ["material", "Material"],
-                ["labor", "Labor"],
-                ["packaging", "Packaging"],
+                ["labor", "Labor (absorbed)"],
+                ["packaging", "Packaging (free USPS)"],
                 ["shipping", "Shipping"],
               ] as const
             ).map(([key, label]) => (
@@ -401,7 +404,7 @@ export function DealOpsPanel({
                   inputMode="decimal"
                   value={costs[key]}
                   onChange={(event) => setCosts((current) => ({ ...current, [key]: event.target.value }))}
-                  placeholder="0.00"
+                  placeholder={key === "labor" || key === "packaging" ? "0" : "0.00"}
                 />
               </div>
             ))}

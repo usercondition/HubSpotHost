@@ -8,6 +8,7 @@ import {
   PRINT_LINE_KIND_PROPERTY,
   type SupplyBooksBalance,
 } from "../../shared/schema";
+import { dealCostsIncomplete } from "../../shared/deal-costs";
 
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
@@ -119,10 +120,6 @@ function asDate(value: string | null | undefined): Date | null {
   return Number.isFinite(date.getTime()) ? date : null;
 }
 
-function isBlank(value: string | null | undefined): boolean {
-  return value === null || value === undefined || value.trim() === "";
-}
-
 function truthyHubSpotFlag(value: string | null | undefined): boolean {
   const normalized = String(value ?? "")
     .trim()
@@ -219,14 +216,7 @@ export function buildPerformanceSnapshot(input: {
     const dealName = props.dealname?.trim() || `Deal ${deal.id}`;
     const displayStage = stageName(stageId, stageMap);
     const requiresPlates = dealRequiresPlates(props);
-    const missingCosts = requiresPlates
-      ? [
-          props.print_material_cost,
-          props.print_labor_cost,
-          props.print_packaging_cost,
-          props.print_actual_shipping_cost,
-        ].some(isBlank)
-      : isBlank(props.print_actual_shipping_cost);
+    const missingCosts = dealCostsIncomplete(props, { requiresPlates });
 
     if (createdAt && createdAt >= periodStart) {
       orders += 1;
@@ -335,7 +325,7 @@ export function buildPerformanceSnapshot(input: {
         pushAttention(
           4,
           "Cost details incomplete",
-          "Add material, labor, packaging, and shipping costs as they become known",
+          "Add material and shipping costs (labor absorbed · free USPS flat-rate = $0)",
           "neutral",
         );
       }

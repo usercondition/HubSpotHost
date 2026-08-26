@@ -108,6 +108,36 @@ test("performance summarizes recent deals and ranks low margins before incomplet
   assert.equal(snapshot.intake.pendingReview, 1);
 });
 
+test("blank labor and packaging do not flag incomplete costs when material and shipping are set", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["free-box"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "free-box",
+        properties: {
+          dealname: "Land Raider - Spencer Patterson",
+          dealstage: "deposit",
+          createdate: "2026-08-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "80",
+          print_material_cost: "18",
+          print_labor_cost: "",
+          print_packaging_cost: "",
+          print_actual_shipping_cost: "9.45",
+        },
+      },
+    ],
+  });
+
+  assert.equal(
+    snapshot.attention.some((item) => item.issueKey === "costs_incomplete"),
+    false,
+  );
+});
+
 test("dismissed attention keys hide skipped plate reminders for legacy orders", () => {
   const snapshot = buildPerformanceSnapshot({
     now: new Date("2026-08-04T12:00:00.000Z"),

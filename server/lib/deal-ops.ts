@@ -32,6 +32,7 @@ import {
   resolvePrinterIdForRecord,
 } from "./printers";
 import { recalculateDeal } from "./service";
+import { dealCostsCompleteFromFields } from "../../shared/deal-costs";
 
 function moneyText(value: string | null | undefined): string {
   if (value == null || String(value).trim() === "") return "";
@@ -148,7 +149,7 @@ function costsFromProperties(props: Record<string, string | null>): DealCostFiel
     shipping,
     grossProfit: Number.isFinite(calc.grossProfit) ? calc.grossProfit : null,
     marginPercentage: Number.isFinite(calc.marginPercentage) ? calc.marginPercentage : null,
-    costsComplete: Boolean(material && labor && packaging && shipping),
+    costsComplete: dealCostsCompleteFromFields({ material, labor, packaging, shipping }),
   };
 }
 
