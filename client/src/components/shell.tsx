@@ -234,8 +234,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={cn(
                         "flex h-10 w-10 items-center justify-center rounded-xl transition-all",
                         active
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_0_0_1px_hsl(var(--sidebar-primary)/0.5)]"
-                          : "text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                          ? "bg-sidebar-accent text-sidebar-foreground"
+                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       )}
                     >
                       <item.icon className="h-4 w-4" />

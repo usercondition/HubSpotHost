@@ -4,8 +4,8 @@
 
 /*
  * Print Ops — Shop Floor Workspace
- * Cool slate canvas, teal primary, status-led color (green live / amber warn / red blocked),
- * Space Grotesk + IBM Plex Mono. Glance-first, low clutter.
+ * Near-black settings canvas in dark mode (Patreon-adjacent density),
+ * teal primary signal, Space Grotesk + IBM Plex Mono.
  */
 
   /* LIGHT MODE — cool paper bench */
@@ -97,47 +97,49 @@
 }
 
 .dark {
-  --button-outline: rgba(255, 255, 255, 0.1);
-  --badge-outline: rgba(255, 255, 255, 0.06);
+  --button-outline: rgba(255, 255, 255, 0.08);
+  --badge-outline: rgba(255, 255, 255, 0.05);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255, 255, 255, 0.03);
-  --elevate-2: rgba(255, 255, 255, 0.06);
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.07);
 
-  /* Cool slate shop floor — teal signal, less amber SaaS */
-  --background: 215 18% 7%;
-  --foreground: 200 12% 94%;
-  --border: 215 12% 15%;
-  --card: 215 16% 9%;
-  --card-foreground: 200 12% 94%;
-  --card-border: 215 12% 14%;
-  --sidebar: 215 22% 5%;
-  --sidebar-foreground: 200 10% 90%;
-  --sidebar-border: 215 14% 11%;
+  /* Near-black settings canvas (Patreon-adjacent) — teal stays the shop signal */
+  --background: 0 0% 4%;
+  --foreground: 0 0% 96%;
+  --border: 0 0% 14%;
+  --card: 0 0% 10%;
+  --card-foreground: 0 0% 96%;
+  --card-border: 0 0% 14%;
+  --sidebar: 0 0% 5%;
+  --sidebar-foreground: 0 0% 88%;
+  --sidebar-border: 0 0% 12%;
   --sidebar-primary: 186 72% 48%;
-  --sidebar-primary-foreground: 215 28% 8%;
-  --sidebar-accent: 215 14% 10%;
-  --sidebar-accent-foreground: 200 10% 94%;
+  --sidebar-primary-foreground: 0 0% 6%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 0 0% 96%;
   --sidebar-ring: 186 72% 48%;
-  --popover: 215 16% 10%;
-  --popover-foreground: 200 12% 94%;
-  --popover-border: 215 12% 17%;
+  --popover: 0 0% 10%;
+  --popover-foreground: 0 0% 96%;
+  --popover-border: 0 0% 16%;
   --primary: 186 72% 48%;
-  --primary-foreground: 215 28% 8%;
-  --secondary: 215 12% 13%;
-  --secondary-foreground: 200 10% 92%;
-  --muted: 215 12% 12%;
-  --muted-foreground: 215 8% 60%;
+  --primary-foreground: 0 0% 6%;
+  --secondary: 0 0% 18%;
+  --secondary-foreground: 0 0% 96%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 58%;
   --accent: 158 50% 44%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 55%;
   --destructive-foreground: 0 0% 98%;
-  --input: 215 12% 20%;
+  --input: 0 0% 16%;
   --ring: 186 72% 48%;
   --chart-1: 186 72% 48%;
   --chart-2: 158 50% 44%;
-  --chart-3: 215 8% 62%;
+  --chart-3: 0 0% 62%;
   --chart-4: 38 92% 52%;
   --chart-5: 350 55% 58%;
+
+  --radius: 0.75rem;
 
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.35);
@@ -283,8 +285,8 @@
 
   .dark body {
     background-image:
-      radial-gradient(ellipse 70% 45% at 8% -8%, hsl(186 72% 45% / 0.09), transparent 50%),
-      radial-gradient(hsl(var(--foreground) / 0.06) 1px, transparent 1px);
+      radial-gradient(ellipse 55% 40% at 12% -10%, hsl(186 72% 45% / 0.05), transparent 55%),
+      radial-gradient(hsl(var(--foreground) / 0.035) 1px, transparent 1px);
   }
 
   .numeric {
@@ -335,6 +337,43 @@
 
   .page-stack {
     @apply space-y-4 px-3 py-3 md:px-5 md:py-4;
+  }
+
+  /* Settings surface — Patreon-adjacent: subnav + large title + soft card */
+  .settings-shell {
+    @apply grid min-h-full gap-0 md:grid-cols-[13.5rem_minmax(0,1fr)];
+  }
+
+  .settings-nav {
+    @apply border-b border-border px-3 py-4 md:border-b-0 md:border-r md:px-3 md:py-5;
+  }
+
+  .settings-nav-title {
+    @apply mb-3 px-2.5 text-sm font-semibold tracking-tight text-foreground;
+  }
+
+  .settings-nav-link {
+    @apply flex w-full items-center rounded-xl px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground;
+  }
+
+  .settings-nav-link[data-active="true"] {
+    @apply bg-secondary text-foreground;
+  }
+
+  .settings-main {
+    @apply mx-auto w-full max-w-2xl px-4 py-6 md:px-8 md:py-8;
+  }
+
+  .settings-title {
+    @apply mb-5 text-3xl font-semibold tracking-tight text-foreground md:text-4xl;
+  }
+
+  .settings-card {
+    @apply rounded-2xl border border-border bg-card p-5 md:p-6;
+  }
+
+  .settings-card-title {
+    @apply mb-4 text-sm font-semibold tracking-tight text-foreground;
   }
 
   .workspace-node {
@@ -409,20 +448,20 @@
     background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card)) 45%);
   }
 
-  /* Titled group container — primary way to cluster related shop data */
+  /* Titled group container — soft charcoal card (settings-adjacent) */
   .workspace-section {
-    border-radius: calc(var(--radius) + 2px);
-    border: 1px solid hsl(var(--card-border));
-    background: linear-gradient(
-      165deg,
-      hsl(var(--card) / 0.98) 0%,
-      hsl(var(--card) / 0.9) 100%
-    );
-    box-shadow: var(--shadow-sm);
+    border-radius: calc(var(--radius) + 4px);
+    border: 1px solid hsl(var(--card-border) / 0.85);
+    background: hsl(var(--card));
+    box-shadow: none;
     overflow: hidden;
     transition:
       border-color 180ms ease,
-      box-shadow 180ms ease;
+      background-color 180ms ease;
+  }
+
+  .dark .workspace-section {
+    border-color: hsl(0 0% 16%);
   }
 
   .metric-tile {
