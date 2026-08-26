@@ -11,7 +11,13 @@ export type ShippingLabelFields = {
   service: string | null;
   carrier: string | null;
   postageUsd: string | null;
+  /** Ship-to name printed on the label (may differ from the HubSpot/Marketplace buyer). */
   recipientName: string | null;
+  /**
+   * Marketplace / HubSpot client from the Pirate Ship file name
+   * (`date---Client-Name---TRACKING.pdf`). Prefer this for deal matching.
+   */
+  clientName: string | null;
   recipientCity: string | null;
   recipientState: string | null;
   recipientPostalCode: string | null;
@@ -185,6 +191,7 @@ export function extractShippingLabelFields(text: string, fileName?: string): Shi
       carrier: fromName.carrier,
       postageUsd: null,
       recipientName: fromName.recipientName,
+      clientName: fromName.recipientName,
       recipientCity: null,
       recipientState: null,
       recipientPostalCode: null,
@@ -210,14 +217,22 @@ export function extractShippingLabelFields(text: string, fileName?: string): Shi
   const trackingNumber = tracking.tracking ?? fromName.trackingNumber;
   const carrier = tracking.carrier ?? service.carrier ?? fromName.carrier;
   const serviceLabel = service.service ?? fromName.service;
+  // Ship-to on the label (gift / relative address) vs Marketplace client in the file name.
   const recipientName = recipient.name ?? fromName.recipientName;
+  const clientName = fromName.recipientName;
 
   if (!trackingNumber) warnings.push("Could not find a tracking number — confirm before saving.");
-  if (!recipientName) warnings.push("Could not read the recipient name — pick the order manually if needed.");
+  if (!recipientName && !clientName) {
+    warnings.push("Could not read a client or ship-to name — pick the order manually if needed.");
+  }
   if (!tracking.tracking && fromName.trackingNumber) {
     warnings.push("Tracking taken from the file name.");
   }
-  if (!recipient.name && fromName.recipientName) {
+  if (clientName && recipient.name && normalizeName(clientName) !== normalizeName(recipient.name)) {
+    warnings.push(
+      `Ship-to is ${recipient.name}; matching HubSpot orders to file-name client ${clientName}.`,
+    );
+  } else if (!recipient.name && clientName) {
     warnings.push("Client name taken from the file name.");
   }
 
@@ -227,6 +242,7 @@ export function extractShippingLabelFields(text: string, fileName?: string): Shi
     carrier,
     postageUsd,
     recipientName,
+    clientName,
     recipientCity: recipient.city,
     recipientState: recipient.state,
     recipientPostalCode: recipient.postalCode,
@@ -349,6 +365,38 @@ function tokenOverlap(a: string, b: string): number {
   return hit / Math.max(left.size, right.size);
 }
 
+function scoreNameAgainstDeal(needle: string, contactNorm: string, dealNorm: string): {
+  score: number;
+  reasons: string[];
+} {
+  if (!needle) return { score: 0, reasons: [] };
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (contactNorm) {
+    if (contactNorm === needle) {
+      score += 100;
+      reasons.push("Exact client name");
+    } else if (contactNorm.includes(needle) || needle.includes(contactNorm)) {
+      score += 70;
+      reasons.push("Client name contains match");
+    } else {
+      const overlap = tokenOverlap(contactNorm, needle);
+      if (overlap >= 0.5) {
+        score += Math.round(overlap * 60);
+        reasons.push("Partial client name match");
+      }
+    }
+  }
+
+  if (dealNorm.includes(needle)) {
+    score += 40;
+    reasons.push("Name appears in deal title");
+  }
+
+  return { score, reasons };
+}
+
 export function matchShippingLabelToDeals(
   fields: ShippingLabelFields,
   deals: Array<{
@@ -360,7 +408,13 @@ export function matchShippingLabelToDeals(
     closed?: boolean;
   }>,
 ): ShippingLabelMatchCandidate[] {
-  const needle = fields.recipientName ? normalizeName(fields.recipientName) : "";
+  // Prefer Marketplace client from the file name; fall back to ship-to on the label.
+  const primaryNeedle = fields.clientName ? normalizeName(fields.clientName) : "";
+  const shipToNeedle =
+    fields.recipientName && normalizeName(fields.recipientName) !== primaryNeedle
+      ? normalizeName(fields.recipientName)
+      : "";
+  const hasNameNeedle = Boolean(primaryNeedle || shipToNeedle);
   const scored: ShippingLabelMatchCandidate[] = [];
 
   for (const deal of deals) {
@@ -370,33 +424,38 @@ export function matchShippingLabelToDeals(
     let score = 0;
     const reasons: string[] = [];
 
-    if (needle && contactNorm) {
-      if (contactNorm === needle) {
-        score += 100;
-        reasons.push("Exact client name");
-      } else if (contactNorm.includes(needle) || needle.includes(contactNorm)) {
-        score += 70;
-        reasons.push("Client name contains match");
-      } else {
-        const overlap = tokenOverlap(contactNorm, needle);
-        if (overlap >= 0.5) {
-          score += Math.round(overlap * 60);
-          reasons.push("Partial client name match");
-        }
+    if (primaryNeedle) {
+      const primary = scoreNameAgainstDeal(primaryNeedle, contactNorm, dealNorm);
+      if (primary.score > 0) {
+        score += primary.score + 20; // Prefer file-name client over ship-to-only hits.
+        reasons.push(...primary.reasons.map((reason) => `${reason} (file name)`));
       }
     }
 
-    if (needle && dealNorm.includes(needle)) {
-      score += 40;
-      reasons.push("Name appears in deal title");
+    if (shipToNeedle) {
+      const shipTo = scoreNameAgainstDeal(shipToNeedle, contactNorm, dealNorm);
+      if (shipTo.score > 0) {
+        score += shipTo.score;
+        reasons.push(...shipTo.reasons.map((reason) => `${reason} (ship-to)`));
+      }
     }
 
+    // Stage bonus is a tie-breaker only — never the sole reason to auto-select.
+    let stageBonus = 0;
     if (deal.closed) {
-      score += 8;
-      reasons.push("Completed (likely shipped)");
+      stageBonus = 8;
     } else if (/ready\s*to\s*ship|packag|ship/i.test(deal.stage)) {
-      score += 12;
-      reasons.push("Ship-stage deal");
+      stageBonus = 12;
+    }
+
+    if (hasNameNeedle && score <= 0) {
+      // We know who the buyer/ship-to is; skip unrelated Ready-to-Ship deals.
+      continue;
+    }
+
+    if (stageBonus > 0) {
+      score += stageBonus;
+      reasons.push(deal.closed ? "Completed (likely shipped)" : "Ship-stage deal");
     }
 
     if (score <= 0) continue;

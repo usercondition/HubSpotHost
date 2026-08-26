@@ -27,6 +27,7 @@ type LabelFields = {
   carrier: string | null;
   postageUsd: string | null;
   recipientName: string | null;
+  clientName: string | null;
   recipientCity: string | null;
   recipientState: string | null;
   recipientPostalCode: string | null;
@@ -178,6 +179,7 @@ export default function ShippingLabelsPage() {
       const contactName =
         data.contact?.name?.trim() ||
         match?.contactName ||
+        parsed?.fields.clientName ||
         parsed?.fields.recipientName ||
         null;
       const contactEmail = data.contact?.email?.trim() || null;
@@ -247,7 +249,7 @@ export default function ShippingLabelsPage() {
   const liveDraft = useMemo(() => {
     if (!tracking.trim()) return "";
     return draftBuyerTrackingMessage({
-      contactName: hubspotContactName || selected?.contactName || parsed?.fields.recipientName || null,
+      contactName: hubspotContactName || selected?.contactName || parsed?.fields.clientName || parsed?.fields.recipientName || null,
       dealName: selected?.dealName ?? null,
       trackingNumber: tracking.trim(),
       service: parsed?.fields.service ?? null,
@@ -281,6 +283,7 @@ export default function ShippingLabelsPage() {
         attachedDraft?.contactName ||
         hubspotContactName ||
         selected?.contactName ||
+        parsed?.fields.clientName ||
         parsed?.fields.recipientName ||
         null,
       dealName: attachedDraft?.dealName || selected?.dealName || null,
@@ -547,7 +550,13 @@ export default function ShippingLabelsPage() {
                   ) : parsed.fields.carrier ? (
                     <StatusPill tone="neutral" icon={Ship} label={parsed.fields.carrier} />
                   ) : null}
-                  {parsed.fields.recipientName ? (
+                  {parsed.fields.clientName ? (
+                    <StatusPill tone="good" icon={CheckCircle2} label={`Client ${parsed.fields.clientName}`} />
+                  ) : null}
+                  {parsed.fields.recipientName &&
+                  parsed.fields.recipientName !== parsed.fields.clientName ? (
+                    <StatusPill tone="neutral" icon={Ship} label={`Ship-to ${parsed.fields.recipientName}`} />
+                  ) : parsed.fields.recipientName && !parsed.fields.clientName ? (
                     <StatusPill tone="good" icon={CheckCircle2} label={parsed.fields.recipientName} />
                   ) : null}
                   {parsed.fields.recipientCity ? (
