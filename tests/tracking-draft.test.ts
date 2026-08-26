@@ -18,14 +18,24 @@ test("buyer tracking draft uses first name and UPS tracking", () => {
   assert.match(message, /Reply here if you need anything/);
 });
 
-test("mailto uses HubSpot contact email and draft body", () => {
-  const href = buyerTrackingMailtoHref({
-    email: "luke@example.com",
-    subject: buyerTrackingEmailSubject("Cover for Suit - Luke Price"),
-    body: "Hey Luke — shipped",
+test("buyer tracking draft lists multiple shared-box orders", () => {
+  const message = draftBuyerTrackingMessage({
+    contactName: "Spencer Patterson",
+    dealNames: [
+      "BR Panels - Spencer Patterson",
+      "Land Raider Banisher - Spencer Patterson",
+    ],
+    trackingNumber: "9300111043900010978789",
+    service: "USPS Ground Advantage",
   });
-  assert.ok(href);
-  assert.match(href!, /^mailto:luke%40example\.com\?/);
-  assert.match(href!, /subject=/);
-  assert.match(href!, /body=/);
+  assert.match(message, /your print orders shipped together \(2 items\)/i);
+  assert.match(message, /Includes: BR Panels - Spencer Patterson; Land Raider Banisher - Spencer Patterson/);
+  assert.match(message, /Tracking \(USPS Ground Advantage\): 9300111043900010978789/);
+});
+
+test("email subject notes extra shared-box orders", () => {
+  assert.match(
+    buyerTrackingEmailSubject("BR Panels - Spencer Patterson", 2),
+    /\+1 more/,
+  );
 });

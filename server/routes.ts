@@ -197,7 +197,7 @@ import {
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
-import { getFulfillmentChecklist, upsertFulfillmentChecklist, findExistingTrackingAttachment } from "./lib/fulfillment";
+import { getFulfillmentChecklist, upsertFulfillmentChecklist, listExistingTrackingAttachments, type HubSpotShippingSync } from "./lib/fulfillment";
 import { buildProductionQueue } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 import {
@@ -1199,7 +1199,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ...snapshot.activeDeals.map((deal) => ({ ...deal, closed: false })),
           ...(snapshot.closedDeals ?? []).map((deal) => ({ ...deal, closed: true })),
         ]);
-        const alreadyAttached = findExistingTrackingAttachment(extracted.fields.trackingNumber, deals);
+        const alreadyAttachedRows = listExistingTrackingAttachments(
+          extracted.fields.trackingNumber,
+          deals,
+        );
+        const alreadyAttachedDealIds = alreadyAttachedRows.map((row) => row.dealId);
+        const alreadyAttached = alreadyAttachedRows[0] ?? null;
         const attachedDealName =
           alreadyAttached == null
             ? null
@@ -1215,6 +1220,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           suggestedNotes: buildShipNotesFromLabel(extracted.fields),
           matches: candidates,
           hubspotPortalId,
+          alreadyAttachedDealIds,
           alreadyAttached: alreadyAttached
             ? {
                 dealId: alreadyAttached.dealId,
@@ -1237,7 +1243,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     },
   );
 
-  /** Confirm label → write tracking (+ optional postage) onto the Print Order. */
+  /** Confirm label → write tracking (+ optional postage) onto one or more Print Orders. */
   app.post("/api/shipping-labels/attach", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const parsed = attachShippingLabelSchema.safeParse(req.body ?? {});
@@ -1245,19 +1251,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     }
     const input = parsed.data;
-    const notes = input.notes.trim();
+    const notesBase = input.notes.trim();
+    const dealIds = input.dealIds;
+    const sharedNote =
+      dealIds.length > 1
+        ? `${notesBase}${notesBase ? " · " : ""}Shared tracking across ${dealIds.length} orders`
+            .trim()
+            .slice(0, 2_000)
+        : notesBase;
 
-    const existing = findExistingTrackingAttachment(input.trackingNumber);
-    if (existing) {
-      const sameDeal = existing.dealId === input.dealId;
-      const contact = await fetchDealAssociatedContact(existing.dealId);
+    const alreadyOn = listExistingTrackingAttachments(input.trackingNumber);
+    const alreadyOnSelected = alreadyOn.filter((row) => dealIds.includes(row.dealId));
+    const toAttach = dealIds.filter((id) => !alreadyOn.some((row) => row.dealId === id));
+
+    if (toAttach.length === 0) {
+      const primary = alreadyOnSelected[0] ?? alreadyOn[0]!;
+      const contact = await fetchDealAssociatedContact(primary.dealId);
       return res.json({
         ok: true,
         duplicate: true,
-        message: sameDeal
-          ? "This tracking is already attached to that Print Order — nothing else to do."
-          : `This tracking is already attached to deal ${existing.dealId} — nothing else to do.`,
-        checklist: getFulfillmentChecklist(existing.dealId),
+        message:
+          dealIds.length > 1
+            ? "This tracking is already on every selected Print Order — nothing else to do."
+            : "This tracking is already attached to that Print Order — nothing else to do.",
+        attachedDealIds: [],
+        skippedDealIds: dealIds,
+        checklist: getFulfillmentChecklist(primary.dealId),
         hubspot: null,
         costs: null,
         costsError: null,
@@ -1267,45 +1286,66 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           email: contact.email,
         },
         alreadyAttached: {
-          dealId: existing.dealId,
-          trackingNumber: existing.trackingNumber,
-          notes: existing.notes,
-          source: existing.source,
-          updatedAt: existing.updatedAt,
+          dealId: primary.dealId,
+          trackingNumber: primary.trackingNumber,
+          notes: primary.notes,
+          source: primary.source,
+          updatedAt: primary.updatedAt,
         },
       });
     }
 
-    const fulfillment = await upsertFulfillmentChecklist(input.dealId, {
-      trackingNumber: input.trackingNumber,
-      trackingPasted: true,
-      labelBought: input.labelBought,
-      packingDone: input.packingDone,
-      notes,
-      liveWrite: input.liveWrite !== false,
-    });
-    if ("error" in fulfillment) {
-      return res.status(400).json({ ok: false, error: fulfillment.error });
-    }
-
+    const attachedDealIds: string[] = [];
+    let primaryChecklist: ReturnType<typeof getFulfillmentChecklist> | null = null;
+    let primaryHubspot: HubSpotShippingSync | null = null;
     let costs: Awaited<ReturnType<typeof updateDealCosts>> | null = null;
     const postage = input.postageUsd.replace(/[$,\s]/g, "").trim();
-    if (postage) {
-      costs = await updateDealCosts(input.dealId, {
-        material: "",
-        labor: "",
-        packaging: "",
-        shipping: postage,
+
+    for (let index = 0; index < toAttach.length; index += 1) {
+      const dealId = toAttach[index]!;
+      const fulfillment = await upsertFulfillmentChecklist(dealId, {
+        trackingNumber: input.trackingNumber,
+        trackingPasted: true,
+        labelBought: input.labelBought,
+        packingDone: input.packingDone,
+        notes: sharedNote,
         liveWrite: input.liveWrite !== false,
       });
+      if ("error" in fulfillment) {
+        return res.status(400).json({
+          ok: false,
+          error: fulfillment.error,
+          attachedDealIds,
+          failedDealId: dealId,
+        });
+      }
+      attachedDealIds.push(dealId);
+      if (!primaryChecklist) {
+        primaryChecklist = fulfillment.checklist;
+        primaryHubspot = fulfillment.hubspot;
+      }
+
+      // Postage is once per package — apply only to the first newly attached order.
+      if (postage && index === 0) {
+        costs = await updateDealCosts(dealId, {
+          material: "",
+          labor: "",
+          packaging: "",
+          shipping: postage,
+          liveWrite: input.liveWrite !== false,
+        });
+      }
     }
 
-    const contact = await fetchDealAssociatedContact(input.dealId);
+    const primaryDealId = attachedDealIds[0]!;
+    const contact = await fetchDealAssociatedContact(primaryDealId);
 
     return res.json({
       ok: true,
-      checklist: fulfillment.checklist,
-      hubspot: fulfillment.hubspot,
+      attachedDealIds,
+      skippedDealIds: alreadyOnSelected.map((row) => row.dealId),
+      checklist: primaryChecklist,
+      hubspot: primaryHubspot,
       costs: costs && costs.ok ? costs.costs : null,
       costsError: costs && !costs.ok ? costs.error : null,
       contact: {

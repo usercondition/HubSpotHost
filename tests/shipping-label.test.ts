@@ -5,7 +5,9 @@ import {
   extractShippingLabelFromPdf,
   matchShippingLabelToDeals,
   buildShipNotesFromLabel,
+  attachShippingLabelSchema,
 } from "../server/lib/shipping-label";
+import { defaultLabelMatchDealIds } from "../shared/shipping-label-select";
 
 const PIRATE_SHIP_LIKE = `
 USPS GROUND ADVANTAGE
@@ -173,4 +175,65 @@ test("ship notes summarize service and postage", () => {
   assert.match(notes, /Ground Advantage/i);
   assert.match(notes, /5\.42/);
   assert.match(notes, /Jose Montes/);
+});
+
+test("default select picks every same-client match for shared-box labels", () => {
+  const fields = extractShippingLabelFields(
+    "",
+    "2026-08-26---Spencer-Patterson---9300111043900010978789.pdf",
+  );
+  const matches = matchShippingLabelToDeals(fields, [
+    {
+      dealId: "panels",
+      dealName: "BR Panels - Spencer Patterson",
+      stage: "Completed",
+      contactName: "Spencer Patterson",
+      amount: 0,
+      closed: true,
+    },
+    {
+      dealId: "raider",
+      dealName: "Land Raider Banisher - Spencer Patterson",
+      stage: "Completed",
+      contactName: "Spencer Patterson",
+      amount: 79.99,
+      closed: true,
+    },
+    {
+      dealId: "other",
+      dealName: "GK Combat Patrol - Luke price",
+      stage: "Completed",
+      contactName: "Luke price",
+      amount: 50,
+      closed: true,
+    },
+  ]);
+  const selected = defaultLabelMatchDealIds(matches);
+  assert.deepEqual(selected.sort(), ["panels", "raider"].sort());
+});
+
+test("attach schema accepts dealIds for multi-order shared tracking", () => {
+  const multi = attachShippingLabelSchema.safeParse({
+    dealIds: ["111", "222"],
+    trackingNumber: "9300111043900010978789",
+    notes: "Shared box",
+  });
+  assert.equal(multi.success, true);
+  if (multi.success) {
+    assert.deepEqual(multi.data.dealIds, ["111", "222"]);
+  }
+
+  const legacy = attachShippingLabelSchema.safeParse({
+    dealId: "333",
+    trackingNumber: "9300111043900010978789",
+  });
+  assert.equal(legacy.success, true);
+  if (legacy.success) {
+    assert.deepEqual(legacy.data.dealIds, ["333"]);
+  }
+
+  const missing = attachShippingLabelSchema.safeParse({
+    trackingNumber: "9300111043900010978789",
+  });
+  assert.equal(missing.success, false);
 });

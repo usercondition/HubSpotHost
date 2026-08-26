@@ -483,22 +483,62 @@ export function buildShipNotesFromLabel(fields: ShippingLabelFields): string {
   return parts.join(" · ").slice(0, 2_000);
 }
 
-export const attachShippingLabelSchema = z.object({
-  dealId: z
-    .string()
-    .trim()
-    .regex(/^[0-9]{1,20}$/, "Select a valid Print Order"),
-  trackingNumber: z.string().trim().min(6).max(120),
-  notes: z.string().trim().max(2_000).optional().default(""),
-  postageUsd: z
-    .string()
-    .trim()
-    .optional()
-    .default("")
-    .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid postage amount"),
-  packingDone: z.boolean().optional().default(true),
-  labelBought: z.boolean().optional().default(true),
-  liveWrite: z.boolean().optional(),
-});
+export const attachShippingLabelSchema = z
+  .object({
+    /** Single-deal attach (legacy). Prefer dealIds for shared-box shipments. */
+    dealId: z
+      .string()
+      .trim()
+      .regex(/^[0-9]{1,20}$/, "Select a valid Print Order")
+      .optional(),
+    /** Attach the same tracking to one or more Print Orders (same client / same box). */
+    dealIds: z
+      .array(z.string().trim().regex(/^[0-9]{1,20}$/, "Select a valid Print Order"))
+      .min(1)
+      .max(20)
+      .optional(),
+    trackingNumber: z.string().trim().min(6).max(120),
+    notes: z.string().trim().max(2_000).optional().default(""),
+    postageUsd: z
+      .string()
+      .trim()
+      .optional()
+      .default("")
+      .refine(
+        (value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))),
+        "Enter a valid postage amount",
+      ),
+    packingDone: z.boolean().optional().default(true),
+    labelBought: z.boolean().optional().default(true),
+    liveWrite: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const ids = [
+      ...(value.dealIds ?? []),
+      ...(value.dealId ? [value.dealId] : []),
+    ].filter(Boolean);
+    if (ids.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select at least one Print Order",
+        path: ["dealIds"],
+      });
+    }
+  })
+  .transform((value) => {
+    const dealIds = Array.from(
+      new Set([...(value.dealIds ?? []), ...(value.dealId ? [value.dealId] : [])]),
+    );
+    return {
+      dealIds,
+      trackingNumber: value.trackingNumber,
+      notes: value.notes,
+      postageUsd: value.postageUsd,
+      packingDone: value.packingDone,
+      labelBought: value.labelBought,
+      liveWrite: value.liveWrite,
+    };
+  });
 
 export type AttachShippingLabelInput = z.infer<typeof attachShippingLabelSchema>;
+

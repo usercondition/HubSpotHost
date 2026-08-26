@@ -15,30 +15,47 @@ function firstNameFrom(value: string | null | undefined): string {
 export function draftBuyerTrackingMessage(input: {
   contactName?: string | null;
   dealName?: string | null;
+  /** When several Print Orders share one box / tracking. */
+  dealNames?: string[] | null;
   trackingNumber: string;
   service?: string | null;
   carrier?: string | null;
 }): string {
+  const names = (input.dealNames ?? [])
+    .map((name) => String(name ?? "").trim())
+    .filter(Boolean);
+  const primaryDeal = names[0] || input.dealName || null;
   const who =
     firstNameFrom(input.contactName) !== "there"
       ? firstNameFrom(input.contactName)
       : firstNameFrom(
-          input.dealName && input.dealName.includes(" - ")
-            ? input.dealName.slice(input.dealName.lastIndexOf(" - ") + 3)
+          primaryDeal && primaryDeal.includes(" - ")
+            ? primaryDeal.slice(primaryDeal.lastIndexOf(" - ") + 3)
             : null,
         );
   const serviceBit = input.service || input.carrier || null;
-  return [
-    `Hey ${who} — your print order shipped!`,
+  const greeting =
+    names.length > 1
+      ? `Hey ${who} — your print orders shipped together (${names.length} items)!`
+      : `Hey ${who} — your print order shipped!`;
+  const lines = [
+    greeting,
     "",
     serviceBit ? `Tracking (${serviceBit}): ${input.trackingNumber}` : `Tracking: ${input.trackingNumber}`,
-    "",
-    "Reply here if you need anything.",
-  ].join("\n");
+  ];
+  if (names.length > 1) {
+    lines.push("", `Includes: ${names.join("; ")}`);
+  }
+  lines.push("", "Reply here if you need anything.");
+  return lines.join("\n");
 }
 
-export function buyerTrackingEmailSubject(dealName?: string | null): string {
+export function buyerTrackingEmailSubject(dealName?: string | null, orderCount = 1): string {
   const cleaned = String(dealName ?? "").trim();
+  if (orderCount > 1) {
+    if (cleaned) return `Your orders shipped — ${cleaned.slice(0, 60)} (+${orderCount - 1} more)`;
+    return `Your ${orderCount} print orders shipped`;
+  }
   if (cleaned) return `Your order shipped — ${cleaned.slice(0, 80)}`;
   return "Your print order shipped";
 }

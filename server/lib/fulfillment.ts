@@ -103,22 +103,30 @@ export type ExistingTrackingAttachment = {
 export function findLocalTrackingAttachment(
   trackingNumber: string | null | undefined,
 ): ExistingTrackingAttachment | null {
-  const needle = normalizeTrackingNumber(trackingNumber);
-  if (needle.length < 6) return null;
+  return listLocalTrackingAttachments(trackingNumber)[0] ?? null;
+}
 
+/** All local checklists that already store this tracking (shared-box shipments). */
+export function listLocalTrackingAttachments(
+  trackingNumber: string | null | undefined,
+): ExistingTrackingAttachment[] {
+  const needle = normalizeTrackingNumber(trackingNumber);
+  if (needle.length < 6) return [];
+
+  const found: ExistingTrackingAttachment[] = [];
   const rows = getDb().select().from(fulfillmentChecklists).all();
   for (const row of rows) {
     const stored = normalizeTrackingNumber(row.trackingNumber);
     if (!stored || stored !== needle) continue;
-    return {
+    found.push({
       dealId: row.hubspotDealId,
       trackingNumber: row.trackingNumber.trim(),
       notes: row.notes ?? "",
       updatedAt: row.updatedAt ?? null,
       source: "local",
-    };
+    });
   }
-  return null;
+  return found;
 }
 
 /**
@@ -129,21 +137,29 @@ export function findHubSpotTrackingAttachment(
   trackingNumber: string | null | undefined,
   deals: Array<{ id: string; properties: Record<string, string | null> }>,
 ): ExistingTrackingAttachment | null {
-  const needle = normalizeTrackingNumber(trackingNumber);
-  if (needle.length < 6) return null;
+  return listHubSpotTrackingAttachments(trackingNumber, deals)[0] ?? null;
+}
 
+export function listHubSpotTrackingAttachments(
+  trackingNumber: string | null | undefined,
+  deals: Array<{ id: string; properties: Record<string, string | null> }>,
+): ExistingTrackingAttachment[] {
+  const needle = normalizeTrackingNumber(trackingNumber);
+  if (needle.length < 6) return [];
+
+  const found: ExistingTrackingAttachment[] = [];
   for (const deal of deals) {
     const stored = normalizeTrackingNumber(deal.properties.print_tracking_number);
     if (!stored || stored !== needle) continue;
-    return {
+    found.push({
       dealId: deal.id,
       trackingNumber: String(deal.properties.print_tracking_number ?? "").trim(),
       notes: String(deal.properties.print_ship_notes ?? "").trim(),
       updatedAt: null,
       source: "hubspot",
-    };
+    });
   }
-  return null;
+  return found;
 }
 
 export function findExistingTrackingAttachment(
@@ -151,6 +167,21 @@ export function findExistingTrackingAttachment(
   deals?: Array<{ id: string; properties: Record<string, string | null> }>,
 ): ExistingTrackingAttachment | null {
   return findLocalTrackingAttachment(trackingNumber) ?? findHubSpotTrackingAttachment(trackingNumber, deals ?? []);
+}
+
+/** Every deal that already has this tracking locally or on HubSpot. */
+export function listExistingTrackingAttachments(
+  trackingNumber: string | null | undefined,
+  deals?: Array<{ id: string; properties: Record<string, string | null> }>,
+): ExistingTrackingAttachment[] {
+  const byDeal = new Map<string, ExistingTrackingAttachment>();
+  for (const row of listLocalTrackingAttachments(trackingNumber)) {
+    byDeal.set(row.dealId, row);
+  }
+  for (const row of listHubSpotTrackingAttachments(trackingNumber, deals ?? [])) {
+    if (!byDeal.has(row.dealId)) byDeal.set(row.dealId, row);
+  }
+  return Array.from(byDeal.values());
 }
 
 export function listFulfillmentChecklists(dealIds: string[]): Map<string, FulfillmentChecklistView> {

@@ -18,6 +18,7 @@ import {
   buyerTrackingMailtoHref,
   draftBuyerTrackingMessage,
 } from "@shared/shipping-draft";
+import { defaultLabelMatchDealIds } from "@shared/shipping-label-select";
 import { ShippingEmailPreviewDialog } from "@/components/shipping-email-preview-dialog";
 import type { ShippingEmailTemplateInput } from "@shared/shipping-email-template";
 
@@ -51,6 +52,7 @@ type ParseResponse = {
   fields: LabelFields;
   suggestedNotes: string;
   matches: LabelMatch[];
+  alreadyAttachedDealIds?: string[];
   alreadyAttached?: {
     dealId: string;
     dealName: string | null;
@@ -62,8 +64,9 @@ type ParseResponse = {
 };
 
 type AttachedDraft = {
-  dealId: string;
+  dealIds: string[];
   dealName: string;
+  dealNames: string[];
   contactName: string | null;
   contactEmail: string | null;
   trackingNumber: string;
@@ -90,9 +93,15 @@ export default function ShippingLabelsPage() {
   const [tracking, setTracking] = useState("");
   const [notes, setNotes] = useState("");
   const [postage, setPostage] = useState("");
-  const [dealId, setDealId] = useState("");
+  const [selectedDealIds, setSelectedDealIds] = useState<string[]>([]);
+  const [manualDealId, setManualDealId] = useState("");
   const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
+
+  const alreadyAttachedIdSet = useMemo(
+    () => new Set(parsed?.alreadyAttachedDealIds ?? (parsed?.alreadyAttached ? [parsed.alreadyAttached.dealId] : [])),
+    [parsed],
+  );
 
   const parseLabel = useMutation({
     mutationFn: async (file: File) => {
@@ -107,20 +116,35 @@ export default function ShippingLabelsPage() {
       setTracking(data.fields.trackingNumber ?? "");
       setNotes(data.suggestedNotes || "");
       setPostage(data.fields.postageUsd ?? "");
-      setDealId(data.alreadyAttached?.dealId ?? data.matches[0]?.dealId ?? "");
-      if (data.alreadyAttached) {
+      setManualDealId("");
+      const defaults = defaultLabelMatchDealIds(data.matches);
+      setSelectedDealIds(defaults.length > 0 ? defaults : data.alreadyAttached?.dealId ? [data.alreadyAttached.dealId] : []);
+      const attachedIds = data.alreadyAttachedDealIds ?? (data.alreadyAttached ? [data.alreadyAttached.dealId] : []);
+      const pendingDefaults = defaults.filter((id) => !attachedIds.includes(id));
+      if (attachedIds.length > 0 && pendingDefaults.length === 0 && defaults.length > 0) {
         toast({
           title: "Already attached",
-          description: data.alreadyAttached.dealName
-            ? `${data.alreadyAttached.trackingNumber} is on ${data.alreadyAttached.dealName} — no action needed.`
-            : `${data.alreadyAttached.trackingNumber} is already saved — no action needed.`,
+          description:
+            attachedIds.length > 1
+              ? `${data.fields.trackingNumber ?? "Tracking"} is already on all ${attachedIds.length} matching orders.`
+              : data.alreadyAttached?.dealName
+                ? `${data.alreadyAttached.trackingNumber} is on ${data.alreadyAttached.dealName} — no action needed.`
+                : `${data.alreadyAttached?.trackingNumber ?? "Tracking"} is already saved — no action needed.`,
+        });
+      } else if (attachedIds.length > 0 && pendingDefaults.length > 0) {
+        toast({
+          title: "Shared box?",
+          description: `Tracking is already on ${attachedIds.length} order(s). ${pendingDefaults.length} matching order(s) still need it — keep them selected to attach.`,
         });
       } else {
         toast({
           title: "Label read",
-          description: data.fields.trackingNumber
-            ? `Tracking ${data.fields.trackingNumber}`
-            : "Check the fields and pick the matching order.",
+          description:
+            defaults.length > 1
+              ? `Tracking ${data.fields.trackingNumber ?? ""} · ${defaults.length} orders selected (same client)`
+              : data.fields.trackingNumber
+                ? `Tracking ${data.fields.trackingNumber}`
+                : "Check the fields and pick the matching order(s).",
         });
       }
     },
@@ -139,7 +163,7 @@ export default function ShippingLabelsPage() {
         "POST",
         "/api/shipping-labels/attach",
         {
-          dealId,
+          dealIds: selectedDealIds,
           trackingNumber: tracking.trim(),
           notes: notes.trim(),
           postageUsd: postage.trim(),
@@ -152,6 +176,8 @@ export default function ShippingLabelsPage() {
         ok: true;
         duplicate?: boolean;
         message?: string;
+        attachedDealIds?: string[];
+        skippedDealIds?: string[];
         contact?: { id: string | null; name: string; email: string };
         alreadyAttached?: { dealId: string; trackingNumber: string };
       };
@@ -170,29 +196,38 @@ export default function ShippingLabelsPage() {
         setTracking("");
         setNotes("");
         setPostage("");
-        setDealId("");
+        setSelectedDealIds([]);
+        setManualDealId("");
         setAttachedDraft(null);
         return;
       }
 
-      const match = parsed?.matches.find((row) => row.dealId === dealId) ?? null;
+      const attachedIds = data.attachedDealIds?.length ? data.attachedDealIds : selectedDealIds;
+      const selectedMatches = (parsed?.matches ?? []).filter((row) => attachedIds.includes(row.dealId));
+      const dealNames =
+        selectedMatches.length > 0
+          ? selectedMatches.map((row) => row.dealName)
+          : attachedIds.map((id) => `Deal ${id}`);
+      const primaryMatch = selectedMatches[0] ?? null;
       const contactName =
         data.contact?.name?.trim() ||
-        match?.contactName ||
+        primaryMatch?.contactName ||
         parsed?.fields.clientName ||
         parsed?.fields.recipientName ||
         null;
       const contactEmail = data.contact?.email?.trim() || null;
       const message = draftBuyerTrackingMessage({
         contactName,
-        dealName: match?.dealName ?? null,
+        dealName: primaryMatch?.dealName ?? dealNames[0] ?? null,
+        dealNames,
         trackingNumber: tracking.trim(),
         service: parsed?.fields.service ?? null,
         carrier: parsed?.fields.carrier ?? null,
       });
       setAttachedDraft({
-        dealId,
-        dealName: match?.dealName ?? `Deal ${dealId}`,
+        dealIds: attachedIds,
+        dealName: primaryMatch?.dealName ?? dealNames[0] ?? `Deal ${attachedIds[0]}`,
+        dealNames,
         contactName,
         contactEmail,
         trackingNumber: tracking.trim(),
@@ -200,17 +235,19 @@ export default function ShippingLabelsPage() {
         carrier: parsed?.fields.carrier ?? null,
         message,
       });
+      const skipCount = data.skippedDealIds?.length ?? 0;
       toast({
-        title: "Tracking attached",
+        title: attachedIds.length > 1 ? `Tracking on ${attachedIds.length} orders` : "Tracking attached",
         description: contactEmail
-          ? `Draft ready for ${contactEmail}`
-          : "Draft ready — no HubSpot email on this contact; copy for Marketplace.",
+          ? `Draft ready for ${contactEmail}${skipCount ? ` · ${skipCount} already had it` : ""}`
+          : `Draft ready — no HubSpot email on this contact; copy for Marketplace.${skipCount ? ` (${skipCount} already had tracking)` : ""}`,
       });
       setParsed(null);
       setTracking("");
       setNotes("");
       setPostage("");
-      setDealId("");
+      setSelectedDealIds([]);
+      setManualDealId("");
     },
     onError: (error: Error) => {
       toast({
@@ -221,21 +258,33 @@ export default function ShippingLabelsPage() {
     },
   });
 
-  const selected = useMemo(
-    () => parsed?.matches.find((row) => row.dealId === dealId) ?? null,
-    [parsed, dealId],
+  const selectedMatches = useMemo(
+    () => (parsed?.matches ?? []).filter((row) => selectedDealIds.includes(row.dealId)),
+    [parsed, selectedDealIds],
   );
+  const primaryDealId = selectedDealIds[0] ?? "";
+  const selectedDealNames = useMemo(() => {
+    if (selectedMatches.length > 0) return selectedMatches.map((row) => row.dealName);
+    return selectedDealIds.map((id) => `Deal ${id}`);
+  }, [selectedMatches, selectedDealIds]);
+
+  const pendingSelectedIds = useMemo(
+    () => selectedDealIds.filter((id) => !alreadyAttachedIdSet.has(id)),
+    [selectedDealIds, alreadyAttachedIdSet],
+  );
+  const allSelectedAlreadyAttached =
+    selectedDealIds.length > 0 && pendingSelectedIds.length === 0;
 
   const contactLookup = useQuery<{
     ok: true;
     contact: { id: string | null; name: string; email: string };
   }>({
-    queryKey: ["/api/shipping-labels/contact", dealId, ownerCode],
-    enabled: isUnlocked && /^[0-9]{1,20}$/.test(dealId) && Boolean(parsed),
+    queryKey: ["/api/shipping-labels/contact", primaryDealId, ownerCode],
+    enabled: isUnlocked && /^[0-9]{1,20}$/.test(primaryDealId) && Boolean(parsed),
     queryFn: async () => {
       const response = await apiRequest(
         "GET",
-        `/api/shipping-labels/contact/${encodeURIComponent(dealId)}`,
+        `/api/shipping-labels/contact/${encodeURIComponent(primaryDealId)}`,
         undefined,
         { headers },
       );
@@ -249,28 +298,34 @@ export default function ShippingLabelsPage() {
   const liveDraft = useMemo(() => {
     if (!tracking.trim()) return "";
     return draftBuyerTrackingMessage({
-      contactName: hubspotContactName || selected?.contactName || parsed?.fields.clientName || parsed?.fields.recipientName || null,
-      dealName: selected?.dealName ?? null,
+      contactName:
+        hubspotContactName ||
+        selectedMatches[0]?.contactName ||
+        parsed?.fields.clientName ||
+        parsed?.fields.recipientName ||
+        null,
+      dealName: selectedMatches[0]?.dealName ?? null,
+      dealNames: selectedDealNames,
       trackingNumber: tracking.trim(),
       service: parsed?.fields.service ?? null,
       carrier: parsed?.fields.carrier ?? null,
     });
-  }, [tracking, selected, parsed, hubspotContactName]);
+  }, [tracking, selectedMatches, selectedDealNames, parsed, hubspotContactName]);
 
   const previewMailto = useMemo(() => {
     if (!hubspotEmail || !liveDraft) return null;
     return buyerTrackingMailtoHref({
       email: hubspotEmail,
-      subject: buyerTrackingEmailSubject(selected?.dealName),
+      subject: buyerTrackingEmailSubject(selectedMatches[0]?.dealName, selectedDealIds.length),
       body: liveDraft,
     });
-  }, [hubspotEmail, liveDraft, selected?.dealName]);
+  }, [hubspotEmail, liveDraft, selectedMatches, selectedDealIds.length]);
 
   const attachedMailto = useMemo(() => {
     if (!attachedDraft?.contactEmail) return null;
     return buyerTrackingMailtoHref({
       email: attachedDraft.contactEmail,
-      subject: buyerTrackingEmailSubject(attachedDraft.dealName),
+      subject: buyerTrackingEmailSubject(attachedDraft.dealName, attachedDraft.dealIds.length),
       body: attachedDraft.message,
     });
   }, [attachedDraft]);
@@ -282,18 +337,44 @@ export default function ShippingLabelsPage() {
       contactName:
         attachedDraft?.contactName ||
         hubspotContactName ||
-        selected?.contactName ||
+        selectedMatches[0]?.contactName ||
         parsed?.fields.clientName ||
         parsed?.fields.recipientName ||
         null,
-      dealName: attachedDraft?.dealName || selected?.dealName || null,
+      dealName: attachedDraft?.dealName || selectedMatches[0]?.dealName || null,
       trackingNumber,
       service: attachedDraft?.service || parsed?.fields.service || null,
       carrier: attachedDraft?.carrier || parsed?.fields.carrier || null,
     };
-  }, [attachedDraft, tracking, hubspotContactName, selected, parsed]);
+  }, [attachedDraft, tracking, hubspotContactName, selectedMatches, parsed]);
 
   const emailDialogContact = attachedDraft?.contactEmail || hubspotEmail || null;
+
+  function toggleDealId(dealId: string) {
+    setSelectedDealIds((prev) =>
+      prev.includes(dealId) ? prev.filter((id) => id !== dealId) : [...prev, dealId],
+    );
+  }
+
+  function clearConfirmPanel() {
+    setParsed(null);
+    setSelectedDealIds([]);
+    setManualDealId("");
+  }
+
+  function addManualDealId() {
+    const id = manualDealId.trim();
+    if (!/^[0-9]{1,20}$/.test(id)) {
+      toast({
+        title: "Invalid deal id",
+        description: "Paste a HubSpot deal id (digits only).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSelectedDealIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setManualDealId("");
+  }
 
   async function copyMessage(text: string) {
     try {
@@ -326,7 +407,7 @@ export default function ShippingLabelsPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Labels"
-        subtitle="Drop a shipping label PDF — we pull tracking, service, and postage, then attach it to the matching Print Order (including Completed)."
+        subtitle="Drop a shipping label PDF — attach the same tracking to one or more Print Orders when they ship in the same box."
       />
 
       <div className="page-stack">
@@ -395,20 +476,35 @@ export default function ShippingLabelsPage() {
             {attachedDraft ? (
               <Panel
                 title="Message the buyer"
-                description={`${attachedDraft.dealName} · tracking saved — copy this into Marketplace (not sent automatically).`}
+                description={
+                  attachedDraft.dealIds.length > 1
+                    ? `${attachedDraft.dealIds.length} orders · shared tracking saved — copy this into Marketplace (not sent automatically).`
+                    : `${attachedDraft.dealName} · tracking saved — copy this into Marketplace (not sent automatically).`
+                }
                 testId="panel-labels-buyer-draft"
               >
                 <div className="glance-item glance-in flex-col items-stretch gap-3" data-tone="good">
                   <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                     <MessageSquareText className="h-4 w-4 text-primary" />
                     Draft ready
-                    <StatusPill tone="good" icon={CheckCircle2} label="Tracking attached" />
+                    <StatusPill
+                      tone="good"
+                      icon={CheckCircle2}
+                      label={
+                        attachedDraft.dealIds.length > 1
+                          ? `Tracking on ${attachedDraft.dealIds.length} orders`
+                          : "Tracking attached"
+                      }
+                    />
                     {attachedDraft.contactEmail ? (
                       <StatusPill tone="neutral" icon={Mail} label={attachedDraft.contactEmail} />
                     ) : (
                       <StatusPill tone="warn" icon={AlertTriangle} label="No HubSpot email" />
                     )}
                   </div>
+                  {attachedDraft.dealNames.length > 1 ? (
+                    <p className="text-xs text-muted-foreground">{attachedDraft.dealNames.join(" · ")}</p>
+                  ) : null}
                   <pre
                     className="whitespace-pre-wrap rounded-md border border-border/80 bg-muted/35 px-3 py-2.5 font-sans text-sm leading-relaxed text-foreground"
                     data-testid="text-buyer-tracking-draft"
@@ -442,9 +538,13 @@ export default function ShippingLabelsPage() {
                       <Copy className="mr-2 h-3.5 w-3.5" />
                       Copy message
                     </Button>
-                    <Button asChild size="sm" variant="outline">
-                      <Link href={queueDealHref(attachedDraft.dealId)}>Open in Queue</Link>
-                    </Button>
+                    {attachedDraft.dealIds.slice(0, 3).map((id) => (
+                      <Button key={id} asChild size="sm" variant="outline">
+                        <Link href={queueDealHref(id)}>
+                          {attachedDraft.dealIds.length > 1 ? `Queue · ${id.slice(-4)}` : "Open in Queue"}
+                        </Link>
+                      </Button>
+                    ))}
                     <Button size="sm" variant="ghost" onClick={() => setAttachedDraft(null)}>
                       Done
                     </Button>
@@ -464,39 +564,46 @@ export default function ShippingLabelsPage() {
                 description={parsed.fileName}
                 testId="panel-labels-confirm"
               >
-                {parsed.alreadyAttached ? (
+                {alreadyAttachedIdSet.size > 0 ? (
                   <div
                     className="glance-item mb-3 flex-col items-stretch gap-2"
-                    data-tone="good"
+                    data-tone={allSelectedAlreadyAttached ? "good" : "warn"}
                     data-testid="panel-label-already-attached"
                   >
                     <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                       <CheckCircle2 className="h-4 w-4 text-primary" />
-                      Already attached — no action needed
+                      {allSelectedAlreadyAttached
+                        ? "Already on every selected order"
+                        : `Already on ${alreadyAttachedIdSet.size} order(s) — can still attach to others`}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Tracking{" "}
                       <span className="font-medium text-foreground">
-                        {parsed.alreadyAttached.trackingNumber}
-                      </span>{" "}
-                      is already on{" "}
-                      <span className="font-medium text-foreground">
-                        {parsed.alreadyAttached.dealName || `deal ${parsed.alreadyAttached.dealId}`}
+                        {parsed.alreadyAttached?.trackingNumber ?? tracking}
                       </span>
-                      . Re-uploading won’t change anything.
+                      {parsed.alreadyAttached?.dealName
+                        ? <>
+                            {" "}
+                            is already on{" "}
+                            <span className="font-medium text-foreground">
+                              {parsed.alreadyAttached.dealName}
+                            </span>
+                            {alreadyAttachedIdSet.size > 1 ? ` (+${alreadyAttachedIdSet.size - 1} more)` : ""}.
+                          </>
+                        : " is already saved on at least one Print Order."}
+                      {pendingSelectedIds.length > 0
+                        ? " Keep the other matching orders selected to put the same tracking on the shared box."
+                        : " Re-uploading won’t change those deals."}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={queueDealHref(parsed.alreadyAttached.dealId)}>Open in Queue</Link>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setParsed(null);
-                          setDealId("");
-                        }}
-                      >
+                      {[...(parsed.alreadyAttachedDealIds ?? (parsed.alreadyAttached ? [parsed.alreadyAttached.dealId] : []))]
+                        .slice(0, 3)
+                        .map((id) => (
+                          <Button key={id} asChild size="sm" variant="outline">
+                            <Link href={queueDealHref(id)}>Queue · {id.slice(-4)}</Link>
+                          </Button>
+                        ))}
+                      <Button size="sm" variant="ghost" onClick={clearConfirmPanel}>
                         Clear
                       </Button>
                     </div>
@@ -569,10 +676,20 @@ export default function ShippingLabelsPage() {
                 </div>
 
                 <div className="mt-4 space-y-2">
-                  <p className="text-sm font-semibold">Match to Print Order</p>
+                  <p className="text-sm font-semibold">
+                    Match to Print Order
+                    {selectedDealIds.length > 1 ? (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        · {selectedDealIds.length} selected (same tracking / box)
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Select every order in the box. Same-client matches are pre-selected when we can tell.
+                  </p>
                   {parsed.matches.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No automatic match — paste the HubSpot deal id below, or open{" "}
+                      No automatic match — paste HubSpot deal id(s) below, or open{" "}
                       <Link href="/deals" className="text-primary hover:underline">
                         Orders
                       </Link>{" "}
@@ -580,44 +697,94 @@ export default function ShippingLabelsPage() {
                     </p>
                   ) : (
                     <ul className="glance-list">
-                      {parsed.matches.map((match) => (
-                        <li key={match.dealId}>
-                          <button
-                            type="button"
-                            className="glance-item w-full text-left"
-                            data-tone={match.closed ? "good" : match.score >= 70 ? "warn" : undefined}
-                            data-testid={`button-label-match-${match.dealId}`}
-                            onClick={() => setDealId(match.dealId)}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold">{match.dealName}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {match.stage}
-                                {match.closed ? " · completed" : ""}
-                                {match.contactName ? ` · ${match.contactName}` : ""} · {formatMoney(match.amount)}
+                      {parsed.matches.map((match) => {
+                        const selected = selectedDealIds.includes(match.dealId);
+                        const alreadyOn = alreadyAttachedIdSet.has(match.dealId);
+                        return (
+                          <li key={match.dealId}>
+                            <button
+                              type="button"
+                              className="glance-item w-full text-left"
+                              data-tone={
+                                alreadyOn ? "good" : match.closed ? "good" : match.score >= 70 ? "warn" : undefined
+                              }
+                              data-testid={`button-label-match-${match.dealId}`}
+                              onClick={() => toggleDealId(match.dealId)}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold">{match.dealName}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {match.stage}
+                                  {match.closed ? " · completed" : ""}
+                                  {match.contactName ? ` · ${match.contactName}` : ""} · {formatMoney(match.amount)}
+                                </span>
+                                <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">
+                                  {match.reason}
+                                  {alreadyOn ? " · tracking already on this order" : ""}
+                                </span>
                               </span>
-                              <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">{match.reason}</span>
-                            </span>
-                            {dealId === match.dealId ? (
-                              <StatusPill tone="good" icon={CheckCircle2} label="Selected" />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Score {match.score}</span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
+                              {selected ? (
+                                <StatusPill
+                                  tone="good"
+                                  icon={CheckCircle2}
+                                  label={alreadyOn ? "On + selected" : "Selected"}
+                                />
+                              ) : alreadyOn ? (
+                                <StatusPill tone="neutral" icon={CheckCircle2} label="Already on" />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Score {match.score}</span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
-                  <div className="pt-1">
-                    <Label htmlFor="label-deal-id">Deal id</Label>
-                    <Input
-                      id="label-deal-id"
-                      value={dealId}
-                      onChange={(event) => setDealId(event.target.value.trim())}
-                      placeholder="HubSpot deal id"
-                      data-testid="input-label-deal-id"
-                    />
+                  <div className="flex flex-wrap items-end gap-2 pt-1">
+                    <div className="min-w-[12rem] flex-1">
+                      <Label htmlFor="label-deal-id">Add deal id</Label>
+                      <Input
+                        id="label-deal-id"
+                        value={manualDealId}
+                        onChange={(event) => setManualDealId(event.target.value.trim())}
+                        placeholder="HubSpot deal id"
+                        data-testid="input-label-deal-id"
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            addManualDealId();
+                          }
+                        }}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={addManualDealId}
+                      data-testid="button-label-add-deal-id"
+                    >
+                      Add
+                    </Button>
                   </div>
+                  {selectedDealIds.some((id) => !parsed.matches.some((m) => m.dealId === id)) ? (
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {selectedDealIds
+                        .filter((id) => !parsed.matches.some((m) => m.dealId === id))
+                        .map((id) => (
+                          <li key={id} className="flex items-center gap-2">
+                            <span>Also selected: deal {id}</span>
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              onClick={() => toggleDealId(id)}
+                            >
+                              remove
+                            </button>
+                          </li>
+                        ))}
+                    </ul>
+                  ) : null}
                 </div>
 
                 {liveDraft ? (
@@ -634,7 +801,7 @@ export default function ShippingLabelsPage() {
                         </p>
                       ) : contactLookup.isFetching ? (
                         <p className="text-xs text-muted-foreground">Looking up HubSpot email…</p>
-                      ) : dealId ? (
+                      ) : primaryDealId ? (
                         <p className="text-xs text-muted-foreground">No email on the linked HubSpot contact.</p>
                       ) : null}
                       <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
@@ -679,32 +846,32 @@ export default function ShippingLabelsPage() {
                   <Button
                     size="sm"
                     disabled={
-                      Boolean(parsed.alreadyAttached) ||
+                      allSelectedAlreadyAttached ||
                       attach.isPending ||
                       !tracking.trim() ||
-                      !/^[0-9]{1,20}$/.test(dealId)
+                      selectedDealIds.length === 0 ||
+                      !selectedDealIds.every((id) => /^[0-9]{1,20}$/.test(id))
                     }
                     onClick={() => attach.mutate()}
                     data-testid="button-label-attach"
                   >
                     {attach.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
-                    {parsed.alreadyAttached
+                    {allSelectedAlreadyAttached
                       ? "Already attached"
-                      : `Attach tracking${selected ? ` · ${selected.dealName.slice(0, 28)}` : ""}`}
+                      : pendingSelectedIds.length > 1
+                        ? `Attach tracking to ${pendingSelectedIds.length} orders`
+                        : pendingSelectedIds.length === 1 && selectedMatches[0]
+                          ? `Attach tracking · ${selectedMatches[0].dealName.slice(0, 28)}`
+                          : selectedDealIds.length > 1
+                            ? `Attach tracking to ${selectedDealIds.length} orders`
+                            : "Attach tracking"}
                   </Button>
-                  {dealId ? (
+                  {primaryDealId ? (
                     <Button asChild size="sm" variant="outline">
-                      <Link href={queueDealHref(dealId)}>Open in Queue</Link>
+                      <Link href={queueDealHref(primaryDealId)}>Open in Queue</Link>
                     </Button>
                   ) : null}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setParsed(null);
-                      setDealId("");
-                    }}
-                  >
+                  <Button size="sm" variant="ghost" onClick={clearConfirmPanel}>
                     Clear
                   </Button>
                 </div>
