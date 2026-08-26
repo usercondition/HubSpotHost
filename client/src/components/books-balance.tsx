@@ -67,7 +67,7 @@ export function BooksBalancePanel({
           />
           <BooksRow
             label="− Order costs"
-            hint="Material, labor, packaging, and shipping on HubSpot deals"
+            hint="Material + shipping on HubSpot deals (labor/packaging treated as $0 when blank)"
             value={-books.orderCosts}
             bar={books.orderCosts / maxBar}
             muted
