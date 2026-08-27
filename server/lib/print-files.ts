@@ -404,7 +404,9 @@ export function groupPrintFileRecordsByDeal(limit = 100): PrintFileDealBoard[] {
     existing.totalResinMassG = total([existing.totalResinMassG, asNumber(record.resinMassG)]);
     existing.totalResinCost = total([existing.totalResinCost, asNumber(record.resinCost)]);
   }
-  return [...boards.values()].sort((a, b) => b.latestAttachedAt.localeCompare(a.latestAttachedAt));
+  return Array.from(boards.values()).sort(
+    (a, b) => b.latestAttachedAt.localeCompare(a.latestAttachedAt),
+  );
 }
 
 /**

@@ -13,6 +13,7 @@ import { dealCostsIncomplete } from "../../shared/deal-costs";
 export const PERFORMANCE_WINDOW_DAYS = 30;
 export const PERFORMANCE_STALE_DAYS = 7;
 export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
+export const PERFORMANCE_COST_VARIANCE_PERCENT = 25;
 const ATTENTION_LIMIT = 8;
 /** Cap for Command Center + Orders page open-deal lists. */
 const ACTIVE_DEALS_LIMIT = 40;
