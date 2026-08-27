@@ -2713,7 +2713,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
   /**
    * Marketplace secretary brief — batch of scanned threads → prioritized next actions.
-   * Create requires owner access code. Read is by capability id (30 min TTL).
+   * The current brief is a single owner-gated persistent slot.
    */
   app.post("/api/marketplace-brief", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -2737,7 +2737,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         };
       });
       const created = createMarketplaceInboxBrief(threads);
-      return res.status(201).json({ ok: true, id: created.id, expiresAt: created.expiresAt, brief: created.brief });
+      return res.status(201).json({ ok: true, id: created.id, brief: created.brief });
     } catch (error) {
       return res.status(400).json({
         ok: false,
@@ -2746,12 +2746,23 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     }
   });
 
+  app.get("/api/marketplace-brief/latest", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const brief = getMarketplaceInboxBrief();
+    if (!brief) {
+      return res.status(404).json({ ok: false, error: "No Marketplace brief has been saved yet." });
+    }
+    return res.json({ ok: true, brief });
+  });
+
+  /** Backwards-compatible Chrome-helper URL; all ids resolve to the one current brief. */
   app.get("/api/marketplace-brief/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
     const brief = getMarketplaceInboxBrief(String(req.params.id || ""));
     if (!brief) {
       return res.status(404).json({
         ok: false,
-        error: "Brief expired. Run Inbox brief from the Chrome helper again.",
+        error: "No Marketplace brief has been saved yet.",
       });
     }
     return res.json({ ok: true, brief });

@@ -1,31 +1,46 @@
 /**
- * Short-lived store for Marketplace inbox secretary briefs.
+ * Persistent single-slot store for the Marketplace inbox secretary brief.
+ *
+ * The configured order-links SQLite database normally lives on `/data`; using
+ * it here keeps the brief available after a process restart or deployment.
  */
-import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
 import type { MarketplaceInboxBrief, MarketplaceThreadInput } from "./marketplace-inbox-brief";
 import { buildMarketplaceInboxBrief } from "./marketplace-inbox-brief";
 
-type StoredBrief = {
-  brief: MarketplaceInboxBrief;
-  createdAt: number;
-};
-
-const briefs = new Map<string, StoredBrief>();
-const TTL_MS = 30 * 60 * 1000;
 const MAX_THREADS = 40;
+const LATEST_BRIEF_ID = "latest";
+const CREATE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS marketplace_inbox_brief (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  brief_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
 
-function sweep(now = Date.now()): void {
-  for (const [id, row] of Array.from(briefs.entries())) {
-    if (now - row.createdAt > TTL_MS) briefs.delete(id);
-  }
+let sqlite: Database.Database | null = null;
+
+function databaseFile(): string {
+  const configured = process.env.MARKETPLACE_INBOX_BRIEF_DB_FILE?.trim() || process.env.ORDER_LINKS_DB_FILE?.trim();
+  return configured === ":memory:" ? configured : path.resolve(configured || "/data/marketplace-inbox-brief.db");
+}
+
+function getSqlite(): Database.Database {
+  if (sqlite) return sqlite;
+  const file = databaseFile();
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
+  sqlite = new Database(file);
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.exec(CREATE_TABLE_SQL);
+  return sqlite;
 }
 
 export function createMarketplaceInboxBrief(threads: MarketplaceThreadInput[]): {
   id: string;
-  expiresAt: string;
   brief: MarketplaceInboxBrief;
 } {
-  sweep();
   if (!Array.isArray(threads) || threads.length === 0) {
     throw new Error("Scan at least one Marketplace conversation");
   }
@@ -40,17 +55,35 @@ export function createMarketplaceInboxBrief(threads: MarketplaceThreadInput[]): 
     throw new Error("Scanned threads did not include enough message text");
   }
   const brief = buildMarketplaceInboxBrief(clipped);
-  const id = crypto.randomBytes(24).toString("hex");
-  briefs.set(id, { brief, createdAt: Date.now() });
-  return { id, expiresAt: new Date(Date.now() + TTL_MS).toISOString(), brief };
+  getSqlite()
+    .prepare(
+      `INSERT INTO marketplace_inbox_brief (singleton, brief_json, updated_at)
+       VALUES (1, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET brief_json = excluded.brief_json, updated_at = excluded.updated_at`,
+    )
+    .run(JSON.stringify(brief), new Date().toISOString());
+  return { id: LATEST_BRIEF_ID, brief };
 }
 
-export function getMarketplaceInboxBrief(id: string): MarketplaceInboxBrief | null {
-  sweep();
-  const row = briefs.get(String(id || "").trim());
-  return row?.brief ?? null;
+/** The historic capability id is intentionally ignored: only one latest brief exists. */
+export function getMarketplaceInboxBrief(_id?: string): MarketplaceInboxBrief | null {
+  const row = getSqlite()
+    .prepare("SELECT brief_json FROM marketplace_inbox_brief WHERE singleton = 1")
+    .get() as { brief_json: string } | undefined;
+  if (!row) return null;
+  try {
+    return JSON.parse(row.brief_json) as MarketplaceInboxBrief;
+  } catch {
+    return null;
+  }
 }
 
 export function clearMarketplaceInboxBriefs(): void {
-  briefs.clear();
+  getSqlite().prepare("DELETE FROM marketplace_inbox_brief").run();
+}
+
+/** Test helper: release the SQLite handle before deleting or changing its file. */
+export function resetMarketplaceInboxBriefStore(): void {
+  sqlite?.close();
+  sqlite = null;
 }

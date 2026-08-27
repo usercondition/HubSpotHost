@@ -3,12 +3,59 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { after, before } from "node:test";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import express from "express";
 import { buildMarketplaceInboxBrief } from "../server/lib/marketplace-inbox-brief";
-import {
+
+const dbFile = path.join(os.tmpdir(), `marketplace-brief-test-${crypto.randomUUID()}.db`);
+const OWNER_CODE = "marketplace-brief-owner-code";
+process.env.MARKETPLACE_INBOX_BRIEF_DB_FILE = dbFile;
+process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = crypto
+  .createHash("sha256")
+  .update(OWNER_CODE, "utf8")
+  .digest("hex");
+
+const {
   clearMarketplaceInboxBriefs,
   createMarketplaceInboxBrief,
   getMarketplaceInboxBrief,
-} from "../server/lib/marketplace-inbox-brief-store";
+  resetMarketplaceInboxBriefStore,
+} = await import("../server/lib/marketplace-inbox-brief-store");
+const { registerRoutes } = await import("../server/routes");
+
+let app: http.Server;
+let appBase = "";
+
+function listen(server: http.Server): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port));
+  });
+}
+
+before(async () => {
+  const expressApp = express();
+  expressApp.use(express.json());
+  app = http.createServer(expressApp);
+  await registerRoutes(app, expressApp);
+  appBase = `http://127.0.0.1:${await listen(app)}`;
+});
+
+after(() => {
+  app?.close();
+  resetMarketplaceInboxBriefStore();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      fs.unlinkSync(`${dbFile}${suffix}`);
+    } catch {
+      /* cleanup */
+    }
+  }
+});
 
 test("secretary brief prioritizes your-turn and paid threads", () => {
   const brief = buildMarketplaceInboxBrief([
@@ -46,17 +93,57 @@ You: Let me know whenever you're ready`,
   assert.ok(brief.doFirst.some((t) => t.draftReply));
 });
 
-test("brief store returns created brief by id", () => {
+test("brief store replaces the previous brief instead of stacking history", () => {
   clearMarketplaceInboxBriefs();
-  const created = createMarketplaceInboxBrief([
+  const first = createMarketplaceInboxBrief([
     {
       title: "Casey",
       unread: true,
       conversation: `Buyer: Ok I can do that — where do I pay?\nYou: PayPal works`,
     },
   ]);
-  const loaded = getMarketplaceInboxBrief(created.id);
+  const second = createMarketplaceInboxBrief([
+    {
+      title: "Morgan",
+      unread: true,
+      conversation: `Buyer: Can you send a price for a Warhound?\nBuyer: I need it shipped.`,
+    },
+  ]);
+  const loaded = getMarketplaceInboxBrief(first.id);
   assert.ok(loaded);
   assert.equal(loaded?.threadCount, 1);
-  assert.equal(getMarketplaceInboxBrief("missing"), null);
+  assert.equal(loaded?.threads[0]?.title, "Morgan");
+  assert.equal(second.id, "latest");
+});
+
+test("latest brief API is owner-gated and returns the persistent current brief", async () => {
+  clearMarketplaceInboxBriefs();
+  const blocked = await fetch(`${appBase}/api/marketplace-brief/latest`);
+  assert.equal(blocked.status, 401);
+
+  const created = await fetch(`${appBase}/api/marketplace-brief`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({
+      threads: [
+        {
+          title: "Taylor",
+          unread: true,
+          conversation: `Buyer: Can you print a Reaver?\nBuyer: What would it cost?`,
+        },
+      ],
+    }),
+  });
+  assert.equal(created.status, 201);
+
+  const latest = await fetch(`${appBase}/api/marketplace-brief/latest`, {
+    headers: { "x-paid-order-access-code": OWNER_CODE },
+  });
+  const body = (await latest.json()) as { ok: boolean; brief?: { threads: Array<{ title: string }> } };
+  assert.equal(latest.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.brief?.threads[0]?.title, "Taylor");
 });

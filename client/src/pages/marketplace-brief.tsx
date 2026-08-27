@@ -151,30 +151,30 @@ export default function MarketplaceBriefPage() {
   }, [search]);
 
   useEffect(() => {
-    if (!briefId) return;
+    if (!isUnlocked) return;
     setLoading(true);
     setError(null);
     void (async () => {
       try {
-        const response = await fetch(`/api/marketplace-brief/${encodeURIComponent(briefId)}`);
+        // A historic helper URL may include ?brief=<id>, but the server now
+        // keeps one persistent current brief rather than expiring capabilities.
+        const response = await fetch("/api/marketplace-brief/latest", { headers });
         const body = (await response.json()) as { ok?: boolean; brief?: InboxBrief; error?: string };
         if (!response.ok || !body.ok || !body.brief) {
-          throw new Error(body.error || "Brief expired");
+          if (response.status === 404) {
+            setBrief(null);
+            return;
+          }
+          throw new Error(body.error || "Could not load the current brief");
         }
         setBrief(body.brief);
-        const next = new URL(window.location.href);
-        next.searchParams.delete("brief");
-        // Keep hash router path; only strip query noise when possible.
-        if (next.hash.includes("brief=")) {
-          window.history.replaceState({}, "", `${next.pathname}${next.search}#/marketplace-brief`);
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setLoading(false);
       }
     })();
-  }, [briefId]);
+  }, [briefId, headers, isUnlocked]);
 
   const demoBrief = async () => {
     setLoading(true);
