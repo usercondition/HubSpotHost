@@ -36,14 +36,22 @@ export function dealCostsIncomplete(
   return options.shippingRequired && isBlank(props.print_actual_shipping_cost);
 }
 
-/** Whether HubSpot/UI cost entry is "done enough" for ops (labor/packaging optional). */
+/** Whether all costs currently due for a Print Order have been entered. */
 export function dealCostsCompleteFromFields(fields: {
   material: string;
   labor: string;
   packaging: string;
   shipping: string;
-}): boolean {
-  return Boolean(fields.material.trim() && fields.shipping.trim());
+}, options: { requiresPlates: boolean; hasPlates: boolean; shippingRequired: boolean }): boolean {
+  return !dealCostsIncomplete(
+    {
+      print_material_cost: fields.material,
+      print_labor_cost: fields.labor,
+      print_packaging_cost: fields.packaging,
+      print_actual_shipping_cost: fields.shipping,
+    },
+    options,
+  );
 }
 
 export const ABSORBED_LABOR_COST = "0";

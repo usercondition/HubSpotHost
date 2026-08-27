@@ -82,24 +82,30 @@ test("shipping is incomplete only after a label requires postage", () => {
   );
 });
 
-test("ops complete flag ignores blank absorbed labor and free packaging", () => {
+test("ops complete flag requires seeded absorbed labor and free packaging", () => {
   assert.equal(
-    dealCostsCompleteFromFields({
-      material: "10",
-      labor: "",
-      packaging: "",
-      shipping: "4",
-    }),
-    true,
+    dealCostsCompleteFromFields(
+      {
+        material: "10",
+        labor: "",
+        packaging: "",
+        shipping: "4",
+      },
+      { requiresPlates: true, hasPlates: true, shippingRequired: true },
+    ),
+    false,
   );
   assert.equal(
-    dealCostsCompleteFromFields({
-      material: "10",
-      labor: "0",
-      packaging: "0",
-      shipping: "",
-    }),
-    false,
+    dealCostsCompleteFromFields(
+      {
+        material: "10",
+        labor: "0",
+        packaging: "0",
+        shipping: "",
+      },
+      { requiresPlates: true, hasPlates: true, shippingRequired: false },
+    ),
+    true,
   );
 });
 

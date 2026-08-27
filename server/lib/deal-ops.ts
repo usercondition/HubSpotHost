@@ -11,6 +11,7 @@ import {
   type DealOpsDetail,
   type PackingSlip,
   type UpdateDealCostsInput,
+  dealRequiresPlates,
 } from "../../shared/schema";
 import { calculateProfit } from "./calc";
 import { getConfig, resolveWriteDecision } from "./config";
@@ -73,6 +74,7 @@ async function fetchDealWithCosts(dealId: string): Promise<{
       "print_labor_cost",
       "print_packaging_cost",
       "print_actual_shipping_cost",
+      "print_tracking_number",
       "print_gross_profit",
       "print_margin_percentage",
       "description",
@@ -139,7 +141,10 @@ async function fetchAssociatedContact(dealId: string) {
   return fetchDealAssociatedContact(dealId);
 }
 
-function costsFromProperties(props: Record<string, string | null>): DealCostFields {
+function costsFromProperties(
+  props: Record<string, string | null>,
+  options: { hasPlates: boolean; shippingRequired: boolean },
+): DealCostFields {
   const calc = calculateProfit(props);
   const material = moneyText(props.print_material_cost);
   const labor = moneyText(props.print_labor_cost);
@@ -153,7 +158,10 @@ function costsFromProperties(props: Record<string, string | null>): DealCostFiel
     shipping,
     grossProfit: Number.isFinite(calc.grossProfit) ? calc.grossProfit : null,
     marginPercentage: Number.isFinite(calc.marginPercentage) ? calc.marginPercentage : null,
-    costsComplete: dealCostsCompleteFromFields({ material, labor, packaging, shipping }),
+    costsComplete: dealCostsCompleteFromFields(
+      { material, labor, packaging, shipping },
+      { requiresPlates: dealRequiresPlates(props), ...options },
+    ),
   };
 }
 
@@ -228,7 +236,7 @@ export async function updateDealCosts(
         ok: true,
         dryRun: false,
         gate: decision.reason,
-        costs: costsFromProperties(deal.properties),
+        costs: costsFromProperties(deal.properties, { hasPlates: false, shippingRequired: false }),
         recalcStatus: recalc.status,
       };
     }
@@ -242,7 +250,7 @@ export async function updateDealCosts(
       dryRun: true,
       gate: decision.reason,
       costs: {
-        ...costsFromProperties(previewProps),
+        ...costsFromProperties(previewProps, { hasPlates: false, shippingRequired: false }),
         grossProfit: calc.grossProfit,
         marginPercentage: calc.marginPercentage,
       },
@@ -363,7 +371,6 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
     const props = deal.properties;
     const stageId = String(props.dealstage ?? "");
     const stageLabel = stages.find((stage) => stage.id === stageId)?.label || stageId || "Unknown";
-    const costs = costsFromProperties(props);
     const checklist = getFulfillmentChecklist(id);
     const fleet = ensureDefaultPrinters();
     const profileMaps = listPrinterProfileMaps();
@@ -373,6 +380,10 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
       .where(eq(printFileRecords.hubspotDealId, id))
       .orderBy(desc(printFileRecords.attachedAt), desc(printFileRecords.id))
       .all();
+    const costs = costsFromProperties(props, {
+      hasPlates: plates.length > 0,
+      shippingRequired: Boolean(checklist.trackingNumber.trim() || String(props.print_tracking_number ?? "").trim()),
+    });
 
     const plateViews = plates.map((plate) => {
       const assignedId = resolvePrinterIdForRecord(plate, fleet, profileMaps);
