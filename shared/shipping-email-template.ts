@@ -2,9 +2,8 @@
  * Quirky-but-professional “your order is on its way” email for Labels.
  * Hipster-maker vibe: hero art, postage stamp, warm copy, table-based HTML.
  * Images load from assetBaseUrl (your app origin) — required for HTML preview + future senders.
- * Shop name / tagline come from shared/brand.ts — no live send from Print Ops yet.
+ * Configure brand defaults below — no live send from Print Ops yet.
  */
-import { SHOP_BRAND } from "./brand";
 
 export type ShippingEmailBrandConfig = {
   /** Shop / brand shown in the email header. */
@@ -28,13 +27,13 @@ export type ShippingEmailBrandConfig = {
   stampImagePath: string;
 };
 
-/** Defaults — shop identity lives in shared/brand.ts. */
+/** Defaults — tweak shop name / accent when you add a sending address. */
 export const SHIPPING_EMAIL_BRAND: ShippingEmailBrandConfig = {
-  shopName: SHOP_BRAND.shopName,
-  tagline: SHOP_BRAND.tagline,
-  accentHex: SHOP_BRAND.accentHex,
-  supportLine: SHOP_BRAND.supportLine,
-  fromDisplayName: SHOP_BRAND.fromDisplayName,
+  shopName: "Print Ops",
+  tagline: "from the studio bench",
+  accentHex: "#3F5D4A",
+  supportLine: "Questions, photos, or praise? Just reply — a human reads these.",
+  fromDisplayName: "The studio desk",
   assetBaseUrl: "",
   heroImagePath: "/email/shipped-hero.jpg",
   stampImagePath: "/email/shipped-stamp.jpg",

@@ -79,12 +79,12 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
 
 /* ----------------------------------------------------------------- mark --- */
 
-export function Mark({ className, label = "Print Operations" }: { className?: string; label?: string }) {
+export function Mark({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 32 32"
       fill="none"
-      aria-label={label}
+      aria-label="Print Operations"
       role="img"
       className={className}
     >
