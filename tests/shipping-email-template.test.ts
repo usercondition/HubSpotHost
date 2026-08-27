@@ -16,10 +16,11 @@ test("shipping email template includes quirky copy, tracking, and image slots", 
     carrier: "UPS",
     brand: { assetBaseUrl: "https://ops.example.com" },
   });
-  assert.match(pack.subject, /Print Ops/i);
+  assert.match(pack.subject, /Mercado Prints/i);
   assert.match(pack.subject, /on its way/i);
   assert.match(pack.subject, /Vulkan/i);
-  assert.match(pack.text, /Hi Matt/);
+  assert.match(pack.text, /Miguel at Mercado Prints/);
+  assert.match(pack.text, /Mercado Prints/);
   assert.match(pack.text, /out of the studio/i);
   assert.match(pack.text, /1ZXG9979YN14824499/);
   assert.match(pack.html, /1ZXG9979YN14824499/);

@@ -10,6 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Mark } from "@/components/shell";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { cn } from "@/lib/utils";
+import { SHOP_BRAND } from "@shared/brand";
 import type { ClientOrderSavedDetails, ClientOrderView } from "@shared/schema";
 
 interface LookupOk {
@@ -81,7 +82,7 @@ export default function ClientOrder() {
 
   useEffect(() => {
     const previous = document.title;
-    document.title = "Order form";
+    document.title = `Order form · ${SHOP_BRAND.shopName}`;
     return () => {
       document.title = previous;
     };
@@ -170,7 +171,7 @@ export default function ClientOrder() {
       const detail = message.match(/"error":"([^"]+)"/)?.[1];
       setError(
         /^410/.test(message)
-          ? "This link has already been used or has expired. Please message the seller for a new one."
+          ? `This link has already been used or has expired. Please message ${SHOP_BRAND.shopName} for a new one.`
           : detail || "Something in the form needs another look. Please check the required fields.",
       );
     },
@@ -183,7 +184,7 @@ export default function ClientOrder() {
     setError("");
     if (form.clientFullName.trim().length < 2) return setError("Please enter your full name.");
     if (!EMAIL_RE.test(form.clientEmail.trim()))
-      return setError("Please enter an email address the seller can reach you at.");
+      return setError(`Please enter an email address ${SHOP_BRAND.shopName} can reach you at.`);
     if (form.confirmedItem.trim().length < 2) return setError("Please confirm what you ordered.");
     if (shippingRequired) {
       if (form.clientPhone.replace(/\D/g, "").length < 7)
@@ -196,7 +197,7 @@ export default function ClientOrder() {
       if (form.shippingCountry.trim().length < 2) return setError("Please add the country.");
     }
     if (!paymentConfirmed)
-      return setError("Please tick the box confirming you already paid the seller for this order.");
+      return setError(`Please tick the box confirming you already paid ${SHOP_BRAND.shopName} for this order.`);
     submit.mutate();
   };
 
@@ -204,10 +205,10 @@ export default function ClientOrder() {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header className="accent-wash border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center gap-2.5 px-5 py-4">
-          <Mark className="h-7 w-7 text-primary" />
+          <Mark className="h-7 w-7 text-primary" label={SHOP_BRAND.shopName} />
           <span className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight">Print Orders</span>
-            <span className="rule-label">Order form</span>
+            <span className="text-sm font-semibold tracking-tight">{SHOP_BRAND.shopName}</span>
+            <span className="rule-label">{SHOP_BRAND.locationLine}</span>
           </span>
         </div>
       </header>
@@ -223,7 +224,7 @@ export default function ClientOrder() {
         {state.kind === "invalid" && (
           <Notice
             title="This link is not valid"
-            body="Double-check the link the seller sent you, or message them for a new one."
+            body={`Double-check the link ${SHOP_BRAND.shopName} sent you, or message them for a new one.`}
             testId="text-client-invalid"
           />
         )}
@@ -231,7 +232,7 @@ export default function ClientOrder() {
         {state.kind === "closed" && (
           <Notice
             title="This link is closed"
-            body="It has already been used or has expired. Message the seller and they can send you a fresh link."
+            body={`It has already been used or has expired. Message ${SHOP_BRAND.shopName} and they can send you a fresh link.`}
             testId="text-client-closed"
           />
         )}
@@ -244,8 +245,8 @@ export default function ClientOrder() {
             <CheckCircle2 className="h-6 w-6 text-chart-4" />
             <h1 className="mt-3 text-lg font-semibold tracking-tight">Thank you — details received</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              The seller now has everything they need to set up your print. They will confirm the
-              order with you directly in Marketplace. This link is now closed.
+              {SHOP_BRAND.shopName} now has everything needed to set up your print. They will confirm
+              the order with you directly in Marketplace. This link is now closed.
             </p>
           </div>
         )}
@@ -257,7 +258,7 @@ export default function ClientOrder() {
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               This form only collects the details needed to prepare and send your print. It does not
-              charge you, take any payment, and it does not place a final order yet — the seller
+              charge you, take any payment, and it does not place a final order yet — {SHOP_BRAND.shopName}{" "}
               confirms that with you after reviewing what you enter here.
             </p>
 
@@ -278,7 +279,7 @@ export default function ClientOrder() {
               className="mt-6 rounded-lg border border-border bg-card p-4"
               data-testid="panel-agreed-order"
             >
-              <p className="rule-label">What you agreed with the seller</p>
+              <p className="rule-label">What you agreed with {SHOP_BRAND.shopName}</p>
               {(state.view.lineItems?.length ?? 0) > 1 ? (
                 <ul className="mt-2 space-y-2" data-testid="list-agreed-line-items">
                   {state.view.lineItems.map((line, index) => (
@@ -308,7 +309,7 @@ export default function ClientOrder() {
 
             <div className="mt-6 space-y-6">
               <fieldset className="space-y-4">
-                <legend className="text-sm font-semibold">How can the seller reach you?</legend>
+                <legend className="text-sm font-semibold">How can {SHOP_BRAND.shopName} reach you?</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <ClientField
                     id="client-full-name"
@@ -453,8 +454,8 @@ export default function ClientOrder() {
                   />
                   <p className="text-xs text-muted-foreground">
                     {(state.view.lineItems?.length ?? 0) > 1
-                      ? "Confirm the list above looks right, or note anything the seller should double-check."
-                      : "Pre-filled from your conversation. Edit it if anything looks wrong and the seller will check before confirming."}
+                      ? `Confirm the list above looks right, or note anything ${SHOP_BRAND.shopName} should double-check.`
+                      : `Pre-filled from your conversation. Edit it if anything looks wrong and ${SHOP_BRAND.shopName} will check before confirming.`}
                   </p>
                 </div>
                 {(state.view.lineItems?.length ?? 0) <= 1 ? (
@@ -475,7 +476,7 @@ export default function ClientOrder() {
                     className="min-h-20 resize-y text-sm"
                     value={form.clientNotes}
                     onChange={(event) => set("clientNotes", event.target.value)}
-                    placeholder="Colour preference, deadline, gift packing, anything the seller should know"
+                    placeholder={`Colour preference, deadline, gift packing, anything ${SHOP_BRAND.shopName} should know`}
                     data-testid="input-client-notes"
                   />
                 </div>
@@ -497,7 +498,7 @@ export default function ClientOrder() {
                 />
                 <span>
                   <span className="block text-sm font-medium">
-                    I have already paid the seller for this order
+                    I have already paid {SHOP_BRAND.shopName} for this order
                   </span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     This form does not take payment. It only records that payment was already made.
@@ -527,13 +528,13 @@ export default function ClientOrder() {
                 ) : (
                   <PackageCheck className="mr-2 h-4 w-4" />
                 )}
-                Send my details to the seller
+                Send my details to {SHOP_BRAND.shopName}
               </Button>
 
               <div className="flex items-start gap-2 text-xs text-muted-foreground">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <p>
-                  Your details go straight to the seller for this one order. The form can be
+                  Your details go straight to {SHOP_BRAND.shopName} for this one order. The form can be
                   submitted once, and the link stops working afterwards.
                 </p>
               </div>

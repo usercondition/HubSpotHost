@@ -90,7 +90,7 @@ export function ShippingEmailPreviewDialog({
           <p className="text-xs text-muted-foreground">
             Images load from <span className="font-medium text-foreground">/email/</span> on this app.
             Tweak shop name &amp; copy in{" "}
-            <span className="font-medium text-foreground">shipping-email-template</span>. Mailto sends
+            <span className="font-medium text-foreground">shared/brand.ts</span>. Mailto sends
             plain text only — HTML waits for a real sender.
           </p>
         </div>

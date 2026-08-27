@@ -35,6 +35,7 @@ import {
   type ProductionFailureType,
 } from "@shared/schema";
 import { defaultDealCostFields } from "@shared/deal-costs";
+import { SHOP_BRAND } from "@shared/brand";
 
 const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
 
@@ -551,7 +552,9 @@ export function DealOpsPanel({
             <h3 className="text-sm font-semibold">Packing slip</h3>
           </div>
           <div className="rounded-md bg-muted/45 p-3 text-sm" data-testid="panel-packing-slip">
-            <p className="font-medium">{slip.contact.name || "Buyer"}</p>
+            <p className="font-semibold tracking-tight">{SHOP_BRAND.shopName}</p>
+            <p className="text-xs text-muted-foreground">{SHOP_BRAND.locationLine}</p>
+            <p className="mt-3 font-medium">{slip.contact.name || "Buyer"}</p>
             {slip.contact.addressLines.map((line) => (
               <p key={line} className="text-muted-foreground">
                 {line}
