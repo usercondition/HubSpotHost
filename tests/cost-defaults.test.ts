@@ -117,6 +117,9 @@ async function analyzeAndAttach() {
   const attached = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: analysis.analysisId,
     dealId: "801",
+    ...(analysis.printerMatch?.requiresPrinterChoice
+      ? { printerId: analysis.printerMatch.printers[0]?.id }
+      : {}),
   });
   assert.equal(attached.status, 201);
   return attached.body;
