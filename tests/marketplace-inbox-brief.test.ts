@@ -26,6 +26,12 @@ const {
   getMarketplaceInboxBrief,
   resetMarketplaceInboxBriefStore,
 } = await import("../server/lib/marketplace-inbox-brief-store");
+const {
+  clearMarketplaceScanRequest,
+  getMarketplaceScanRequest,
+  resetMarketplaceScanRequestStore,
+  setMarketplaceScanRequest,
+} = await import("../server/lib/marketplace-scan-request-store");
 const { registerRoutes } = await import("../server/routes");
 
 let app: http.Server;
@@ -48,6 +54,7 @@ before(async () => {
 after(() => {
   app?.close();
   resetMarketplaceInboxBriefStore();
+  resetMarketplaceScanRequestStore();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       fs.unlinkSync(`${dbFile}${suffix}`);
@@ -146,4 +153,58 @@ test("latest brief API is owner-gated and returns the persistent current brief",
   assert.equal(latest.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.brief?.threads[0]?.title, "Taylor");
+});
+
+test("Marketplace scan request API has a public read and owner-gated persistent writes", async () => {
+  clearMarketplaceScanRequest();
+  const initial = await fetch(`${appBase}/api/marketplace-scan-request`);
+  assert.equal(initial.status, 200);
+  assert.deepEqual(await initial.json(), { requested: false, id: 0 });
+
+  const blocked = await fetch(`${appBase}/api/marketplace-scan-request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requested: true }),
+  });
+  assert.equal(blocked.status, 401);
+
+  const armed = await fetch(`${appBase}/api/marketplace-scan-request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ requested: true }),
+  });
+  const armedBody = (await armed.json()) as { ok: boolean; requested: boolean; id: number };
+  assert.equal(armed.status, 201);
+  assert.deepEqual(armedBody, { ok: true, requested: true, id: 1 });
+
+  const armedRead = await fetch(`${appBase}/api/marketplace-scan-request`);
+  assert.deepEqual(await armedRead.json(), { requested: true, id: armedBody.id });
+
+  resetMarketplaceScanRequestStore();
+  assert.deepEqual(getMarketplaceScanRequest(), { requested: true, id: armedBody.id });
+
+  const replaced = await fetch(`${appBase}/api/marketplace-scan-request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ requested: true }),
+  });
+  const replacedBody = (await replaced.json()) as { ok: boolean; requested: boolean; id: number };
+  assert.deepEqual(replacedBody, { ok: true, requested: true, id: armedBody.id + 1 });
+
+  const cleared = await fetch(`${appBase}/api/marketplace-scan-request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ requested: false }),
+  });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(await cleared.json(), { ok: true, requested: false, id: replacedBody.id });
 });

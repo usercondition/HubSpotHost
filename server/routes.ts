@@ -141,6 +141,10 @@ import {
 } from "./lib/messenger-scan-bridge";
 import { registerMessengerScanTestUi } from "./lib/messenger-scan-test-ui";
 import { createMarketplaceInboxBrief, getMarketplaceInboxBrief } from "./lib/marketplace-inbox-brief-store";
+import {
+  getMarketplaceScanRequest,
+  setMarketplaceScanRequest,
+} from "./lib/marketplace-scan-request-store";
 import { createPaidOrder } from "./lib/paid-orders";
 import {
   applyReviewEdits,
@@ -2819,6 +2823,28 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       });
     }
     return res.json({ ok: true, brief });
+  });
+
+  /**
+   * Persistent one-slot request for the Chrome helper to scan Marketplace
+   * inboxes on demand. Public reads expose only the boolean flag and numeric
+   * request id; arming or clearing remains owner-gated.
+   */
+  app.get("/api/marketplace-scan-request", (req: Request, res: Response) => {
+    return res.json(getMarketplaceScanRequest());
+  });
+
+  app.post("/api/marketplace-scan-request", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const requested =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>).requested
+        : undefined;
+    if (typeof requested !== "boolean") {
+      return res.status(400).json({ ok: false, error: "Expected { requested: true | false }" });
+    }
+    const request = setMarketplaceScanRequest(requested);
+    return res.status(requested ? 201 : 200).json({ ok: true, ...request });
   });
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {
