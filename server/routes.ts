@@ -206,6 +206,7 @@ import {
   assignPlateToPrinter,
   buildDealOpsDetail,
   fetchDealAssociatedContact,
+  seedPrintDealCosts,
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
@@ -1339,16 +1340,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         primaryHubspot = fulfillment.hubspot;
       }
 
-      // Once per package on the first newly attached order: postage when known,
-      // plus labor/packaging $0 (absorbed labor · free USPS Large Flat Rate).
+      // Copy known postage to every attached order only when that deal's field
+      // is blank. This also seeds the $0 absorbed labor/free USPS packaging.
+      const seeded = await seedPrintDealCosts(dealId, {
+        postage,
+        liveWrite: input.liveWrite !== false,
+      });
       if (index === 0) {
-        costs = await updateDealCosts(dealId, {
-          material: "",
-          labor: "0",
-          packaging: "0",
-          shipping: postage,
-          liveWrite: input.liveWrite !== false,
-        });
+        costs = seeded;
       }
     }
 
@@ -2324,6 +2323,13 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       const attachedAt = new Date().toISOString();
       const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
       await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
+      const seededCosts = await seedPrintDealCosts(deal.id, {
+        materialEstimate: summary.totalResinCost,
+        liveWrite: true,
+      });
+      if (seededCosts && !seededCosts.ok) {
+        return res.status(seededCosts.status ?? 502).json(seededCosts);
+      }
       const record = createPrintFileRecord({
         analysisId: parsed.data.analysisId,
         hubspotDealId: deal.id,

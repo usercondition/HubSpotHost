@@ -40,6 +40,10 @@ function moneyText(value: string | null | undefined): string {
   return Number.isFinite(n) ? String(n) : "";
 }
 
+function isBlank(value: string | null | undefined): boolean {
+  return String(value ?? "").trim() === "";
+}
+
 function parseGrams(value: string | null | undefined): number | null {
   if (value == null || value === "") return null;
   const n = Number(value);
@@ -246,6 +250,55 @@ export async function updateDealCosts(
     };
   } catch (error) {
     const message = error instanceof HubSpotError ? error.message : "Could not update deal costs.";
+    const status = error instanceof HubSpotError ? error.status : 502;
+    return { ok: false, error: message, status };
+  }
+}
+
+/**
+ * Fill only missing Print Order costs from facts already known to Print Ops.
+ * Explicit HubSpot values always win, including a $0 actual cost.
+ */
+export async function seedPrintDealCosts(
+  dealId: string,
+  input: {
+    materialEstimate?: number | null;
+    postage?: string | null;
+    liveWrite?: boolean;
+  },
+): Promise<Awaited<ReturnType<typeof updateDealCosts>> | null> {
+  const id = dealId.trim();
+  if (!/^[0-9]{1,20}$/.test(id)) {
+    return { ok: false, error: "Select a valid Print Order.", status: 400 };
+  }
+
+  try {
+    const deal = await fetchDealWithCosts(id);
+    const props = deal.properties;
+    const materialEstimate =
+      input.materialEstimate !== null &&
+      input.materialEstimate !== undefined &&
+      Number.isFinite(input.materialEstimate) &&
+      input.materialEstimate >= 0
+        ? String(input.materialEstimate)
+        : "";
+    const postage = String(input.postage ?? "").trim();
+    const hasPostage = postage !== "" && Number.isFinite(Number(postage.replace(/[$,\s]/g, "")));
+
+    const defaults: UpdateDealCostsInput = {
+      material: isBlank(props.print_material_cost) ? materialEstimate : "",
+      labor: isBlank(props.print_labor_cost) ? "0" : "",
+      packaging: isBlank(props.print_packaging_cost) ? "0" : "",
+      shipping: isBlank(props.print_actual_shipping_cost) && hasPostage ? postage : "",
+      liveWrite: input.liveWrite !== false,
+    };
+
+    if (![defaults.material, defaults.labor, defaults.packaging, defaults.shipping].some(Boolean)) {
+      return null;
+    }
+    return await updateDealCosts(id, defaults);
+  } catch (error) {
+    const message = error instanceof HubSpotError ? error.message : "Could not read deal costs.";
     const status = error instanceof HubSpotError ? error.status : 502;
     return { ok: false, error: message, status };
   }
