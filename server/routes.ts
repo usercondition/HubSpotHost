@@ -2826,12 +2826,11 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   });
 
   /**
-   * Owner-gated, persistent one-slot request for the Chrome helper to scan
-   * Marketplace inboxes on demand. This only signals the helper; it does not
-   * access Messenger or store inbox contents.
+   * Persistent one-slot request for the Chrome helper to scan Marketplace
+   * inboxes on demand. Public reads expose only the boolean flag and numeric
+   * request id; arming or clearing remains owner-gated.
    */
   app.get("/api/marketplace-scan-request", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
     return res.json(getMarketplaceScanRequest());
   });
 

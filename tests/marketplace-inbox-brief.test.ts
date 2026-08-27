@@ -155,15 +155,18 @@ test("latest brief API is owner-gated and returns the persistent current brief",
   assert.equal(body.brief?.threads[0]?.title, "Taylor");
 });
 
-test("Marketplace scan request API is owner-gated and maintains one persistent slot", async () => {
+test("Marketplace scan request API has a public read and owner-gated persistent writes", async () => {
   clearMarketplaceScanRequest();
-  const blocked = await fetch(`${appBase}/api/marketplace-scan-request`);
-  assert.equal(blocked.status, 401);
-
-  const initial = await fetch(`${appBase}/api/marketplace-scan-request`, {
-    headers: { "x-paid-order-access-code": OWNER_CODE },
-  });
+  const initial = await fetch(`${appBase}/api/marketplace-scan-request`);
+  assert.equal(initial.status, 200);
   assert.deepEqual(await initial.json(), { requested: false, id: 0 });
+
+  const blocked = await fetch(`${appBase}/api/marketplace-scan-request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requested: true }),
+  });
+  assert.equal(blocked.status, 401);
 
   const armed = await fetch(`${appBase}/api/marketplace-scan-request`, {
     method: "POST",
@@ -177,9 +180,7 @@ test("Marketplace scan request API is owner-gated and maintains one persistent s
   assert.equal(armed.status, 201);
   assert.deepEqual(armedBody, { ok: true, requested: true, id: 1 });
 
-  const armedRead = await fetch(`${appBase}/api/marketplace-scan-request`, {
-    headers: { "x-paid-order-access-code": OWNER_CODE },
-  });
+  const armedRead = await fetch(`${appBase}/api/marketplace-scan-request`);
   assert.deepEqual(await armedRead.json(), { requested: true, id: armedBody.id });
 
   resetMarketplaceScanRequestStore();
