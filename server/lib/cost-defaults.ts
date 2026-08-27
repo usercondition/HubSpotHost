@@ -12,8 +12,8 @@ import { HubSpotError, fetchDealInputs, patchDealOutputs } from "./hubspot";
 import { listPrintFileRecords } from "./print-files";
 import { recalculateDeal } from "./service";
 
-export const DEFAULT_LABOR_RATE_USD_PER_HOUR = 25;
-export const DEFAULT_PACKAGING_USD = 5;
+export const DEFAULT_LABOR_RATE_USD_PER_HOUR = 0;
+export const DEFAULT_PACKAGING_USD = 0;
 
 export type CostDefaultField = "material" | "labor" | "packaging" | "shipping";
 
@@ -109,7 +109,7 @@ export function buildCostFieldProposal(input: {
       skipReason: "Not selected",
     };
   }
-  if (input.proposed == null || !(input.proposed > 0)) {
+  if (input.proposed == null || input.proposed < 0) {
     return {
       field: input.field,
       property: input.property,
@@ -121,7 +121,7 @@ export function buildCostFieldProposal(input: {
       skipReason: "No value available",
     };
   }
-  if (input.current != null && input.current > 0 && !input.overwrite) {
+  if (input.current != null && !input.overwrite) {
     return {
       field: input.field,
       property: input.property,
@@ -203,7 +203,7 @@ export function assembleCostDefaultsPreview(input: {
       field: "packaging",
       property: "print_packaging_cost",
       label: "Packaging cost",
-      proposed: input.packagingAmount > 0 ? input.packagingAmount : null,
+      proposed: input.packagingAmount,
       current: input.currentPackaging,
       source: `Flat default $${input.packagingAmount.toFixed(2)}`,
       include: input.includePackaging !== false,
@@ -214,7 +214,7 @@ export function assembleCostDefaultsPreview(input: {
       property: "print_actual_shipping_cost",
       label: "Shipping cost",
       proposed:
-        input.shippingAmount != null && input.shippingAmount > 0 ? round2(input.shippingAmount) : null,
+        input.shippingAmount != null && input.shippingAmount >= 0 ? round2(input.shippingAmount) : null,
       current: input.currentShipping,
       source: "Paste Pirate Ship postage when you buy the label",
       include: Boolean(input.includeShipping),

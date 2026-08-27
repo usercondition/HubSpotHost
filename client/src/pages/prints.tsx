@@ -277,10 +277,11 @@ export default function Prints() {
   const [includePackaging, setIncludePackaging] = useState(true);
   const [includeShipping, setIncludeShipping] = useState(false);
   const [overwriteCosts, setOverwriteCosts] = useState(false);
-  const [laborRate, setLaborRate] = useState("25");
-  const [packagingAmount, setPackagingAmount] = useState("5");
+  const [laborRate, setLaborRate] = useState("0");
+  const [packagingAmount, setPackagingAmount] = useState("0");
   const [shippingAmount, setShippingAmount] = useState("");
   const [costPreview, setCostPreview] = useState<CostDefaultsPreview | null>(null);
+  const existingCostsSeeded = useRef(false);
 
   useEffect(() => {
     const fromHash = readHashQueryParam("dealId");
@@ -327,6 +328,29 @@ export default function Prints() {
       return (await response.json()) as PrintsResponse;
     },
   });
+
+  const seedExistingCosts = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/prints/seed-costs", {}, { headers });
+      return (await response.json()) as { ok: true; processed: number; seeded: number };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      if (result.seeded > 0) {
+        toast({
+          title: "Existing plate costs synced",
+          description: `${result.seeded} Print Order${result.seeded === 1 ? "" : "s"} received missing cost defaults.`,
+        });
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (!isUnlocked || !prints.data || existingCostsSeeded.current) return;
+    existingCostsSeeded.current = true;
+    seedExistingCosts.mutate();
+  }, [isUnlocked, prints.data, seedExistingCosts]);
 
   const resin = prints.data?.resin;
   useEffect(() => {

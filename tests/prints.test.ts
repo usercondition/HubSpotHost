@@ -41,6 +41,7 @@ let mockCalls: MockCall[] = [];
 /** Mutable HubSpot deal stage for refresh tests. */
 let mockDealStage = "queued";
 let mockDealStageLabel = "Queued to Print";
+let mockDealProperties: Record<string, string> = {};
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -127,6 +128,7 @@ before(async () => {
                   dealname: "Five plate Knight",
                   pipeline: "default",
                   dealstage: mockDealStage,
+                  ...mockDealProperties,
                 },
               },
             ],
@@ -167,6 +169,13 @@ before(async () => {
       }
       if (call.url === "/crm/v3/properties/deals" && call.method === "GET") {
         return res.end(JSON.stringify({ results: [] }));
+      }
+      if (call.url.startsWith("/crm/v3/objects/deals/701?") && call.method === "GET") {
+        return res.end(JSON.stringify({ id: "701", properties: mockDealProperties }));
+      }
+      if (call.url === "/crm/v3/objects/deals/701" && call.method === "PATCH") {
+        Object.assign(mockDealProperties, JSON.parse(call.body).properties);
+        return res.end(JSON.stringify({ id: "701", properties: mockDealProperties }));
       }
       return res.end(JSON.stringify({ id: "ok" }));
     });
@@ -255,6 +264,7 @@ test("ULTX analyze accepts an uploaded Slice.log for sealed estimate recovery", 
 
 test("each CTB plate appends to one job and HubSpot receives cumulative totals", async () => {
   mockCalls = [];
+  mockDealProperties = {};
   mockDealStage = "in_work";
   mockDealStageLabel = "In work";
   // Fixture CTB uses "ELEGOO SATURN" — unmatched fleet profile needs an explicit printer.
@@ -375,6 +385,100 @@ test("attach previews and confirmed detach rebuilds only print planning totals",
   const clearProperties = JSON.parse(clear!.body).properties;
   assert.equal(clearProperties.print_plate_count, "");
   assert.equal(Object.hasOwn(clearProperties, "print_material_cost"), false);
+});
+
+test("plate attach seeds blank material, labor, and packaging costs", async () => {
+  mockCalls = [];
+  mockDealProperties = {
+    print_material_cost: "",
+    print_labor_cost: "",
+    print_packaging_cost: "",
+    print_actual_shipping_cost: "",
+  };
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const fleet = await jsonOwnerRequest("GET", "/api/printers");
+    const staged = stagePrintFile("cost-seed.ctb", fixtureCtb());
+    const attached = await jsonOwnerRequest("POST", "/api/prints/attach", {
+      analysisId: staged.analysisId,
+      dealId: "701",
+      printerId: fleet.body.printers[0]?.printerId,
+    });
+    assert.equal(attached.status, 201, attached.body?.error || "attach failed");
+    const costPatch = mockCalls
+      .filter((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701")
+      .map((call) => JSON.parse(call.body).properties)
+      .find((properties) => "print_material_cost" in properties);
+    assert.deepEqual(costPatch, {
+      print_material_cost: String(attached.body.summary.totalResinCost),
+      print_labor_cost: "0",
+      print_packaging_cost: "0",
+    });
+  } finally {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
+});
+
+test("plate attach preserves an existing material actual", async () => {
+  mockCalls = [];
+  mockDealProperties = {
+    print_material_cost: "3.67",
+    print_labor_cost: "0",
+    print_packaging_cost: "0",
+    print_actual_shipping_cost: "",
+  };
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const fleet = await jsonOwnerRequest("GET", "/api/printers");
+    const staged = stagePrintFile("actual-material.ctb", fixtureCtb());
+    const attached = await jsonOwnerRequest("POST", "/api/prints/attach", {
+      analysisId: staged.analysisId,
+      dealId: "701",
+      printerId: fleet.body.printers[0]?.printerId,
+    });
+    assert.equal(attached.status, 201, attached.body?.error || "attach failed");
+    const properties = mockCalls
+      .filter((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701")
+      .map((call) => JSON.parse(call.body).properties);
+    assert.equal(properties.some((patch) => "print_material_cost" in patch), false);
+    assert.equal(mockDealProperties.print_material_cost, "3.67");
+  } finally {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
+});
+
+test("label attach seeds known postage without replacing existing costs", async () => {
+  mockCalls = [];
+  mockDealProperties = {
+    print_material_cost: "3.67",
+    print_labor_cost: "0",
+    print_packaging_cost: "0",
+    print_actual_shipping_cost: "",
+  };
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const attached = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", {
+      dealIds: ["701"],
+      trackingNumber: "9400111899223344556677",
+      postageUsd: "5.42",
+      labelBought: true,
+      packingDone: true,
+    });
+    assert.equal(attached.status, 200, attached.body?.error || "label attach failed");
+    const properties = mockCalls
+      .filter((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701")
+      .map((call) => JSON.parse(call.body).properties);
+    assert.ok(properties.some((patch) => patch.print_actual_shipping_cost === "5.42"));
+    assert.equal(mockDealProperties.print_actual_shipping_cost, "5.42");
+  } finally {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
 });
 
 test("plate history deal stage refreshes when HubSpot moves the order", async () => {

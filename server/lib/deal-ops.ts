@@ -11,6 +11,7 @@ import {
   type DealOpsDetail,
   type PackingSlip,
   type UpdateDealCostsInput,
+  dealRequiresPlates,
 } from "../../shared/schema";
 import { calculateProfit } from "./calc";
 import { getConfig, resolveWriteDecision } from "./config";
@@ -38,6 +39,10 @@ function moneyText(value: string | null | undefined): string {
   if (value == null || String(value).trim() === "") return "";
   const n = Number(String(value).replace(/[$,\s]/g, ""));
   return Number.isFinite(n) ? String(n) : "";
+}
+
+function isBlank(value: string | null | undefined): boolean {
+  return String(value ?? "").trim() === "";
 }
 
 function parseGrams(value: string | null | undefined): number | null {
@@ -69,6 +74,7 @@ async function fetchDealWithCosts(dealId: string): Promise<{
       "print_labor_cost",
       "print_packaging_cost",
       "print_actual_shipping_cost",
+      "print_tracking_number",
       "print_gross_profit",
       "print_margin_percentage",
       "description",
@@ -135,7 +141,10 @@ async function fetchAssociatedContact(dealId: string) {
   return fetchDealAssociatedContact(dealId);
 }
 
-function costsFromProperties(props: Record<string, string | null>): DealCostFields {
+function costsFromProperties(
+  props: Record<string, string | null>,
+  options: { hasPlates: boolean; shippingRequired: boolean },
+): DealCostFields {
   const calc = calculateProfit(props);
   const material = moneyText(props.print_material_cost);
   const labor = moneyText(props.print_labor_cost);
@@ -149,7 +158,10 @@ function costsFromProperties(props: Record<string, string | null>): DealCostFiel
     shipping,
     grossProfit: Number.isFinite(calc.grossProfit) ? calc.grossProfit : null,
     marginPercentage: Number.isFinite(calc.marginPercentage) ? calc.marginPercentage : null,
-    costsComplete: dealCostsCompleteFromFields({ material, labor, packaging, shipping }),
+    costsComplete: dealCostsCompleteFromFields(
+      { material, labor, packaging, shipping },
+      { requiresPlates: dealRequiresPlates(props), ...options },
+    ),
   };
 }
 
@@ -224,7 +236,7 @@ export async function updateDealCosts(
         ok: true,
         dryRun: false,
         gate: decision.reason,
-        costs: costsFromProperties(deal.properties),
+        costs: costsFromProperties(deal.properties, { hasPlates: false, shippingRequired: false }),
         recalcStatus: recalc.status,
       };
     }
@@ -238,7 +250,7 @@ export async function updateDealCosts(
       dryRun: true,
       gate: decision.reason,
       costs: {
-        ...costsFromProperties(previewProps),
+        ...costsFromProperties(previewProps, { hasPlates: false, shippingRequired: false }),
         grossProfit: calc.grossProfit,
         marginPercentage: calc.marginPercentage,
       },
@@ -246,6 +258,56 @@ export async function updateDealCosts(
     };
   } catch (error) {
     const message = error instanceof HubSpotError ? error.message : "Could not update deal costs.";
+    const status = error instanceof HubSpotError ? error.status : 502;
+    return { ok: false, error: message, status };
+  }
+}
+
+/**
+ * Fill only missing Print Order costs from facts already known to Print Ops.
+ * Explicit HubSpot values always win, including a $0 actual cost.
+ */
+export async function seedPrintDealCosts(
+  dealId: string,
+  input: {
+    materialEstimate?: number | null;
+    postage?: string | null;
+    liveWrite?: boolean;
+  },
+): Promise<Awaited<ReturnType<typeof updateDealCosts>> | null> {
+  const id = dealId.trim();
+  if (!/^[0-9]{1,20}$/.test(id)) {
+    return { ok: false, error: "Select a valid Print Order.", status: 400 };
+  }
+
+  try {
+    const deal = await fetchDealWithCosts(id);
+    const props = deal.properties;
+    const materialEstimate =
+      input.materialEstimate !== null &&
+      input.materialEstimate !== undefined &&
+      Number.isFinite(input.materialEstimate) &&
+      input.materialEstimate >= 0
+        ? String(input.materialEstimate)
+        : "";
+    const postage = String(input.postage ?? "").trim();
+    const postageAmount = Number(postage.replace(/[$,\s]/g, ""));
+    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount >= 0;
+
+    const defaults: UpdateDealCostsInput = {
+      material: isBlank(props.print_material_cost) ? materialEstimate : "",
+      labor: isBlank(props.print_labor_cost) ? "0" : "",
+      packaging: isBlank(props.print_packaging_cost) ? "0" : "",
+      shipping: isBlank(props.print_actual_shipping_cost) && hasPostage ? postage : "",
+      liveWrite: input.liveWrite !== false,
+    };
+
+    if (![defaults.material, defaults.labor, defaults.packaging, defaults.shipping].some(Boolean)) {
+      return null;
+    }
+    return await updateDealCosts(id, defaults);
+  } catch (error) {
+    const message = error instanceof HubSpotError ? error.message : "Could not read deal costs.";
     const status = error instanceof HubSpotError ? error.status : 502;
     return { ok: false, error: message, status };
   }
@@ -310,7 +372,6 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
     const props = deal.properties;
     const stageId = String(props.dealstage ?? "");
     const stageLabel = stages.find((stage) => stage.id === stageId)?.label || stageId || "Unknown";
-    const costs = costsFromProperties(props);
     const checklist = getFulfillmentChecklist(id);
     const fleet = ensureDefaultPrinters();
     const profileMaps = listPrinterProfileMaps();
@@ -320,6 +381,10 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
       .where(eq(printFileRecords.hubspotDealId, id))
       .orderBy(desc(printFileRecords.attachedAt), desc(printFileRecords.id))
       .all();
+    const costs = costsFromProperties(props, {
+      hasPlates: plates.length > 0,
+      shippingRequired: Boolean(checklist.trackingNumber.trim() || String(props.print_tracking_number ?? "").trim()),
+    });
 
     const plateViews = plates.map((plate) => {
       const assignedId = resolvePrinterIdForRecord(plate, fleet, profileMaps);

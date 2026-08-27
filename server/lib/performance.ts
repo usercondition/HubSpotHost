@@ -179,6 +179,8 @@ export function buildPerformanceSnapshot(input: {
   supplySpend?: SupplySpend;
   /** Local Print-files deal IDs that already have at least one attached CTB plate. */
   attachedPrintDealIds?: Iterable<string>;
+  /** Local fulfillment records that have an attached shipping-label tracking number. */
+  shippingLabelDealIds?: Iterable<string>;
   /** Dismissed attention keys as `dealId:issueKey`. */
   dismissedAttentionKeys?: Iterable<string>;
   hubspotPortalId?: string | null;
@@ -192,6 +194,7 @@ export function buildPerformanceSnapshot(input: {
   const stageMap = new Map(input.stages.map((stage) => [stage.id, stage]));
   const stageCounts = new Map(input.stages.map((stage) => [stage.id, 0]));
   const attachedPrintDealIds = new Set(input.attachedPrintDealIds ?? []);
+  const shippingLabelDealIds = new Set(input.shippingLabelDealIds ?? []);
   const dismissedAttentionKeys = new Set(input.dismissedAttentionKeys ?? []);
 
   let revenue = 0;
@@ -217,7 +220,10 @@ export function buildPerformanceSnapshot(input: {
     const dealName = props.dealname?.trim() || `Deal ${deal.id}`;
     const displayStage = stageName(stageId, stageMap);
     const requiresPlates = dealRequiresPlates(props);
-    const missingCosts = dealCostsIncomplete(props, { requiresPlates });
+    const hasPlates = attachedPrintDealIds.has(deal.id);
+    const shippingRequired =
+      shippingLabelDealIds.has(deal.id) || Boolean(String(props.print_tracking_number ?? "").trim());
+    const missingCosts = dealCostsIncomplete(props, { requiresPlates, hasPlates, shippingRequired });
 
     if (createdAt && createdAt >= periodStart) {
       orders += 1;
@@ -225,7 +231,6 @@ export function buildPerformanceSnapshot(input: {
       grossProfit += calculation.grossProfit;
     }
 
-    const hasPlates = attachedPrintDealIds.has(deal.id);
     const boardDeal = {
       dealId: deal.id,
       dealName,
@@ -348,7 +353,9 @@ export function buildPerformanceSnapshot(input: {
         pushAttention(
           4,
           "Cost details incomplete",
-          "Add material and shipping costs (labor absorbed · free USPS flat-rate = $0)",
+          shippingRequired
+            ? "Add missing material, labor, packaging, or actual label postage"
+            : "Add missing material, labor, or packaging costs (shipping is due after a label is attached)",
           "neutral",
         );
       }

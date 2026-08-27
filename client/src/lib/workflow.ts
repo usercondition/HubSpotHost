@@ -54,7 +54,7 @@ export function floorFocusMeta(kind: FloorFocusKind): {
     case "costs":
       return {
         title: "Need costs",
-        description: "Orders missing material or shipping costs (labor absorbed · free USPS boxes = $0).",
+        description: "Orders missing plate costs, $0 defaults, or postage after a shipping label.",
         issueKey: "costs_incomplete",
         workspaceHref: "/queue",
         workspaceLabel: "Open Queue",
