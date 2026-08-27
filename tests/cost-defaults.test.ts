@@ -198,11 +198,11 @@ after(() => {
   }
 });
 
-test("default labor and packaging rates are $25/hr and $5", () => {
+test("default labor and free USPS packaging costs are zero", () => {
   delete process.env.COST_DEFAULT_LABOR_RATE_USD_PER_HOUR;
   delete process.env.COST_DEFAULT_PACKAGING_USD;
-  assert.equal(getDefaultLaborRatePerHour(), 25);
-  assert.equal(getDefaultPackagingAmount(), 5);
+  assert.equal(getDefaultLaborRatePerHour(), 0);
+  assert.equal(getDefaultPackagingAmount(), 0);
 });
 
 test("existing cost fields are skipped unless overwrite is enabled", () => {
@@ -313,7 +313,7 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
   const shipping = preview.body.preview.fields.find((field: any) => field.field === "shipping");
   assert.equal(material.proposed, 4.75);
   assert.equal(labor.willWrite, false);
-  assert.equal(packaging.proposed, 5);
+  assert.equal(packaging.proposed, 0);
   assert.equal(shipping.proposed, 8.4);
   assert.equal(material.willWrite, true);
 
@@ -339,7 +339,7 @@ test("preview and confirm-apply write cost fields then recalculate", async () =>
     assert.equal(applied.body.written.length, 3);
     assert.equal(dealCosts.print_material_cost, "4.75");
     assert.equal(dealCosts.print_labor_cost, null);
-    assert.equal(dealCosts.print_packaging_cost, "5");
+    assert.equal(dealCosts.print_packaging_cost, "0");
     assert.equal(dealCosts.print_actual_shipping_cost, "8.4");
     assert.equal(applied.body.recalculated, true);
 

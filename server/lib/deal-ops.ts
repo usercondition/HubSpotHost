@@ -291,7 +291,8 @@ export async function seedPrintDealCosts(
         ? String(input.materialEstimate)
         : "";
     const postage = String(input.postage ?? "").trim();
-    const hasPostage = postage !== "" && Number.isFinite(Number(postage.replace(/[$,\s]/g, "")));
+    const postageAmount = Number(postage.replace(/[$,\s]/g, ""));
+    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount >= 0;
 
     const defaults: UpdateDealCostsInput = {
       material: isBlank(props.print_material_cost) ? materialEstimate : "",

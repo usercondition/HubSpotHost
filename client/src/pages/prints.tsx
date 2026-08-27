@@ -277,7 +277,7 @@ export default function Prints() {
   const [includePackaging, setIncludePackaging] = useState(true);
   const [includeShipping, setIncludeShipping] = useState(false);
   const [overwriteCosts, setOverwriteCosts] = useState(false);
-  const [laborRate, setLaborRate] = useState("25");
+  const [laborRate, setLaborRate] = useState("0");
   const [packagingAmount, setPackagingAmount] = useState("0");
   const [shippingAmount, setShippingAmount] = useState("");
   const [costPreview, setCostPreview] = useState<CostDefaultsPreview | null>(null);
