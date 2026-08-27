@@ -3,7 +3,9 @@
  *
  * Labor is absorbed (owner time not billed into deal costs).
  * Packaging uses free USPS Large Flat Rate boxes → $0.
- * Nudges / "costs complete" only require material + actual shipping on print deals.
+ * Print Ops seeds labor and packaging as $0 when a plate is attached. Shipping
+ * becomes required only after a label is attached, because postage is not known
+ * while a job is still being printed.
  */
 
 function isBlank(value: unknown): boolean {
@@ -20,12 +22,18 @@ export type DealCostPropertyBag = {
 /** True when required actual-cost fields are still empty. */
 export function dealCostsIncomplete(
   props: DealCostPropertyBag,
-  options: { requiresPlates: boolean },
+  options: { requiresPlates: boolean; hasPlates: boolean; shippingRequired: boolean },
 ): boolean {
-  if (!options.requiresPlates) {
-    return isBlank(props.print_actual_shipping_cost);
+  if (
+    options.requiresPlates &&
+    options.hasPlates &&
+    (isBlank(props.print_material_cost) ||
+      isBlank(props.print_labor_cost) ||
+      isBlank(props.print_packaging_cost))
+  ) {
+    return true;
   }
-  return isBlank(props.print_material_cost) || isBlank(props.print_actual_shipping_cost);
+  return options.shippingRequired && isBlank(props.print_actual_shipping_cost);
 }
 
 /** Whether HubSpot/UI cost entry is "done enough" for ops (labor/packaging optional). */
@@ -40,3 +48,12 @@ export function dealCostsCompleteFromFields(fields: {
 
 export const ABSORBED_LABOR_COST = "0";
 export const FREE_PACKAGING_COST = "0";
+
+export function defaultDealCostFields(): {
+  material: string;
+  labor: string;
+  packaging: string;
+  shipping: string;
+} {
+  return { material: "", labor: ABSORBED_LABOR_COST, packaging: FREE_PACKAGING_COST, shipping: "" };
+}

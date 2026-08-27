@@ -13,7 +13,7 @@ test("performance summarizes recent deals and ranks low margins before incomplet
       purchases: 2,
       byCategory: [{ category: "materials", label: "Materials", total: 62.5, count: 2 }],
     },
-    attachedPrintDealIds: [],
+    attachedPrintDealIds: ["two"],
     stages: [
       { id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } },
       { id: "closed", label: "Completed", displayOrder: 1, metadata: { isClosed: true } },
@@ -98,17 +98,12 @@ test("performance summarizes recent deals and ranks low margins before incomplet
       (item) => item.dealName === "Low-margin Knight" && item.issue === "No CTB plates attached",
     ),
   );
-  assert.ok(
-    snapshot.attention.some(
-      (item) => item.dealName === "Needs costs" && item.issue === "No CTB plates attached",
-    ),
-  );
   assert.ok(snapshot.attention.every((item) => item.issueKey.length > 0));
   assert.equal(snapshot.supplySpend.total, 62.5);
   assert.equal(snapshot.intake.pendingReview, 1);
 });
 
-test("blank labor and packaging do not flag incomplete costs when material and shipping are set", () => {
+test("blank labor and packaging remain incomplete until their zero defaults are seeded", () => {
   const snapshot = buildPerformanceSnapshot({
     now: new Date("2026-08-04T12:00:00.000Z"),
     intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
@@ -134,7 +129,7 @@ test("blank labor and packaging do not flag incomplete costs when material and s
 
   assert.equal(
     snapshot.attention.some((item) => item.issueKey === "costs_incomplete"),
-    false,
+    true,
   );
 });
 
@@ -155,18 +150,70 @@ test("performance alerts when actual resin cost materially varies from the plate
           amount: "100",
           print_estimated_resin_cost: "10",
           print_material_cost: "15",
-          print_labor_cost: "",
-          print_packaging_cost: "",
+          print_labor_cost: "0",
+          print_packaging_cost: "0",
           print_actual_shipping_cost: "0",
         },
       },
     ],
   });
-
   const alert = snapshot.attention.find((item) => item.dealId === "variance");
   assert.equal(alert?.issue, "Material cost vs CTB estimate");
   assert.match(alert?.detail ?? "", /\$15\.00 actual vs \$10\.00 estimate \(50% apart\)/);
   assert.equal(alert?.severity, "bad");
+});
+
+test("plated jobs with complete non-shipping costs do not alert before a label is attached", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["unlabeled"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "unlabeled",
+        properties: {
+          dealname: "Armigers - Jose",
+          dealstage: "deposit",
+          createdate: "2026-08-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "100",
+          print_material_cost: "3.67",
+          print_labor_cost: "0",
+          print_packaging_cost: "0",
+          print_actual_shipping_cost: "",
+        },
+      },
+    ],
+  });
+  assert.equal(snapshot.attention.some((item) => item.issueKey === "costs_incomplete"), false);
+});
+
+test("an attached label makes blank shipping incomplete until postage is seeded", () => {
+  const snapshot = buildPerformanceSnapshot({
+    now: new Date("2026-08-04T12:00:00.000Z"),
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: ["labeled"],
+    shippingLabelDealIds: ["labeled"],
+    stages: [{ id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } }],
+    deals: [
+      {
+        id: "labeled",
+        properties: {
+          dealname: "Knight - Jose",
+          dealstage: "deposit",
+          createdate: "2026-08-01T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "100",
+          print_material_cost: "3.67",
+          print_labor_cost: "0",
+          print_packaging_cost: "0",
+          print_actual_shipping_cost: "",
+        },
+      },
+    ],
+  });
+  assert.equal(snapshot.attention.some((item) => item.issueKey === "costs_incomplete"), true);
 });
 
 test("dismissed attention keys hide skipped plate reminders for legacy orders", () => {

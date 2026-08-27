@@ -198,6 +198,17 @@ export function listFulfillmentChecklists(dealIds: string[]): Map<string, Fulfil
   return map;
 }
 
+/** Deal IDs with a locally attached shipping label, including shared-box labels. */
+export function attachedShippingLabelDealIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const row of getDb().select().from(fulfillmentChecklists).all()) {
+    if (normalizeTrackingNumber(row.trackingNumber).length >= 6) {
+      ids.add(row.hubspotDealId);
+    }
+  }
+  return ids;
+}
+
 export type HubSpotShippingSync = {
   attempted: boolean;
   dryRun: boolean;

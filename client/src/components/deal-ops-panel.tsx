@@ -34,6 +34,7 @@ import {
   type FulfillmentChecklistKey,
   type ProductionFailureType,
 } from "@shared/schema";
+import { defaultDealCostFields } from "@shared/deal-costs";
 
 const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
 
@@ -138,7 +139,7 @@ export function DealOpsPanel({
     },
   });
 
-  const [costs, setCosts] = useState({ material: "", labor: "", packaging: "", shipping: "" });
+  const [costs, setCosts] = useState(defaultDealCostFields);
   const [stageId, setStageId] = useState("");
   const [tracking, setTracking] = useState("");
   const [failureType, setFailureType] = useState<ProductionFailureType>("qc_reject");
@@ -149,8 +150,8 @@ export function DealOpsPanel({
     if (!detail.data) return;
     setCosts({
       material: detail.data.costs.material,
-      labor: detail.data.costs.labor,
-      packaging: detail.data.costs.packaging,
+      labor: detail.data.costs.labor || "0",
+      packaging: detail.data.costs.packaging || "0",
       shipping: detail.data.costs.shipping,
     });
     setStageId(detail.data.stageId);

@@ -210,7 +210,13 @@ import {
   updateDealCosts,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
-import { getFulfillmentChecklist, upsertFulfillmentChecklist, listExistingTrackingAttachments, type HubSpotShippingSync } from "./lib/fulfillment";
+import {
+  attachedShippingLabelDealIds,
+  getFulfillmentChecklist,
+  upsertFulfillmentChecklist,
+  listExistingTrackingAttachments,
+  type HubSpotShippingSync,
+} from "./lib/fulfillment";
 import { buildProductionQueue } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 import {
@@ -507,6 +513,7 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     intakeCounts: orderLinkCounts(),
     supplySpend: buildSupplySpendSummary(),
     attachedPrintDealIds: attachedPrintFileDealIds(),
+    shippingLabelDealIds: attachedShippingLabelDealIds(),
     hubspotPortalId,
     dismissedAttentionKeys: activeAttentionOverrideKeys(),
   });
@@ -1093,6 +1100,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         deals,
         stages,
         attachedPrintDealIds: attachedIds,
+        shippingLabelDealIds: attachedShippingLabelDealIds(),
         intakeCounts: orderLinkCounts(),
         supplySpend: buildSupplySpendSummary(),
         dismissedAttentionKeys: activeAttentionOverrideKeys(),
@@ -1207,6 +1215,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           intakeCounts: orderLinkCounts(),
           supplySpend: buildSupplySpendSummary(),
           attachedPrintDealIds: attachedPrintFileDealIds(),
+            shippingLabelDealIds: attachedShippingLabelDealIds(),
           dismissedAttentionKeys: activeAttentionOverrideKeys(),
           hubspotPortalId,
         });
@@ -1597,6 +1606,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           intakeCounts: orderLinkCounts(),
           supplySpend: buildSupplySpendSummary(),
           attachedPrintDealIds: attachedPrintFileDealIds(),
+          shippingLabelDealIds: attachedShippingLabelDealIds(),
           dismissedAttentionKeys: activeAttentionOverrideKeys(),
           hubspotPortalId,
         }),
@@ -2265,9 +2275,46 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   });
 
   /**
-   * This is the only CTB route that writes to HubSpot. It requires the owner
-   * code and an explicit deal selection. HubSpot succeeds first; only then is
-   * the durable local production record created.
+   * Reapply safe defaults to historical attached plates. This only fills blank
+   * HubSpot cost fields from local plate totals; it never invents postage.
+   */
+  app.post("/api/prints/seed-costs", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+
+    const estimates = new Map<string, { total: number; hasEstimate: boolean }>();
+    for (const record of listPrintFileRecords(500)) {
+      const summary = estimates.get(record.hubspotDealId) ?? { total: 0, hasEstimate: false };
+      const resinCost = Number(record.resinCost);
+      if (Number.isFinite(resinCost) && resinCost >= 0) {
+        summary.total += resinCost;
+        summary.hasEstimate = true;
+      }
+      estimates.set(record.hubspotDealId, summary);
+    }
+
+    const results = [];
+    for (const [dealId, estimate] of estimates) {
+      const seeded = await seedPrintDealCosts(dealId, {
+        materialEstimate: estimate.hasEstimate ? estimate.total : null,
+        liveWrite: true,
+      });
+      results.push({
+        dealId,
+        status: seeded === null ? "current" : seeded.ok ? (seeded.dryRun ? "dry-run" : "seeded") : "error",
+        error: seeded && !seeded.ok ? seeded.error : undefined,
+      });
+    }
+    return res.json({
+      ok: true,
+      processed: results.length,
+      seeded: results.filter((result) => result.status === "seeded").length,
+      results,
+    });
+  });
+
+  /**
+   * Attach a CTB/ULTX plate to an explicit order. HubSpot succeeds first; only
+   * then is the durable local production record created.
    */
   app.post("/api/prints/attach", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
