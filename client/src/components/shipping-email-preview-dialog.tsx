@@ -23,7 +23,7 @@ type Props = {
 };
 
 /**
- * Preview the stored professional shipping email template.
+ * Preview the quirky “order on its way” email template (hero + stamp images).
  * Mailto uses plain text (HTML isn’t supported in mailto); HTML is ready for a future sender.
  */
 export function ShippingEmailPreviewDialog({
@@ -46,7 +46,13 @@ export function ShippingEmailPreviewDialog({
     );
   }
 
-  const pack = buildShippingEmailPackage(input);
+  const assetBaseUrl =
+    input.brand?.assetBaseUrl ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const pack = buildShippingEmailPackage({
+    ...input,
+    brand: { ...input.brand, assetBaseUrl },
+  });
   const mailto = contactEmail
     ? buyerTrackingMailtoHref({
         email: contactEmail,
@@ -62,28 +68,30 @@ export function ShippingEmailPreviewDialog({
         data-testid="dialog-shipping-email-template"
       >
         <DialogHeader>
-          <DialogTitle>Email template preview</DialogTitle>
+          <DialogTitle>Shipped email preview</DialogTitle>
           <DialogDescription>
-            Professional HTML template stored for later sending. Subject: {pack.subject}
+            Hipster-maker HTML template (hero + stamp). Subject: {pack.subject}
             {contactEmail ? ` · To: ${contactEmail}` : " · No HubSpot email on this contact yet"}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div
-            className="overflow-hidden rounded-lg border border-border bg-[#f4f1ec]"
+            className="overflow-hidden rounded-lg border border-border bg-[#e8e2d6]"
             data-testid="panel-shipping-email-html-preview"
           >
             <iframe
               title="Shipping email preview"
-              sandbox=""
+              sandbox="allow-same-origin"
               srcDoc={pack.html}
-              className="h-[28rem] w-full border-0 bg-white"
+              className="h-[32rem] w-full border-0 bg-[#e8e2d6]"
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Brand defaults live in <span className="font-medium text-foreground">shipping-email-template</span>{" "}
-            (shop name, accent, from line). Wire a real sender later — this popup won’t auto-send.
+            Images load from <span className="font-medium text-foreground">/email/</span> on this app.
+            Tweak shop name &amp; copy in{" "}
+            <span className="font-medium text-foreground">shipping-email-template</span>. Mailto sends
+            plain text only — HTML waits for a real sender.
           </p>
         </div>
 
