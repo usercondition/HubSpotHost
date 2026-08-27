@@ -143,7 +143,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
 
   if (intent === "plates") {
     if (plateIssues.length === 0) {
-      const missing = snapshot.activeDeals.filter((d) => !d.hasPlates);
+      const missing = snapshot.activeDeals.filter((d) => d.promptAttachPlates);
       if (missing.length === 0) {
         return {
           ok: true,
@@ -275,10 +275,10 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     );
     actions.push({ label: "Review intake", href: "/orders" });
   }
-  if (plateIssues.length > 0 || snapshot.activeDeals.some((d) => !d.hasPlates)) {
-    const count = plateIssues.length || snapshot.activeDeals.filter((d) => !d.hasPlates).length;
+  if (plateIssues.length > 0 || snapshot.activeDeals.some((d) => d.promptAttachPlates)) {
+    const count = plateIssues.length || snapshot.activeDeals.filter((d) => d.promptAttachPlates).length;
     priorities.push(`${priorities.length + 1}. Attach CTB plates on ${count} open order${count === 1 ? "" : "s"}.`);
-    const first = plateIssues[0] ?? snapshot.activeDeals.find((d) => !d.hasPlates);
+    const first = plateIssues[0] ?? snapshot.activeDeals.find((d) => d.promptAttachPlates);
     if (first) {
       const dealId = "dealId" in first ? first.dealId : (first as { dealId: string }).dealId;
       actions.push({ label: "Attach plates", href: printsHref(dealId) });

@@ -29,7 +29,7 @@ const {
   getActiveResinProfile,
 } = await import("../server/lib/resin-pricing");
 const { createSupplyPurchase } = await import("../server/lib/supplies");
-const { ensureDefaultResinInventory, openResinBottle, upsertResinProduct } = await import(
+const { ensureDefaultResinInventory, listResinProducts, openResinBottle, upsertResinProduct } = await import(
   "../server/lib/resin-inventory"
 );
 const { encryptCtbSettingsBlock, parseCtbFile } = await import("../server/lib/ctb");
@@ -137,6 +137,20 @@ test("open inventory bottle rate is used when profile price is zero", () => {
   });
   assert.equal(estimate.resinCostSource, "inventory");
   assert.equal(estimate.resinCost, 4);
+});
+
+test("updating the active profile mirrors its bottle price to inventory", () => {
+  upsertActiveResinProfile({
+    name: "ELEGOO ABS-Like 3.0 Space Grey",
+    amazonAsin: DEFAULT_RESIN_ASIN,
+    amazonUrl: `https://www.amazon.com/dp/${DEFAULT_RESIN_ASIN}`,
+    bottleMassG: 1000,
+    bottleVolumeMl: null,
+    bottlePriceUsd: "41.50",
+    notes: "",
+  });
+
+  assert.equal(listResinProducts()[0]?.unitCostUsd, "41.50");
 });
 
 test("supplies resin purchases can provide a fallback rate", () => {

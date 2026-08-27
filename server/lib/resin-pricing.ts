@@ -14,6 +14,7 @@ import { and, desc, eq } from "drizzle-orm";
 import {
   lineItemsForSupplyPurchase,
   resinBottles,
+  resinProducts,
   resinProfiles,
   type PrintFileMetrics,
   type ResinCostSource,
@@ -31,6 +32,24 @@ export const DEFAULT_BOTTLE_MASS_G = 1000;
 export const DEFAULT_RESIN_DENSITY_G_PER_ML = 1.1;
 export const AMAZON_FETCH_TIMEOUT_MS = 10_000;
 export const AMAZON_PRICE_CACHE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Keep the Inventory bottle cost in sync when Print Files updates the active
+ * profile, so the next estimate uses the same economics in both places.
+ */
+function mirrorBottlePriceToInventory(profileName: string, bottlePriceUsd: number): void {
+  const db = getDb();
+  const products = db.select().from(resinProducts).all();
+  if (products.length === 0) return;
+
+  const normalized = profileName.trim().toLowerCase();
+  const target =
+    products.find((product) => product.name.trim().toLowerCase() === normalized) ?? products[0]!;
+  db.update(resinProducts)
+    .set({ unitCostUsd: bottlePriceUsd.toFixed(2), updatedAt: nowIso() })
+    .where(eq(resinProducts.id, target.id))
+    .run();
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -98,7 +117,7 @@ export function upsertActiveResinProfile(input: UpsertResinProfileInput): ResinP
       ? null
       : positive(input.bottleVolumeMl);
 
-  return getDb()
+  const updated = getDb()
     .update(resinProfiles)
     .set({
       name: input.name.trim(),
@@ -114,6 +133,8 @@ export function upsertActiveResinProfile(input: UpsertResinProfileInput): ResinP
     .where(eq(resinProfiles.id, active.id))
     .returning()
     .get();
+  mirrorBottlePriceToInventory(updated.name, price);
+  return updated;
 }
 
 export function parseAmazonProductPrice(html: string): number | null {
@@ -201,6 +222,7 @@ export async function refreshResinPriceFromAmazon(
       .where(eq(resinProfiles.id, profile.id))
       .returning()
       .get();
+    mirrorBottlePriceToInventory(updated.name, price);
 
     return { profile: updated, price, cached: false };
   } finally {
