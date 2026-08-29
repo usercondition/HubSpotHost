@@ -237,9 +237,15 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     },
     body: JSON.stringify({ pending: true, text: "Your Acastus Knights quote is ready.", to: "Taylor" }),
   });
-  const queuedBody = (await queued.json()) as { ok: boolean; pending: boolean; id: number; to: string };
+  const queuedBody = (await queued.json()) as {
+    ok: boolean;
+    pending: boolean;
+    id: number;
+    to: string;
+    channel: string;
+  };
   assert.equal(queued.status, 201);
-  assert.deepEqual(queuedBody, { ok: true, pending: true, id: 1, to: "Taylor" });
+  assert.deepEqual(queuedBody, { ok: true, pending: true, id: 1, to: "Taylor", channel: "marketplace" });
 
   const read = await fetch(url, { headers: { "x-paid-order-access-code": OWNER_CODE } });
   assert.deepEqual(await read.json(), {
@@ -247,6 +253,7 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     id: queuedBody.id,
     to: "Taylor",
     text: "Your Acastus Knights quote is ready.",
+    channel: "marketplace",
   });
 
   resetMarketplaceSendRequestStore();
@@ -255,6 +262,7 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     id: queuedBody.id,
     to: "Taylor",
     text: "Your Acastus Knights quote is ready.",
+    channel: "marketplace",
   });
 
   const cleared = await fetch(url, {
@@ -269,5 +277,54 @@ test("Marketplace send request API is owner-gated and clears its one message slo
   assert.deepEqual(await cleared.json(), { ok: true, pending: false, id: queuedBody.id });
 
   const clearedRead = await fetch(url, { headers: { "x-paid-order-access-code": OWNER_CODE } });
-  assert.deepEqual(await clearedRead.json(), { pending: false, id: queuedBody.id, to: "", text: "" });
+  assert.deepEqual(await clearedRead.json(), {
+    pending: false,
+    id: queuedBody.id,
+    to: "",
+    text: "",
+    channel: "marketplace",
+  });
+});
+
+test("OfferUp shipment queue is owner-gated and identifies its chat channel", async () => {
+  clearMarketplaceSendRequest();
+  const url = `${appBase}/api/marketplace-send-request`;
+  const queued = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({
+      pending: true,
+      to: "Jamie Carter",
+      text: "Your order has shipped. Tracking: 9400111899223344556678.",
+      channel: "offerup",
+    }),
+  });
+  assert.equal(queued.status, 201);
+  assert.deepEqual(await queued.json(), {
+    ok: true,
+    pending: true,
+    id: 1,
+    to: "Jamie Carter",
+    channel: "offerup",
+  });
+  assert.deepEqual(getMarketplaceSendRequest(), {
+    pending: true,
+    id: 1,
+    to: "Jamie Carter",
+    text: "Your order has shipped. Tracking: 9400111899223344556678.",
+    channel: "offerup",
+  });
+
+  const invalid = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ pending: true, to: "Jamie Carter", text: "No send", channel: "other" }),
+  });
+  assert.equal(invalid.status, 400);
 });

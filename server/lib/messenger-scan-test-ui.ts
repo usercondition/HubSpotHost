@@ -27,4 +27,11 @@ export function registerMessengerScanTestUi(app: Express): void {
     res.setHeader("Cache-Control", "no-store");
     return res.sendFile(htmlPath);
   });
+  app.get("/dev/mock-offerup", (_req: Request, res: Response) => {
+    if (!fs.existsSync(htmlPath)) {
+      return res.status(404).type("text/plain").send("Mock OfferUp test page is missing from the repo.");
+    }
+    res.setHeader("Cache-Control", "no-store");
+    return res.sendFile(htmlPath);
+  });
 }

@@ -93,6 +93,7 @@ export default function ShippingLabelsPage() {
   const [tracking, setTracking] = useState("");
   const [notes, setNotes] = useState("");
   const [postage, setPostage] = useState("");
+  const [messageChannel, setMessageChannel] = useState<"marketplace" | "offerup">("marketplace");
   const [selectedDealIds, setSelectedDealIds] = useState<string[]>([]);
   const [manualDealId, setManualDealId] = useState("");
   const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
@@ -167,6 +168,7 @@ export default function ShippingLabelsPage() {
           trackingNumber: tracking.trim(),
           notes: notes.trim(),
           postageUsd: postage.trim(),
+          messageChannel,
           packingDone: true,
           labelBought: true,
         },
@@ -639,6 +641,21 @@ export default function ShippingLabelsPage() {
                       placeholder="0.00"
                       data-testid="input-label-postage"
                     />
+                  </div>
+                  <div>
+                    <Label htmlFor="label-message-channel">Buyer chat</Label>
+                    <select
+                      id="label-message-channel"
+                      value={messageChannel}
+                      onChange={(event) =>
+                        setMessageChannel(event.target.value === "offerup" ? "offerup" : "marketplace")
+                      }
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                      data-testid="select-label-message-channel"
+                    >
+                      <option value="marketplace">Facebook Marketplace</option>
+                      <option value="offerup">OfferUp</option>
+                    </select>
                   </div>
                   <div className="sm:col-span-2">
                     <Label htmlFor="label-notes">Ship notes</Label>

@@ -1372,9 +1372,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const primaryDealId = attachedDealIds[0]!;
     const contact = await fetchDealAssociatedContact(primaryDealId);
     const postageAmount = Number(postage);
-    // A Marketplace notice is only safe when the label supplied both a real
-    // postage amount and a buyer name. The attached tracking remains saved
-    // even when either is unavailable.
+    // A buyer-chat notice is only safe when the label supplied both a real
+    // postage amount and a buyer name. Print Orders currently have no sales
+    // channel field, so the label UI supplies the explicit channel (defaulting
+    // to Marketplace for backwards compatibility). The attached tracking
+    // remains saved even when either is unavailable.
     const marketplaceSend =
       contact.name && Number.isFinite(postageAmount) && postage !== ""
         ? enqueueMarketplaceShipmentSendRequest({
@@ -1382,6 +1384,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             trackingNumber: input.trackingNumber,
             to: contact.name,
             text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
+            channel: input.messageChannel,
           })
         : null;
 
@@ -1399,7 +1402,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         email: contact.email,
       },
       marketplaceSend: marketplaceSend
-        ? { queued: marketplaceSend.queued, id: marketplaceSend.request.id, to: marketplaceSend.request.to }
+        ? {
+            queued: marketplaceSend.queued,
+            id: marketplaceSend.request.id,
+            to: marketplaceSend.request.to,
+            channel: marketplaceSend.request.channel,
+          }
         : null,
     });
   });
@@ -2870,7 +2878,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
   /**
    * One owner-gated message slot for the Comet extension to type into the
-   * already-open Marketplace thread. The message is never exposed publicly.
+   * already-open Marketplace or OfferUp thread. The message is never exposed publicly.
    */
   app.get("/api/marketplace-send-request", (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -2897,8 +2905,21 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     if (body.text.length > 40_000 || (body.to !== undefined && (typeof body.to !== "string" || body.to.length > 200))) {
       return res.status(400).json({ ok: false, error: "Message text or recipient is too long" });
     }
-    const request = setMarketplaceSendRequest(true, { text: body.text, to: body.to ?? "" });
-    return res.status(201).json({ ok: true, pending: true, id: request.id, to: request.to });
+    if (body.channel !== undefined && body.channel !== "marketplace" && body.channel !== "offerup") {
+      return res.status(400).json({ ok: false, error: "Channel must be marketplace or offerup" });
+    }
+    const request = setMarketplaceSendRequest(true, {
+      text: body.text,
+      to: body.to ?? "",
+      channel: body.channel === "offerup" ? "offerup" : "marketplace",
+    });
+    return res.status(201).json({
+      ok: true,
+      pending: true,
+      id: request.id,
+      to: request.to,
+      channel: request.channel,
+    });
   });
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {

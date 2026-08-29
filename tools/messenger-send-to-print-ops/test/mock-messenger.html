@@ -73,6 +73,12 @@
       </main>
     </div>
     <script>
+      const IS_OFFERUP = location.pathname.includes("mock-offerup");
+      document.title = IS_OFFERUP ? "Mock OfferUp inbox — Print Ops brief test" : document.title;
+      document.querySelector("aside h1").textContent = IS_OFFERUP ? "OfferUp messages" : "Marketplace inbox";
+      document.querySelector("aside p").textContent = IS_OFFERUP ? "Mock list for OfferUp testing" : "Mock list for Inbox brief testing";
+      document.getElementById("archived").textContent = IS_OFFERUP ? "Hidden / past chats" : "Archived chats";
+      document.getElementById("archived").setAttribute("aria-label", IS_OFFERUP ? "Hidden and past chats" : "Archived chats");
       const THREADS = [
         {
           id: "alex",
@@ -126,7 +132,7 @@
         },
         {
           id: "archived-jamie",
-          title: "Jamie Carter (Marketplace)",
+          title: IS_OFFERUP ? "Jamie Carter (OfferUp)" : "Jamie Carter (Marketplace)",
           archived: true,
           unread: false,
           messages: [{ outgoing: false, text: "Thanks for the update." }],
@@ -183,7 +189,7 @@
         threadEl.scrollTop = threadEl.scrollHeight;
       }
 
-      window.__mockMarketplaceInbox = {
+      const mockInbox = {
         listThreads() {
           return THREADS.map((t) => ({
             id: t.id,
@@ -208,6 +214,8 @@
           return true;
         },
       };
+      if (IS_OFFERUP) window.__mockOfferUpInbox = mockInbox;
+      else window.__mockMarketplaceInbox = mockInbox;
 
       document.getElementById("archived").addEventListener("click", () => {
         showingArchived = true;
