@@ -77,6 +77,130 @@
     return cleanBubbleText(heading?.textContent || document.title || "");
   }
 
+  function normalizedThreadName(value) {
+    return cleanBubbleText(value)
+      .replace(/\(marketplace\)/gi, "")
+      .replace(/[^a-z0-9\s]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  // Do not use partial-name matching here: sending a shipping notice to a
+  // similarly named buyer is worse than leaving the request pending.
+  function exactThreadMatch(title, recipient) {
+    return normalizedThreadName(title) === normalizedThreadName(recipient);
+  }
+
+  function listedThreadItems() {
+    const listRoot =
+      document.querySelector("[data-print-ops-thread-list]") ||
+      document.querySelector('[aria-label="Chats"]') ||
+      document.querySelector('[aria-label*="Conversations"]') ||
+      document.querySelector('div[role="navigation"]');
+    if (!listRoot) return [];
+    return Array.from(
+      listRoot.querySelectorAll(
+        '[data-print-ops-thread-item], a[role="link"], div[role="row"], div[role="listitem"]',
+      ),
+    );
+  }
+
+  function listedThreadTitle(el) {
+    return cleanBubbleText(
+      el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+    );
+  }
+
+  async function openMarketplaceThread(recipient) {
+    if (!recipient || normalizedThreadName(recipient).length < 2) {
+      throw new Error("Queued shipment has no buyer name; it was not sent.");
+    }
+    if (typeof window.__mockMarketplaceInbox?.openThreadByName === "function") {
+      const outcome = window.__mockMarketplaceInbox.openThreadByName(recipient);
+      if (outcome === "ambiguous") {
+        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+      }
+      if (outcome) {
+        await sleep(50);
+        return;
+      }
+      throw new Error(`Could not find Marketplace chat for "${recipient}", including archived chats. Request left pending.`);
+    }
+
+    const clickMatchingThread = () => {
+      const matches = listedThreadItems().filter((item) => exactThreadMatch(listedThreadTitle(item), recipient));
+      if (matches.length > 1) {
+        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+      }
+      const hit = matches[0];
+      if (hit) hit.click();
+      return Boolean(hit);
+    };
+    if (clickMatchingThread()) {
+      await sleep(700);
+      if (exactThreadMatch(threadTitle(), recipient)) return;
+    }
+
+    // Messenger's archive is normally a navigation item. Open it before
+    // searching; search result titles still must exactly match the recipient.
+    const archived = Array.from(
+      document.querySelectorAll('[aria-label*="Archived" i], [title*="Archived" i], a[href*="archived" i]'),
+    ).find((el) => /archived/i.test(el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || ""));
+    if (archived) {
+      archived.click();
+      await sleep(900);
+      if (clickMatchingThread()) {
+        await sleep(700);
+        if (exactThreadMatch(threadTitle(), recipient)) return;
+      }
+    }
+
+    const search = document.querySelector(
+      'input[placeholder*="Search" i], input[aria-label*="Search" i], [role="searchbox"]',
+    );
+    if (search) {
+      search.focus();
+      search.value = recipient;
+      search.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: recipient }));
+      search.dispatchEvent(new Event("change", { bubbles: true }));
+      await sleep(900);
+      if (clickMatchingThread()) {
+        await sleep(700);
+        if (exactThreadMatch(threadTitle(), recipient)) return;
+      }
+    }
+    throw new Error(`Could not find an exact Marketplace chat for "${recipient}", including archived chats. Request left pending.`);
+  }
+
+  async function sendMarketplaceMessage(recipient, text) {
+    await openMarketplaceThread(recipient);
+    if (!exactThreadMatch(threadTitle(), recipient)) {
+      throw new Error(`Opened chat does not exactly match "${recipient}"; request left pending.`);
+    }
+    const composer = document.querySelector(
+      '[data-print-ops-composer], [contenteditable="true"][role="textbox"], [contenteditable="true"][aria-label*="Message" i], textarea[aria-label*="Message" i]',
+    );
+    if (!composer) throw new Error("Could not find the message composer; request left pending.");
+    composer.focus();
+    if (composer.getAttribute("contenteditable") === "true") {
+      document.execCommand("insertText", false, text);
+    } else {
+      composer.value = text;
+      composer.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await sleep(50);
+    const send = document.querySelector(
+      '[data-print-ops-send], [aria-label="Send" i], [title="Send" i], button[type="submit"]',
+    );
+    if (send) send.click();
+    else {
+      composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+    }
+    await sleep(350);
+    return { title: threadTitle() };
+  }
+
   function collectBubbles(threadRoot) {
     const mockNodes = threadRoot.querySelectorAll("[data-print-ops-message]");
     if (mockNodes.length) {
@@ -316,6 +440,12 @@
     }
     if (message.type === "print-ops-scrape-inbox") {
       scrapeInboxThreads({ maxThreads: message.maxThreads || 20 })
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
+    if (message.type === "print-ops-send-marketplace-request") {
+      sendMarketplaceMessage(message.to, message.text)
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
       return true;

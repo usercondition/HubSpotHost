@@ -146,6 +146,7 @@ import {
   setMarketplaceScanRequest,
 } from "./lib/marketplace-scan-request-store";
 import {
+  enqueueMarketplaceShipmentSendRequest,
   getMarketplaceSendRequest,
   setMarketplaceSendRequest,
 } from "./lib/marketplace-send-request-store";
@@ -1370,6 +1371,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     const primaryDealId = attachedDealIds[0]!;
     const contact = await fetchDealAssociatedContact(primaryDealId);
+    const postageAmount = Number(postage);
+    // A Marketplace notice is only safe when the label supplied both a real
+    // postage amount and a buyer name. The attached tracking remains saved
+    // even when either is unavailable.
+    const marketplaceSend =
+      contact.name && Number.isFinite(postageAmount) && postage !== ""
+        ? enqueueMarketplaceShipmentSendRequest({
+            dealId: primaryDealId,
+            trackingNumber: input.trackingNumber,
+            to: contact.name,
+            text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
+          })
+        : null;
 
     return res.json({
       ok: true,
@@ -1384,6 +1398,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         name: contact.name,
         email: contact.email,
       },
+      marketplaceSend: marketplaceSend
+        ? { queued: marketplaceSend.queued, id: marketplaceSend.request.id, to: marketplaceSend.request.to }
+        : null,
     });
   });
 

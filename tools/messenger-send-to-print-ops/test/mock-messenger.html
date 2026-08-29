@@ -52,6 +52,7 @@
           <h1>Marketplace inbox</h1>
           <p>Mock list for Inbox brief testing</p>
         </header>
+        <button id="archived" type="button" aria-label="Archived chats">Archived chats</button>
         <div id="thread-list" data-print-ops-thread-list role="list"></div>
       </aside>
       <main>
@@ -63,6 +64,8 @@
           <span class="badge">Test UI</span>
         </header>
         <div id="thread" data-print-ops-thread data-testid="mock-messenger-thread" aria-label="Conversation"></div>
+        <textarea data-print-ops-composer aria-label="Message"></textarea>
+        <button data-print-ops-send type="button">Send</button>
         <footer>
           Load the extension → click <strong>Inbox brief</strong> (toolbar) to scan every thread in this list.
           Single-thread <strong>Send to Print Ops</strong> still works on the open chat.
@@ -121,16 +124,24 @@
             { outgoing: false, text: "Order complete on my end." },
           ],
         },
+        {
+          id: "archived-jamie",
+          title: "Jamie Carter (Marketplace)",
+          archived: true,
+          unread: false,
+          messages: [{ outgoing: false, text: "Thanks for the update." }],
+        },
       ];
 
       const listEl = document.getElementById("thread-list");
       const threadEl = document.getElementById("thread");
       const titleEl = document.querySelector("[data-print-ops-thread-title]");
       let activeId = THREADS[0].id;
+      let showingArchived = false;
 
       function renderList() {
         listEl.innerHTML = "";
-        THREADS.forEach((t) => {
+        THREADS.filter((t) => Boolean(t.archived) === showingArchived).forEach((t) => {
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "thread-item";
@@ -184,8 +195,36 @@
             ].join("\n"),
           }));
         },
+        openThreadByName(name) {
+          const normalized = (value) => String(value).replace(/\(marketplace\)/ig, "").replace(/[^a-z0-9\s]/ig, " ").replace(/\s+/g, " ").trim().toLowerCase();
+          const matches = THREADS.filter((t) => normalized(t.title) === normalized(name));
+          if (matches.length > 1) return "ambiguous";
+          const found = matches[0];
+          if (!found) return false;
+          showingArchived = Boolean(found.archived);
+          activeId = found.id;
+          renderList();
+          renderThread();
+          return true;
+        },
       };
 
+      document.getElementById("archived").addEventListener("click", () => {
+        showingArchived = true;
+        const first = THREADS.find((t) => t.archived);
+        if (first) activeId = first.id;
+        renderList();
+        renderThread();
+      });
+      document.querySelector("[data-print-ops-send]").addEventListener("click", () => {
+        const text = document.querySelector("[data-print-ops-composer]").value.trim();
+        const thread = THREADS.find((t) => t.id === activeId);
+        if (text && thread) {
+          thread.messages.push({ outgoing: true, text });
+          document.querySelector("[data-print-ops-composer]").value = "";
+          renderThread();
+        }
+      });
       renderList();
       renderThread();
     </script>

@@ -87,6 +87,31 @@ async function createBrief(settings, inbox) {
   return body;
 }
 
+async function getMarketplaceSendRequest(settings) {
+  if (!settings.accessCode) {
+    throw new Error("Set your owner access code in the extension options first.");
+  }
+  const response = await fetch(`${settings.baseUrl}/api/marketplace-send-request`, {
+    headers: { "x-paid-order-access-code": settings.accessCode },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `Could not read shipment request (HTTP ${response.status})`);
+  return body;
+}
+
+async function clearMarketplaceSendRequest(settings) {
+  const response = await fetch(`${settings.baseUrl}/api/marketplace-send-request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": settings.accessCode,
+    },
+    body: JSON.stringify({ pending: false }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body?.ok) throw new Error(body?.error || `Could not clear shipment request (HTTP ${response.status})`);
+}
+
 function appUrl(baseUrl, pathWithQuery) {
   // Hash router: /#/marketplace-brief?brief=…
   const [path, query] = pathWithQuery.split("?");
@@ -116,6 +141,24 @@ async function runInboxBrief(tab) {
     threadCount: inbox.threads?.length || 0,
     headline: created.brief?.headline || "",
   };
+}
+
+async function runQueuedShipment(tab) {
+  if (!tab?.id) throw new Error("Open Marketplace Messenger or the mock inbox before sending.");
+  const settings = await getSettings();
+  const request = await getMarketplaceSendRequest(settings);
+  if (!request.pending) return { pending: false };
+  if (!request.to || !request.text) throw new Error("Queued shipment is missing a buyer or message; it was not sent.");
+  await ensureContent(tab.id);
+  const sent = await chrome.tabs.sendMessage(tab.id, {
+    type: "print-ops-send-marketplace-request",
+    to: request.to,
+    text: request.text,
+  });
+  if (!sent?.ok) throw new Error(sent?.error || "Could not send shipment notice; request remains pending.");
+  // Only acknowledge the server slot after the page reports a successful send.
+  await clearMarketplaceSendRequest(settings);
+  return { pending: true, to: request.to, title: sent.title };
 }
 
 function alertOnTab(tabId, message) {
@@ -150,6 +193,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tab = active;
       }
       return runInboxBrief(tab);
+    };
+    go()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => {
+        chrome.tabs.query({ active: true, currentWindow: true }).then(([active]) => {
+          alertOnTab(active?.id, error?.message || String(error));
+        });
+        sendResponse({ ok: false, error: error?.message || String(error) });
+      });
+    return true;
+  }
+  if (message.type === "print-ops-send-queued-shipment") {
+    const go = async () => {
+      let tab = sender.tab;
+      if (!tab?.id) {
+        const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+        tab = active;
+      }
+      return runQueuedShipment(tab);
     };
     go()
       .then((result) => sendResponse({ ok: true, ...result }))

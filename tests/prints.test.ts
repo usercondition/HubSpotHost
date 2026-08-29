@@ -26,6 +26,10 @@ const store = await import("../server/lib/order-links");
 const { createPrintFileRecord, listPrintFileRecords, stagePrintFile } = await import(
   "../server/lib/print-files"
 );
+const {
+  clearMarketplaceSendRequest,
+  getMarketplaceSendRequest,
+} = await import("../server/lib/marketplace-send-request-store");
 const { registerRoutes } = await import("../server/routes");
 
 interface MockCall {
@@ -42,6 +46,7 @@ let mockCalls: MockCall[] = [];
 let mockDealStage = "queued";
 let mockDealStageLabel = "Queued to Print";
 let mockDealProperties: Record<string, string> = {};
+let mockContactName = "";
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -176,6 +181,13 @@ before(async () => {
       if (call.url === "/crm/v3/objects/deals/701" && call.method === "PATCH") {
         Object.assign(mockDealProperties, JSON.parse(call.body).properties);
         return res.end(JSON.stringify({ id: "701", properties: mockDealProperties }));
+      }
+      if (call.url === "/crm/v4/objects/deals/701/associations/contacts?limit=1") {
+        return res.end(JSON.stringify({ results: mockContactName ? [{ toObjectId: "contact-701" }] : [] }));
+      }
+      if (call.url.startsWith("/crm/v3/objects/contacts/contact-701?")) {
+        const [firstname, ...rest] = mockContactName.split(" ");
+        return res.end(JSON.stringify({ properties: { firstname, lastname: rest.join(" ") } }));
       }
       return res.end(JSON.stringify({ id: "ok" }));
     });
@@ -476,6 +488,47 @@ test("label attach seeds known postage without replacing existing costs", async 
     assert.ok(properties.some((patch) => patch.print_actual_shipping_cost === "5.42"));
     assert.equal(mockDealProperties.print_actual_shipping_cost, "5.42");
   } finally {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
+});
+
+test("priced label attach queues one idempotent owner-only Marketplace shipment notice", async () => {
+  clearMarketplaceSendRequest();
+  mockCalls = [];
+  mockContactName = "Jamie Carter";
+  mockDealProperties = {
+    print_material_cost: "3.67",
+    print_labor_cost: "0",
+    print_packaging_cost: "0",
+    print_actual_shipping_cost: "",
+  };
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const payload = {
+      dealIds: ["701"],
+      trackingNumber: "9400111899223344556678",
+      postageUsd: "5.42",
+      labelBought: true,
+      packingDone: true,
+    };
+    const attached = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
+    assert.equal(attached.status, 200, attached.body?.error || "label attach failed");
+    assert.deepEqual(attached.body.marketplaceSend, { queued: true, id: 1, to: "Jamie Carter" });
+    assert.deepEqual(getMarketplaceSendRequest(), {
+      pending: true,
+      id: 1,
+      to: "Jamie Carter",
+      text: "Your order has shipped. Tracking: 9400111899223344556678.",
+    });
+
+    const duplicate = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.body.duplicate, true);
+    assert.equal(getMarketplaceSendRequest().id, 1);
+  } finally {
+    mockContactName = "";
     process.env.DRY_RUN = "true";
     process.env.ALLOW_HUBSPOT_WRITES = "false";
   }
