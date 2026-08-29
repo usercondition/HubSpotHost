@@ -145,6 +145,10 @@ import {
   getMarketplaceScanRequest,
   setMarketplaceScanRequest,
 } from "./lib/marketplace-scan-request-store";
+import {
+  getMarketplaceSendRequest,
+  setMarketplaceSendRequest,
+} from "./lib/marketplace-send-request-store";
 import { createPaidOrder } from "./lib/paid-orders";
 import {
   applyReviewEdits,
@@ -2845,6 +2849,39 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     }
     const request = setMarketplaceScanRequest(requested);
     return res.status(requested ? 201 : 200).json({ ok: true, ...request });
+  });
+
+  /**
+   * One owner-gated message slot for the Comet extension to type into the
+   * already-open Marketplace thread. The message is never exposed publicly.
+   */
+  app.get("/api/marketplace-send-request", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json(getMarketplaceSendRequest());
+  });
+
+  app.post("/api/marketplace-send-request", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const pending = body.pending;
+    if (typeof pending !== "boolean") {
+      return res.status(400).json({ ok: false, error: "Expected { pending: true | false }" });
+    }
+    if (!pending) {
+      const request = setMarketplaceSendRequest(false);
+      return res.json({ ok: true, pending: false, id: request.id });
+    }
+    if (typeof body.text !== "string" || !body.text.trim()) {
+      return res.status(400).json({ ok: false, error: "A message text string is required when pending is true" });
+    }
+    if (body.text.length > 40_000 || (body.to !== undefined && (typeof body.to !== "string" || body.to.length > 200))) {
+      return res.status(400).json({ ok: false, error: "Message text or recipient is too long" });
+    }
+    const request = setMarketplaceSendRequest(true, { text: body.text, to: body.to ?? "" });
+    return res.status(201).json({ ok: true, pending: true, id: request.id, to: request.to });
   });
 
   app.post("/api/paid-orders", async (req: Request, res: Response) => {
