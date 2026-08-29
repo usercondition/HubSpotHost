@@ -510,6 +510,8 @@ export const attachShippingLabelSchema = z
       ),
     packingDone: z.boolean().optional().default(true),
     labelBought: z.boolean().optional().default(true),
+    /** Explicit buyer-chat channel; existing orders do not carry this metadata. */
+    messageChannel: z.enum(["marketplace", "offerup"]).optional().default("marketplace"),
     liveWrite: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -536,6 +538,7 @@ export const attachShippingLabelSchema = z
       postageUsd: value.postageUsd,
       packingDone: value.packingDone,
       labelBought: value.labelBought,
+      messageChannel: value.messageChannel,
       liveWrite: value.liveWrite,
     };
   });

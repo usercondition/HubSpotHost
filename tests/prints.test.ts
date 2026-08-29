@@ -515,18 +515,67 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
     };
     const attached = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
     assert.equal(attached.status, 200, attached.body?.error || "label attach failed");
-    assert.deepEqual(attached.body.marketplaceSend, { queued: true, id: 1, to: "Jamie Carter" });
+    assert.deepEqual(attached.body.marketplaceSend, {
+      queued: true,
+      id: 1,
+      to: "Jamie Carter",
+      channel: "marketplace",
+    });
     assert.deepEqual(getMarketplaceSendRequest(), {
       pending: true,
       id: 1,
       to: "Jamie Carter",
       text: "Your order has shipped. Tracking: 9400111899223344556678.",
+      channel: "marketplace",
     });
 
     const duplicate = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
     assert.equal(duplicate.status, 200);
     assert.equal(duplicate.body.duplicate, true);
     assert.equal(getMarketplaceSendRequest().id, 1);
+  } finally {
+    mockContactName = "";
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+  }
+});
+
+test("priced OfferUp label attach queues tracking-only notice on OfferUp", async () => {
+  clearMarketplaceSendRequest();
+  mockCalls = [];
+  mockContactName = "Jamie Carter";
+  mockDealProperties = {
+    print_material_cost: "3.67",
+    print_labor_cost: "0",
+    print_packaging_cost: "0",
+    print_actual_shipping_cost: "",
+  };
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  try {
+    const attached = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", {
+      dealIds: ["701"],
+      trackingNumber: "9400111899223344556679",
+      postageUsd: "5.42",
+      messageChannel: "offerup",
+      labelBought: true,
+      packingDone: true,
+    });
+    assert.equal(attached.status, 200, attached.body?.error || "label attach failed");
+    assert.deepEqual(attached.body.marketplaceSend, {
+      queued: true,
+      id: 1,
+      to: "Jamie Carter",
+      channel: "offerup",
+    });
+    assert.deepEqual(getMarketplaceSendRequest(), {
+      pending: true,
+      id: 1,
+      to: "Jamie Carter",
+      text: "Your order has shipped. Tracking: 9400111899223344556679.",
+      channel: "offerup",
+    });
+    assert.doesNotMatch(getMarketplaceSendRequest().text, /5\.42|postage|\$/i);
   } finally {
     mockContactName = "";
     process.env.DRY_RUN = "true";

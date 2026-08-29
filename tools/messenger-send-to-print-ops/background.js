@@ -144,7 +144,7 @@ async function runInboxBrief(tab) {
 }
 
 async function runQueuedShipment(tab) {
-  if (!tab?.id) throw new Error("Open Marketplace Messenger or the mock inbox before sending.");
+  if (!tab?.id) throw new Error("Open Marketplace Messenger, OfferUp, or a mock inbox before sending.");
   const settings = await getSettings();
   const request = await getMarketplaceSendRequest(settings);
   if (!request.pending) return { pending: false };
@@ -154,11 +154,12 @@ async function runQueuedShipment(tab) {
     type: "print-ops-send-marketplace-request",
     to: request.to,
     text: request.text,
+    channel: request.channel || "marketplace",
   });
   if (!sent?.ok) throw new Error(sent?.error || "Could not send shipment notice; request remains pending.");
   // Only acknowledge the server slot after the page reports a successful send.
   await clearMarketplaceSendRequest(settings);
-  return { pending: true, to: request.to, title: sent.title };
+  return { pending: true, to: request.to, title: sent.title, channel: request.channel || "marketplace" };
 }
 
 function alertOnTab(tabId, message) {

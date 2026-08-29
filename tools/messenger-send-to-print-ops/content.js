@@ -1,5 +1,5 @@
 /**
- * Content script: full-thread scrape for mock Messenger + best-effort messenger.com.
+ * Content script: full-thread scrape for Marketplace and OfferUp.
  * Auto-scrolls the selected conversation so older bubbles load before extract.
  */
 (() => {
@@ -8,6 +8,12 @@
 
   const NOISE_RE =
     /^(?:you sent|enter|delivery|reacted|liked a message|sent an attachment|today|yesterday|\d{1,2}:\d{2}\s*(?:am|pm)?)$/i;
+  const isOfferUp = () => /(^|\.)offerup\.com$/i.test(location.hostname) || Boolean(window.__mockOfferUpInbox);
+  const isMarketplace = () =>
+    /(^|\.)messenger\.com$/i.test(location.hostname) ||
+    /(^|\.)facebook\.com$/i.test(location.hostname) ||
+    Boolean(window.__mockMarketplaceInbox);
+  const channelName = () => (isOfferUp() ? "OfferUp" : "Marketplace");
 
   function cleanBubbleText(raw) {
     return String(raw || "")
@@ -44,6 +50,8 @@
   function findThreadRoot() {
     return (
       document.querySelector("[data-print-ops-thread]") ||
+      document.querySelector('[data-testid*="conversation" i]') ||
+      document.querySelector('[data-testid*="message-thread" i]') ||
       document.querySelector('[role="main"] [role="log"]') ||
       document.querySelector('[role="main"] div[data-pagelet*="MWThread"]') ||
       document.querySelector("div[aria-label='Messages']") ||
@@ -72,6 +80,8 @@
     if (mock) return cleanBubbleText(mock.textContent || "");
     const heading =
       document.querySelector("h1") ||
+      document.querySelector('[data-testid*="conversation-title" i]') ||
+      document.querySelector('[data-testid*="thread-title" i]') ||
       document.querySelector('[role="main"] h2') ||
       document.querySelector("header h1");
     return cleanBubbleText(heading?.textContent || document.title || "");
@@ -80,6 +90,7 @@
   function normalizedThreadName(value) {
     return cleanBubbleText(value)
       .replace(/\(marketplace\)/gi, "")
+      .replace(/\(offerup\)/gi, "")
       .replace(/[^a-z0-9\s]/gi, " ")
       .replace(/\s+/g, " ")
       .trim()
@@ -95,13 +106,15 @@
   function listedThreadItems() {
     const listRoot =
       document.querySelector("[data-print-ops-thread-list]") ||
+      document.querySelector('[data-testid*="conversation-list" i]') ||
+      document.querySelector('[data-testid*="message-list" i]') ||
       document.querySelector('[aria-label="Chats"]') ||
       document.querySelector('[aria-label*="Conversations"]') ||
       document.querySelector('div[role="navigation"]');
     if (!listRoot) return [];
     return Array.from(
       listRoot.querySelectorAll(
-        '[data-print-ops-thread-item], a[role="link"], div[role="row"], div[role="listitem"]',
+        '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
       ),
     );
   }
@@ -116,22 +129,23 @@
     if (!recipient || normalizedThreadName(recipient).length < 2) {
       throw new Error("Queued shipment has no buyer name; it was not sent.");
     }
-    if (typeof window.__mockMarketplaceInbox?.openThreadByName === "function") {
-      const outcome = window.__mockMarketplaceInbox.openThreadByName(recipient);
+    const mockInbox = isOfferUp() ? window.__mockOfferUpInbox : window.__mockMarketplaceInbox;
+    if (typeof mockInbox?.openThreadByName === "function") {
+      const outcome = mockInbox.openThreadByName(recipient);
       if (outcome === "ambiguous") {
-        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+        throw new Error(`More than one exact ${channelName()} chat matches "${recipient}"; request left pending.`);
       }
       if (outcome) {
         await sleep(50);
         return;
       }
-      throw new Error(`Could not find Marketplace chat for "${recipient}", including archived chats. Request left pending.`);
+      throw new Error(`Could not find ${channelName()} chat for "${recipient}", including archived or hidden chats. Request left pending.`);
     }
 
     const clickMatchingThread = () => {
       const matches = listedThreadItems().filter((item) => exactThreadMatch(listedThreadTitle(item), recipient));
       if (matches.length > 1) {
-        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+        throw new Error(`More than one exact ${channelName()} chat matches "${recipient}"; request left pending.`);
       }
       const hit = matches[0];
       if (hit) hit.click();
@@ -142,13 +156,16 @@
       if (exactThreadMatch(threadTitle(), recipient)) return;
     }
 
-    // Messenger's archive is normally a navigation item. Open it before
-    // searching; search result titles still must exactly match the recipient.
-    const archived = Array.from(
-      document.querySelectorAll('[aria-label*="Archived" i], [title*="Archived" i], a[href*="archived" i]'),
-    ).find((el) => /archived/i.test(el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || ""));
-    if (archived) {
-      archived.click();
+    // Marketplace calls this archive; OfferUp UI can expose prior chats as
+    // Hidden or Past. Search each available view, still requiring one exact
+    // title before opening anything.
+    const historyViews = Array.from(
+      document.querySelectorAll(
+        '[aria-label*="Archived" i], [title*="Archived" i], a[href*="archived" i], [aria-label*="Hidden" i], [title*="Hidden" i], a[href*="hidden" i], [aria-label*="Past" i], [title*="Past" i], a[href*="past" i]',
+      ),
+    ).filter((el) => /archived|hidden|past/i.test(el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || ""));
+    for (const historyView of historyViews) {
+      historyView.click();
       await sleep(900);
       if (clickMatchingThread()) {
         await sleep(700);
@@ -170,7 +187,7 @@
         if (exactThreadMatch(threadTitle(), recipient)) return;
       }
     }
-    throw new Error(`Could not find an exact Marketplace chat for "${recipient}", including archived chats. Request left pending.`);
+    throw new Error(`Could not find an exact ${channelName()} chat for "${recipient}", including archived or hidden chats. Request left pending.`);
   }
 
   async function sendMarketplaceMessage(recipient, text) {
@@ -179,7 +196,7 @@
       throw new Error(`Opened chat does not exactly match "${recipient}"; request left pending.`);
     }
     const composer = document.querySelector(
-      '[data-print-ops-composer], [contenteditable="true"][role="textbox"], [contenteditable="true"][aria-label*="Message" i], textarea[aria-label*="Message" i]',
+      '[data-print-ops-composer], [contenteditable="true"][role="textbox"], [contenteditable="true"][aria-label*="Message" i], textarea[aria-label*="Message" i], textarea[placeholder*="Message" i], input[placeholder*="Message" i]',
     );
     if (!composer) throw new Error("Could not find the message composer; request left pending.");
     composer.focus();
@@ -191,7 +208,7 @@
     }
     await sleep(50);
     const send = document.querySelector(
-      '[data-print-ops-send], [aria-label="Send" i], [title="Send" i], button[type="submit"]',
+      '[data-print-ops-send], [aria-label="Send" i], [title="Send" i], button[data-testid*="send" i], button[type="submit"]',
     );
     if (send) send.click();
     else {
@@ -304,8 +321,9 @@
   async function scrapeInboxThreads(options = {}) {
     const maxThreads = options.maxThreads ?? 20;
 
-    if (typeof window.__mockMarketplaceInbox?.listThreads === "function") {
-      const listed = window.__mockMarketplaceInbox.listThreads().slice(0, maxThreads);
+    const mockInbox = isOfferUp() ? window.__mockOfferUpInbox : window.__mockMarketplaceInbox;
+    if (typeof mockInbox?.listThreads === "function") {
+      const listed = mockInbox.listThreads().slice(0, maxThreads);
       return {
         threads: listed.map((row) => ({
           id: row.id,
@@ -313,12 +331,14 @@
           unread: Boolean(row.unread),
           conversation: row.conversation,
         })),
-        source: "mock-inbox",
+        source: isOfferUp() ? "mock-offerup-inbox" : "mock-marketplace-inbox",
       };
     }
 
     const listRoot =
       document.querySelector("[data-print-ops-thread-list]") ||
+      document.querySelector('[data-testid*="conversation-list" i]') ||
+      document.querySelector('[data-testid*="message-list" i]') ||
       document.querySelector('[aria-label="Chats"]') ||
       document.querySelector('[aria-label*="Conversations"]') ||
       document.querySelector('div[role="navigation"]');
@@ -326,7 +346,7 @@
     const items = listRoot
       ? Array.from(
           listRoot.querySelectorAll(
-            '[data-print-ops-thread-item], a[role="link"], div[role="row"], div[role="listitem"]',
+            '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
           ),
         )
       : [];
@@ -445,6 +465,19 @@
       return true;
     }
     if (message.type === "print-ops-send-marketplace-request") {
+      const expectedChannel = message.channel === "offerup" ? "offerup" : "marketplace";
+      const actualChannel = isOfferUp() ? "offerup" : "marketplace";
+      if ((!isOfferUp() && !isMarketplace()) || (actualChannel === "marketplace" && !isMarketplace())) {
+        sendResponse({ ok: false, error: "Open Marketplace Messenger or OfferUp before sending. Request left pending." });
+        return;
+      }
+      if (expectedChannel !== actualChannel) {
+        sendResponse({
+          ok: false,
+          error: `Queued shipment is for ${expectedChannel === "offerup" ? "OfferUp" : "Marketplace"}; open that site before sending. Request left pending.`,
+        });
+        return;
+      }
       sendMarketplaceMessage(message.to, message.text)
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
