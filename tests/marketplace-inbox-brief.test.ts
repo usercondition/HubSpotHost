@@ -32,6 +32,11 @@ const {
   resetMarketplaceScanRequestStore,
   setMarketplaceScanRequest,
 } = await import("../server/lib/marketplace-scan-request-store");
+const {
+  clearMarketplaceSendRequest,
+  getMarketplaceSendRequest,
+  resetMarketplaceSendRequestStore,
+} = await import("../server/lib/marketplace-send-request-store");
 const { registerRoutes } = await import("../server/routes");
 
 let app: http.Server;
@@ -55,6 +60,7 @@ after(() => {
   app?.close();
   resetMarketplaceInboxBriefStore();
   resetMarketplaceScanRequestStore();
+  resetMarketplaceSendRequestStore();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       fs.unlinkSync(`${dbFile}${suffix}`);
@@ -207,4 +213,61 @@ test("Marketplace scan request API has a public read and owner-gated persistent 
   });
   assert.equal(cleared.status, 200);
   assert.deepEqual(await cleared.json(), { ok: true, requested: false, id: replacedBody.id });
+});
+
+test("Marketplace send request API is owner-gated and clears its one message slot", async () => {
+  clearMarketplaceSendRequest();
+  const url = `${appBase}/api/marketplace-send-request`;
+
+  const blockedRead = await fetch(url);
+  assert.equal(blockedRead.status, 401);
+
+  const blockedWrite = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pending: true, text: "This must not be queued without owner access." }),
+  });
+  assert.equal(blockedWrite.status, 401);
+
+  const queued = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ pending: true, text: "Your Acastus Knights quote is ready.", to: "Taylor" }),
+  });
+  const queuedBody = (await queued.json()) as { ok: boolean; pending: boolean; id: number; to: string };
+  assert.equal(queued.status, 201);
+  assert.deepEqual(queuedBody, { ok: true, pending: true, id: 1, to: "Taylor" });
+
+  const read = await fetch(url, { headers: { "x-paid-order-access-code": OWNER_CODE } });
+  assert.deepEqual(await read.json(), {
+    pending: true,
+    id: queuedBody.id,
+    to: "Taylor",
+    text: "Your Acastus Knights quote is ready.",
+  });
+
+  resetMarketplaceSendRequestStore();
+  assert.deepEqual(getMarketplaceSendRequest(), {
+    pending: true,
+    id: queuedBody.id,
+    to: "Taylor",
+    text: "Your Acastus Knights quote is ready.",
+  });
+
+  const cleared = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paid-order-access-code": OWNER_CODE,
+    },
+    body: JSON.stringify({ pending: false }),
+  });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(await cleared.json(), { ok: true, pending: false, id: queuedBody.id });
+
+  const clearedRead = await fetch(url, { headers: { "x-paid-order-access-code": OWNER_CODE } });
+  assert.deepEqual(await clearedRead.json(), { pending: false, id: queuedBody.id, to: "", text: "" });
 });
