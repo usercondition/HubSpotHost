@@ -1,10 +1,10 @@
 /**
  * Temporary Floor focus lists — reached from pressure-chip shortcuts.
- * Not in the nav rail; deep-link only (`/#/focus?kind=plates`).
+ * Not in the nav rail; deep-link only (`/#/focus/plates`).
  */
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useRoute } from "wouter";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -32,9 +32,17 @@ import type { PerformanceResponse } from "@shared/schema";
 
 const KIND_ORDER: FloorFocusKind[] = ["plates", "costs", "stale", "intake", "buyer"];
 
+function useFocusKind(): FloorFocusKind {
+  const [, params] = useRoute("/focus/:kind");
+  if (isFloorFocusKind(params?.kind)) return params.kind;
+  // Legacy `#/focus?kind=plates` (and stock-wouter search fallback).
+  const fromQuery = readHashQueryParam("kind");
+  if (isFloorFocusKind(fromQuery)) return fromQuery;
+  return "plates";
+}
+
 export default function FloorFocusPage() {
-  const rawKind = readHashQueryParam("kind");
-  const kind: FloorFocusKind = isFloorFocusKind(rawKind) ? rawKind : "plates";
+  const kind = useFocusKind();
   const meta = floorFocusMeta(kind);
 
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
