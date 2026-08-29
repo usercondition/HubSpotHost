@@ -197,7 +197,9 @@
         },
         openThreadByName(name) {
           const normalized = (value) => String(value).replace(/\(marketplace\)/ig, "").replace(/[^a-z0-9\s]/ig, " ").replace(/\s+/g, " ").trim().toLowerCase();
-          const found = THREADS.find((t) => normalized(t.title) === normalized(name));
+          const matches = THREADS.filter((t) => normalized(t.title) === normalized(name));
+          if (matches.length > 1) return "ambiguous";
+          const found = matches[0];
           if (!found) return false;
           showingArchived = Boolean(found.archived);
           activeId = found.id;

@@ -117,7 +117,11 @@
       throw new Error("Queued shipment has no buyer name; it was not sent.");
     }
     if (typeof window.__mockMarketplaceInbox?.openThreadByName === "function") {
-      if (window.__mockMarketplaceInbox.openThreadByName(recipient)) {
+      const outcome = window.__mockMarketplaceInbox.openThreadByName(recipient);
+      if (outcome === "ambiguous") {
+        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+      }
+      if (outcome) {
         await sleep(50);
         return;
       }
@@ -125,7 +129,11 @@
     }
 
     const clickMatchingThread = () => {
-      const hit = listedThreadItems().find((item) => exactThreadMatch(listedThreadTitle(item), recipient));
+      const matches = listedThreadItems().filter((item) => exactThreadMatch(listedThreadTitle(item), recipient));
+      if (matches.length > 1) {
+        throw new Error(`More than one exact Marketplace chat matches "${recipient}"; request left pending.`);
+      }
+      const hit = matches[0];
       if (hit) hit.click();
       return Boolean(hit);
     };
