@@ -58,7 +58,7 @@ test("attention next steps route plates and costs into Print files", () => {
 test("floor focus chip shortcuts map to focused lists and workspaces", () => {
   assert.equal(isFloorFocusKind("plates"), true);
   assert.equal(isFloorFocusKind("nope"), false);
-  assert.equal(floorFocusHref("costs"), "/focus?kind=costs");
+  assert.equal(floorFocusHref("costs"), "/focus/costs");
   assert.equal(floorFocusMeta("plates").issueKey, "no_plates");
   assert.equal(floorFocusMeta("plates").workspaceHref, "/prints");
   assert.equal(floorFocusMeta("intake").workspaceHref, "/orders");

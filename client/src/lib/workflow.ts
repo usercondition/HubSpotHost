@@ -7,8 +7,13 @@ export function readHashQueryParam(name: string): string | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash;
   const queryIndex = hash.indexOf("?");
-  if (queryIndex < 0) return null;
-  return new URLSearchParams(hash.slice(queryIndex + 1)).get(name);
+  if (queryIndex >= 0) {
+    const fromHash = new URLSearchParams(hash.slice(queryIndex + 1)).get(name);
+    if (fromHash != null && fromHash !== "") return fromHash;
+  }
+  // Legacy: stock wouter hash navigate() parked queries on location.search.
+  const fromSearch = new URLSearchParams(window.location.search).get(name);
+  return fromSearch != null && fromSearch !== "" ? fromSearch : null;
 }
 
 export function printsDealHref(dealId: string): string {
@@ -32,7 +37,7 @@ export function isFloorFocusKind(value: string | null | undefined): value is Flo
 }
 
 export function floorFocusHref(kind: FloorFocusKind): string {
-  return `/focus?kind=${encodeURIComponent(kind)}`;
+  return `/focus/${encodeURIComponent(kind)}`;
 }
 
 export function floorFocusMeta(kind: FloorFocusKind): {

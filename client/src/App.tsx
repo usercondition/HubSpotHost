@@ -1,7 +1,7 @@
 import { Switch, Route, Router } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
+import { useAppHashLocation } from "./lib/hash-location";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, ThemeProvider } from "@/components/shell";
@@ -32,6 +32,7 @@ function ShellRoutes() {
       <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/focus/:kind" component={FloorFocusPage} />
           <Route path="/focus" component={FloorFocusPage} />
           <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/labels" component={ShippingLabelsPage} />
@@ -65,7 +66,7 @@ function App() {
       <ThemeProvider>
         <TooltipProvider>
           <Toaster />
-          <Router hook={useHashLocation}>
+          <Router hook={useAppHashLocation}>
             <Switch>
               {/* Public buyer form. Legacy /client-order path still works. */}
               <Route path="/order-form/:token" component={ClientOrder} />
