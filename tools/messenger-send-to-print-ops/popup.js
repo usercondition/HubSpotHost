@@ -18,6 +18,9 @@ async function run(type) {
 document.getElementById("inbox").addEventListener("click", () => {
   run("print-ops-inbox-brief").catch((error) => setStatus(error?.message || String(error)));
 });
+document.getElementById("shipment").addEventListener("click", () => {
+  run("print-ops-send-queued-shipment").catch((error) => setStatus(error?.message || String(error)));
+});
 document.getElementById("thread").addEventListener("click", () => {
   run("print-ops-scan-request").catch((error) => setStatus(error?.message || String(error)));
 });
