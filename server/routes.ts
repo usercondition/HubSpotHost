@@ -1381,7 +1381,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             dealId: primaryDealId,
             trackingNumber: input.trackingNumber,
             to: contact.name,
-            text: `Your order has shipped. Tracking: ${input.trackingNumber}. Postage: $${postageAmount.toFixed(2)}.`,
+            text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
           })
         : null;
 

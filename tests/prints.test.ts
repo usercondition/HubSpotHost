@@ -520,7 +520,7 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
       pending: true,
       id: 1,
       to: "Jamie Carter",
-      text: "Your order has shipped. Tracking: 9400111899223344556678. Postage: $5.42.",
+      text: "Your order has shipped. Tracking: 9400111899223344556678.",
     });
 
     const duplicate = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
