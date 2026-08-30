@@ -35,20 +35,32 @@ function installHashWindow(initialHash = "#/", initialSearch = "") {
   return location;
 }
 
-test("hash navigate keeps query string inside the hash", async () => {
+test("hash navigate keeps query string inside the hash while matching its path", async () => {
   const location = installHashWindow("#/", "");
   const { navigateHash, currentHashPath } = await import("../client/src/lib/hash-location");
   const { readHashQueryParam } = await import("../client/src/lib/workflow");
 
   navigateHash("/focus?kind=costs");
   assert.equal(location.hash, "#/focus?kind=costs");
-  assert.equal(currentHashPath(), "/focus?kind=costs");
+  assert.equal(currentHashPath(), "/focus");
   assert.equal(readHashQueryParam("kind"), "costs");
   assert.equal(location.search, "");
 
   navigateHash("/prints?dealId=99");
   assert.equal(location.hash, "#/prints?dealId=99");
+  assert.equal(currentHashPath(), "/prints");
   assert.equal(readHashQueryParam("dealId"), "99");
+});
+
+test("hash route matching excludes helper deep-link queries", async () => {
+  const location = installHashWindow("#/marketplace-brief?brief=brief-123");
+  const { currentHashPath } = await import("../client/src/lib/hash-location");
+
+  assert.equal(currentHashPath(), "/marketplace-brief");
+  assert.equal(location.hash, "#/marketplace-brief?brief=brief-123");
+
+  location.hash = "#/paid-orders?bridge=bridge-456";
+  assert.equal(currentHashPath(), "/paid-orders");
 });
 
 test("readHashQueryParam still accepts legacy location.search parking", async () => {
