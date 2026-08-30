@@ -47,13 +47,13 @@
   </head>
   <body>
     <div class="app" data-print-ops-inbox>
-      <aside>
+      <aside role="navigation" aria-label="Messenger navigation">
         <header>
           <h1>Marketplace inbox</h1>
           <p>Mock list for Inbox brief testing</p>
         </header>
         <button id="archived" type="button" aria-label="Archived chats">Archived chats</button>
-        <div id="thread-list" data-print-ops-thread-list role="list"></div>
+        <div id="thread-list" data-pagelet="MWInboxList" aria-label="Chats" role="grid"></div>
       </aside>
       <main>
         <header data-print-ops-header style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
@@ -74,6 +74,7 @@
     </div>
     <script>
       const IS_OFFERUP = location.pathname.includes("mock-offerup");
+      const NO_LIST = new URLSearchParams(location.search).has("no-list");
       document.title = IS_OFFERUP ? "Mock OfferUp inbox — Print Ops brief test" : document.title;
       document.querySelector("aside h1").textContent = IS_OFFERUP ? "OfferUp messages" : "Marketplace inbox";
       document.querySelector("aside p").textContent = IS_OFFERUP ? "Mock list for OfferUp testing" : "Mock list for Inbox brief testing";
@@ -154,9 +155,9 @@
           btn.dataset.printOpsThreadItem = "true";
           btn.dataset.threadId = t.id;
           btn.dataset.unread = t.unread ? "true" : "false";
-          btn.setAttribute("role", "listitem");
+          btn.setAttribute("role", "row");
           if (t.id === activeId) btn.setAttribute("aria-current", "true");
-          btn.innerHTML = `<div class="name"><span>${t.title}</span>${t.unread ? '<span class="dot" title="Unread"></span>' : ""}</div><div class="snip">${t.messages[t.messages.length - 1].text}</div>`;
+          btn.innerHTML = `<div role="gridcell" class="name"><span dir="auto">${t.title}</span>${t.unread ? '<span class="dot" title="Unread"></span>' : ""}</div><div role="gridcell" class="snip">${t.messages[t.messages.length - 1].text}</div>`;
           btn.addEventListener("click", () => {
             activeId = t.id;
             renderList();
@@ -216,6 +217,10 @@
       };
       if (IS_OFFERUP) window.__mockOfferUpInbox = mockInbox;
       else window.__mockMarketplaceInbox = mockInbox;
+
+      // /dev/mock-messenger?no-list verifies that Inbox brief fails closed:
+      // the open conversation must never be submitted as an inbox-wide brief.
+      if (NO_LIST) listEl.remove();
 
       document.getElementById("archived").addEventListener("click", () => {
         showingArchived = true;
