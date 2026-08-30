@@ -37,10 +37,7 @@ async function scrapeActiveTab(tabId) {
 
 async function scrapeInbox(tabId) {
   await ensureContent(tabId);
-  const response = await chrome.tabs.sendMessage(tabId, {
-    type: "print-ops-scrape-inbox",
-    maxThreads: 20,
-  });
+  const response = await chrome.tabs.sendMessage(tabId, { type: "print-ops-scrape-inbox" });
   if (!response?.ok) throw new Error(response?.error || "Inbox scrape failed");
   return response;
 }
@@ -130,7 +127,7 @@ async function runThreadScan(tab) {
 }
 
 async function runInboxBrief(tab) {
-  if (!tab?.id) throw new Error("No active Messenger / mock inbox tab");
+  if (!tab?.id) throw new Error("Open Messenger / Marketplace in Comet and leave its chat list visible, then click Inbox brief.");
   const settings = await getSettings();
   const inbox = await scrapeInbox(tab.id);
   const created = await createBrief(settings, inbox);

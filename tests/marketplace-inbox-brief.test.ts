@@ -106,6 +106,38 @@ You: Let me know whenever you're ready`,
   assert.ok(brief.doFirst.some((t) => t.draftReply));
 });
 
+test("list-row previews keep every chat when one conversation pane is thin", () => {
+  // This mirrors the helper's inbox-list payload. It must not click through or
+  // require a conversation pane before producing a multi-thread brief.
+  const brief = buildMarketplaceInboxBrief([
+    {
+      id: "alex",
+      title: "Alex",
+      unread: true,
+      conversation: "Thread: Alex\nBuyer: How much shipped?",
+    },
+    {
+      id: "taylor-thin",
+      title: "Taylor (thin pane)",
+      unread: true,
+      conversation: "Thread: Taylor (thin pane)\nBuyer: Is this still available?",
+    },
+    {
+      id: "riley",
+      title: "Riley",
+      unread: false,
+      conversation: "Thread: Riley\nBuyer: Order complete on my end.",
+    },
+  ]);
+
+  assert.equal(brief.threadCount, 3);
+  assert.deepEqual(
+    brief.threads.map((thread) => thread.title).sort(),
+    ["Alex", "Riley", "Taylor (thin pane)"],
+  );
+  assert.equal(brief.threads.find((thread) => thread.id === "taylor-thin")?.status, "your_turn");
+});
+
 test("brief store replaces the previous brief instead of stacking history", () => {
   clearMarketplaceInboxBriefs();
   const first = createMarketplaceInboxBrief([

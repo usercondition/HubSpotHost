@@ -131,6 +131,13 @@
           ],
         },
         {
+          id: "taylor-thin",
+          title: "Taylor (thin pane)",
+          unread: true,
+          preview: "Is this still available?",
+          messages: [],
+        },
+        {
           id: "archived-jamie",
           title: IS_OFFERUP ? "Jamie Carter (OfferUp)" : "Jamie Carter (Marketplace)",
           archived: true,
@@ -156,7 +163,8 @@
           btn.dataset.unread = t.unread ? "true" : "false";
           btn.setAttribute("role", "listitem");
           if (t.id === activeId) btn.setAttribute("aria-current", "true");
-          btn.innerHTML = `<div class="name"><span>${t.title}</span>${t.unread ? '<span class="dot" title="Unread"></span>' : ""}</div><div class="snip">${t.messages[t.messages.length - 1].text}</div>`;
+          const preview = t.preview || t.messages[t.messages.length - 1]?.text || "";
+          btn.innerHTML = `<div class="name"><span>${t.title}</span>${t.unread ? '<span class="dot" title="Unread"></span>' : ""}</div><div class="snip" data-print-ops-thread-snippet>${preview}</div>`;
           btn.addEventListener("click", () => {
             activeId = t.id;
             renderList();
@@ -195,10 +203,7 @@
             id: t.id,
             title: t.title,
             unread: t.unread,
-            conversation: [
-              `Thread: ${t.title}`,
-              ...t.messages.map((m) => `${m.outgoing ? "You" : "Buyer"}: ${m.text}`),
-            ].join("\n"),
+            snippet: t.preview || t.messages[t.messages.length - 1]?.text || "",
           }));
         },
         openThreadByName(name) {

@@ -125,6 +125,28 @@
     );
   }
 
+  function listedThreadSnippet(el, title) {
+    const explicit = el.querySelector(
+      "[data-print-ops-thread-snippet], .snip, [data-testid*='snippet' i], [data-testid*='preview' i]",
+    );
+    const text = cleanBubbleText(explicit?.textContent || "");
+    if (text) return text;
+
+    // A row usually contains its sender/title followed by its latest message.
+    // Keep this deliberately conservative: a slightly noisy preview is useful
+    // for triage, while treating the whole row as a conversation is not.
+    const rowText = cleanBubbleText(el.textContent || "");
+    const normalizedTitle = cleanBubbleText(title);
+    if (normalizedTitle && rowText.startsWith(normalizedTitle)) {
+      return cleanBubbleText(rowText.slice(normalizedTitle.length));
+    }
+    return "";
+  }
+
+  function inboxConversation(title, snippet) {
+    return [`Thread: ${title}`, snippet ? `Buyer: ${snippet}` : ""].filter(Boolean).join("\n");
+  }
+
   async function openMarketplaceThread(recipient) {
     if (!recipient || normalizedThreadName(recipient).length < 2) {
       throw new Error("Queued shipment has no buyer name; it was not sent.");
@@ -316,10 +338,12 @@
   }
 
   /**
-   * Prefer mock inbox dump; else click through listed chats (best-effort).
+   * Build an inbox brief from the left rail. The list is the source of truth:
+   * every visible row stays in the brief even if its conversation pane is
+   * unloaded, sparse, or disappears during a click-through.
    */
   async function scrapeInboxThreads(options = {}) {
-    const maxThreads = options.maxThreads ?? 20;
+    const maxThreads = Number.isFinite(options.maxThreads) ? options.maxThreads : Infinity;
 
     const mockInbox = isOfferUp() ? window.__mockOfferUpInbox : window.__mockMarketplaceInbox;
     if (typeof mockInbox?.listThreads === "function") {
@@ -329,7 +353,7 @@
           id: row.id,
           title: row.title,
           unread: Boolean(row.unread),
-          conversation: row.conversation,
+          conversation: inboxConversation(row.title, row.snippet),
         })),
         source: isOfferUp() ? "mock-offerup-inbox" : "mock-marketplace-inbox",
       };
@@ -343,72 +367,76 @@
       document.querySelector('[aria-label*="Conversations"]') ||
       document.querySelector('div[role="navigation"]');
 
-    const items = listRoot
-      ? Array.from(
-          listRoot.querySelectorAll(
-            '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
-          ),
-        )
-      : [];
+    if (!listRoot) {
+      throw new Error(
+        "No Marketplace chat list found. In Comet, open Messenger / Marketplace and leave the left chat list visible, then click Inbox brief.",
+      );
+    }
 
     const picks = [];
     const seen = new Set();
-    for (const el of items) {
-      const title = cleanBubbleText(
-        el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+
+    const collectVisibleRows = () => {
+      const items = Array.from(
+        listRoot.querySelectorAll(
+          '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
+        ),
       );
-      if (!title || title.length < 2 || seen.has(title)) continue;
-      // Skip obvious chrome.
-      if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
-      seen.add(title);
-      const unread =
-        el.getAttribute("data-unread") === "true" ||
-        Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
-        /unread/i.test(el.getAttribute("aria-label") || "");
-      picks.push({ el, title, unread });
-      if (picks.length >= maxThreads) break;
+      for (const el of items) {
+        const title = listedThreadTitle(el);
+        if (!title || title.length < 2 || seen.has(title)) continue;
+        // Skip obvious chrome.
+        if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
+        seen.add(title);
+        const unread =
+          el.getAttribute("data-unread") === "true" ||
+          Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
+          /unread/i.test(el.getAttribute("aria-label") || "");
+        picks.push({ title, unread, snippet: listedThreadSnippet(el, title) });
+        if (picks.length >= maxThreads) return;
+      }
+    };
+
+    // Messenger virtualizes older rows. Walk the left rail until it stops
+    // advancing, while retaining every row seen along the way.
+    let stablePasses = 0;
+    let previousTop = -1;
+    for (let pass = 0; pass < 160 && picks.length < maxThreads; pass++) {
+      collectVisibleRows();
+      const nextTop = Math.min(
+        listRoot.scrollHeight,
+        listRoot.scrollTop + Math.max(300, Math.floor(listRoot.clientHeight * 0.85)),
+      );
+      if (nextTop <= listRoot.scrollTop + 1 || listRoot.scrollTop === previousTop) {
+        stablePasses += 1;
+        if (stablePasses >= 3) break;
+      } else {
+        stablePasses = 0;
+      }
+      previousTop = listRoot.scrollTop;
+      listRoot.scrollTop = nextTop;
+      listRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await sleep(250);
     }
+    collectVisibleRows();
 
     if (!picks.length) {
-      // Fallback: brief the open thread only.
-      const one = await scrapeSelectedThread();
-      return {
-        threads: [
-          {
-            id: one.href || "open-thread",
-            title: one.title,
-            unread: false,
-            conversation: one.conversation,
-          },
-        ],
-        source: "open-thread-fallback",
-      };
+      throw new Error(
+        "No Marketplace chats were found in the visible list. In Comet, leave the Messenger / Marketplace chat list open and try Inbox brief again.",
+      );
     }
 
     // Unread first.
     picks.sort((a, b) => Number(b.unread) - Number(a.unread));
-
-    const threads = [];
-    for (const pick of picks) {
-      try {
-        pick.el.click();
-        await sleep(700);
-        const scraped = await scrapeSelectedThread();
-        threads.push({
-          id: pick.title,
-          title: scraped.title || pick.title,
-          unread: pick.unread,
-          conversation: scraped.conversation,
-        });
-      } catch {
-        // Skip stubborn rows.
-      }
-    }
-
-    if (!threads.length) {
-      throw new Error("Could not read any inbox threads. Open Messenger and try again.");
-    }
-    return { threads, source: "inbox-clickthrough" };
+    return {
+      threads: picks.map((pick) => ({
+        id: pick.title,
+        title: pick.title,
+        unread: pick.unread,
+        conversation: inboxConversation(pick.title, pick.snippet),
+      })),
+      source: "inbox-list",
+    };
   }
 
   function ensureFab() {
@@ -459,7 +487,7 @@
       return true;
     }
     if (message.type === "print-ops-scrape-inbox") {
-      scrapeInboxThreads({ maxThreads: message.maxThreads || 20 })
+      scrapeInboxThreads({ maxThreads: message.maxThreads })
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
       return true;
