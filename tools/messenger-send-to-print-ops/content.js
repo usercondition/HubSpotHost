@@ -103,25 +103,50 @@
     return normalizedThreadName(title) === normalizedThreadName(recipient);
   }
 
-  function listedThreadItems() {
-    const listRoot =
+  function findInboxThreadList() {
+    return (
       document.querySelector("[data-print-ops-thread-list]") ||
       document.querySelector('[data-testid*="conversation-list" i]') ||
       document.querySelector('[data-testid*="message-list" i]') ||
-      document.querySelector('[aria-label="Chats"]') ||
-      document.querySelector('[aria-label*="Conversations"]') ||
-      document.querySelector('div[role="navigation"]');
-    if (!listRoot) return [];
-    return Array.from(
-      listRoot.querySelectorAll(
-        '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
-      ),
+      document.querySelector('[data-pagelet*="MWInbox" i]') ||
+      document.querySelector('[aria-label="Chats" i]') ||
+      document.querySelector('[aria-label*="Chats" i] [role="grid"]') ||
+      document.querySelector('[aria-label*="Conversations" i]') ||
+      document.querySelector('div[role="navigation"] [role="grid"]') ||
+      document.querySelector('div[role="navigation"] [role="list"]') ||
+      document.querySelector('div[role="navigation"]')
     );
+  }
+
+  function listedThreadItems(listRoot = findInboxThreadList()) {
+    if (!listRoot) return [];
+    const selector =
+      '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[href*="/t/"], a[role="link"], [role="row"], [role="listitem"]';
+    return Array.from(listRoot.querySelectorAll(selector)).filter(
+      (item) => item.closest(selector) === item,
+    );
+  }
+
+  function findInboxScrollContainer(listRoot) {
+    let node = listRoot;
+    for (let i = 0; i < 8 && node; i++) {
+      const style = window.getComputedStyle(node);
+      if (
+        (style.overflowY === "auto" || style.overflowY === "scroll") &&
+        node.scrollHeight > node.clientHeight + 4
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return listRoot;
   }
 
   function listedThreadTitle(el) {
     return cleanBubbleText(
-      el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+      el.querySelector(".name span, [dir='auto'], span, strong")?.textContent ||
+        el.getAttribute("aria-label") ||
+        "",
     );
   }
 
@@ -319,10 +344,10 @@
    * Prefer mock inbox dump; else click through listed chats (best-effort).
    */
   async function scrapeInboxThreads(options = {}) {
-    const maxThreads = options.maxThreads ?? 20;
+    const maxThreads = options.maxThreads ?? Infinity;
 
     const mockInbox = isOfferUp() ? window.__mockOfferUpInbox : window.__mockMarketplaceInbox;
-    if (typeof mockInbox?.listThreads === "function") {
+    if (window.__printOpsUseMockInboxData && typeof mockInbox?.listThreads === "function") {
       const listed = mockInbox.listThreads().slice(0, maxThreads);
       return {
         threads: listed.map((row) => ({
@@ -335,63 +360,70 @@
       };
     }
 
-    const listRoot =
-      document.querySelector("[data-print-ops-thread-list]") ||
-      document.querySelector('[data-testid*="conversation-list" i]') ||
-      document.querySelector('[data-testid*="message-list" i]') ||
-      document.querySelector('[aria-label="Chats"]') ||
-      document.querySelector('[aria-label*="Conversations"]') ||
-      document.querySelector('div[role="navigation"]');
-
-    const items = listRoot
-      ? Array.from(
-          listRoot.querySelectorAll(
-            '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
-          ),
-        )
-      : [];
-
-    const picks = [];
-    const seen = new Set();
-    for (const el of items) {
-      const title = cleanBubbleText(
-        el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+    const listRoot = findInboxThreadList();
+    if (!listRoot) {
+      throw new Error(
+        "Could not find the inbox thread list. Open Messenger chats (messenger.com or facebook.com/messages) with the list visible.",
       );
-      if (!title || title.length < 2 || seen.has(title)) continue;
+    }
+    const listScrollEl = findInboxScrollContainer(listRoot);
+
+    const picks = new Map();
+    const addVisibleThreads = () => {
+      for (const el of listedThreadItems(listRoot)) {
+        const title = listedThreadTitle(el);
+        if (!title || title.length < 2 || picks.has(title)) continue;
       // Skip obvious chrome.
-      if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
-      seen.add(title);
-      const unread =
-        el.getAttribute("data-unread") === "true" ||
-        Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
-        /unread/i.test(el.getAttribute("aria-label") || "");
-      picks.push({ el, title, unread });
-      if (picks.length >= maxThreads) break;
+        if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
+        const unread =
+          el.getAttribute("data-unread") === "true" ||
+          Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
+          /unread/i.test(el.getAttribute("aria-label") || "");
+        picks.set(title, { el, title, unread });
+        if (picks.size >= maxThreads) return;
+      }
+    };
+
+    // Messenger virtualizes its left rail. Gather every unique visible chat
+    // while moving through it; only a large safety limit prevents a broken DOM
+    // from keeping the tab busy forever.
+    let stableRounds = 0;
+    let previousCount = 0;
+    for (let pass = 0; pass < 100 && picks.size < maxThreads; pass++) {
+      addVisibleThreads();
+      const atBottom =
+        listScrollEl.scrollTop + listScrollEl.clientHeight >= listScrollEl.scrollHeight - 4;
+      if (picks.size === previousCount && atBottom) {
+        stableRounds += 1;
+        if (stableRounds >= 2) break;
+      } else {
+        stableRounds = 0;
+      }
+      previousCount = picks.size;
+      listScrollEl.scrollTop = Math.min(
+        listScrollEl.scrollHeight,
+        listScrollEl.scrollTop + Math.max(300, Math.floor(listScrollEl.clientHeight * 0.85)),
+      );
+      listScrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await sleep(350);
     }
 
-    if (!picks.length) {
-      // Fallback: brief the open thread only.
-      const one = await scrapeSelectedThread();
-      return {
-        threads: [
-          {
-            id: one.href || "open-thread",
-            title: one.title,
-            unread: false,
-            conversation: one.conversation,
-          },
-        ],
-        source: "open-thread-fallback",
-      };
+    if (!picks.size) {
+      throw new Error(
+        "Could not find inbox chat rows. Open Messenger chats (messenger.com or facebook.com/messages) with the list visible.",
+      );
     }
 
     // Unread first.
-    picks.sort((a, b) => Number(b.unread) - Number(a.unread));
+    const rankedPicks = Array.from(picks.values()).sort((a, b) => Number(b.unread) - Number(a.unread));
 
     const threads = [];
-    for (const pick of picks) {
+    for (const pick of rankedPicks) {
       try {
-        pick.el.click();
+        // Prefer a current node after virtualization; retain the discovered node
+        // as a fallback for static lists and the local mock.
+        const liveRow = listedThreadItems(listRoot).find((item) => listedThreadTitle(item) === pick.title);
+        (liveRow || pick.el).click();
         await sleep(700);
         const scraped = await scrapeSelectedThread();
         threads.push({
@@ -459,7 +491,7 @@
       return true;
     }
     if (message.type === "print-ops-scrape-inbox") {
-      scrapeInboxThreads({ maxThreads: message.maxThreads || 20 })
+      scrapeInboxThreads({ maxThreads: message.maxThreads || Infinity })
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
       return true;
@@ -484,6 +516,22 @@
       return true;
     }
   });
+
+  // Local mock-only test seam. It lets the browser smoke test exercise the
+  // content script's real DOM locators without exposing a production API.
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.pathname.startsWith("/dev/mock-")) {
+    document.addEventListener("print-ops-test-scrape-inbox", async () => {
+      try {
+        const result = await scrapeInboxThreads();
+        document.documentElement.dataset.printOpsInboxTestResult = JSON.stringify({ ok: true, ...result });
+      } catch (error) {
+        document.documentElement.dataset.printOpsInboxTestResult = JSON.stringify({
+          ok: false,
+          error: error?.message || String(error),
+        });
+      }
+    });
+  }
 
   ensureFab();
 })();

@@ -39,7 +39,6 @@ async function scrapeInbox(tabId) {
   await ensureContent(tabId);
   const response = await chrome.tabs.sendMessage(tabId, {
     type: "print-ops-scrape-inbox",
-    maxThreads: 20,
   });
   if (!response?.ok) throw new Error(response?.error || "Inbox scrape failed");
   return response;
