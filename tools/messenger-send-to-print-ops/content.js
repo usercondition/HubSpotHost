@@ -150,6 +150,15 @@
     );
   }
 
+  function listedThreadKey(el, title) {
+    return (
+      el.getAttribute("data-thread-id") ||
+      el.getAttribute("data-threadid") ||
+      el.getAttribute("href") ||
+      `${title}\n${cleanBubbleText(el.textContent || "")}`
+    );
+  }
+
   async function openMarketplaceThread(recipient) {
     if (!recipient || normalizedThreadName(recipient).length < 2) {
       throw new Error("Queued shipment has no buyer name; it was not sent.");
@@ -372,14 +381,15 @@
     const addVisibleThreads = () => {
       for (const el of listedThreadItems(listRoot)) {
         const title = listedThreadTitle(el);
-        if (!title || title.length < 2 || picks.has(title)) continue;
-      // Skip obvious chrome.
+        const key = listedThreadKey(el, title);
+        if (!title || title.length < 2 || picks.has(key)) continue;
+        // Skip obvious chrome.
         if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
         const unread =
           el.getAttribute("data-unread") === "true" ||
           Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
           /unread/i.test(el.getAttribute("aria-label") || "");
-        picks.set(title, { el, title, unread });
+        picks.set(key, { el, key, title, unread });
         if (picks.size >= maxThreads) return;
       }
     };
@@ -387,15 +397,22 @@
     // Messenger virtualizes its left rail. Gather every unique visible chat
     // while moving through it; only a large safety limit prevents a broken DOM
     // from keeping the tab busy forever.
+    listScrollEl.scrollTop = 0;
+    listScrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await sleep(350);
     let stableRounds = 0;
     let previousCount = 0;
+    let reachedEnd = false;
     for (let pass = 0; pass < 100 && picks.size < maxThreads; pass++) {
       addVisibleThreads();
       const atBottom =
         listScrollEl.scrollTop + listScrollEl.clientHeight >= listScrollEl.scrollHeight - 4;
       if (picks.size === previousCount && atBottom) {
         stableRounds += 1;
-        if (stableRounds >= 2) break;
+        if (stableRounds >= 2) {
+          reachedEnd = true;
+          break;
+        }
       } else {
         stableRounds = 0;
       }
@@ -408,6 +425,11 @@
       await sleep(350);
     }
 
+    if (!reachedEnd && picks.size < maxThreads) {
+      throw new Error(
+        "Inbox list kept loading and could not be fully scanned. Wait for Messenger chats to finish loading, then run Inbox brief again.",
+      );
+    }
     if (!picks.size) {
       throw new Error(
         "Could not find inbox chat rows. Open Messenger chats (messenger.com or facebook.com/messages) with the list visible.",
@@ -419,22 +441,28 @@
 
     const threads = [];
     for (const pick of rankedPicks) {
-      try {
-        // Prefer a current node after virtualization; retain the discovered node
-        // as a fallback for static lists and the local mock.
-        const liveRow = listedThreadItems(listRoot).find((item) => listedThreadTitle(item) === pick.title);
-        (liveRow || pick.el).click();
-        await sleep(700);
-        const scraped = await scrapeSelectedThread();
-        threads.push({
-          id: pick.title,
-          title: scraped.title || pick.title,
-          unread: pick.unread,
-          conversation: scraped.conversation,
-        });
-      } catch {
-        // Skip stubborn rows.
+      const liveRow = listedThreadItems(listRoot).find(
+        (item) => listedThreadKey(item, listedThreadTitle(item)) === pick.key,
+      );
+      if (!liveRow) {
+        throw new Error(
+          `Inbox changed before "${pick.title}" could be opened. No brief was created; reload Messenger and try again.`,
+        );
       }
+      liveRow.click();
+      await sleep(700);
+      const scraped = await scrapeSelectedThread();
+      if (!exactThreadMatch(scraped.title, pick.title)) {
+        throw new Error(
+          `Opened "${scraped.title}" instead of "${pick.title}". No brief was created; reload Messenger and try again.`,
+        );
+      }
+      threads.push({
+        id: pick.key,
+        title: scraped.title || pick.title,
+        unread: pick.unread,
+        conversation: scraped.conversation,
+      });
     }
 
     if (!threads.length) {
