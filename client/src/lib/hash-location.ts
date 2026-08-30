@@ -28,11 +28,17 @@ function subscribe(callback: () => void) {
   };
 }
 
-/** Path + search from the hash only (`#/focus?kind=plates` → `/focus?kind=plates`). */
+/**
+ * Route path from the hash only (`#/focus?kind=plates` → `/focus`).
+ *
+ * Wouter matches this value against route paths, so hash query strings must be
+ * excluded. They remain in `window.location.hash` for readHashQueryParam().
+ */
 export function currentHashPath(): string {
   const raw = window.location.hash.replace(/^#/, "");
-  if (!raw || raw === "/") return "/";
-  return raw.startsWith("/") ? raw : `/${raw}`;
+  const hashPath = raw.split("?", 1)[0];
+  if (!hashPath || hashPath === "/") return "/";
+  return hashPath.startsWith("/") ? hashPath : `/${hashPath}`;
 }
 
 export function navigateHash(to: string, opts: NavigateOpts = {}) {
