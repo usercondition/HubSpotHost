@@ -103,25 +103,59 @@
     return normalizedThreadName(title) === normalizedThreadName(recipient);
   }
 
-  function listedThreadItems() {
-    const listRoot =
+  function findInboxThreadList() {
+    return (
       document.querySelector("[data-print-ops-thread-list]") ||
       document.querySelector('[data-testid*="conversation-list" i]') ||
       document.querySelector('[data-testid*="message-list" i]') ||
-      document.querySelector('[aria-label="Chats"]') ||
-      document.querySelector('[aria-label*="Conversations"]') ||
-      document.querySelector('div[role="navigation"]');
-    if (!listRoot) return [];
-    return Array.from(
-      listRoot.querySelectorAll(
-        '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
-      ),
+      document.querySelector('[data-pagelet*="MWInbox" i]') ||
+      document.querySelector('[aria-label="Chats" i]') ||
+      document.querySelector('[aria-label*="Chats" i] [role="grid"]') ||
+      document.querySelector('[aria-label*="Conversations" i]') ||
+      document.querySelector('div[role="navigation"] [role="grid"]') ||
+      document.querySelector('div[role="navigation"] [role="list"]') ||
+      document.querySelector('div[role="navigation"]')
     );
+  }
+
+  function listedThreadItems(listRoot = findInboxThreadList()) {
+    if (!listRoot) return [];
+    const selector =
+      '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[href*="/t/"], a[role="link"], [role="row"], [role="listitem"]';
+    return Array.from(listRoot.querySelectorAll(selector)).filter(
+      (item) => item.closest(selector) === item,
+    );
+  }
+
+  function findInboxScrollContainer(listRoot) {
+    let node = listRoot;
+    for (let i = 0; i < 8 && node; i++) {
+      const style = window.getComputedStyle(node);
+      if (
+        (style.overflowY === "auto" || style.overflowY === "scroll") &&
+        node.scrollHeight > node.clientHeight + 4
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return listRoot;
   }
 
   function listedThreadTitle(el) {
     return cleanBubbleText(
-      el.querySelector(".name span, span, strong")?.textContent || el.getAttribute("aria-label") || "",
+      el.querySelector(".name span, [dir='auto'], span, strong")?.textContent ||
+        el.getAttribute("aria-label") ||
+        "",
+    );
+  }
+
+  function listedThreadKey(el, title) {
+    return (
+      el.getAttribute("data-thread-id") ||
+      el.getAttribute("data-threadid") ||
+      el.getAttribute("href") ||
+      `${title}\n${cleanBubbleText(el.textContent || "")}`
     );
   }
 
@@ -131,16 +165,8 @@
     );
     const text = cleanBubbleText(explicit?.textContent || "");
     if (text) return text;
-
-    // A row usually contains its sender/title followed by its latest message.
-    // Keep this deliberately conservative: a slightly noisy preview is useful
-    // for triage, while treating the whole row as a conversation is not.
     const rowText = cleanBubbleText(el.textContent || "");
-    const normalizedTitle = cleanBubbleText(title);
-    if (normalizedTitle && rowText.startsWith(normalizedTitle)) {
-      return cleanBubbleText(rowText.slice(normalizedTitle.length));
-    }
-    return "";
+    return rowText.startsWith(title) ? cleanBubbleText(rowText.slice(title.length)) : "";
   }
 
   function inboxConversation(title, snippet) {
@@ -337,16 +363,12 @@
     };
   }
 
-  /**
-   * Build an inbox brief from the left rail. The list is the source of truth:
-   * every visible row stays in the brief even if its conversation pane is
-   * unloaded, sparse, or disappears during a click-through.
-   */
+  /** Build an inbox brief from the left rail, without requiring thread panes. */
   async function scrapeInboxThreads(options = {}) {
-    const maxThreads = Number.isFinite(options.maxThreads) ? options.maxThreads : Infinity;
+    const maxThreads = options.maxThreads ?? Infinity;
 
     const mockInbox = isOfferUp() ? window.__mockOfferUpInbox : window.__mockMarketplaceInbox;
-    if (typeof mockInbox?.listThreads === "function") {
+    if (window.__printOpsUseMockInboxData && typeof mockInbox?.listThreads === "function") {
       const listed = mockInbox.listThreads().slice(0, maxThreads);
       return {
         threads: listed.map((row) => ({
@@ -359,78 +381,66 @@
       };
     }
 
-    const listRoot =
-      document.querySelector("[data-print-ops-thread-list]") ||
-      document.querySelector('[data-testid*="conversation-list" i]') ||
-      document.querySelector('[data-testid*="message-list" i]') ||
-      document.querySelector('[aria-label="Chats"]') ||
-      document.querySelector('[aria-label*="Conversations"]') ||
-      document.querySelector('div[role="navigation"]');
-
+    const listRoot = findInboxThreadList();
     if (!listRoot) {
       throw new Error(
         "No Marketplace chat list found. In Comet, open Messenger / Marketplace and leave the left chat list visible, then click Inbox brief.",
       );
     }
+    const listScrollEl = findInboxScrollContainer(listRoot);
 
-    const picks = [];
-    const seen = new Set();
-
-    const collectVisibleRows = () => {
-      const items = Array.from(
-        listRoot.querySelectorAll(
-          '[data-print-ops-thread-item], [data-testid*="conversation" i], [data-testid*="thread" i], a[role="link"], div[role="row"], div[role="listitem"]',
-        ),
-      );
-      for (const el of items) {
+    const picks = new Map();
+    const addVisibleThreads = () => {
+      for (const el of listedThreadItems(listRoot)) {
         const title = listedThreadTitle(el);
-        if (!title || title.length < 2 || seen.has(title)) continue;
+        const key = listedThreadKey(el, title);
+        if (!title || title.length < 2 || picks.has(key)) continue;
         // Skip obvious chrome.
         if (/^(chats|marketplace|inbox|filtered|messages)$/i.test(title)) continue;
-        seen.add(title);
         const unread =
           el.getAttribute("data-unread") === "true" ||
           Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
           /unread/i.test(el.getAttribute("aria-label") || "");
-        picks.push({ title, unread, snippet: listedThreadSnippet(el, title) });
-        if (picks.length >= maxThreads) return;
+        picks.set(key, { key, title, unread, snippet: listedThreadSnippet(el, title) });
+        if (picks.size >= maxThreads) return;
       }
     };
 
-    // Messenger virtualizes older rows. Walk the left rail until it stops
-    // advancing, while retaining every row seen along the way.
-    let stablePasses = 0;
-    let previousTop = -1;
-    for (let pass = 0; pass < 160 && picks.length < maxThreads; pass++) {
-      collectVisibleRows();
-      const nextTop = Math.min(
-        listRoot.scrollHeight,
-        listRoot.scrollTop + Math.max(300, Math.floor(listRoot.clientHeight * 0.85)),
-      );
-      if (nextTop <= listRoot.scrollTop + 1 || listRoot.scrollTop === previousTop) {
-        stablePasses += 1;
-        if (stablePasses >= 3) break;
+    // Messenger virtualizes its left rail. Gather every unique visible chat
+    // while moving through it; only a large safety limit prevents a broken DOM
+    // from keeping the tab busy forever.
+    listScrollEl.scrollTop = 0;
+    listScrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await sleep(350);
+    let stableRounds = 0;
+    let previousCount = 0;
+    for (let pass = 0; pass < 100 && picks.size < maxThreads; pass++) {
+      addVisibleThreads();
+      const atBottom =
+        listScrollEl.scrollTop + listScrollEl.clientHeight >= listScrollEl.scrollHeight - 4;
+      if (picks.size === previousCount && atBottom) {
+        stableRounds += 1;
+        if (stableRounds >= 2) {
+          break;
+        }
       } else {
-        stablePasses = 0;
+        stableRounds = 0;
       }
-      previousTop = listRoot.scrollTop;
-      listRoot.scrollTop = nextTop;
-      listRoot.dispatchEvent(new Event("scroll", { bubbles: true }));
-      await sleep(250);
-    }
-    collectVisibleRows();
-
-    if (!picks.length) {
-      throw new Error(
-        "No Marketplace chats were found in the visible list. In Comet, leave the Messenger / Marketplace chat list open and try Inbox brief again.",
+      previousCount = picks.size;
+      listScrollEl.scrollTop = Math.min(
+        listScrollEl.scrollHeight,
+        listScrollEl.scrollTop + Math.max(300, Math.floor(listScrollEl.clientHeight * 0.85)),
       );
+      listScrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await sleep(350);
     }
 
     // Unread first.
-    picks.sort((a, b) => Number(b.unread) - Number(a.unread));
+    const rankedPicks = Array.from(picks.values()).sort((a, b) => Number(b.unread) - Number(a.unread));
+
     return {
-      threads: picks.map((pick) => ({
-        id: pick.title,
+      threads: rankedPicks.map((pick) => ({
+        id: pick.key,
         title: pick.title,
         unread: pick.unread,
         conversation: inboxConversation(pick.title, pick.snippet),
@@ -487,7 +497,7 @@
       return true;
     }
     if (message.type === "print-ops-scrape-inbox") {
-      scrapeInboxThreads({ maxThreads: message.maxThreads })
+      scrapeInboxThreads({ maxThreads: message.maxThreads || Infinity })
         .then((result) => sendResponse({ ok: true, ...result }))
         .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
       return true;
@@ -512,6 +522,22 @@
       return true;
     }
   });
+
+  // Local mock-only test seam. It lets the browser smoke test exercise the
+  // content script's real DOM locators without exposing a production API.
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.pathname.startsWith("/dev/mock-")) {
+    document.addEventListener("print-ops-test-scrape-inbox", async () => {
+      try {
+        const result = await scrapeInboxThreads();
+        document.documentElement.dataset.printOpsInboxTestResult = JSON.stringify({ ok: true, ...result });
+      } catch (error) {
+        document.documentElement.dataset.printOpsInboxTestResult = JSON.stringify({
+          ok: false,
+          error: error?.message || String(error),
+        });
+      }
+    });
+  }
 
   ensureFab();
 })();
