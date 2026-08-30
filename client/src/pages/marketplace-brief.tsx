@@ -249,9 +249,9 @@ You: Let me know whenever you're ready`,
         <>
           <section className="rounded-md border border-card-border bg-card px-4 py-3 text-sm text-muted-foreground">
             <p>
-              <strong className="font-medium text-foreground">How to run:</strong> in Chrome, open Messenger /
-              Marketplace inbox → extension → <strong className="font-medium text-foreground">Inbox brief</strong>.
-              It scans recent threads and opens this page with the secretary summary.
+              <strong className="font-medium text-foreground">How to run:</strong> in Comet, open Messenger /
+              Marketplace and leave the left chat list visible → extension → <strong className="font-medium text-foreground">Inbox brief</strong>.
+              It scans every discovered list row and opens this page with the secretary summary.
             </p>
             <p className="mt-2">
               Download helper from{" "}

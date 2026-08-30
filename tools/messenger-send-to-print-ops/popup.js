@@ -5,7 +5,7 @@ function setStatus(text) {
 }
 
 async function run(type) {
-  setStatus(type === "inbox" ? "Scanning inbox…" : "Scanning thread…");
+  setStatus(type === "print-ops-inbox-brief" ? "Scanning the visible chat list…" : "Scanning thread…");
   const response = await chrome.runtime.sendMessage({ type });
   if (!response?.ok) {
     setStatus(response?.error || "Failed");

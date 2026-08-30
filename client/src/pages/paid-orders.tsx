@@ -426,7 +426,7 @@ export default function PaidOrders() {
                     Extension Options: keep the Print Ops URL, paste your owner access code, Save
                   </li>
                   <li>
-                    Open Messenger → extension → <strong className="font-medium text-foreground">Run inbox brief</strong>{" "}
+                    In Comet, open Messenger with its chat list visible → extension → <strong className="font-medium text-foreground">Inbox brief</strong>{" "}
                     (secretary summary on the <Link href="/marketplace-brief" className="hs-link">Brief</Link> page).
                     Optional: send one thread into Manual.
                   </li>
