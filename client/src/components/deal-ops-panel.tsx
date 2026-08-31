@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { hubspotDealHref } from "@/lib/workflow";
-import { StatusPill } from "@/components/primitives";
+import { StatusPill, WorkspaceSection } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -319,9 +319,9 @@ export function DealOpsPanel({
   }
 
   if (detail.isError || !detail.data) {
-    return (
-      <div className={cn(!flush && "rounded-lg border border-destructive/35 bg-card p-5")}>
-        <div className="flex items-start gap-3">
+    if (flush) {
+      return (
+        <div className="flex items-start gap-3" data-testid="panel-deal-ops-error">
           <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
           <div>
             <p className="font-semibold">Could not load deal ops</p>
@@ -330,7 +330,17 @@ export function DealOpsPanel({
             </p>
           </div>
         </div>
-      </div>
+      );
+    }
+    return (
+      <WorkspaceSection title="Could not load deal ops" testId="panel-deal-ops-error">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
+          <p className="text-sm text-muted-foreground">
+            {(detail.error as Error | null)?.message?.replace(/^\d+:\s*/, "") || "Try refreshing."}
+          </p>
+        </div>
+      </WorkspaceSection>
     );
   }
 

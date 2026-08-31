@@ -119,7 +119,7 @@ export default function Operations() {
 
       <div className="page-stack">
         {/* KPI row */}
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="metric-strip">
           {health.isLoading ? (
             Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-[5.5rem] w-full rounded-lg" />

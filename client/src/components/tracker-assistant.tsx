@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ExternalLink, Loader2, MessageSquareText, Send, Sparkles } from "lucide-react";
+import { ExternalLink, Loader2, MessageSquareText, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
+import { WorkspaceSection } from "@/components/primitives";
 import type { TrackerAssistantResponse } from "@shared/schema";
 
 const SUGGESTIONS = [
@@ -86,30 +87,20 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
   };
 
   return (
-    <section
-      className="rounded-lg border border-card-border bg-card"
-      aria-labelledby="tracker-assistant-title"
-      data-testid="panel-tracker-assistant"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
-        <div className="min-w-0">
-          <p className="rule-label">Ask the tracker</p>
-          <h2 id="tracker-assistant-title" className="mt-1 flex items-center gap-2 text-base font-semibold tracking-tight">
-            <Sparkles className="h-4 w-4 text-primary" />
-            Ops briefing from live queue data
-          </h2>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Read-only helper — prioritizes intake, plates, costs, and stale deals. Morning Telegram digests cover the full briefing; health nudges only ping missing plates, costs, stale jobs, and stuck intake.
-          </p>
-        </div>
-        {answer ? (
+    <WorkspaceSection
+      eyebrow="Ask the tracker"
+      title="Ops briefing from live queue data"
+      description="Read-only helper — prioritizes intake, plates, costs, and stale deals. Morning Telegram digests cover the full briefing; health nudges only ping missing plates, costs, stale jobs, and stuck intake."
+      actions={
+        answer ? (
           <span className="rule-label" data-testid="text-tracker-assistant-mode">
             {answer.mode === "model" ? "Model + tracker" : "Tracker rules"}
           </span>
-        ) : null}
-      </div>
-
-      <div className="space-y-4 p-5">
+        ) : null
+      }
+      testId="panel-tracker-assistant"
+    >
+      <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {SUGGESTIONS.map((suggestion) => (
             <button
@@ -210,6 +201,6 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
           </div>
         ) : null}
       </div>
-    </section>
+    </WorkspaceSection>
   );
 }

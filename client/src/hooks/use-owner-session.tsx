@@ -169,55 +169,59 @@ export function OwnerUnlockPanel({
 
   return (
     <section
-      className="rounded-lg border border-card-border bg-card/90 p-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(15rem,19rem)] md:items-end md:gap-6"
+      className="workspace-section"
       aria-labelledby={`${testIdPrefix}-unlock-title`}
       data-testid={`panel-${testIdPrefix}-unlock`}
     >
-      <div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/12 text-primary">
-          <KeyRound className="h-4 w-4" />
-        </div>
-        <p className="mt-3 rule-label">Owner access</p>
-        <h2 id={`${testIdPrefix}-unlock-title`} className="mt-1 text-lg font-semibold tracking-tight">
+      <div className="border-b border-border/80 px-3.5 py-2.5">
+        <p className="rule-label mb-0.5">Owner access</p>
+        <h2 id={`${testIdPrefix}-unlock-title`} className="text-sm font-semibold tracking-tight">
           {title}
         </h2>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{description}</p>
-        <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          One unlock covers Floor, Queue, Labels, Orders, Prints, and the rest of Daily Work in this
-          tab — until you Lock or reload.
-        </p>
+        <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{description}</p>
       </div>
-      <form
-        className="mt-5 space-y-3 md:mt-0"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const code = codeDraft.trim();
-          if (code) onUnlock(code);
-        }}
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor={`${testIdPrefix}-owner-code`}>Owner access code</Label>
-          <Input
-            id={`${testIdPrefix}-owner-code`}
-            type="password"
-            autoComplete="off"
-            autoFocus
-            value={codeDraft}
-            onChange={(event) => setCodeDraft(event.target.value)}
-            placeholder="Enter your code"
-            data-testid={`input-${testIdPrefix}-owner-code`}
-          />
+      <div className="grid gap-4 p-3.5 md:grid-cols-[minmax(0,1fr)_minmax(15rem,19rem)] md:items-end">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/12 text-primary">
+            <KeyRound className="h-4 w-4" />
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            One unlock covers Floor, Queue, Labels, Orders, Prints, and the rest of Daily Work in this
+            tab — until you Lock or reload.
+          </p>
         </div>
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={pending || codeDraft.trim().length === 0}
-          data-testid={`button-unlock-${testIdPrefix}`}
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const code = codeDraft.trim();
+            if (code) onUnlock(code);
+          }}
         >
-          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
-          {buttonLabel}
-        </Button>
-      </form>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${testIdPrefix}-owner-code`}>Owner access code</Label>
+            <Input
+              id={`${testIdPrefix}-owner-code`}
+              type="password"
+              autoComplete="off"
+              autoFocus
+              value={codeDraft}
+              onChange={(event) => setCodeDraft(event.target.value)}
+              placeholder="Enter your code"
+              data-testid={`input-${testIdPrefix}-owner-code`}
+            />
+          </div>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={pending || codeDraft.trim().length === 0}
+            data-testid={`button-unlock-${testIdPrefix}`}
+          >
+            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlock className="mr-2 h-4 w-4" />}
+            {buttonLabel}
+          </Button>
+        </form>
+      </div>
     </section>
   );
 }

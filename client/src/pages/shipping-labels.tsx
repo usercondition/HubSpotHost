@@ -406,7 +406,7 @@ export default function ShippingLabelsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Labels"
         subtitle="Drop a shipping label PDF — attach the same tracking to one or more Print Orders when they ship in the same box."

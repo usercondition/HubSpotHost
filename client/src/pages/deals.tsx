@@ -24,6 +24,7 @@ import {
   formatPartsBadge,
   type OrderPartSummary,
 } from "@/components/order-parts-dialog";
+import { Panel } from "@/components/primitives";
 import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -186,12 +187,11 @@ export default function DealsPage() {
         ) : performance.isLoading ? (
           <BoardSkeleton />
         ) : performance.isError || !snapshot ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-deals-error">
+          <Panel title="Orders could not be loaded" testId="panel-deals-error">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
               <div>
-                <h2 className="text-base font-semibold tracking-tight">Orders could not be loaded</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                <p className="text-sm leading-6 text-muted-foreground">
                   Check the HubSpot connection, then refresh.
                 </p>
                 <Button className="mt-4" size="sm" onClick={() => performance.refetch()} data-testid="button-retry-deals">
@@ -200,7 +200,7 @@ export default function DealsPage() {
                 </Button>
               </div>
             </div>
-          </section>
+          </Panel>
         ) : (
           <section
             className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-card-border bg-card"

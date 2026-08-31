@@ -351,18 +351,17 @@ export default function Supplies() {
             <Skeleton className="h-[20rem] rounded-lg" />
           </div>
         ) : supplies.isError || !supplies.data ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-supplies-error">
-            <p className="text-sm font-medium">The supply ledger is not available right now.</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Refresh after checking your owner code and connection.</p>
+          <Panel title="The supply ledger is not available right now" testId="panel-supplies-error">
+            <p className="text-sm text-muted-foreground">Refresh after checking your owner code and connection.</p>
             <Button className="mt-4" size="sm" onClick={() => supplies.refetch()} data-testid="button-retry-supplies">
               <RefreshCw className="mr-2 h-3.5 w-3.5" />
               Try again
             </Button>
-          </section>
+          </Panel>
         ) : (
           <>
             <section
-              className="grid gap-3 sm:grid-cols-2"
+              className="metric-strip"
               aria-label="Supply spend summary"
               data-testid="summary-supplies-status"
             >

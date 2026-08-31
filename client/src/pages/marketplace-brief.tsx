@@ -8,7 +8,6 @@ import { apiRequest } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
-import { cn } from "@/lib/utils";
 
 type BriefAction = {
   id: string;
@@ -230,12 +229,13 @@ You: Let me know whenever you're ready`,
   };
 
   return (
-    <div className="page-stack" data-testid="page-marketplace-brief">
+    <div className="mx-auto max-w-5xl" data-testid="page-marketplace-brief">
       <PageHeader
         title="Marketplace brief"
         subtitle="Secretary view of scanned Marketplace chats — who to reply to, what’s waiting, what to do next."
       />
 
+      <div className="page-stack">
       {!isUnlocked ? (
         <OwnerUnlockPanel
           title="Unlock Marketplace brief"
@@ -247,20 +247,24 @@ You: Let me know whenever you're ready`,
         />
       ) : (
         <>
-          <section className="rounded-md border border-card-border bg-card px-4 py-3 text-sm text-muted-foreground">
-            <p>
-              <strong className="font-medium text-foreground">How to run:</strong> in Comet, open Messenger /
-              Marketplace and leave the left chat list visible → extension → <strong className="font-medium text-foreground">Inbox brief</strong>.
-              It scans every discovered list row and opens this page with the secretary summary.
+          <Panel title="How to run" description="Chrome helper scans Messenger / Marketplace and opens this page with the secretary summary.">
+            <p className="text-sm text-muted-foreground">
+              In Comet, open Messenger / Marketplace and leave the left chat list visible → extension →{" "}
+              <strong className="font-medium text-foreground">Inbox brief</strong>. It scans every discovered
+              list row and opens this page with the secretary summary.
             </p>
-            <p className="mt-2">
+            <p className="mt-2 text-sm text-muted-foreground">
               Download helper from{" "}
               <a className="hs-link" href="/downloads/messenger-send-to-print-ops-v1.zip" download>
                 /downloads/messenger-send-to-print-ops-v1.zip
               </a>
-              . Or generate a <button type="button" className="hs-link font-medium" onClick={() => void demoBrief()}>demo brief</button> without Messenger.
+              . Or generate a{" "}
+              <button type="button" className="hs-link font-medium" onClick={() => void demoBrief()}>
+                demo brief
+              </button>{" "}
+              without Messenger.
             </p>
-          </section>
+          </Panel>
 
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -268,13 +272,13 @@ You: Let me know whenever you're ready`,
             </div>
           ) : null}
           {error ? (
-            <p className="text-sm text-destructive" data-testid="marketplace-brief-error">
-              {error}
-            </p>
+            <Panel title="Could not load brief" testId="marketplace-brief-error">
+              <p className="text-sm text-destructive">{error}</p>
+            </Panel>
           ) : null}
 
           {brief ? (
-            <div className="space-y-4">
+            <>
               <Panel
                 title="Today’s secretary note"
                 description={new Date(brief.generatedAt).toLocaleString()}
@@ -299,7 +303,7 @@ You: Let me know whenever you're ready`,
               />
               <Section title="Then" description="Payment waiting or stale follow-ups." threads={brief.then} />
               <Section title="Waiting / other" description="Ball in their court, done, or unclear." threads={brief.waiting} />
-            </div>
+            </>
           ) : !loading ? (
             <Panel title="No brief loaded yet" description="Run the Chrome Inbox brief, or try the demo.">
               <div className="flex flex-wrap gap-2">
@@ -317,6 +321,7 @@ You: Let me know whenever you're ready`,
           ) : null}
         </>
       )}
+      </div>
     </div>
   );
 }

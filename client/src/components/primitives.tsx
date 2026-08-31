@@ -18,13 +18,6 @@ const TONE_PILL: Record<Tone, string> = {
   bad: "border-destructive/40 bg-destructive/12 text-destructive",
 };
 
-const TONE_METRIC: Record<Tone, string> = {
-  neutral: "text-foreground",
-  good: "text-accent",
-  warn: "text-chart-4",
-  bad: "text-destructive",
-};
-
 export function StatusPill({
   tone,
   icon: Icon,
@@ -47,31 +40,6 @@ export function StatusPill({
       {Icon ? <Icon className="h-2.5 w-2.5 shrink-0" /> : null}
       <span className="min-w-0 truncate">{label}</span>
     </span>
-  );
-}
-
-/** Compact metric tile for digestible counts / money. */
-export function MetricTile({
-  label,
-  value,
-  hint,
-  tone = "neutral",
-  testId,
-  className,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: Tone;
-  testId?: string;
-  className?: string;
-}) {
-  return (
-    <div data-testid={testId} data-tone={tone} className={cn("metric-tile glance-in", className)}>
-      <p className="rule-label">{label}</p>
-      <p className={cn("mt-1.5 text-2xl font-semibold tracking-tight numeric", TONE_METRIC[tone])}>{value}</p>
-      {hint ? <p className="mt-1 text-[0.6875rem] text-muted-foreground">{hint}</p> : null}
-    </div>
   );
 }
 
@@ -150,14 +118,18 @@ export function Panel({
   description,
   actions,
   children,
+  testId,
+  className,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
   children: ReactNode;
+  testId?: string;
+  className?: string;
 }) {
   return (
-    <WorkspaceSection title={title} description={description} actions={actions}>
+    <WorkspaceSection title={title} description={description} actions={actions} testId={testId} className={className}>
       {children}
     </WorkspaceSection>
   );

@@ -174,7 +174,7 @@ function resinCostHint(metrics: PrintFileMetrics): string {
 function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Extracted plate metrics">
+      <section className="metric-strip" aria-label="Extracted plate metrics">
         <StatCard label="Estimated plate time" value={formatHours(metrics.printTimeSeconds)} hint="Whole build plate" icon={Clock3} testId="metric-print-time" />
         <StatCard label="Resin volume" value={formatNumber(metrics.resinVolumeMl, " ml")} hint="Whole build plate" icon={Scale} testId="metric-resin-volume" />
         <StatCard label="Resin mass" value={formatNumber(metrics.resinMassG, " g")} hint={metrics.resinDensityGPerMl ? `${formatNumber(metrics.resinDensityGPerMl)} g/ml density` : "Whole build plate"} icon={PackageCheck} testId="metric-resin-mass" />
@@ -206,7 +206,7 @@ function FileMetrics({ metrics }: { metrics: PrintFileMetrics }) {
       </section>
 
       <section
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        className="metric-strip"
         aria-label="Slice exposure and motion settings"
         data-testid="panel-ctb-settings"
       >
@@ -787,12 +787,11 @@ export default function Prints() {
             <Skeleton className="h-80 rounded-lg" />
           </div>
         ) : prints.isError || !prints.data ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-prints-error">
+          <Panel title="Print-file tracking is not available right now" testId="panel-prints-error">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
               <div>
-                <h2 className="text-base font-semibold tracking-tight">Print-file tracking is not available right now</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                <p className="text-sm leading-6 text-muted-foreground">
                   The command center could not read your active Print Orders. Refresh after checking your HubSpot connection and owner code.
                 </p>
                 <Button className="mt-4" size="sm" onClick={() => prints.refetch()} data-testid="button-retry-prints">
@@ -801,7 +800,7 @@ export default function Prints() {
                 </Button>
               </div>
             </div>
-          </section>
+          </Panel>
         ) : (
           <>
             <section className="rounded-lg border border-primary/25 bg-primary/5 p-4" aria-label="Multi-plate workflow" data-testid="panel-multi-plate-guidance">

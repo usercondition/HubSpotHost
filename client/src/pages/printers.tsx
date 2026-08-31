@@ -157,7 +157,7 @@ function PrinterDetail({
         />
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label={`${printer.name} usage`}>
+      <section className="metric-strip" aria-label={`${printer.name} usage`}>
         <StatCard label="Print hours" value={formatHours(printer.totalPrintHours)} hint={`${printer.plateCount} plate${printer.plateCount === 1 ? "" : "s"}`} icon={Clock3} testId={`metric-printer-hours-${printer.printerId}`} />
         <StatCard label="Layers printed" value={printer.totalLayers.toLocaleString()} hint={`${printer.distinctOrders} order${printer.distinctOrders === 1 ? "" : "s"}`} icon={Layers3} testId={`metric-printer-layers-${printer.printerId}`} />
         <StatCard label="Resin volume" value={`${printer.totalResinVolumeMl.toLocaleString()} ml`} hint={`${printer.totalResinMassG.toLocaleString()} g`} icon={PackageCheck} testId={`metric-printer-resin-${printer.printerId}`} />
@@ -606,22 +606,21 @@ export default function PrintersPage() {
             <Skeleton className="h-96 rounded-lg" />
           </div>
         ) : fleet.isError || !fleet.data ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-printers-error">
+          <Panel title="Printer fleet is not available right now" testId="panel-printers-error">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
               <div>
-                <h2 className="text-base font-semibold tracking-tight">Printer fleet is not available right now</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">Refresh after checking your owner code and local database volume.</p>
+                <p className="text-sm leading-6 text-muted-foreground">Refresh after checking your owner code and local database volume.</p>
                 <Button className="mt-4" size="sm" onClick={() => fleet.refetch()} data-testid="button-retry-printers">
                   <RefreshCw className="mr-2 h-3.5 w-3.5" />
                   Try again
                 </Button>
               </div>
             </div>
-          </section>
+          </Panel>
         ) : (
           <>
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Fleet totals">
+            <section className="metric-strip" aria-label="Fleet totals">
               <StatCard label="Active printers" value={String(fleet.data.fleetTotals.activePrinters)} hint="Named machines in the fleet" icon={Printer} testId="metric-fleet-active" />
               <StatCard label="Fleet print hours" value={formatHours(fleet.data.fleetTotals.totalPrintHours)} hint="From attached plates" icon={Clock3} testId="metric-fleet-hours" />
               <StatCard label="Fleet layers" value={fleet.data.fleetTotals.totalLayers.toLocaleString()} hint={`${fleet.data.fleetTotals.plateCount} plates total`} icon={Layers3} testId="metric-fleet-layers" />

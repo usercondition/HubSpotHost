@@ -305,7 +305,6 @@
 }
 
 @layer utilities {
-  .amber-wash,
   .accent-wash {
     background-color: hsl(var(--card) / 0.78);
     background-image: none;

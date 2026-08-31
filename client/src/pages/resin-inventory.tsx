@@ -222,20 +222,21 @@ export default function ResinInventoryPage() {
             <Skeleton className="h-80 rounded-lg" />
           </div>
         ) : inventory.isError || !inventory.data ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5">
+          <Panel title="Resin inventory is not available" testId="panel-resin-inventory-error">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
               <div>
-                <h2 className="text-base font-semibold">Resin inventory is not available</h2>
+                <p className="text-sm text-muted-foreground">Refresh after checking your owner code and connection.</p>
                 <Button className="mt-4" size="sm" onClick={() => inventory.refetch()}>
+                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
                   Try again
                 </Button>
               </div>
             </div>
-          </section>
+          </Panel>
         ) : (
           <>
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Inventory totals">
+            <section className="metric-strip" aria-label="Inventory totals">
               <StatCard label="Sealed bottles" value={String(inventory.data.totals.sealedBottles)} hint={`Stock value ${money(inventory.data.totals.sealedValueUsd)}`} icon={Package} testId="metric-resin-sealed" />
               <StatCard label="Open bottles" value={String(inventory.data.totals.openBottles)} hint={active ? `Active: ${active.productName}` : "Open a bottle to start tracking pours"} icon={Beaker} testId="metric-resin-open" />
               <StatCard label="Resin used" value={grams(inventory.data.totals.resinUsedGrams)} hint={`Material cost ${money(inventory.data.totals.materialCostUsedUsd)}`} icon={Scale} testId="metric-resin-used" />

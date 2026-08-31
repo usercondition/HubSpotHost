@@ -46,7 +46,7 @@ function updatedAt(value: string): string {
 function LoadingMetrics() {
   return (
     <div className="space-y-5" data-testid="skeleton-performance">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="metric-strip">
         {Array.from({ length: 6 }, (_, index) => (
           <Skeleton key={index} className="h-28 rounded-lg" />
         ))}
@@ -142,12 +142,11 @@ export default function Performance() {
         ) : performance.isLoading ? (
           <LoadingMetrics />
         ) : performance.isError || !snapshot ? (
-          <section className="rounded-lg border border-destructive/35 bg-card p-5" data-testid="panel-performance-error">
+          <Panel title="Performance is not available right now" testId="panel-performance-error">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
               <div>
-                <h2 className="text-base font-semibold tracking-tight">Performance is not available right now</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                <p className="text-sm leading-6 text-muted-foreground">
                   The command center could not read the Print Orders pipeline. Refresh after checking your HubSpot connection or access code.
                 </p>
                 <Button className="mt-4" size="sm" onClick={() => performance.refetch()} data-testid="button-retry-performance">
@@ -156,7 +155,7 @@ export default function Performance() {
                 </Button>
               </div>
             </div>
-          </section>
+          </Panel>
         ) : (
           <>
             <section className="flex flex-wrap items-center justify-between gap-3" data-testid="summary-performance-status">
@@ -174,7 +173,7 @@ export default function Performance() {
               />
             </section>
 
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Performance summary">
+            <section className="metric-strip" aria-label="Performance summary">
               <StatCard
                 label="Revenue"
                 value={money(snapshot.summary.revenue)}
