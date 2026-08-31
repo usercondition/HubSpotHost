@@ -31,7 +31,7 @@ export type ShippingEmailBrandConfig = {
 export const SHIPPING_EMAIL_BRAND: ShippingEmailBrandConfig = {
   shopName: "Print Ops",
   tagline: "from the studio bench",
-  accentHex: "#3F5D4A",
+  accentHex: "#1F8A94",
   supportLine: "Questions, photos, or praise? Just reply — a human reads these.",
   fromDisplayName: "The studio desk",
   assetBaseUrl: "",

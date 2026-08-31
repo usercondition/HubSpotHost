@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
-import { Mark } from "@/components/shell";
+import { BrandMarkImage, brandAsset } from "@/components/brand";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { cn } from "@/lib/utils";
 import type { ClientOrderSavedDetails, ClientOrderView } from "@shared/schema";
@@ -204,13 +204,24 @@ export default function ClientOrder() {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header className="accent-wash border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center gap-2.5 px-5 py-4">
-          <Mark className="h-7 w-7 text-primary" />
+          <BrandMarkImage className="h-9 w-9" size={36} alt="" />
           <span className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight">Print Orders</span>
+            <span className="text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="rule-label">Order form</span>
           </span>
         </div>
       </header>
+
+      <div className="relative overflow-hidden border-b border-border" data-testid="panel-brand-hero">
+        <img
+          src={brandAsset("brand/studio-hero.jpg")}
+          alt=""
+          width={1536}
+          height={1024}
+          className="h-36 w-full object-cover object-center sm:h-44 md:h-52"
+        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/25 to-transparent" />
+      </div>
 
       <main className="mx-auto max-w-2xl px-5 py-8 md:py-12">
         {state.kind === "loading" && (

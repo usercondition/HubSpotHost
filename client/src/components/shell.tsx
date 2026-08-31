@@ -23,6 +23,7 @@ import {
   Users,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
+import { BrandMarkImage } from "@/components/brand";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -80,23 +81,7 @@ export function ThemeToggle({ className, testId = "button-theme-toggle" }: { cla
 
 /* ----------------------------------------------------------------- mark --- */
 
-export function Mark({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-label="Print Operations"
-      role="img"
-      className={className}
-    >
-      <rect x="3.5" y="3.5" width="25" height="25" rx="7" stroke="currentColor" strokeWidth="1.8" opacity="0.35" />
-      <path d="M9 22h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M11 17h10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />
-      <path d="M13 12h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.5" />
-      <circle cx="16" cy="8" r="1.7" fill="currentColor" />
-    </svg>
-  );
-}
+export { BrandMarkImage, Mark, brandAsset } from "@/components/brand";
 
 /* ---------------------------------------------------------------- shell --- */
 
@@ -182,7 +167,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-testid="link-home"
           title="Print Ops"
         >
-          <Mark className="h-7 w-7 shrink-0 text-primary" />
+          <BrandMarkImage className="h-8 w-8 shrink-0" size={32} alt="" />
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">

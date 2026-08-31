@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, Loader2, Unlock } from "lucide-react";
+import { Loader2, Unlock } from "lucide-react";
+import { BrandMarkImage } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -174,9 +175,7 @@ export function OwnerUnlockPanel({
       data-testid={`panel-${testIdPrefix}-unlock`}
     >
       <div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/12 text-primary">
-          <KeyRound className="h-4 w-4" />
-        </div>
+        <BrandMarkImage className="h-10 w-10" size={40} />
         <p className="mt-3 rule-label">Owner access</p>
         <h2 id={`${testIdPrefix}-unlock-title`} className="mt-1 text-lg font-semibold tracking-tight">
           {title}
