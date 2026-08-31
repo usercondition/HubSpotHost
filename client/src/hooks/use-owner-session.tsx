@@ -28,28 +28,54 @@ type OwnerSessionValue = {
 
 const OwnerSessionContext = createContext<OwnerSessionValue | null>(null);
 
+/** Tab-scoped only (clears when the browser tab closes). Never localStorage. */
+const OWNER_SESSION_KEY = "print-ops-owner-code";
+
+function readSessionOwnerCode(): string {
+  if (typeof sessionStorage === "undefined") return "";
+  try {
+    return sessionStorage.getItem(OWNER_SESSION_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSessionOwnerCode(code: string) {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    if (code) sessionStorage.setItem(OWNER_SESSION_KEY, code);
+    else sessionStorage.removeItem(OWNER_SESSION_KEY);
+  } catch {
+    // Private mode / blocked storage — unlock still works in memory.
+  }
+}
+
 /**
  * Session-scoped owner unlock for Daily work pages.
- * Lives in React memory only — cleared on full reload, never written to storage.
+ * Kept in this browser tab (sessionStorage) so a soft reload doesn't force
+ * re-unlock; cleared on Lock, auth failure, or when the tab closes.
  */
 export function OwnerSessionProvider({ children }: { children: ReactNode }) {
-  const [ownerCode, setOwnerCode] = useState("");
+  const [ownerCode, setOwnerCode] = useState(readSessionOwnerCode);
   const [codeDraft, setCodeDraft] = useState("");
   const { toast } = useToast();
 
   const unlock = useCallback((code: string) => {
     setOwnerCode(code);
+    writeSessionOwnerCode(code);
     setCodeDraft("");
   }, []);
 
   const lock = useCallback(() => {
     setOwnerCode("");
+    writeSessionOwnerCode("");
   }, []);
 
   useEffect(() => {
     return onOwnerAuthFailure(() => {
       setOwnerCode((current) => {
         if (!current) return current;
+        writeSessionOwnerCode("");
         toast({
           title: "Owner session expired",
           description: "Unlock again with your owner code to continue.",

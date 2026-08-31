@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { useOwnerSession } from "@/hooks/use-owner-session";
+import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
@@ -155,13 +156,21 @@ const GROUPS: Array<{ id: NavGroup; hint: string }> = [
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const pathOnly = location.split("?")[0] || "/";
   const { isUnlocked, lock } = useOwnerSession();
-  const activeGroup = NAV.find((item) => item.href === location)?.group ?? "Run";
-  const activeItem = NAV.find((item) => item.href === location);
+  const activeGroup = NAV.find((item) => item.href === pathOnly)?.group ?? "Run";
+  const activeItem = NAV.find((item) => item.href === pathOnly);
 
   useEffect(() => {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
-  }, [location, activeItem]);
+  }, [pathOnly, activeItem]);
+
+  // Soft-refresh HubSpot-backed boards when moving between areas (no hard reload).
+  useEffect(() => {
+    if (!isUnlocked) return;
+    void queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+  }, [pathOnly, isUnlocked]);
 
   return (
     <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[4.25rem_1fr] md:grid-rows-[auto_1fr]">
@@ -224,7 +233,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {group.id}
                 </p>
                 {NAV.filter((item) => item.group === group.id).map((item) => {
-                  const active = location === item.href;
+                  const active = pathOnly === item.href;
                   return (
                     <Link
                       key={item.href}
@@ -278,7 +287,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
         >
           {NAV.map((item) => {
-            const active = location === item.href;
+            const active = pathOnly === item.href;
             return (
               <Link
                 key={item.href}

@@ -72,9 +72,13 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
+      // Shop-floor data goes stale in HubSpot; soft-refresh instead of hard reload.
+      // 20s matches server print-order deal cache TTL.
+      staleTime: 20_000,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: true,
       refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
       retry: false,
     },
     mutations: {
