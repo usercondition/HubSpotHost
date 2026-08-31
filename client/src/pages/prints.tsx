@@ -4,9 +4,12 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Clock3,
   CircleDollarSign,
+  ExternalLink,
   FilePlus2,
   FileUp,
   FolderOpen,
@@ -270,6 +273,7 @@ export default function Prints() {
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
+  const [resinRateOpen, setResinRateOpen] = useState(false);
   const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
   const [logsPathCopied, setLogsPathCopied] = useState(false);
   const [includeMaterial, setIncludeMaterial] = useState(true);
@@ -812,67 +816,149 @@ export default function Prints() {
               </div>
             </section>
 
-            <Panel
-              title="Default resin rate"
-              description="Used only when a CTB has no Chitubox resin price. Prefers your bottle profile, then recent Supplies resin purchases."
+            <section
+              className="rounded-lg border border-border bg-card"
+              data-testid="panel-default-resin-rate"
             >
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="resin-name">Resin</Label>
-                  <Input id="resin-name" value={resinName} onChange={(event) => setResinName(event.target.value)} data-testid="input-resin-name" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="resin-asin">Amazon ASIN</Label>
-                  <Input id="resin-asin" value={resinAsin} onChange={(event) => setResinAsin(event.target.value)} data-testid="input-resin-asin" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="resin-mass">Bottle mass (g)</Label>
-                  <Input id="resin-mass" inputMode="decimal" value={resinMassG} onChange={(event) => setResinMassG(event.target.value)} data-testid="input-resin-mass" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="resin-price">Bottle price (USD)</Label>
-                  <Input id="resin-price" inputMode="decimal" value={resinPrice} onChange={(event) => setResinPrice(event.target.value)} placeholder="35.99" data-testid="input-resin-price" />
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button type="button" onClick={() => saveResin.mutate()} disabled={saveResin.isPending} data-testid="button-save-resin-profile">
-                  {saveResin.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}
-                  Save resin rate
-                </Button>
-                <Button
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <button
                   type="button"
-                  variant="outline"
-                  onClick={() => refreshAmazon.mutate()}
-                  disabled={refreshAmazon.isPending || !resinAsin.trim()}
-                  data-testid="button-refresh-amazon-resin"
+                  className="inline-flex min-w-0 flex-1 items-center gap-2 text-left"
+                  onClick={() => setResinRateOpen((open) => !open)}
+                  aria-expanded={resinRateOpen}
+                  data-testid="button-toggle-resin-rate"
                 >
-                  {refreshAmazon.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  Refresh Amazon price
-                </Button>
-                {resin?.amazonUrl ? (
-                  <a
-                    href={resin.amazonUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-primary underline-offset-2 hover:underline"
-                    data-testid="link-amazon-resin"
+                  {resinRateOpen ? (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="shrink-0 text-sm font-semibold tracking-tight">Resin rate</span>
+                  <span
+                    className="min-w-0 truncate text-xs text-muted-foreground"
+                    data-testid="text-resin-rate-status"
                   >
-                    Open Amazon listing
-                  </a>
-                ) : null}
+                    {resin?.rate
+                      ? resin.rate.label
+                      : resin?.inventoryRate
+                        ? `Inventory · ${resin.inventoryRate.label}`
+                        : resin?.suppliesRate
+                          ? `Supplies · ${resin.suppliesRate.label}`
+                          : "No fallback rate yet — expand to set bottle price"}
+                  </span>
+                </button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => refreshAmazon.mutate()}
+                    disabled={refreshAmazon.isPending || !resinAsin.trim()}
+                    data-testid="button-refresh-amazon-resin"
+                  >
+                    {refreshAmazon.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    <span className="ml-1.5 hidden sm:inline">Amazon</span>
+                  </Button>
+                  {resin?.amazonUrl ? (
+                    <Button asChild type="button" size="sm" variant="ghost">
+                      <a
+                        href={resin.amazonUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        data-testid="link-amazon-resin"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span className="ml-1.5 hidden sm:inline">Listing</span>
+                      </a>
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-              <p className="mt-3 text-xs leading-5 text-muted-foreground" data-testid="text-resin-rate-status">
-                {resin?.rate
-                  ? `Active estimate rate: ${resin.rate.label}`
-                  : resin?.inventoryRate
-                    ? `No profile bottle price. Open inventory bottle rate ready: ${resin.inventoryRate.label}`
-                    : resin?.suppliesRate
-                      ? `No bottle price yet. Supplies fallback ready: ${resin.suppliesRate.label}`
-                      : "Save a bottle price, open an inventory bottle, or refresh Amazon to estimate plate cost when the slicer leaves resin cost blank."}
-                {" "}
-                Amazon live price is best-effort and may be blocked; manual price always works. Attach still burns the open inventory bottle.
-              </p>
-            </Panel>
+
+              {resinRateOpen ? (
+                <div className="space-y-3 border-t border-border px-3 py-3">
+                  <p className="text-[0.6875rem] leading-4 text-muted-foreground">
+                    Fallback when a CTB has no Chitubox resin price. Bottle profile → inventory → Supplies.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-1">
+                      <Label htmlFor="resin-name" className="text-[0.6875rem]">
+                        Resin
+                      </Label>
+                      <Input
+                        id="resin-name"
+                        className="h-8"
+                        value={resinName}
+                        onChange={(event) => setResinName(event.target.value)}
+                        data-testid="input-resin-name"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="resin-asin" className="text-[0.6875rem]">
+                        Amazon ASIN
+                      </Label>
+                      <Input
+                        id="resin-asin"
+                        className="h-8"
+                        value={resinAsin}
+                        onChange={(event) => setResinAsin(event.target.value)}
+                        data-testid="input-resin-asin"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="resin-mass" className="text-[0.6875rem]">
+                        Bottle mass (g)
+                      </Label>
+                      <Input
+                        id="resin-mass"
+                        className="h-8"
+                        inputMode="decimal"
+                        value={resinMassG}
+                        onChange={(event) => setResinMassG(event.target.value)}
+                        data-testid="input-resin-mass"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="resin-price" className="text-[0.6875rem]">
+                        Bottle price (USD)
+                      </Label>
+                      <Input
+                        id="resin-price"
+                        className="h-8"
+                        inputMode="decimal"
+                        value={resinPrice}
+                        onChange={(event) => setResinPrice(event.target.value)}
+                        placeholder="35.99"
+                        data-testid="input-resin-price"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => saveResin.mutate()}
+                      disabled={saveResin.isPending}
+                      data-testid="button-save-resin-profile"
+                    >
+                      {saveResin.isPending ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CircleDollarSign className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Save rate
+                    </Button>
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      Amazon price is best-effort; manual price always works. Attach still burns the open bottle.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </section>
 
             <section className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
               <Panel
