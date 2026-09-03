@@ -20,12 +20,18 @@ export function printsDealHref(dealId: string): string {
   return `/prints?dealId=${encodeURIComponent(dealId)}`;
 }
 
+/** @deprecated Kits UI is parked — prefer Orders Parts + Prints plate bits. */
 export function kitsDealHref(dealId: string): string {
   return `/kit-dry-run?dealId=${encodeURIComponent(dealId)}`;
 }
 
 export function queueDealHref(dealId: string): string {
   return `/queue?dealId=${encodeURIComponent(dealId)}`;
+}
+
+export function labelsDealHref(dealId?: string | null): string {
+  const id = String(dealId ?? "").trim();
+  return id ? `/labels?dealId=${encodeURIComponent(id)}` : "/labels";
 }
 
 /** Floor pressure-chip shortcuts — temporary focused lists (not in the nav rail). */
@@ -144,8 +150,8 @@ export function attentionNextStep(item: {
   }
   if (issue.includes("cost")) {
     return {
-      href: printsDealHref(item.dealId),
-      label: "Apply cost defaults",
+      href: queueDealHref(item.dealId),
+      label: "Enter costs",
       external: false,
     };
   }

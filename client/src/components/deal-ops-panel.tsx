@@ -21,10 +21,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { hubspotDealHref } from "@/lib/workflow";
+import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
 import { StatusPill, WorkspaceSection } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { Link } from "wouter";
 import {
   FULFILLMENT_CHECKLIST_KEYS,
   FULFILLMENT_CHECKLIST_LABELS,
@@ -372,11 +373,23 @@ export function DealOpsPanel({
             </a>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <a href={PIRATE_SHIP_URL} target="_blank" rel="noopener noreferrer">
+            <Link href={labelsDealHref(dealId)} data-testid="link-deal-ops-labels">
               <Ship className="mr-2 h-3.5 w-3.5" />
+              Drop label PDF
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <a href={PIRATE_SHIP_URL} target="_blank" rel="noopener noreferrer">
               Pirate Ship
             </a>
           </Button>
+          {data.plates.length === 0 ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={printsDealHref(dealId)} data-testid="link-deal-ops-prints">
+                Attach plates
+              </Link>
+            </Button>
+          ) : null}
           {onClose && !flush ? (
             <Button size="sm" variant="ghost" onClick={onClose} data-testid="button-close-deal-ops">
               Close
@@ -578,7 +591,7 @@ export function DealOpsPanel({
             </ul>
             {slip.kitSummary ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                Kit QC: {slip.kitSummary.good}/{slip.kitSummary.total} good
+                Parts QC: {slip.kitSummary.good}/{slip.kitSummary.total} good
                 {slip.kitSummary.reprint > 0 ? ` · ${slip.kitSummary.reprint} reprint` : ""}
               </p>
             ) : null}

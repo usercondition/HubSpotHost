@@ -51,11 +51,12 @@ import {
   rememberSliceLog,
   type PrinterMatchInfo,
 } from "@/lib/print-attach";
-import { readHashQueryParam } from "@/lib/workflow";
+import { readHashQueryParam, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { PlateBitsPanel, type PlateBitSummary } from "@/components/plate-bits-panel";
+import { Link } from "wouter";
 import type {
   PrintFileCandidateDeal,
   PrintFileDealBoard,
@@ -274,6 +275,7 @@ export default function Prints() {
   const [resinMassG, setResinMassG] = useState("1000");
   const [resinPrice, setResinPrice] = useState("");
   const [resinRateOpen, setResinRateOpen] = useState(false);
+  const [costDefaultsOpen, setCostDefaultsOpen] = useState(false);
   const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
   const [logsPathCopied, setLogsPathCopied] = useState(false);
   const [includeMaterial, setIncludeMaterial] = useState(true);
@@ -1371,11 +1373,38 @@ export default function Prints() {
             )}
 
             {dealId ? (
-              <Panel
-                title="3. Apply cost defaults"
-                description="Revenue is the quoted order amount. Fill blank cash-cost fields (material, packaging, shipping). Labor stays out by default because it is usually already in your quote."
-              >
-                <div className="space-y-4" data-testid="panel-cost-defaults">
+              <section className="rounded-lg border border-border bg-card" data-testid="panel-cost-defaults">
+                <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-3 py-2">
+                  <button
+                    type="button"
+                    className="inline-flex min-w-0 flex-1 items-center gap-2 text-left"
+                    onClick={() => setCostDefaultsOpen((open) => !open)}
+                    aria-expanded={costDefaultsOpen}
+                    data-testid="button-toggle-cost-defaults"
+                  >
+                    {costDefaultsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="shrink-0 text-sm font-semibold tracking-tight">3. Cost defaults</span>
+                    <span className="min-w-0 truncate text-xs text-muted-foreground">
+                      {selectedHasPlates
+                        ? "Optional — plate attach already seeds material + $0 labor/packaging. Prefer Queue ops for postage."
+                        : "Attach plates first, or enter costs in Queue ops."}
+                    </span>
+                  </button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={queueDealHref(dealId)} data-testid="link-prints-to-queue-costs">
+                      Open Queue ops
+                    </Link>
+                  </Button>
+                </div>
+                {costDefaultsOpen ? (
+                <div className="space-y-4 p-3.5">
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Revenue is the quoted order amount. Fill blank cash-cost fields. Labor stays out by default because it is usually already in your quote.
+                  </p>
                   {!selectedHasPlates ? (
                     <p className="text-xs leading-5 text-muted-foreground">
                       Attach at least one CTB plate to this order first so material can be estimated from plate resin data.
@@ -1453,7 +1482,8 @@ export default function Prints() {
                     </ul>
                   ) : null}
                 </div>
-              </Panel>
+                ) : null}
+              </section>
             ) : null}
 
             <Panel

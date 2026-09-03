@@ -200,10 +200,10 @@ function classifyThread(input: MarketplaceThreadInput, index: number): Marketpla
       kind: "ops",
     });
   }
-  if (status === "awaiting_payment" || status === "your_turn") {
+  if (status === "ready_to_book" || status === "awaiting_payment" || status === "your_turn" || status === "paid_needs_details") {
     nextActions.push({
       id: "intake",
-      label: "Send / open Intake link",
+      label: status === "ready_to_book" ? "Open Intake" : "Send / open Intake link",
       href: "/orders",
       kind: "ops",
     });

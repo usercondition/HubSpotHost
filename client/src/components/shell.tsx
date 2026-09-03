@@ -160,6 +160,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { isUnlocked, lock } = useOwnerSession();
   const activeGroup = NAV.find((item) => item.href === pathOnly)?.group ?? "Run";
   const activeItem = NAV.find((item) => item.href === pathOnly);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const runNav = NAV.filter((item) => item.group === "Run");
+  const moreNav = NAV.filter((item) => item.group !== "Run");
+  const mobileNav = mobileMoreOpen ? NAV : runNav;
 
   useEffect(() => {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
@@ -280,13 +284,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile horizontal nav */}
+      {/* Mobile horizontal nav — Run pinned; Take/Keep/Office behind More */}
       <div className="flex min-h-0 min-w-0 flex-col md:col-start-2">
         <nav
           aria-label="Mobile navigation"
           className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
         >
-          {NAV.map((item) => {
+          {mobileNav.map((item) => {
             const active = pathOnly === item.href;
             return (
               <Link
@@ -306,6 +310,20 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setMobileMoreOpen((open) => !open)}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium",
+              mobileMoreOpen || moreNav.some((item) => item.href === pathOnly)
+                ? "bg-muted text-foreground"
+                : "bg-card/70 text-muted-foreground hover:text-foreground",
+            )}
+            data-testid="button-mobile-nav-more"
+            aria-expanded={mobileMoreOpen}
+          >
+            {mobileMoreOpen ? "Less" : "More"}
+          </button>
         </nav>
 
         <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">{children}</main>
@@ -314,20 +332,35 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+const GROUP_EYEBROW: Record<NavGroup, string> = {
+  Run: "Run",
+  Take: "Take",
+  Keep: "Keep",
+  Office: "Office",
+};
+
 export function PageHeader({
   title,
   subtitle,
   actions,
+  eyebrow,
 }: {
   title: string;
   subtitle: string;
   actions?: ReactNode;
+  /** Override auto group label (Run / Take / Keep / Office). */
+  eyebrow?: string;
 }) {
+  const [location] = useLocation();
+  const pathOnly = location.split("?")[0] || "/";
+  const group = NAV.find((item) => item.href === pathOnly)?.group ?? "Run";
+  const label = eyebrow?.trim() || GROUP_EYEBROW[group];
+
   return (
     <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="rule-label mb-0.5">Shop floor</p>
+          <p className="rule-label mb-0.5">{label}</p>
           <h1
             className="truncate text-xl font-semibold tracking-tight text-foreground md:text-2xl"
             data-testid="text-page-title"

@@ -199,6 +199,15 @@ export default function PaidOrders() {
     },
   });
 
+  // Clients handoff: /paid-orders?q=Name — seed the contact name field once.
+  useEffect(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
+    const q = params.get("q")?.trim();
+    if (q) {
+      setContact((current) => (current.fullName.trim() ? current : { ...current, fullName: q }));
+    }
+  }, [search]);
+
   // Chrome extension deep-link: /paid-orders?bridge=<id>
   useEffect(() => {
     const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);

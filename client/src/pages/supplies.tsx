@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Boxes,
+  Beaker,
   CheckCircle2,
   FileUp,
   Loader2,
@@ -21,11 +22,13 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { BooksBalancePanel } from "@/components/books-balance";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard } from "@/components/primitives";
+import { Link } from "wouter";
 import {
   SUPPLY_CATEGORIES,
   SUPPLY_CATEGORY_LABELS,
   lineItemsForSupplyPurchase,
   type PerformanceResponse,
+  type ResinReorderResponse,
   type SupplyCategory,
   type SupplyPurchase,
   type SupplyPurchaseLineItem,
@@ -167,6 +170,16 @@ export default function Supplies() {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
     },
+  });
+
+  const resinReorder = useQuery<ResinReorderResponse & { ok?: boolean }>({
+    queryKey: ["/api/resin-reorder", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/resin-reorder", undefined, { headers });
+      return (await response.json()) as ResinReorderResponse & { ok?: boolean };
+    },
+    staleTime: 60_000,
   });
 
 
@@ -380,6 +393,39 @@ export default function Supplies() {
                 testId="metric-supplies-count"
               />
             </section>
+
+            {(resinReorder.data?.buyNow?.length ?? 0) > 0 ? (
+              <Panel
+                title="Resin to buy soon"
+                description="From plate burn rate — full bottle stock lives on the Resin inventory page."
+                testId="panel-supplies-resin-buy"
+                actions={
+                  <Button asChild size="sm" variant="outline">
+                    <Link href="/resin">
+                      <Beaker className="mr-1.5 h-3.5 w-3.5" />
+                      Open resin
+                    </Link>
+                  </Button>
+                }
+              >
+                <ul className="space-y-2" data-testid="list-supplies-resin-buy">
+                  {resinReorder.data!.buyNow.slice(0, 4).map((row) => (
+                    <li
+                      key={row.productId}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/25 px-3 py-2 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{row.name}</p>
+                        <p className="text-xs text-muted-foreground">{row.reason}</p>
+                      </div>
+                      <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-chart-4">
+                        Buy {row.suggestedBuyCount}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            ) : null}
 
             <Panel
               title="1. Log a purchase"

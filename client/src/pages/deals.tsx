@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { hubspotDealHref, hubspotDealsListHref, printsDealHref, queueDealHref } from "@/lib/workflow";
+import { hubspotDealHref, hubspotDealsListHref, labelsDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
@@ -402,7 +402,7 @@ function DealCard({
 
   return (
     <article
-      className="board-card group shrink-0 p-2.5"
+      className="workspace-node group shrink-0 p-2.5"
       data-tone={tone}
       data-testid={`card-deal-${deal.dealId}`}
     >
@@ -503,6 +503,15 @@ function DealCard({
             data-testid={`link-deal-costs-${deal.dealId}`}
           >
             Enter costs
+          </Link>
+        ) : null}
+        {!deal.needsPlates ? (
+          <Link
+            href={labelsDealHref(deal.dealId)}
+            className="hs-link inline-flex items-center gap-1 text-xs font-medium"
+            data-testid={`link-deal-labels-${deal.dealId}`}
+          >
+            Drop label
           </Link>
         ) : null}
         <a

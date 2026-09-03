@@ -1341,6 +1341,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         trackingPasted: true,
         labelBought: input.labelBought,
         packingDone: input.packingDone,
+        // Postage seed below fills blank cost fields — mark costs entered when postage is known.
+        costsEntered: postage !== "" ? true : undefined,
         notes: sharedNote,
         liveWrite: input.liveWrite !== false,
       });

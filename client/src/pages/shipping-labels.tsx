@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText, Mail } from "lucide-react";
@@ -11,7 +11,7 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
-import { queueDealHref } from "@/lib/workflow";
+import { queueDealHref, readHashQueryParam } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
 import {
   buyerTrackingEmailSubject,
@@ -98,6 +98,21 @@ export default function ShippingLabelsPage() {
   const [manualDealId, setManualDealId] = useState("");
   const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
+  const [prefillDealId, setPrefillDealId] = useState(() => readHashQueryParam("dealId")?.trim() || "");
+
+  useEffect(() => {
+    const sync = () => {
+      const id = readHashQueryParam("dealId")?.trim() || "";
+      setPrefillDealId(id);
+      if (id && /^[0-9]{1,20}$/.test(id)) {
+        setManualDealId(id);
+        setSelectedDealIds((prev) => (prev.includes(id) ? prev : prev.length === 0 ? [id] : prev));
+      }
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
   const alreadyAttachedIdSet = useMemo(
     () => new Set(parsed?.alreadyAttachedDealIds ?? (parsed?.alreadyAttached ? [parsed.alreadyAttached.dealId] : [])),
@@ -119,7 +134,15 @@ export default function ShippingLabelsPage() {
       setPostage(data.fields.postageUsd ?? "");
       setManualDealId("");
       const defaults = defaultLabelMatchDealIds(data.matches);
-      setSelectedDealIds(defaults.length > 0 ? defaults : data.alreadyAttached?.dealId ? [data.alreadyAttached.dealId] : []);
+      const seeded =
+        defaults.length > 0
+          ? defaults
+          : data.alreadyAttached?.dealId
+            ? [data.alreadyAttached.dealId]
+            : prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)
+              ? [prefillDealId]
+              : [];
+      setSelectedDealIds(seeded);
       const attachedIds = data.alreadyAttachedDealIds ?? (data.alreadyAttached ? [data.alreadyAttached.dealId] : []);
       const pendingDefaults = defaults.filter((id) => !attachedIds.includes(id));
       if (attachedIds.length > 0 && pendingDefaults.length === 0 && defaults.length > 0) {
@@ -424,6 +447,23 @@ export default function ShippingLabelsPage() {
           />
         ) : (
           <>
+            {prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId) ? (
+              <Panel
+                title="Label for selected order"
+                description={`Deal ${prefillDealId} is preselected from Queue / Ops. Drop a PDF or paste tracking below.`}
+                testId="panel-labels-prefill"
+                actions={
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={queueDealHref(prefillDealId)}>Back to Queue ops</Link>
+                  </Button>
+                }
+              >
+                <p className="text-sm text-muted-foreground">
+                  After attach, open Queue to finish stage / packing — checklist ticks for label + tracking automatically.
+                </p>
+              </Panel>
+            ) : null}
+
             <Panel
               title="Drop shipping label"
               description="Pirate Ship / USPS PDF exports work best. Nothing is saved until you confirm the order below."

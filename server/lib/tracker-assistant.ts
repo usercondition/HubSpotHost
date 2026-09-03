@@ -174,10 +174,10 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         ok: true,
         mode: "rules",
         reply:
-          "No open orders are currently flagged for incomplete cost details. When plates are attached, use Print files → Apply cost defaults to fill material/packaging (and paste shipping) with a confirm step. Labor stays in the quoted order amount.",
+          "No open orders are currently flagged for incomplete cost details. Plate attach seeds material + $0 labor/packaging; enter postage in Queue ops or after a Labels PDF drop. Labor stays in the quoted order amount.",
         actions: [
-          { label: "Print files", href: "/prints" },
-          { label: "Open HubSpot deals", href: "/performance" },
+          { label: "Open Queue", href: "/queue" },
+          { label: "Labels", href: "/labels" },
         ],
         usedFacts,
       };
@@ -185,11 +185,11 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     lines.push(`${costIssues.length} order${costIssues.length === 1 ? "" : "s"} need cost fields filled:`);
     for (const item of costIssues.slice(0, 5)) {
       lines.push(`• ${item.dealName} — ${item.detail}`);
-      actions.push({ label: `Cost defaults · ${item.dealName.slice(0, 20)}`, href: printsHref(item.dealId) });
+      actions.push({ label: `Enter costs · ${item.dealName.slice(0, 20)}`, href: queueHref(item.dealId) });
     }
     lines.push("");
     lines.push(
-      "Revenue is the quoted order amount. On Print files, preview material/packaging (and paste shipping), then confirm — labor is left out by default because it is usually already in the quote.",
+      "Revenue is the quoted order amount. Open Queue ops to enter postage (and any blanks). Plate attach already seeds material + $0 labor/packaging — labor stays in the quote by default.",
     );
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 4), usedFacts };
   }

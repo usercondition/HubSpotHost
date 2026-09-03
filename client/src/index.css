@@ -417,34 +417,40 @@
     background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card) / 0.92) 42%);
   }
 
+  /* Orders board cards share Queue deal-card chrome (workspace-node). */
   .board-card {
-    border-radius: calc(var(--radius) + 1px);
-    border: 1px solid hsl(var(--border));
-    background: hsl(var(--card));
-    box-shadow: var(--shadow-xs);
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid hsl(var(--card-border));
+    background: hsl(var(--card) / 0.92);
+    box-shadow: var(--shadow-sm);
     transition:
-      border-color 160ms ease,
-      background-color 160ms ease;
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms ease;
+  }
+
+  .board-card:hover {
+    border-color: hsl(var(--primary) / 0.35);
   }
 
   .board-card[data-tone='warn'] {
     border-left: 3px solid hsl(var(--chart-4));
-    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card)) 45%);
+    background: linear-gradient(90deg, hsl(var(--chart-4) / 0.1), hsl(var(--card) / 0.92) 42%);
   }
 
   .board-card[data-tone='bad'] {
     border-left: 3px solid hsl(var(--destructive));
-    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card)) 45%);
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), hsl(var(--card) / 0.92) 42%);
   }
 
   .board-card[data-tone='good'] {
     border-left: 3px solid hsl(var(--accent));
-    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card)) 45%);
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.08), hsl(var(--card) / 0.92) 42%);
   }
 
   .board-card[data-tone='plates'] {
     border-left: 3px solid hsl(var(--primary));
-    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card)) 45%);
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.12), hsl(var(--card) / 0.92) 42%);
   }
 
   /* Titled group container — soft charcoal card (settings-adjacent) */

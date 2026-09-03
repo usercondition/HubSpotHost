@@ -92,7 +92,7 @@ function QueueCard({
           <StatusPill
             tone="warn"
             icon={Layers3}
-            label={`Kit ${item.kitNeeded} needed${item.kitReprint ? ` · ${item.kitReprint} reprint` : ""}`}
+            label={`Parts ${item.kitNeeded} open${item.kitReprint ? ` · ${item.kitReprint} reprint` : ""}`}
           />
         ) : null}
         <StatusPill
@@ -211,7 +211,7 @@ export default function ProductionQueuePage() {
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock the production queue"
-            description="Same owner code as Daily Work. Live HubSpot orders plus local plates, kits, and ship checklists."
+            description="Same owner code as Daily Work. Live HubSpot orders plus local plates, parts QC, and ship checklists."
             buttonLabel="Unlock Queue"
             testIdPrefix="queue"
             pending={unlock.isPending}
@@ -238,7 +238,7 @@ export default function ProductionQueuePage() {
               <StatCard label="Open orders" value={String(data.summary.openOrders)} hint="Active HubSpot deals" icon={PackageCheck} />
               <StatCard label="Next print" value={String(data.summary.nextPrint)} hint="Needs plates" icon={FileUp} />
               <StatCard label="In production" value={String(data.summary.inProduction)} hint="Plates attached" icon={Clock3} />
-              <StatCard label="Blocked" value={String(data.summary.blocked)} hint="QC / unassigned" icon={AlertTriangle} tone="warn" />
+              <StatCard label="Blocked" value={String(data.summary.blocked)} hint="Parts / unassigned" icon={AlertTriangle} tone="warn" />
               <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
             </div>
 
@@ -271,7 +271,7 @@ export default function ProductionQueuePage() {
               />
               <QueueColumn
                 title="Blocked"
-                subtitle="Needs kit QC or printer assignment"
+                subtitle="Needs parts QC or printer assignment"
                 items={data.blocked}
                 selectedId={selectedDealId}
                 onSelect={setSelectedDealId}

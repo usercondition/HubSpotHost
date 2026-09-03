@@ -213,8 +213,18 @@ function ContactRow({
             <span className="ml-1.5 hidden lg:inline">HubSpot</span>
           </a>
         </Button>
+        <Button asChild size="sm" variant="outline" data-testid={`button-intake-${contact.contactId}`}>
+          <Link href="/orders">
+            Intake
+          </Link>
+        </Button>
+        <Button asChild size="sm" variant="outline" data-testid={`button-orders-${contact.contactId}`}>
+          <Link href="/deals">
+            Orders
+          </Link>
+        </Button>
         <Button asChild size="sm" data-testid={`button-manual-order-${contact.contactId}`}>
-          <Link href="/paid-orders">
+          <Link href={`/paid-orders?q=${encodeURIComponent(contact.fullName || contact.email || "")}`}>
             <UserRound className="mr-1.5 h-3.5 w-3.5" />
             Manual
           </Link>
@@ -288,6 +298,9 @@ export default function ClientsPage() {
                   <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                   HubSpot
                 </a>
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/orders">Intake</Link>
               </Button>
               <Button asChild size="sm" variant="outline">
                 <Link href="/paid-orders">Manual order</Link>

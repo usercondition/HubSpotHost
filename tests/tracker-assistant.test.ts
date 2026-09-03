@@ -131,10 +131,10 @@ test("tracker assistant lists plate gaps with attach actions", () => {
   assert.ok(answer.actions.every((action) => action.href.includes("prints") || action.href === "/prints"));
 });
 
-test("tracker assistant explains incomplete costs with Print files links", () => {
+test("tracker assistant explains incomplete costs with Queue ops links", () => {
   const answer = answerTrackerQuestionRules("What is missing costs?", sampleContext());
   assert.match(answer.reply, /Display base/);
   assert.match(answer.reply, /quoted order amount/i);
-  assert.match(answer.reply, /labor is left out by default/i);
-  assert.ok(answer.actions.some((action) => action.href.includes("/prints?dealId=d2")));
+  assert.match(answer.reply, /labor stays in the quote/i);
+  assert.ok(answer.actions.some((action) => action.href.includes("/queue?dealId=d2")));
 });

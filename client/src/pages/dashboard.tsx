@@ -1,17 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertTriangle,
+  Beaker,
   CheckCircle2,
   ExternalLink,
   FileUp,
   Link2,
   ListOrdered,
+  Printer,
   SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { attentionNextStep, floorFocusHref, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { TrackerAssistantPanel } from "@/components/tracker-assistant";
@@ -24,7 +27,12 @@ import {
 } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { HealthResponse, PerformanceResponse } from "@shared/schema";
+import type {
+  HealthResponse,
+  PerformanceResponse,
+  PrinterFleetSnapshot,
+  ResinReorderResponse,
+} from "@shared/schema";
 
 function SystemStatus({ health }: { health: HealthResponse | undefined }) {
   const live = health?.safety.liveWriteReady === true;
@@ -120,6 +128,7 @@ function PressureChip({
 }
 
 function TodaysWork() {
+  const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlockMutation = useOwnerUnlock({
     successTitle: "Floor unlocked",
@@ -132,6 +141,52 @@ function TodaysWork() {
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
+    },
+  });
+
+  const resinReorder = useQuery<ResinReorderResponse>({
+    queryKey: ["/api/resin-reorder", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/resin-reorder", undefined, { headers });
+      return (await response.json()) as ResinReorderResponse;
+    },
+    staleTime: 60_000,
+  });
+
+  const printers = useQuery<{ ok: true } & PrinterFleetSnapshot>({
+    queryKey: ["/api/printers", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/printers", undefined, { headers });
+      return (await response.json()) as { ok: true } & PrinterFleetSnapshot;
+    },
+    staleTime: 60_000,
+  });
+
+  const dismissAttention = useMutation({
+    mutationFn: async (input: { dealId: string; issueKey: string }) => {
+      const response = await apiRequest(
+        "POST",
+        "/api/attention/dismiss",
+        { dealId: input.dealId, issueKey: input.issueKey, note: "Skipped from Floor" },
+        { headers },
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      toast({
+        title: "Alert skipped",
+        description: "Hidden for this order until you reopen it or HubSpot clears the issue.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not skip that alert",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 160),
+        variant: "destructive",
+      });
     },
   });
 
@@ -172,8 +227,22 @@ function TodaysWork() {
   const staleJobs = countByIssueKey(attention, "stale");
   const pendingReview = snapshot.intake.pendingReview;
   const awaitingClient = snapshot.intake.awaitingClient;
+  const buyNow = resinReorder.data?.buyNow ?? [];
+  const fepDue =
+    printers.data?.printers.filter((printer) => {
+      if (printer.status !== "active") return false;
+      const hours = printer.fepHoursUsedPercent ?? 0;
+      const layers = printer.fepLayersUsedPercent ?? 0;
+      return Math.max(hours, layers) >= 85;
+    }) ?? [];
   const totalPressure =
-    platesNeeded + costsNeeded + staleJobs + pendingReview + (awaitingClient > 0 ? 1 : 0);
+    platesNeeded +
+    costsNeeded +
+    staleJobs +
+    pendingReview +
+    (awaitingClient > 0 ? 1 : 0) +
+    (buyNow.length > 0 ? 1 : 0) +
+    (fepDue.length > 0 ? 1 : 0);
 
   const nextItems = attention.slice(0, 5);
   const clearFloor = totalPressure === 0 && nextItems.length === 0;
@@ -269,6 +338,49 @@ function TodaysWork() {
               </div>
             ) : null}
 
+            {buyNow.length > 0 ? (
+              <div className="glance-item glance-in" data-tone="warn" data-testid="row-glance-resin-buy">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    Buy resin soon · {buyNow.length} product{buyNow.length === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+                    {buyNow[0]?.name}
+                    {buyNow.length > 1 ? ` +${buyNow.length - 1} more` : ""} · from plate burn rate
+                  </p>
+                </div>
+                <Button asChild size="sm" variant="outline" data-testid="button-glance-open-resin">
+                  <Link href="/resin">
+                    <Beaker className="mr-1.5 h-3.5 w-3.5" />
+                    Resin stock
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
+
+            {fepDue.length > 0 ? (
+              <div className="glance-item glance-in" data-tone="warn" data-testid="row-glance-fep-due">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    FEP due · {fepDue.length} printer{fepDue.length === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+                    {fepDue
+                      .map((p) => p.name)
+                      .slice(0, 3)
+                      .join(", ")}
+                    {fepDue.length > 3 ? ` +${fepDue.length - 3}` : ""} at ≥85% life
+                  </p>
+                </div>
+                <Button asChild size="sm" variant="outline" data-testid="button-glance-open-printers">
+                  <Link href="/printers">
+                    <Printer className="mr-1.5 h-3.5 w-3.5" />
+                    Printers
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
+
             {nextItems.map((item, index) => {
               const step = attentionNextStep({
                 dealId: item.dealId,
@@ -293,16 +405,30 @@ function TodaysWork() {
                       {item.stage} · {item.detail}
                     </p>
                   </div>
-                  <Button asChild size="sm" variant={tone === "bad" ? "destructive" : "default"}>
-                    <Link href={step.href} data-testid={`link-glance-action-${item.dealId}`}>
-                      {item.issueKey === "no_plates" ? (
-                        <FileUp className="mr-1.5 h-3.5 w-3.5" />
-                      ) : (
-                        <ListOrdered className="mr-1.5 h-3.5 w-3.5" />
-                      )}
-                      {step.label}
-                    </Link>
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                    <Button asChild size="sm" variant={tone === "bad" ? "destructive" : "default"}>
+                      <Link href={step.href} data-testid={`link-glance-action-${item.dealId}`}>
+                        {item.issueKey === "no_plates" ? (
+                          <FileUp className="mr-1.5 h-3.5 w-3.5" />
+                        ) : (
+                          <ListOrdered className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        {step.label}
+                      </Link>
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={dismissAttention.isPending}
+                      onClick={() =>
+                        dismissAttention.mutate({ dealId: item.dealId, issueKey: item.issueKey })
+                      }
+                      data-testid={`button-glance-skip-${item.dealId}-${item.issueKey}`}
+                    >
+                      Skip
+                    </Button>
+                  </div>
                 </div>
               );
             })}
