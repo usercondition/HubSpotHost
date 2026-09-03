@@ -4,6 +4,7 @@ import { Link, useLocation } from "wouter";
 import {
   Activity,
   BarChart3,
+  Beaker,
   Boxes,
   ClipboardCheck,
   ExternalLink,
@@ -22,10 +23,12 @@ import {
   Sun,
   Users,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { AttentionBell } from "@/components/attention-bell";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import type { HealthResponse } from "@shared/schema";
 
 /* ---------------------------------------------------------------- theme --- */
 
@@ -135,8 +138,7 @@ const NAV: Array<{
     group: "Take",
   },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep" },
-  // Resin inventory stays at /resin (digest / direct URL) but is off the rail —
-  // bottle bookkeeping is optional; plate attach + APIs still work without the tab.
+  { href: "/resin", label: "Resin", title: "Resin inventory", icon: Beaker, testId: "link-nav-resin", group: "Keep" },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office" },
@@ -164,6 +166,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   const runNav = NAV.filter((item) => item.group === "Run");
   const moreNav = NAV.filter((item) => item.group !== "Run");
   const mobileNav = mobileMoreOpen ? NAV : runNav;
+
+  const health = useQuery<HealthResponse>({
+    queryKey: ["/api/health"],
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const healthOk = health.data?.status === "ok";
+  const liveReady = health.data?.safety.liveWriteReady === true;
+  const healthLabel = health.isError
+    ? "Offline"
+    : health.isLoading
+      ? "…"
+      : healthOk
+        ? liveReady
+          ? "Live"
+          : "Online"
+        : "Degraded";
+  const healthTone = health.isError || (!health.isLoading && !healthOk) ? "warn" : "ok";
 
   useEffect(() => {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
@@ -195,8 +215,20 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </Link>
 
-        <span className="status-live hidden sm:inline-flex" data-testid="status-workspace-live">
-          Online
+        <span
+          className={cn("status-live hidden sm:inline-flex", healthTone === "warn" && "status-alert")}
+          data-testid="status-workspace-live"
+          title={
+            health.isError
+              ? "Health check failed"
+              : liveReady
+                ? "HubSpot live writes ready"
+                : healthOk
+                  ? "Service healthy (safe / dry-run mode)"
+                  : "Health degraded"
+          }
+        >
+          {healthLabel}
         </span>
 
         <div className="ml-auto flex items-center gap-1.5">

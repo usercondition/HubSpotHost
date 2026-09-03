@@ -53,7 +53,7 @@ function invalidateOps(dealId?: string) {
 
 /**
  * Right-side ops drawer — overlays the board so columns don’t jump.
- * Desktop: board stays clickable (switch orders without closing).
+ * Desktop: board stays clickable under a transparent non-blocking layer (Esc / X to close).
  * Mobile: light scrim to dismiss.
  */
 export function DealOpsDrawer({
@@ -83,7 +83,7 @@ export function DealOpsDrawer({
       <button
         type="button"
         aria-label="Dismiss deal ops"
-        className="pointer-events-auto absolute inset-0 bg-black/40 transition-opacity"
+        className="pointer-events-auto absolute inset-0 bg-black/40 transition-opacity md:pointer-events-none md:bg-transparent"
         onClick={onClose}
         data-testid="button-deal-ops-scrim"
       />

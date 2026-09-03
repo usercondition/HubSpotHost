@@ -15,22 +15,38 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { printsDealHref, queueDealHref, labelsDealHref, readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
+import type { ProductionQueueItem, ProductionQueueResponse, PrinterFleetSnapshot } from "@shared/schema";
 
 type QueueResponse = ProductionQueueResponse & { ok: true };
+
+const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
 
 function hoursLabel(seconds: number | null): string {
   if (seconds == null || !(seconds > 0)) return "—";
   const hours = seconds / 3_600;
   if (hours < 1) return `${Math.round(seconds / 60)}m`;
   return `${hours.toFixed(hours >= 10 ? 0 : 1)}h`;
+}
+
+function scrollToLane(testId: string) {
+  document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function printerIdleLabel(lastJobAt: string | null): { label: string; tone: "good" | "warn" | "neutral" } {
+  if (!lastJobAt) return { label: "Idle", tone: "good" };
+  const ageMs = Date.now() - new Date(lastJobAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return { label: "Unknown", tone: "neutral" };
+  const hours = ageMs / 3_600_000;
+  if (hours < 6) return { label: "Busy", tone: "warn" };
+  if (hours < 48) return { label: `${Math.round(hours)}h idle`, tone: "neutral" };
+  return { label: `${Math.round(hours / 24)}d idle`, tone: "good" };
 }
 
 function QueueCard({
@@ -106,6 +122,47 @@ function QueueCard({
           <Link href={printsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
             Plates
           </Link>
+          {item.bucket === "ship_ready" || item.fulfillment.shipReady ? (
+            <>
+              <Link
+                href={labelsDealHref(item.dealId)}
+                className="text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+                data-testid={`link-queue-labels-${item.dealId}`}
+              >
+                Drop label
+              </Link>
+              <a
+                href={PIRATE_SHIP_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground hover:underline"
+                onClick={(e) => e.stopPropagation()}
+                data-testid={`link-queue-pirateship-${item.dealId}`}
+              >
+                Pirate Ship
+              </a>
+            </>
+          ) : null}
+        </div>
+      ) : item.bucket === "ship_ready" || item.fulfillment.shipReady ? (
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <Link
+            href={labelsDealHref(item.dealId)}
+            className="text-primary hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Drop label
+          </Link>
+          <a
+            href={PIRATE_SHIP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-muted-foreground hover:text-foreground hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Pirate Ship
+          </a>
         </div>
       ) : null}
     </button>
@@ -177,6 +234,16 @@ export default function ProductionQueuePage() {
     },
   });
 
+  const fleet = useQuery<PrinterFleetSnapshot & { ok: true }>({
+    queryKey: ["/api/printers", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/printers", undefined, { headers });
+      return (await response.json()) as PrinterFleetSnapshot & { ok: true };
+    },
+    staleTime: 60_000,
+  });
+
   const data = queue.data;
 
   const selectedExists = useMemo(() => {
@@ -234,20 +301,70 @@ export default function ProductionQueuePage() {
           </Panel>
         ) : (
           <>
-            <div className="metric-strip">
-              <StatCard label="Open orders" value={String(data.summary.openOrders)} hint="Active HubSpot deals" icon={PackageCheck} />
-              <StatCard label="Next print" value={String(data.summary.nextPrint)} hint="Needs plates" icon={FileUp} />
-              <StatCard label="In production" value={String(data.summary.inProduction)} hint="Plates attached" icon={Clock3} />
-              <StatCard label="Blocked" value={String(data.summary.blocked)} hint="Parts / unassigned" icon={AlertTriangle} tone="warn" />
-              <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
+            <div className="metric-strip" role="navigation" aria-label="Jump to queue lanes">
+              <button
+                type="button"
+                className="text-left"
+                onClick={() => scrollToLane("column-next-print")}
+                data-testid="button-jump-next-print"
+              >
+                <StatCard label="Next print" value={String(data.summary.nextPrint)} hint="Jump to lane" icon={FileUp} />
+              </button>
+              <button
+                type="button"
+                className="text-left"
+                onClick={() => scrollToLane("column-in-production")}
+                data-testid="button-jump-in-production"
+              >
+                <StatCard label="In production" value={String(data.summary.inProduction)} hint="Jump to lane" icon={Clock3} />
+              </button>
+              <button
+                type="button"
+                className="text-left"
+                onClick={() => scrollToLane("column-blocked")}
+                data-testid="button-jump-blocked"
+              >
+                <StatCard label="Blocked" value={String(data.summary.blocked)} hint="Jump to lane" icon={AlertTriangle} tone="warn" />
+              </button>
+              <button
+                type="button"
+                className="text-left"
+                onClick={() => scrollToLane("column-ship-ready")}
+                data-testid="button-jump-ship-ready"
+              >
+                <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Jump to lane" icon={Ship} tone="good" />
+              </button>
             </div>
+
+            {fleet.data?.printers?.length ? (
+              <div className="flex flex-wrap gap-1.5" data-testid="panel-queue-fleet-load" aria-label="Printer load">
+                {fleet.data.printers
+                  .filter((printer) => printer.status === "active")
+                  .map((printer) => {
+                    const idle = printerIdleLabel(printer.lastJobAt);
+                    const fep = Math.max(printer.fepHoursUsedPercent ?? 0, printer.fepLayersUsedPercent ?? 0);
+                    return (
+                      <Link
+                        key={printer.printerId}
+                        href="/printers"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card/80 px-2 py-1 text-[0.6875rem] hover:border-primary/40"
+                        data-testid={`chip-queue-printer-${printer.printerId}`}
+                      >
+                        <span className="font-medium">{printer.name}</span>
+                        <StatusPill tone={idle.tone} label={idle.label} />
+                        {fep >= 85 ? <StatusPill tone="warn" label={`FEP ${Math.round(fep)}%`} /> : null}
+                      </Link>
+                    );
+                  })}
+              </div>
+            ) : null}
 
             <p className="text-sm text-muted-foreground">
               {selectedDealId
                 ? selectedExists
-                  ? "Ops open on the right — click outside or press Esc to close."
+                  ? "Ops open on the right — click outside (mobile) or press Esc to close."
                   : "That deal isn’t on the board anymore — pick another card or close ops."
-                : "Select an order for costs, stage, printers, ship checklist, or packing slip."}
+                : "Select an order for costs, stage, printers, ship checklist, or packing slip. Ship-ready cards link to Labels + Pirate Ship."}
             </p>
 
             <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">

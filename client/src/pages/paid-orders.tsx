@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
 import { formatMoney } from "@/lib/format";
-import { printsDealHref, queueDealHref, hubspotDealHref } from "@/lib/workflow";
+import { printsDealHref, queueDealHref, hubspotDealHref, readHashQueryParam } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
@@ -199,19 +199,34 @@ export default function PaidOrders() {
     },
   });
 
-  // Clients handoff: /paid-orders?q=Name — seed the contact name field once.
+  // Clients / Brief handoff: #/paid-orders?q=&amount=&product=&email=
   useEffect(() => {
-    const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
-    const q = params.get("q")?.trim();
-    if (q) {
-      setContact((current) => (current.fullName.trim() ? current : { ...current, fullName: q }));
+    const q = readHashQueryParam("q")?.trim() || "";
+    const amount = readHashQueryParam("amount")?.trim() || "";
+    const product = readHashQueryParam("product")?.trim() || "";
+    const email = readHashQueryParam("email")?.trim() || "";
+    if (!q && !amount && !product && !email) return;
+    setContact((current) => ({
+      ...current,
+      fullName: current.fullName.trim() || q,
+      email: current.email.trim() || email,
+    }));
+    if (amount || product) {
+      setLines((current) => {
+        const first = current[0];
+        const blank = current.length === 1 && !first?.productName.trim() && !first?.amount.trim();
+        if (!blank) return current;
+        return [newLine({ productName: product, amount })];
+      });
     }
   }, [search]);
 
   // Chrome extension deep-link: /paid-orders?bridge=<id>
   useEffect(() => {
-    const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
-    const bridgeId = params.get("bridge")?.trim() || "";
+    const bridgeId =
+      readHashQueryParam("bridge")?.trim() ||
+      new URLSearchParams(search.startsWith("?") ? search : `?${search}`).get("bridge")?.trim() ||
+      "";
     if (!bridgeId || bridgeHandled.current === bridgeId) return;
     bridgeHandled.current = bridgeId;
     setBridgeStatus("loading");

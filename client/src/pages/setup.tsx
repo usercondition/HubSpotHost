@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 import { CodeLine } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -180,6 +181,17 @@ export default function Setup() {
             </button>
           ))}
         </nav>
+        <div className="mt-4 hidden flex-col gap-1 border-t border-border pt-3 md:flex">
+          <p className="px-2 text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Office
+          </p>
+          <Link href="/operations" className="settings-nav-link" data-testid="link-setup-to-profit">
+            Profit
+          </Link>
+          <Link href="/performance" className="settings-nav-link" data-testid="link-setup-to-stats">
+            Stats
+          </Link>
+        </div>
       </aside>
 
       <div className="settings-main">

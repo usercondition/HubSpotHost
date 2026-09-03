@@ -651,9 +651,36 @@ export default function PrintersPage() {
                       >
                         <span className="text-sm font-medium">{printer.name}</span>
                         <span className="mt-0.5 text-xs text-muted-foreground">
-                          {formatHours(printer.totalPrintHours)} · {printer.plateCount} plate{printer.plateCount === 1 ? "" : "s"}
+                          {formatHours(printer.totalPrintHours)} · {printer.plateCount} plate
+                          {printer.plateCount === 1 ? "" : "s"}
                           {printer.status === "retired" ? " · retired" : ""}
                         </span>
+                        {printer.status === "active" ? (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {(() => {
+                              const ageMs = printer.lastJobAt
+                                ? Date.now() - new Date(printer.lastJobAt).getTime()
+                                : null;
+                              const busy = ageMs != null && Number.isFinite(ageMs) && ageMs < 6 * 3_600_000;
+                              const fep = Math.max(
+                                printer.fepHoursUsedPercent ?? 0,
+                                printer.fepLayersUsedPercent ?? 0,
+                              );
+                              return (
+                                <>
+                                  <StatusPill
+                                    tone={busy ? "warn" : "good"}
+                                    label={busy ? "Busy" : "Idle"}
+                                    testId={`status-printer-load-${printer.printerId}`}
+                                  />
+                                  {fep >= 85 ? (
+                                    <StatusPill tone="warn" label={`FEP ${Math.round(fep)}%`} />
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}

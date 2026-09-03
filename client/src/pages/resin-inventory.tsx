@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   Beaker,
@@ -190,6 +191,15 @@ export default function ResinInventoryPage() {
         subtitle="Track sealed bottles, the open pour bottle, grams used from attached plates, and rough $ per bottle."
         actions={
           <>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/supplies">
+                <ShoppingBag className="mr-1.5 h-3.5 w-3.5" />
+                Supplies
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/printers">Printers</Link>
+            </Button>
             {ownerCode ? (
               <Button
                 size="sm"

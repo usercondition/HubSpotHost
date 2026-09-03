@@ -329,9 +329,15 @@ export default function Supplies() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Supply spend"
-        subtitle="Drop a receipt, confirm the items, then review what you’ve spent."
+        subtitle="Drop a receipt, confirm the items, then review what you’ve spent. Resin stock lives next door."
         actions={
           <>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/resin">
+                <Beaker className="mr-1.5 h-3.5 w-3.5" />
+                Resin
+              </Link>
+            </Button>
             {ownerCode ? (
               <Button
                 size="sm"
