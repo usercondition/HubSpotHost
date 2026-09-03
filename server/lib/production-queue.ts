@@ -1,6 +1,6 @@
 /**
  * Production queue: next print, in production, ship-ready, blocked.
- * Built from Performance snapshot + local plates / kits / checklists / assignments.
+ * Built from Performance snapshot + local plates / order parts / checklists / assignments.
  */
 import { desc } from "drizzle-orm";
 import {
@@ -11,7 +11,7 @@ import {
 } from "../../shared/schema";
 import { listFulfillmentChecklists } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
-import { listKitSummaries } from "./kits";
+import { listOrderPartSummaries } from "./order-parts";
 import { getDb } from "./order-links";
 import { ensureDefaultPrinters, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
 
@@ -72,7 +72,8 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
   // Charge-only HubSpot deals (shipping / fees) are not production work.
   const printDeals = snapshot.activeDeals.filter((deal) => deal.requiresPlates);
 
-  const kitByDeal = new Map(listKitSummaries(200).map((kit) => [kit.hubspotDealId, kit]));
+  // Parts QC (Orders Parts / plate bits) drives blocked scoring — parked kits store is ignored.
+  const partsByDeal = new Map(listOrderPartSummaries(300).map((row) => [row.hubspotDealId, row]));
   const checklists = listFulfillmentChecklists(printDeals.map((deal) => deal.dealId));
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
@@ -92,7 +93,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       else if (!assignedIds.includes(printerId)) assignedIds.push(printerId);
       if (plate.printTimeSeconds && plate.printTimeSeconds > 0) totalPrintTimeSeconds += plate.printTimeSeconds;
     }
-    const kit = kitByDeal.get(deal.dealId);
+    const parts = partsByDeal.get(deal.dealId);
     const base = {
       dealId: deal.dealId,
       dealName: deal.dealName,
@@ -108,8 +109,9 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       assignedPrinterIds: assignedIds,
       assignedPrinterNames: assignedIds.map((id) => printerName.get(id) || `Printer ${id}`),
       unassignedPlateCount,
-      kitNeeded: kit?.needed ?? 0,
-      kitReprint: kit?.reprint ?? 0,
+      // Field names kept for API stability; values now come from order parts.
+      kitNeeded: parts?.needed ?? 0,
+      kitReprint: parts?.reprint ?? 0,
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
       fulfillment: checklists.get(deal.dealId) ?? {

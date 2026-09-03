@@ -212,6 +212,14 @@ test("default select picks every same-client match for shared-box labels", () =>
   assert.deepEqual(selected.sort(), ["panels", "raider"].sort());
 });
 
+test("default select keeps only primary when same-client scores diverge", () => {
+  const selected = defaultLabelMatchDealIds([
+    { dealId: "a", contactName: "Alex", dealName: "Knight - Alex", score: 90 },
+    { dealId: "b", contactName: "Alex", dealName: "Base - Alex", score: 40 },
+  ]);
+  assert.deepEqual(selected, ["a"]);
+});
+
 test("attach schema accepts dealIds for multi-order shared tracking", () => {
   const multi = attachShippingLabelSchema.safeParse({
     dealIds: ["111", "222"],

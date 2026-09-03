@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -29,12 +30,8 @@ import {
 } from "@shared/schema";
 
 const CHECKLIST = [
-  "Deploy this service to a public HTTPS URL.",
-  "Inject CUSTOM_CRED_API_HUBAPI_COM_URL and CUSTOM_CRED_API_HUBAPI_COM_TOKEN.",
-  "Set HUBSPOT_WEBHOOK_SECRET to the private app client secret.",
-  "Subscribe Deal property changed events for the five source fields.",
-  "Run a dry-run recalculation on one test deal and read the audit row.",
-  "Set DRY_RUN=false and ALLOW_HUBSPOT_WRITES=true to start writing.",
+  "Confirm Setup env vars + webhook secret are injected.",
+  "Dry-run one test deal here, then set DRY_RUN=false and ALLOW_HUBSPOT_WRITES=true.",
 ];
 
 function money(value: number | undefined) {
@@ -92,9 +89,15 @@ export default function Operations() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Profit automation"
-        subtitle="Use HubSpot for costs and stages. This page shows how Gross Profit and Margin stay current."
+        subtitle="Recalculate Gross Profit / Margin for a deal. Env vars and webhooks live on Setup; books and attention live on Stats."
         actions={
           <>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/performance">Stats</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/setup">Setup</Link>
+            </Button>
             <StatusPill
               tone={live ? "warn" : "neutral"}
               icon={live ? Zap : CircleDashed}
@@ -432,10 +435,10 @@ export default function Operations() {
           )}
         </Panel>
 
-        {/* Activation checklist */}
+        {/* Short activation reminder — full env/webhook docs live on Setup */}
         <Panel
-          title="Activation checklist"
-          description="Everything required before HubSpot deals change."
+          title="Write unlock"
+          description="Full environment checklist is on Setup. Use this page to dry-run one deal before enabling live writes."
         >
           <ol className="space-y-2">
             {CHECKLIST.map((item, index) => (
@@ -447,10 +450,9 @@ export default function Operations() {
               </li>
             ))}
           </ol>
-          <p className="mt-3 text-xs text-muted-foreground">
-            This console holds no token and no customer data. Access control comes from the
-            deployment's privacy setting.
-          </p>
+          <Button asChild size="sm" variant="outline" className="mt-3">
+            <Link href="/setup">Open Setup</Link>
+          </Button>
         </Panel>
       </div>
     </div>

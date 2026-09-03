@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
@@ -110,9 +111,15 @@ export default function Performance() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Performance"
-        subtitle="A read-only daily view of orders, margins, workload, and supply spending."
+        subtitle="Read-only books, margins, and attention. Recalculate a deal on Profit; env unlocks on Setup."
         actions={
           <>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/operations">Profit</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/setup">Setup</Link>
+            </Button>
             {ownerCode ? (
               <Button
                 size="sm"

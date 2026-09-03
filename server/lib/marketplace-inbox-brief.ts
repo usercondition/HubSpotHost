@@ -193,10 +193,17 @@ function classifyThread(input: MarketplaceThreadInput, index: number): Marketpla
     nextActions.push({ id: "reply", label: "Reply in Messenger", kind: "reply" });
   }
   if (status === "ready_to_book" || status === "paid_needs_details") {
+    const manualParams = new URLSearchParams();
+    const buyerName = clean(title.replace(/\(.*?\)/g, ""), 80);
+    if (buyerName) manualParams.set("q", buyerName);
+    if (analysis.amount) manualParams.set("amount", analysis.amount);
+    if (analysis.productName) manualParams.set("product", analysis.productName);
+    if (analysis.email) manualParams.set("email", analysis.email);
+    const qs = manualParams.toString();
     nextActions.push({
       id: "manual",
       label: "Open Manual entry",
-      href: "/paid-orders",
+      href: qs ? `/paid-orders?${qs}` : "/paid-orders",
       kind: "ops",
     });
   }

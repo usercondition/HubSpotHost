@@ -18,7 +18,7 @@ import {
   buyerTrackingMailtoHref,
   draftBuyerTrackingMessage,
 } from "@shared/shipping-draft";
-import { defaultLabelMatchDealIds } from "@shared/shipping-label-select";
+import { defaultLabelMatchDealIds, labelMatchContactKey, labelMatchNeedsSharedBoxConfirm } from "@shared/shipping-label-select";
 import { ShippingEmailPreviewDialog } from "@/components/shipping-email-preview-dialog";
 import type { ShippingEmailTemplateInput } from "@shared/shipping-email-template";
 
@@ -145,7 +145,22 @@ export default function ShippingLabelsPage() {
       setSelectedDealIds(seeded);
       const attachedIds = data.alreadyAttachedDealIds ?? (data.alreadyAttached ? [data.alreadyAttached.dealId] : []);
       const pendingDefaults = defaults.filter((id) => !attachedIds.includes(id));
-      if (attachedIds.length > 0 && pendingDefaults.length === 0 && defaults.length > 0) {
+      const top = data.matches[0];
+      const sameClientOthers =
+        top && seeded.length === 1
+          ? data.matches.filter(
+              (row) =>
+                row.dealId !== seeded[0] &&
+                labelMatchContactKey(row) === labelMatchContactKey(top) &&
+                !attachedIds.includes(row.dealId),
+            )
+          : [];
+      if (sameClientOthers.length > 0) {
+        toast({
+          title: "Shared box?",
+          description: `Primary match is ${top?.dealName ?? "one order"}. ${sameClientOthers.length} other same-client order(s) scored lower — confirm below if they ship together.`,
+        });
+      } else if (attachedIds.length > 0 && pendingDefaults.length === 0 && defaults.length > 0) {
         toast({
           title: "Already attached",
           description:
@@ -299,6 +314,24 @@ export default function ShippingLabelsPage() {
   );
   const allSelectedAlreadyAttached =
     selectedDealIds.length > 0 && pendingSelectedIds.length === 0;
+
+  const sharedBoxConfirm = useMemo(() => {
+    if (!parsed?.matches?.length) return { needed: false, primary: null, others: [] as LabelMatch[] };
+    const top = parsed.matches[0]!;
+    const key = labelMatchContactKey(top);
+    if (!key || selectedDealIds.length !== 1 || selectedDealIds[0] !== top.dealId) {
+      return labelMatchNeedsSharedBoxConfirm(parsed.matches, selectedDealIds);
+    }
+    const others = parsed.matches.filter(
+      (row) => row.dealId !== top.dealId && labelMatchContactKey(row) === key && !alreadyAttachedIdSet.has(row.dealId),
+    );
+    const spread = others.length ? top.score - Math.min(...others.map((row) => row.score)) : 0;
+    return {
+      needed: others.length > 0 && spread >= 30,
+      primary: top,
+      others,
+    };
+  }, [parsed, selectedDealIds, alreadyAttachedIdSet]);
 
   const contactLookup = useQuery<{
     ok: true;
@@ -742,8 +775,51 @@ export default function ShippingLabelsPage() {
                     ) : null}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Select every order in the box. Same-client matches are pre-selected when we can tell.
+                    Select every order in the box. Same-client matches are pre-selected when scores agree.
                   </p>
+                  {sharedBoxConfirm.needed && sharedBoxConfirm.primary ? (
+                    <div
+                      className="glance-item flex-col items-stretch gap-2"
+                      data-tone="warn"
+                      data-testid="panel-label-shared-box-confirm"
+                    >
+                      <p className="text-sm font-medium">
+                        Primary ship-to looks like {sharedBoxConfirm.primary.dealName}
+                        {sharedBoxConfirm.primary.contactName
+                          ? ` (${sharedBoxConfirm.primary.contactName})`
+                          : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {sharedBoxConfirm.others.length} other same-client order
+                        {sharedBoxConfirm.others.length === 1 ? "" : "s"} scored lower. Add them only if this
+                        label covers a shared box.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() =>
+                            setSelectedDealIds((prev) => {
+                              const extra = sharedBoxConfirm.others.map((row) => row.dealId);
+                              return [...prev, ...extra.filter((id) => !prev.includes(id))];
+                            })
+                          }
+                          data-testid="button-label-add-shared-box"
+                        >
+                          Add {sharedBoxConfirm.others.length} to shared box
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedDealIds([sharedBoxConfirm.primary!.dealId])}
+                          data-testid="button-label-keep-primary-only"
+                        >
+                          Keep primary only
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                   {parsed.matches.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       No automatic match — paste HubSpot deal id(s) below, or open{" "}
