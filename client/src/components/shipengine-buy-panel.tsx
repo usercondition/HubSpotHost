@@ -139,6 +139,13 @@ type PurchaseResponse = {
   message?: string;
   attachedDealIds?: string[];
   contact?: { id: string | null; name: string; email: string };
+  stageMoves?: Array<{
+    dealId: string;
+    ok: boolean;
+    dryRun?: boolean;
+    stageLabel?: string;
+    error?: string;
+  }>;
   shipengine?: {
     trackingNumber: string;
     labelUrl: string | null;
@@ -370,11 +377,17 @@ export function ShipEngineBuyPanel({
       });
       setRates([]);
       setSelectedRateId("");
+      const completed = (data.stageMoves ?? []).filter((row) => row.ok);
+      const stageHint = completed[0]?.stageLabel
+        ? ` · moved to ${completed[0].stageLabel}`
+        : data.stageMoves?.some((row) => !row.ok)
+          ? " · tracking saved (stage move failed)"
+          : "";
       toast({
         title: data.shipengine?.testMode ? "Test label bought" : "Label bought",
         description: tracking
-          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached`
-          : data.message ?? "Tracking attached",
+          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached${stageHint}`
+          : data.message ?? `Tracking attached${stageHint}`,
       });
     },
     onError: (error: Error) => {
@@ -392,7 +405,7 @@ export function ShipEngineBuyPanel({
   return (
     <Panel
       title="Buy with ShipEngine"
-      description="Rate-shop UPS (and USPS), buy the label, and write tracking + postage onto the Print Order."
+      description="Rate-shop UPS (and USPS), buy the label, write tracking + postage, and move the Print Order to Completed."
       testId="panel-labels-shipengine"
       actions={
         status?.testMode ? (

@@ -3,7 +3,13 @@
  */
 import type { DealCostFields } from "../../shared/schema";
 import { enqueueMarketplaceShipmentSendRequest } from "./marketplace-send-request-store";
-import { fetchDealAssociatedContact, seedPrintDealCosts, updateDealCosts } from "./deal-ops";
+import {
+  advanceDealStage,
+  fetchDealAssociatedContact,
+  resolveCompletedPrintOrderStage,
+  seedPrintDealCosts,
+  updateDealCosts,
+} from "./deal-ops";
 import {
   getFulfillmentChecklist,
   listExistingTrackingAttachments,
@@ -11,6 +17,16 @@ import {
   type HubSpotShippingSync,
 } from "./fulfillment";
 import type { AttachShippingLabelInput } from "./shipping-label";
+
+export type LabelStageMove = {
+  dealId: string;
+  ok: boolean;
+  dryRun?: boolean;
+  stageId?: string;
+  stageLabel?: string;
+  error?: string;
+  skipped?: boolean;
+};
 
 export type AttachShippingLabelResult =
   | {
@@ -23,6 +39,7 @@ export type AttachShippingLabelResult =
       hubspot: null;
       costs: null;
       costsError: null;
+      stageMoves: LabelStageMove[];
       contact: { id: string | null; name: string; email: string };
       alreadyAttached: {
         dealId: string;
@@ -42,6 +59,7 @@ export type AttachShippingLabelResult =
       hubspot: HubSpotShippingSync | null;
       costs: DealCostFields | null;
       costsError: string | null;
+      stageMoves: LabelStageMove[];
       contact: { id: string | null; name: string; email: string };
       marketplaceSend: {
         queued: boolean;
@@ -84,6 +102,7 @@ export async function attachShippingLabelToDeals(
       hubspot: null,
       costs: null,
       costsError: null,
+      stageMoves: [],
       contact: {
         id: contact.id,
         name: contact.name,
@@ -140,6 +159,42 @@ export async function attachShippingLabelToDeals(
     }
   }
 
+  const stageMoves: LabelStageMove[] = [];
+  if (input.markComplete !== false && attachedDealIds.length > 0) {
+    const completed = await resolveCompletedPrintOrderStage();
+    if (!completed) {
+      for (const dealId of attachedDealIds) {
+        stageMoves.push({
+          dealId,
+          ok: false,
+          error: "No Completed / Closed Won stage found on the Print Orders pipeline.",
+        });
+      }
+    } else {
+      for (const dealId of attachedDealIds) {
+        const moved = await advanceDealStage(dealId, {
+          stageId: completed.id,
+          liveWrite: input.liveWrite !== false,
+        });
+        if (moved.ok) {
+          stageMoves.push({
+            dealId,
+            ok: true,
+            dryRun: moved.dryRun,
+            stageId: moved.stageId,
+            stageLabel: moved.stageLabel,
+          });
+        } else {
+          stageMoves.push({
+            dealId,
+            ok: false,
+            error: moved.error,
+          });
+        }
+      }
+    }
+  }
+
   const primaryDealId = attachedDealIds[0]!;
   const contact = await fetchDealAssociatedContact(primaryDealId);
   const postageAmount = Number(postage);
@@ -162,6 +217,7 @@ export async function attachShippingLabelToDeals(
     hubspot: primaryHubspot,
     costs: costs && costs.ok ? costs.costs : null,
     costsError: costs && !costs.ok ? costs.error : null,
+    stageMoves,
     contact: {
       id: contact.id,
       name: contact.name,

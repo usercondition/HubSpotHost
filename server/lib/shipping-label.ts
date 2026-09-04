@@ -510,6 +510,8 @@ export const attachShippingLabelSchema = z
       ),
     packingDone: z.boolean().optional().default(true),
     labelBought: z.boolean().optional().default(true),
+    /** Move Print Order(s) to HubSpot Completed / Closed Won after attach. */
+    markComplete: z.boolean().optional().default(true),
     /** Explicit buyer-chat channel; existing orders do not carry this metadata. */
     messageChannel: z.enum(["marketplace", "offerup"]).optional().default("marketplace"),
     liveWrite: z.boolean().optional(),
@@ -538,6 +540,7 @@ export const attachShippingLabelSchema = z
       postageUsd: value.postageUsd,
       packingDone: value.packingDone,
       labelBought: value.labelBought,
+      markComplete: value.markComplete,
       messageChannel: value.messageChannel,
       liveWrite: value.liveWrite,
     };
