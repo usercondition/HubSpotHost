@@ -89,13 +89,37 @@ async function fetchDealWithCosts(dealId: string): Promise<{
   };
 }
 
-export async function fetchDealAssociatedContact(dealId: string): Promise<{
+export type DealAssociatedContact = {
   id: string | null;
   name: string;
   email: string;
   phone: string;
+  /** Display lines for packing slip / Labels UI. */
   addressLines: string[];
-}> {
+  /** Structured HubSpot ship-to (street2 is not a separate HubSpot field). */
+  street1: string;
+  street2: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+};
+
+const EMPTY_DEAL_CONTACT: DealAssociatedContact = {
+  id: null,
+  name: "",
+  email: "",
+  phone: "",
+  addressLines: [],
+  street1: "",
+  street2: "",
+  city: "",
+  state: "",
+  zip: "",
+  country: "",
+};
+
+export async function fetchDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
   try {
     const assoc = await hubspotRequest(
       `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/contacts?limit=1`,
@@ -109,7 +133,7 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<{
           ? results[0].id
           : null;
     if (!contactId) {
-      return { id: null, name: "", email: "", phone: "", addressLines: [] };
+      return { ...EMPTY_DEAL_CONTACT };
     }
     const contact = await hubspotRequest(
       `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,address,city,state,zip,country`,
@@ -117,10 +141,15 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<{
     );
     const props = (contact.properties ?? {}) as Record<string, string | null>;
     const name = [props.firstname, props.lastname].filter(Boolean).join(" ").trim();
+    const street1 = String(props.address ?? "").trim();
+    const city = String(props.city ?? "").trim();
+    const state = String(props.state ?? "").trim();
+    const zip = String(props.zip ?? "").trim();
+    const country = String(props.country ?? "").trim();
     const addressLines = [
-      props.address,
-      [props.city, props.state, props.zip].filter(Boolean).join(", "),
-      props.country,
+      street1,
+      [city, state, zip].filter(Boolean).join(", "),
+      country,
     ]
       .map((line) => String(line ?? "").trim())
       .filter(Boolean);
@@ -130,9 +159,15 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<{
       email: String(props.email ?? "").trim(),
       phone: String(props.phone ?? "").trim(),
       addressLines,
+      street1,
+      street2: "",
+      city,
+      state,
+      zip,
+      country,
     };
   } catch {
-    return { id: null, name: "", email: "", phone: "", addressLines: [] };
+    return { ...EMPTY_DEAL_CONTACT };
   }
 }
 

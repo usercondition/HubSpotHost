@@ -146,7 +146,6 @@ import {
   setMarketplaceScanRequest,
 } from "./lib/marketplace-scan-request-store";
 import {
-  enqueueMarketplaceShipmentSendRequest,
   getMarketplaceSendRequest,
   setMarketplaceSendRequest,
 } from "./lib/marketplace-send-request-store";
@@ -224,7 +223,6 @@ import {
   getFulfillmentChecklist,
   upsertFulfillmentChecklist,
   listExistingTrackingAttachments,
-  type HubSpotShippingSync,
 } from "./lib/fulfillment";
 import { buildProductionQueue } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
@@ -234,6 +232,19 @@ import {
   extractShippingLabelFromPdf,
   matchShippingLabelToDeals,
 } from "./lib/shipping-label";
+import { attachShippingLabelToDeals } from "./lib/shipping-label-attach";
+import {
+  ShipEngineError,
+  buildShipNotesFromShipEngine,
+  contactToShipEngineAddress,
+  createShipEngineRates,
+  getShipFromAddress,
+  getShipEngineStatus,
+  listShipEngineCarriers,
+  purchaseShipEngineLabel,
+  shipEnginePurchaseRequestSchema,
+  shipEngineRatesRequestSchema,
+} from "./lib/shipengine";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
@@ -833,6 +844,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         telegramConfigured: telegramConfigured(),
         schedule: getHealthNudgeSchedule(),
       },
+      shipengine: (() => {
+        const se = getShipEngineStatus();
+        return {
+          configured: se.configured,
+          hasApiKey: se.hasApiKey,
+          hasShipFrom: se.hasShipFrom,
+          testMode: se.testMode,
+        };
+      })(),
       properties: {
         inputs: [...INPUT_PROPERTIES],
         outputs: [...OUTPUT_PROPERTIES],
@@ -1283,135 +1303,246 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) {
       return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     }
-    const input = parsed.data;
-    const notesBase = input.notes.trim();
-    const dealIds = input.dealIds;
-    const sharedNote =
-      dealIds.length > 1
-        ? `${notesBase}${notesBase ? " · " : ""}Shared tracking across ${dealIds.length} orders`
-            .trim()
-            .slice(0, 2_000)
-        : notesBase;
+    const result = await attachShippingLabelToDeals(parsed.data);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    return res.json(result);
+  });
 
-    const alreadyOn = listExistingTrackingAttachments(input.trackingNumber);
-    const alreadyOnSelected = alreadyOn.filter((row) => dealIds.includes(row.dealId));
-    const toAttach = dealIds.filter((id) => !alreadyOn.some((row) => row.dealId === id));
+  /** ShipEngine readiness — API key + ship-from (no secrets returned). */
+  app.get("/api/shipping-labels/shipengine/status", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const status = getShipEngineStatus();
+    let carriers: Awaited<ReturnType<typeof listShipEngineCarriers>> | null = null;
+    let carriersError: string | null = null;
+    if (status.hasApiKey) {
+      try {
+        carriers = await listShipEngineCarriers();
+      } catch (error) {
+        carriersError = error instanceof Error ? error.message : "Could not list carriers";
+      }
+    }
+    return res.json({
+      ok: true,
+      configured: status.configured,
+      hasApiKey: status.hasApiKey,
+      hasShipFrom: status.hasShipFrom,
+      testMode: status.testMode,
+      shipFrom: status.shipFrom
+        ? {
+            name: status.shipFrom.name,
+            street1: status.shipFrom.street1,
+            street2: status.shipFrom.street2 || "",
+            city: status.shipFrom.city,
+            state: status.shipFrom.state,
+            zip: status.shipFrom.zip,
+            country: status.shipFrom.country,
+          }
+        : null,
+      carriers: carriers
+        ? carriers.map((carrier) => ({
+            carrierId: carrier.carrierId,
+            carrierCode: carrier.carrierCode,
+            friendlyName: carrier.friendlyName,
+          }))
+        : null,
+      carriersError,
+    });
+  });
 
-    if (toAttach.length === 0) {
-      const primary = alreadyOnSelected[0] ?? alreadyOn[0]!;
-      const contact = await fetchDealAssociatedContact(primary.dealId);
+  /** Structured HubSpot ship-to for rate shopping. */
+  app.get("/api/shipping-labels/ship-to/:dealId", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    try {
+      const contact = await fetchDealAssociatedContact(dealId);
+      const address = contactToShipEngineAddress(contact);
       return res.json({
         ok: true,
-        duplicate: true,
-        message:
-          dealIds.length > 1
-            ? "This tracking is already on every selected Print Order — nothing else to do."
-            : "This tracking is already attached to that Print Order — nothing else to do.",
-        attachedDealIds: [],
-        skippedDealIds: dealIds,
-        checklist: getFulfillmentChecklist(primary.dealId),
-        hubspot: null,
-        costs: null,
-        costsError: null,
+        dealId,
         contact: {
           id: contact.id,
           name: contact.name,
           email: contact.email,
+          phone: contact.phone,
+          addressLines: contact.addressLines,
+          street1: contact.street1,
+          street2: contact.street2,
+          city: contact.city,
+          state: contact.state,
+          zip: contact.zip,
+          country: contact.country,
         },
-        alreadyAttached: {
-          dealId: primary.dealId,
-          trackingNumber: primary.trackingNumber,
-          notes: primary.notes,
-          source: primary.source,
-          updatedAt: primary.updatedAt,
-        },
+        ready: Boolean(address),
+        missing: address
+          ? []
+          : [
+              !contact.name && "name",
+              !contact.street1 && "street",
+              !contact.city && "city",
+              !contact.state && "state",
+              !contact.zip && "zip",
+            ].filter(Boolean),
+      });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load ship-to address",
+      });
+    }
+  });
+
+  /** Quote carrier rates via ShipEngine for a Print Order's HubSpot ship-to. */
+  app.post("/api/shipping-labels/shipengine/rates", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = shipEngineRatesRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const status = getShipEngineStatus();
+    if (!status.hasApiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
+      });
+    }
+    const addressFrom = parsed.data.addressFrom
+      ? {
+          name: parsed.data.addressFrom.name,
+          street1: parsed.data.addressFrom.street1,
+          street2: parsed.data.addressFrom.street2 || undefined,
+          city: parsed.data.addressFrom.city,
+          state: parsed.data.addressFrom.state,
+          zip: parsed.data.addressFrom.zip,
+          country: parsed.data.addressFrom.country || "US",
+          phone: parsed.data.addressFrom.phone || undefined,
+          email: parsed.data.addressFrom.email || undefined,
+        }
+      : getShipFromAddress();
+    if (!addressFrom) {
+      return res.status(503).json({
+        ok: false,
+        error:
+          "Set SHIP_FROM_NAME, SHIP_FROM_STREET1, SHIP_FROM_CITY, SHIP_FROM_STATE, and SHIP_FROM_ZIP on Railway.",
       });
     }
 
-    const attachedDealIds: string[] = [];
-    let primaryChecklist: ReturnType<typeof getFulfillmentChecklist> | null = null;
-    let primaryHubspot: HubSpotShippingSync | null = null;
-    let costs: Awaited<ReturnType<typeof updateDealCosts>> | null = null;
-    const postage = input.postageUsd.replace(/[$,\s]/g, "").trim();
-
-    for (let index = 0; index < toAttach.length; index += 1) {
-      const dealId = toAttach[index]!;
-      const fulfillment = await upsertFulfillmentChecklist(dealId, {
-        trackingNumber: input.trackingNumber,
-        trackingPasted: true,
-        labelBought: input.labelBought,
-        packingDone: input.packingDone,
-        // Postage seed below fills blank cost fields — mark costs entered when postage is known.
-        costsEntered: postage !== "" ? true : undefined,
-        notes: sharedNote,
-        liveWrite: input.liveWrite !== false,
-      });
-      if ("error" in fulfillment) {
+    try {
+      const contact = await fetchDealAssociatedContact(parsed.data.dealId);
+      const addressTo = contactToShipEngineAddress(contact);
+      if (!addressTo) {
         return res.status(400).json({
           ok: false,
-          error: fulfillment.error,
-          attachedDealIds,
-          failedDealId: dealId,
+          error:
+            "HubSpot contact is missing a full ship-to address (name, street, city, state, zip).",
+          contact: {
+            name: contact.name,
+            addressLines: contact.addressLines,
+          },
         });
       }
-      attachedDealIds.push(dealId);
-      if (!primaryChecklist) {
-        primaryChecklist = fulfillment.checklist;
-        primaryHubspot = fulfillment.hubspot;
-      }
 
-      // Copy known postage to every attached order only when that deal's field
-      // is blank. This also seeds the $0 absorbed labor/free USPS packaging.
-      const seeded = await seedPrintDealCosts(dealId, {
-        postage,
-        liveWrite: input.liveWrite !== false,
+      const quoted = await createShipEngineRates({
+        addressFrom,
+        addressTo,
+        parcel: parsed.data.parcel,
       });
-      if (index === 0) {
-        costs = seeded;
-      }
+      return res.json({
+        ok: true,
+        dealId: parsed.data.dealId,
+        testMode: quoted.testMode,
+        shipmentId: quoted.shipmentId,
+        addressTo: {
+          name: addressTo.name,
+          street1: addressTo.street1,
+          city: addressTo.city,
+          state: addressTo.state,
+          zip: addressTo.zip,
+        },
+        rates: quoted.rates,
+        messages: quoted.messages,
+      });
+    } catch (error) {
+      const statusCode = error instanceof ShipEngineError ? error.status : 502;
+      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not get ShipEngine rates",
+      });
+    }
+  });
+
+  /** Buy a ShipEngine rate, then attach tracking + postage like a PDF label. */
+  app.post("/api/shipping-labels/shipengine/purchase", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = shipEnginePurchaseRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    if (!getShipEngineStatus().hasApiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "Add SHIPENGINE_API_KEY on Railway before buying labels.",
+      });
     }
 
-    const primaryDealId = attachedDealIds[0]!;
-    const contact = await fetchDealAssociatedContact(primaryDealId);
-    const postageAmount = Number(postage);
-    // A buyer-chat notice is only safe when the label supplied both a real
-    // postage amount and a buyer name. Print Orders currently have no sales
-    // channel field, so the label UI supplies the explicit channel (defaulting
-    // to Marketplace for backwards compatibility). The attached tracking
-    // remains saved even when either is unavailable.
-    const marketplaceSend =
-      contact.name && Number.isFinite(postageAmount) && postage !== ""
-        ? enqueueMarketplaceShipmentSendRequest({
-            dealId: primaryDealId,
-            trackingNumber: input.trackingNumber,
-            to: contact.name,
-            text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
-            channel: input.messageChannel,
-          })
-        : null;
-
-    return res.json({
-      ok: true,
-      attachedDealIds,
-      skippedDealIds: alreadyOnSelected.map((row) => row.dealId),
-      checklist: primaryChecklist,
-      hubspot: primaryHubspot,
-      costs: costs && costs.ok ? costs.costs : null,
-      costsError: costs && !costs.ok ? costs.error : null,
-      contact: {
-        id: contact.id,
-        name: contact.name,
-        email: contact.email,
-      },
-      marketplaceSend: marketplaceSend
-        ? {
-            queued: marketplaceSend.queued,
-            id: marketplaceSend.request.id,
-            to: marketplaceSend.request.to,
-            channel: marketplaceSend.request.channel,
-          }
-        : null,
-    });
+    try {
+      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
+      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
+      const notes = buildShipNotesFromShipEngine({
+        carrierCode: purchase.carrierCode || parsed.data.carrierCode,
+        serviceType: purchase.serviceCode || parsed.data.serviceType,
+        amount: purchase.amount || parsed.data.amount,
+        labelUrl: purchase.labelUrl,
+        recipientName: contact.name || null,
+      });
+      const postageUsd = purchase.amount || parsed.data.amount || "";
+      const attached = await attachShippingLabelToDeals({
+        dealIds: parsed.data.dealIds,
+        trackingNumber: purchase.trackingNumber,
+        notes,
+        postageUsd,
+        packingDone: parsed.data.packingDone,
+        labelBought: true,
+        messageChannel: parsed.data.messageChannel,
+        liveWrite: parsed.data.liveWrite,
+      });
+      if (!attached.ok) {
+        return res.status(400).json({
+          ...attached,
+          shipengine: {
+            trackingNumber: purchase.trackingNumber,
+            labelUrl: purchase.labelUrl,
+            amount: postageUsd,
+            testMode: purchase.testMode,
+          },
+        });
+      }
+      return res.json({
+        ...attached,
+        shipengine: {
+          labelId: purchase.labelId,
+          trackingNumber: purchase.trackingNumber,
+          trackingUrl: purchase.trackingUrl,
+          labelUrl: purchase.labelUrl,
+          amount: postageUsd,
+          currency: purchase.currency,
+          carrierCode: purchase.carrierCode || parsed.data.carrierCode,
+          serviceCode: purchase.serviceCode || parsed.data.serviceType,
+          testMode: purchase.testMode,
+        },
+      });
+    } catch (error) {
+      const statusCode = error instanceof ShipEngineError ? error.status : 502;
+      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not purchase ShipEngine label",
+      });
+    }
   });
 
   /** HubSpot contact email/name for a Print Order (Labels draft → mailto). */

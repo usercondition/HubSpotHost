@@ -124,6 +124,12 @@ export interface HealthResponse {
     telegramConfigured: boolean;
     schedule: { enabled: boolean; timeZone: string; hours: number[] };
   };
+  shipengine?: {
+    configured: boolean;
+    hasApiKey: boolean;
+    hasShipFrom: boolean;
+    testMode: boolean | null;
+  };
 
   serverTime: string;
 }
@@ -1783,7 +1789,7 @@ export type FulfillmentChecklistKey = (typeof FULFILLMENT_CHECKLIST_KEYS)[number
 export const FULFILLMENT_CHECKLIST_LABELS: Record<FulfillmentChecklistKey, string> = {
   addressVerified: "Address verified",
   costsEntered: "Actual costs entered",
-  labelBought: "Pirate Ship label bought",
+  labelBought: "Shipping label bought",
   trackingPasted: "Tracking saved",
   packingDone: "Packed & ready",
 };
