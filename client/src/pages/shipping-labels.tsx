@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText, Mail } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText, Mail, ArrowLeft, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
-import { queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { labelsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
 import {
   buyerTrackingEmailSubject,
@@ -22,6 +22,7 @@ import { defaultLabelMatchDealIds } from "@shared/shipping-label-select";
 import { ShippingEmailPreviewDialog } from "@/components/shipping-email-preview-dialog";
 import { ShipEngineBuyPanel, ShipEngineLabelLink } from "@/components/shipengine-buy-panel";
 import type { ShippingEmailTemplateInput } from "@shared/shipping-email-template";
+import type { ProductionQueueResponse } from "@shared/schema";
 
 type LabelFields = {
   trackingNumber: string | null;
@@ -101,6 +102,37 @@ export default function ShippingLabelsPage() {
   const [attachedDraft, setAttachedDraft] = useState<AttachedDraft | null>(null);
   const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
   const [prefillDealId, setPrefillDealId] = useState(() => readHashQueryParam("dealId")?.trim() || "");
+  const [, setLocation] = useLocation();
+
+  const hasPrefillDeal = Boolean(prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId));
+
+  const queueQuery = useQuery<{ ok: true } & ProductionQueueResponse>({
+    queryKey: ["/api/production-queue", ownerCode, "labels-prefill"],
+    enabled: isUnlocked && hasPrefillDeal,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/production-queue", undefined, { headers });
+      return response.json();
+    },
+  });
+
+  const prefillDeal = useMemo(() => {
+    if (!hasPrefillDeal || !queueQuery.data) return null;
+    const items = [
+      ...(queueQuery.data.nextPrint ?? []),
+      ...(queueQuery.data.inProduction ?? []),
+      ...(queueQuery.data.shipReady ?? []),
+      ...(queueQuery.data.blocked ?? []),
+    ];
+    return items.find((row) => row.dealId === prefillDealId) ?? null;
+  }, [hasPrefillDeal, queueQuery.data, prefillDealId]);
+
+  const prefillDealLabel = prefillDeal?.dealName?.trim() || (hasPrefillDeal ? `Order ···${prefillDealId.slice(-6)}` : "");
+
+  function clearPrefillDeal() {
+    setPrefillDealId("");
+    setManualDealId("");
+    setLocation(labelsDealHref());
+  }
 
   useEffect(() => {
     const sync = () => {
@@ -435,7 +467,11 @@ export default function ShippingLabelsPage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Labels"
-        subtitle="Buy a ShipEngine label or drop a PDF — attach tracking to one or more Print Orders when they ship in the same box."
+        subtitle={
+          hasPrefillDeal
+            ? `Buying or attaching a label for ${prefillDealLabel}.`
+            : "Buy a ShipEngine label or drop a PDF — attach tracking to one or more Print Orders when they ship in the same box."
+        }
       />
 
       <div className="page-stack">
@@ -450,21 +486,39 @@ export default function ShippingLabelsPage() {
           />
         ) : (
           <>
-            {prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId) ? (
-              <Panel
-                title="Label for selected order"
-                description={`Deal ${prefillDealId} is preselected from Queue / Ops. Buy with ShipEngine or drop a PDF below.`}
-                testId="panel-labels-prefill"
-                actions={
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={queueDealHref(prefillDealId)}>Back to Queue ops</Link>
-                  </Button>
-                }
+            {hasPrefillDeal ? (
+              <div
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-3"
+                data-testid="panel-labels-prefill"
               >
-                <p className="text-sm text-muted-foreground">
-                  After attach, open Queue to finish stage / packing — checklist ticks for label + tracking automatically.
-                </p>
-              </Panel>
+                <div className="min-w-0">
+                  <p className="rule-label mb-0.5">From Queue</p>
+                  <p className="truncate text-sm font-semibold text-foreground" data-testid="text-labels-prefill-name">
+                    {prefillDealLabel}
+                  </p>
+                  {prefillDeal?.contactName ? (
+                    <p className="truncate text-xs text-muted-foreground">{prefillDeal.contactName}</p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button asChild size="sm" variant="outline" data-testid="button-labels-open-queue">
+                    <Link href={queueDealHref(prefillDealId)}>
+                      <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                      Queue
+                    </Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearPrefillDeal}
+                    data-testid="button-labels-clear-prefill"
+                    aria-label="Clear selected order"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
             ) : null}
 
             <ShipEngineBuyPanel
