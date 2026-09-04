@@ -11,6 +11,11 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { queueDealHref } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
+import {
+  filterShopShippingRates,
+  isShopUsualBoxRate,
+  type ShippingRatePrefMode,
+} from "@shared/shipping-rate-prefs";
 import type { ProductionQueueResponse } from "@shared/schema";
 
 type ShipEngineRate = {
@@ -56,8 +61,11 @@ function sortRates(rates: ShipEngineRate[], sort: RateSort): ShipEngineRate[] {
   if (sort === "fastest") {
     return next.sort((a, b) => rateDays(a) - rateDays(b) || rateAmount(a) - rateAmount(b));
   }
-  // recommended: UPS first, then cheapest (matches server default)
+  // recommended: usual box services first, UPS within that, then cheapest
   return next.sort((a, b) => {
+    const aUsual = isShopUsualBoxRate(a) ? 0 : 1;
+    const bUsual = isShopUsualBoxRate(b) ? 0 : 1;
+    if (aUsual !== bUsual) return aUsual - bUsual;
     const aUps = isUpsRate(a) ? 0 : 1;
     const bUps = isUpsRate(b) ? 0 : 1;
     if (aUps !== bUps) return aUps - bUps;
@@ -185,6 +193,7 @@ export function ShipEngineBuyPanel({
   const [addressHint, setAddressHint] = useState("");
   const [rateSort, setRateSort] = useState<RateSort>("recommended");
   const [carrierFilter, setCarrierFilter] = useState<CarrierFilter>("all");
+  const [ratePrefMode, setRatePrefMode] = useState<ShippingRatePrefMode>("usual");
 
   useEffect(() => {
     if (prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)) {
@@ -236,22 +245,33 @@ export function ShipEngineBuyPanel({
     return items.slice(0, 8);
   }, [queueQuery.data]);
 
+  const preferredRates = useMemo(
+    () => filterShopShippingRates(rates, ratePrefMode),
+    [rates, ratePrefMode],
+  );
+
   const visibleRates = useMemo(
-    () => sortRates(filterRates(rates, carrierFilter), rateSort),
-    [rates, carrierFilter, rateSort],
+    () => sortRates(filterRates(preferredRates, carrierFilter), rateSort),
+    [preferredRates, carrierFilter, rateSort],
   );
 
   const carrierCounts = useMemo(() => {
     let ups = 0;
     let usps = 0;
     let other = 0;
-    for (const rate of rates) {
+    for (const rate of preferredRates) {
       if (isUpsRate(rate)) ups += 1;
       else if (isUspsRate(rate)) usps += 1;
       else other += 1;
     }
-    return { ups, usps, other, all: rates.length };
-  }, [rates]);
+    return { ups, usps, other, all: preferredRates.length };
+  }, [preferredRates]);
+
+  const hiddenUsualCount = useMemo(() => {
+    if (ratePrefMode !== "usual") return 0;
+    const boxed = filterShopShippingRates(rates, "all");
+    return Math.max(0, boxed.length - filterShopShippingRates(rates, "usual").length);
+  }, [rates, ratePrefMode]);
 
   const selectedRate =
     rates.find((rate) => rate.rateId === selectedRateId) ??
@@ -287,7 +307,9 @@ export function ShipEngineBuyPanel({
       setTestMode(data.testMode);
       setRateSort("recommended");
       setCarrierFilter("all");
-      setSelectedRateId(data.rates[0]?.rateId ?? "");
+      setRatePrefMode("usual");
+      const usualFirst = filterShopShippingRates(data.rates, "usual")[0];
+      setSelectedRateId(usualFirst?.rateId ?? data.rates[0]?.rateId ?? "");
       setAddressHint(
         `${data.addressTo.name} · ${data.addressTo.street1}, ${data.addressTo.city}, ${data.addressTo.state} ${data.addressTo.zip}`,
       );
@@ -295,8 +317,8 @@ export function ShipEngineBuyPanel({
         title: data.rates.length ? `${data.rates.length} rates` : "No rates",
         description: data.testMode
           ? "ShipEngine sandbox — purchases won’t charge live postage."
-          : data.rates[0]
-            ? `UPS-first: ${data.rates[0].carrierFriendlyName} ${data.rates[0].serviceType} $${data.rates[0].amount}`
+          : usualFirst
+            ? `Usual boxes: ${usualFirst.carrierFriendlyName} ${usualFirst.serviceType} $${usualFirst.amount}`
             : data.messages[0] || "Try different box dims or connect UPS/USPS in ShipStation.",
       });
     },
@@ -539,9 +561,36 @@ export function ShipEngineBuyPanel({
                 <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox — no live postage charge" />
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Buying charges your ShipEngine / carrier balance. Pick a row — Buy stays under the table.
+                  Usual = box services you actually buy (UPS Ground / USPS Ground Advantage &amp; Priority).
+                  Envelopes are hidden.
                 </p>
               )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Services</span>
+                {(
+                  [
+                    ["usual", "Usual boxes"],
+                    ["all", "All package rates"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={ratePrefMode === value ? "default" : "outline"}
+                    onClick={() => setRatePrefMode(value)}
+                    data-testid={`button-shipengine-pref-${value}`}
+                  >
+                    {label}
+                  </Button>
+                ))}
+                {hiddenUsualCount > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    +{hiddenUsualCount} express / other hidden
+                  </span>
+                ) : null}
+              </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
