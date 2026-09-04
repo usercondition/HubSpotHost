@@ -119,6 +119,34 @@ const EMPTY_DEAL_CONTACT: DealAssociatedContact = {
   country: "",
 };
 
+/** HubSpot association payloads sometimes send IDs as numbers — coerce safely. */
+export function hubspotObjectId(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return /^[0-9]{1,20}$/.test(trimmed) ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    const asInt = Math.trunc(value);
+    if (asInt <= 0) return null;
+    const asText = String(asInt);
+    return /^[0-9]{1,20}$/.test(asText) ? asText : null;
+  }
+  return null;
+}
+
+function contactIdFromAssociationResult(row: unknown): string | null {
+  if (!row || typeof row !== "object") return null;
+  const record = row as Record<string, unknown>;
+  const nestedTo =
+    record.to && typeof record.to === "object" ? (record.to as Record<string, unknown>) : null;
+  return (
+    hubspotObjectId(record.toObjectId) ??
+    hubspotObjectId(record.id) ??
+    hubspotObjectId(nestedTo?.id) ??
+    hubspotObjectId(nestedTo?.toObjectId)
+  );
+}
+
 export async function fetchDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
   try {
     const assoc = await hubspotRequest(
@@ -126,12 +154,7 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<DealAs
       { method: "GET" },
     );
     const results = Array.isArray(assoc?.results) ? assoc.results : [];
-    const contactId =
-      typeof results[0]?.toObjectId === "string"
-        ? results[0].toObjectId
-        : typeof results[0]?.id === "string"
-          ? results[0].id
-          : null;
+    const contactId = contactIdFromAssociationResult(results[0]);
     if (!contactId) {
       return { ...EMPTY_DEAL_CONTACT };
     }
