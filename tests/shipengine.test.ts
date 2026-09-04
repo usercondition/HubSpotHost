@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildShipNotesFromShipEngine,
   contactToShipEngineAddress,
+  ensureShipEnginePhones,
   getShipEngineApiKey,
   getShipEngineStatus,
   getShipFromAddress,
@@ -21,6 +22,7 @@ test("shipengine env helpers read API key and ship-from", () => {
     SHIP_FROM_CITY: "San Diego",
     SHIP_FROM_STATE: "CA",
     SHIP_FROM_ZIP: "92101",
+    SHIP_FROM_PHONE: "6195550100",
   } as NodeJS.ProcessEnv;
   assert.equal(getShipEngineApiKey(env), "TEST_abc");
   assert.equal(shipEngineKeyIsTest("TEST_abc"), true);
@@ -28,9 +30,55 @@ test("shipengine env helpers read API key and ship-from", () => {
   const from = getShipFromAddress(env);
   assert.ok(from);
   assert.equal(from?.city, "San Diego");
+  assert.equal(from?.phone, "6195550100");
   const status = getShipEngineStatus(env);
   assert.equal(status.configured, true);
+  assert.equal(status.hasShipFromPhone, true);
   assert.equal(status.testMode, true);
+});
+
+test("ShipEngine is not configured without SHIP_FROM_PHONE", () => {
+  const env = {
+    SHIPENGINE_API_KEY: "TEST_abc",
+    SHIP_FROM_NAME: "Studio Desk",
+    SHIP_FROM_STREET1: "100 Resin Ave",
+    SHIP_FROM_CITY: "San Diego",
+    SHIP_FROM_STATE: "CA",
+    SHIP_FROM_ZIP: "92101",
+  } as NodeJS.ProcessEnv;
+  const status = getShipEngineStatus(env);
+  assert.equal(status.hasShipFrom, true);
+  assert.equal(status.hasShipFromPhone, false);
+  assert.equal(status.configured, false);
+});
+
+test("ensureShipEnginePhones uses shop phone only — client phone optional", () => {
+  const from = {
+    name: "Shop",
+    street1: "1 Studio",
+    city: "San Diego",
+    state: "CA",
+    zip: "92101",
+    country: "US",
+    phone: "6195550100",
+  };
+  const toNoPhone = {
+    name: "Buyer",
+    street1: "9 Print Ln",
+    city: "Sioux Falls",
+    state: "SD",
+    zip: "57107",
+    country: "US",
+  };
+  const filled = ensureShipEnginePhones(from, toNoPhone);
+  assert.ok(!("error" in filled));
+  if ("error" in filled) return;
+  assert.equal(filled.addressFrom.phone, "6195550100");
+  assert.equal(filled.addressTo.phone, "6195550100");
+
+  const missingShop = ensureShipEnginePhones({ ...from, phone: undefined }, toNoPhone);
+  assert.ok("error" in missingShop);
+  assert.match(missingShop.error, /SHIP_FROM_PHONE/);
 });
 
 test("CUSTOM_CRED shipengine token wins over SHIPENGINE_API_KEY", () => {

@@ -159,7 +159,7 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<DealAs
       return { ...EMPTY_DEAL_CONTACT };
     }
     const contact = await hubspotRequest(
-      `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,address,city,state,zip,country`,
+      `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,mobilephone,address,city,state,zip,country`,
       { method: "GET" },
     );
     const props = (contact.properties ?? {}) as Record<string, string | null>;
@@ -180,7 +180,7 @@ export async function fetchDealAssociatedContact(dealId: string): Promise<DealAs
       id: contactId,
       name,
       email: String(props.email ?? "").trim(),
-      phone: String(props.phone ?? "").trim(),
+      phone: String(props.phone ?? "").trim() || String(props.mobilephone ?? "").trim(),
       addressLines,
       street1,
       street2: "",

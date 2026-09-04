@@ -238,6 +238,7 @@ import {
   buildShipNotesFromShipEngine,
   contactToShipEngineAddress,
   createShipEngineRates,
+  ensureShipEnginePhones,
   getShipFromAddress,
   getShipEngineStatus,
   listShipEngineCarriers,
@@ -1328,6 +1329,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       configured: status.configured,
       hasApiKey: status.hasApiKey,
       hasShipFrom: status.hasShipFrom,
+      hasShipFromPhone: status.hasShipFromPhone,
       testMode: status.testMode,
       shipFrom: status.shipFrom
         ? {
@@ -1338,6 +1340,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             state: status.shipFrom.state,
             zip: status.shipFrom.zip,
             country: status.shipFrom.country,
+            hasPhone: Boolean(status.shipFrom.phone?.trim()),
           }
         : null,
       carriers: carriers
@@ -1433,6 +1436,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           "Set SHIP_FROM_NAME, SHIP_FROM_STREET1, SHIP_FROM_CITY, SHIP_FROM_STATE, and SHIP_FROM_ZIP on Railway.",
       });
     }
+    if (!addressFrom.phone?.trim()) {
+      return res.status(503).json({
+        ok: false,
+        error:
+          "Set SHIP_FROM_PHONE on Railway to your shop phone. ShipEngine requires it (client phone is not used).",
+      });
+    }
 
     try {
       const contact = await fetchDealAssociatedContact(parsed.data.dealId);
@@ -1449,9 +1459,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      const withPhones = ensureShipEnginePhones(addressFrom, addressTo);
+      if ("error" in withPhones) {
+        return res.status(503).json({ ok: false, error: withPhones.error });
+      }
+
       const quoted = await createShipEngineRates({
-        addressFrom,
-        addressTo,
+        addressFrom: withPhones.addressFrom,
+        addressTo: withPhones.addressTo,
         parcel: parsed.data.parcel,
       });
       return res.json({

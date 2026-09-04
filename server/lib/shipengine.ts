@@ -110,6 +110,29 @@ export function getShipFromAddress(env: NodeJS.ProcessEnv = process.env): ShipEn
   };
 }
 
+/**
+ * ShipEngine requires a non-empty phone on ship_from (and usually ship_to).
+ * Always use the shop SHIP_FROM_PHONE — never block on missing client phone.
+ * If the contact has no phone, reuse the shop number on ship_to.
+ */
+export function ensureShipEnginePhones(
+  addressFrom: ShipEngineAddress,
+  addressTo: ShipEngineAddress,
+): { addressFrom: ShipEngineAddress; addressTo: ShipEngineAddress } | { error: string } {
+  const shopPhone = (addressFrom.phone || "").trim();
+  if (!shopPhone) {
+    return {
+      error:
+        "Set SHIP_FROM_PHONE on Railway to your shop phone. ShipEngine requires it on the ship-from address (client phone is optional).",
+    };
+  }
+  const toPhone = (addressTo.phone || "").trim() || shopPhone;
+  return {
+    addressFrom: { ...addressFrom, phone: shopPhone },
+    addressTo: { ...addressTo, phone: toPhone },
+  };
+}
+
 /** Optional comma-separated carrier ids; empty = auto-list from account. */
 export function getConfiguredCarrierIds(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = envTrim(env, "SHIPENGINE_CARRIER_IDS");
@@ -124,16 +147,19 @@ export function getShipEngineStatus(env: NodeJS.ProcessEnv = process.env): {
   configured: boolean;
   hasApiKey: boolean;
   hasShipFrom: boolean;
+  hasShipFromPhone: boolean;
   testMode: boolean | null;
   shipFrom: ShipEngineAddress | null;
   carrierIdsConfigured: string[];
 } {
   const key = getShipEngineApiKey(env);
   const shipFrom = getShipFromAddress(env);
+  const hasShipFromPhone = Boolean(shipFrom?.phone?.trim());
   return {
-    configured: Boolean(key && shipFrom),
+    configured: Boolean(key && shipFrom && hasShipFromPhone),
     hasApiKey: Boolean(key),
     hasShipFrom: Boolean(shipFrom),
+    hasShipFromPhone,
     testMode: key ? shipEngineKeyIsTest(key) : null,
     shipFrom,
     carrierIdsConfigured: getConfiguredCarrierIds(env),
@@ -174,9 +200,11 @@ function moneyCurrency(value: unknown): string {
 }
 
 function toApiAddress(address: ShipEngineAddress) {
+  const phone = (address.phone || "").trim();
   return {
     name: address.name,
-    phone: address.phone || undefined,
+    // Always send a string when present — omitting phone makes ShipEngine 400.
+    ...(phone ? { phone } : {}),
     email: address.email || undefined,
     company_name: address.companyName || undefined,
     address_line1: address.street1,
