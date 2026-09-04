@@ -472,16 +472,6 @@ export default function ShippingLabelsPage() {
             ? `Buying or attaching a label for ${prefillDealLabel}.`
             : "Buy a ShipEngine label or drop a PDF — attach tracking to one or more Print Orders when they ship in the same box."
         }
-        actions={
-          hasPrefillDeal ? (
-            <Button asChild size="sm" variant="outline" data-testid="button-labels-back-queue">
-              <Link href={queueDealHref(prefillDealId)}>
-                <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-                Queue
-              </Link>
-            </Button>
-          ) : undefined
-        }
       />
 
       <div className="page-stack">
@@ -511,8 +501,11 @@ export default function ShippingLabelsPage() {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Button asChild size="sm" data-testid="button-labels-open-queue">
-                    <Link href={queueDealHref(prefillDealId)}>Open in Queue</Link>
+                  <Button asChild size="sm" variant="outline" data-testid="button-labels-open-queue">
+                    <Link href={queueDealHref(prefillDealId)}>
+                      <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                      Queue
+                    </Link>
                   </Button>
                   <Button
                     type="button"
