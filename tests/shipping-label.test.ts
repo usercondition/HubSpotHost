@@ -221,6 +221,7 @@ test("attach schema accepts dealIds for multi-order shared tracking", () => {
   assert.equal(multi.success, true);
   if (multi.success) {
     assert.deepEqual(multi.data.dealIds, ["111", "222"]);
+    assert.equal(multi.data.markComplete, true);
   }
 
   const legacy = attachShippingLabelSchema.safeParse({
@@ -230,6 +231,17 @@ test("attach schema accepts dealIds for multi-order shared tracking", () => {
   assert.equal(legacy.success, true);
   if (legacy.success) {
     assert.deepEqual(legacy.data.dealIds, ["333"]);
+    assert.equal(legacy.data.markComplete, true);
+  }
+
+  const keepOpen = attachShippingLabelSchema.safeParse({
+    dealId: "444",
+    trackingNumber: "9300111043900010978789",
+    markComplete: false,
+  });
+  assert.equal(keepOpen.success, true);
+  if (keepOpen.success) {
+    assert.equal(keepOpen.data.markComplete, false);
   }
 
   const missing = attachShippingLabelSchema.safeParse({
