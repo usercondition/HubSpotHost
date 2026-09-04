@@ -59,6 +59,33 @@ function stageClosed(metadata: Record<string, unknown>): boolean {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
+/**
+ * Prefer HubSpot closed-won / Completed for “shipped” Print Orders.
+ * Falls back to the first closed stage on the Print Orders pipeline.
+ */
+export function pickCompletedPrintOrderStage(
+  stages: Array<{ id: string; label: string; metadata: Record<string, unknown> }>,
+): { id: string; label: string } | null {
+  const closed = stages.filter((stage) => stageClosed(stage.metadata));
+  if (closed.length === 0) return null;
+  const scored = [...closed].sort((a, b) => {
+    const score = (stage: { id: string; label: string }) => {
+      const hay = `${stage.id} ${stage.label}`.toLowerCase();
+      if (hay === "closedwon" || /\bclosed\s*won\b/.test(hay)) return 0;
+      if (/\bcomplete/.test(hay) || /\bshipped\b/.test(hay)) return 1;
+      return 2;
+    };
+    return score(a) - score(b) || a.label.localeCompare(b.label);
+  });
+  const pick = scored[0]!;
+  return { id: pick.id, label: pick.label };
+}
+
+export async function resolveCompletedPrintOrderStage(): Promise<{ id: string; label: string } | null> {
+  const stages = await fetchPrintOrderPipelineStages();
+  return pickCompletedPrintOrderStage(stages);
+}
+
 async function fetchDealWithCosts(dealId: string): Promise<{
   id: string;
   properties: Record<string, string | null>;

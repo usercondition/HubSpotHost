@@ -239,6 +239,13 @@ export default function ShippingLabelsPage() {
         skippedDealIds?: string[];
         contact?: { id: string | null; name: string; email: string };
         alreadyAttached?: { dealId: string; trackingNumber: string };
+        stageMoves?: Array<{
+          dealId: string;
+          ok: boolean;
+          dryRun?: boolean;
+          stageLabel?: string;
+          error?: string;
+        }>;
       };
     },
     onSuccess: (data) => {
@@ -296,11 +303,17 @@ export default function ShippingLabelsPage() {
         labelUrl: null,
       });
       const skipCount = data.skippedDealIds?.length ?? 0;
+      const completed = (data.stageMoves ?? []).filter((row) => row.ok);
+      const stageHint = completed[0]?.stageLabel
+        ? ` · ${completed.length > 1 ? `${completed.length} orders` : "order"} → ${completed[0].stageLabel}`
+        : data.stageMoves?.some((row) => !row.ok)
+          ? " · stage move failed"
+          : "";
       toast({
         title: attachedIds.length > 1 ? `Tracking on ${attachedIds.length} orders` : "Tracking attached",
         description: contactEmail
-          ? `Draft ready for ${contactEmail}${skipCount ? ` · ${skipCount} already had it` : ""}`
-          : `Draft ready — no HubSpot email on this contact; copy for Marketplace.${skipCount ? ` (${skipCount} already had tracking)` : ""}`,
+          ? `Draft ready for ${contactEmail}${stageHint}${skipCount ? ` · ${skipCount} already had it` : ""}`
+          : `Draft ready — copy for Marketplace.${stageHint}${skipCount ? ` (${skipCount} already had tracking)` : ""}`,
       });
       setParsed(null);
       setTracking("");
