@@ -1361,6 +1361,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const contact = await fetchDealAssociatedContact(dealId);
       const address = contactToShipEngineAddress(contact);
+      const missing = address
+        ? []
+        : [
+            !contact.name && "name",
+            !contact.street1 && "street",
+            !contact.city && "city",
+            !contact.state && "state",
+            !contact.zip && "zip",
+          ].filter(Boolean);
       return res.json({
         ok: true,
         dealId,
@@ -1378,15 +1387,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           country: contact.country,
         },
         ready: Boolean(address),
-        missing: address
-          ? []
-          : [
-              !contact.name && "name",
-              !contact.street1 && "street",
-              !contact.city && "city",
-              !contact.state && "state",
-              !contact.zip && "zip",
-            ].filter(Boolean),
+        hasContact: Boolean(contact.id),
+        missing,
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;

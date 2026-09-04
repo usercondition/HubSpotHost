@@ -36,6 +36,7 @@ type ShipToResponse = {
   ok: true;
   dealId: string;
   ready: boolean;
+  hasContact?: boolean;
   missing: string[];
   contact: {
     id: string | null;
@@ -394,9 +395,13 @@ export function ShipEngineBuyPanel({
               data-tone={shipToReady ? "good" : "warn"}
             >
               <p className="text-sm font-semibold">
-                {shipToReady ? "Ship to" : "Ship-to incomplete on HubSpot contact"}
+                {shipToReady
+                  ? "Ship to"
+                  : shipToQuery.data.hasContact === false
+                    ? "No HubSpot contact linked to this deal"
+                    : "Ship-to incomplete on HubSpot contact"}
               </p>
-              {shipToQuery.data.contact.addressLines.length ? (
+              {shipToReady && shipToQuery.data.contact.addressLines.length ? (
                 <p className="text-sm text-muted-foreground">
                   {[shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines]
                     .filter(Boolean)
@@ -404,7 +409,9 @@ export function ShipEngineBuyPanel({
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Missing: {(shipToQuery.data.missing || []).join(", ") || "address"}
+                  {shipToQuery.data.hasContact === false
+                    ? "Associate the buyer contact on the HubSpot deal, then refresh."
+                    : `Missing: ${(shipToQuery.data.missing || []).join(", ") || "address"}`}
                 </p>
               )}
             </div>
