@@ -79,6 +79,16 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     required: "Optional",
     note: "Shared secret for POST /api/cron/owner-digest and /api/cron/health-nudge",
   },
+  {
+    name: "SHIPPO_API_KEY",
+    required: "Optional",
+    note: "Shippo API token for Labels rate shop + buy (prefer shippo_test_… first)",
+  },
+  {
+    name: "SHIP_FROM_NAME",
+    required: "Optional (with Shippo)",
+    note: "Shop ship-from name; also set STREET1/CITY/STATE/ZIP",
+  },
 ];
 
 const WEBHOOK_STEPS = [
@@ -106,6 +116,9 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/contacts", note: "Browse HubSpot contacts (query + recent)" },
   { method: "GET", path: "/api/contacts/:id", note: "Single HubSpot contact card" },
   { method: "GET", path: "/api/resin-reorder", note: "Resin burn-rate buy cues (owner code)" },
+  { method: "GET", path: "/api/shipping-labels/shippo/status", note: "Shippo key + ship-from readiness (owner)" },
+  { method: "POST", path: "/api/shipping-labels/shippo/rates", note: "Quote UPS/USPS rates for a Print Order" },
+  { method: "POST", path: "/api/shipping-labels/shippo/purchase", note: "Buy Shippo label → attach tracking" },
 ];
 
 const DAILY_ROUTES = [

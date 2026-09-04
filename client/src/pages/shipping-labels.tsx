@@ -20,6 +20,7 @@ import {
 } from "@shared/shipping-draft";
 import { defaultLabelMatchDealIds } from "@shared/shipping-label-select";
 import { ShippingEmailPreviewDialog } from "@/components/shipping-email-preview-dialog";
+import { ShippoBuyPanel, ShippoLabelLink } from "@/components/shippo-buy-panel";
 import type { ShippingEmailTemplateInput } from "@shared/shipping-email-template";
 
 type LabelFields = {
@@ -73,10 +74,11 @@ type AttachedDraft = {
   service: string | null;
   carrier: string | null;
   message: string;
+  labelUrl: string | null;
 };
 
 /**
- * Drop Pirate Ship / carrier label PDFs → extract tracking → confirm Print Order.
+ * Buy labels via Shippo, or drop Pirate Ship / carrier PDFs → attach tracking.
  * Complete in HubSpot already means shipped — no separate Shipped board needed.
  */
 export default function ShippingLabelsPage() {
@@ -85,7 +87,7 @@ export default function ShippingLabelsPage() {
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Labels unlocked",
-    successDescription: "Drop label PDFs to pull tracking onto Print Orders.",
+    successDescription: "Buy Shippo labels or drop PDFs to pull tracking onto Print Orders.",
   });
 
   const [dragOver, setDragOver] = useState(false);
@@ -259,6 +261,7 @@ export default function ShippingLabelsPage() {
         service: parsed?.fields.service ?? null,
         carrier: parsed?.fields.carrier ?? null,
         message,
+        labelUrl: null,
       });
       const skipCount = data.skippedDealIds?.length ?? 0;
       toast({
@@ -432,14 +435,14 @@ export default function ShippingLabelsPage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Labels"
-        subtitle="Drop a shipping label PDF — attach the same tracking to one or more Print Orders when they ship in the same box."
+        subtitle="Buy a Shippo label or drop a PDF — attach tracking to one or more Print Orders when they ship in the same box."
       />
 
       <div className="page-stack">
         {!isUnlocked ? (
           <OwnerUnlockPanel
             title="Unlock Labels"
-            description="Owner code required to read label PDFs and write tracking onto HubSpot deals."
+            description="Owner code required to buy labels, read PDFs, and write tracking onto HubSpot deals."
             buttonLabel="Unlock Labels"
             testIdPrefix="labels"
             pending={unlock.isPending}
@@ -450,7 +453,7 @@ export default function ShippingLabelsPage() {
             {prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId) ? (
               <Panel
                 title="Label for selected order"
-                description={`Deal ${prefillDealId} is preselected from Queue / Ops. Drop a PDF or paste tracking below.`}
+                description={`Deal ${prefillDealId} is preselected from Queue / Ops. Buy with Shippo or drop a PDF below.`}
                 testId="panel-labels-prefill"
                 actions={
                   <Button asChild size="sm" variant="outline">
@@ -464,9 +467,45 @@ export default function ShippingLabelsPage() {
               </Panel>
             ) : null}
 
+            <ShippoBuyPanel
+              headers={headers}
+              ownerCode={ownerCode}
+              isUnlocked={isUnlocked}
+              prefillDealId={prefillDealId}
+              messageChannel={messageChannel}
+              onPurchased={(result) => {
+                const message = draftBuyerTrackingMessage({
+                  contactName: result.contactName,
+                  dealName: result.dealName,
+                  dealNames: [result.dealName],
+                  trackingNumber: result.trackingNumber,
+                  service: result.service,
+                  carrier: result.carrier,
+                });
+                setAttachedDraft({
+                  dealIds: result.dealIds,
+                  dealName: result.dealName,
+                  dealNames: [result.dealName],
+                  contactName: result.contactName,
+                  contactEmail: result.contactEmail,
+                  trackingNumber: result.trackingNumber,
+                  service: result.service,
+                  carrier: result.carrier,
+                  message,
+                  labelUrl: result.labelUrl,
+                });
+                setParsed(null);
+                setTracking("");
+                setNotes("");
+                setPostage("");
+                setSelectedDealIds([]);
+                setManualDealId("");
+              }}
+            />
+
             <Panel
-              title="Drop shipping label"
-              description="Pirate Ship / USPS PDF exports work best. Nothing is saved until you confirm the order below."
+              title="Or drop a shipping label PDF"
+              description="Pirate Ship / carrier PDF exports still work. Nothing is saved until you confirm the order below."
               testId="panel-labels-drop"
             >
               <input
@@ -554,6 +593,7 @@ export default function ShippingLabelsPage() {
                     {attachedDraft.message}
                   </pre>
                   <div className="flex flex-wrap gap-2">
+                    {attachedDraft.labelUrl ? <ShippoLabelLink url={attachedDraft.labelUrl} /> : null}
                     <Button
                       size="sm"
                       variant="outline"
