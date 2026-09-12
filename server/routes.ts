@@ -38,7 +38,11 @@ import {
   clearAttentionOverride,
   dismissAttentionAlert,
 } from "./lib/attention";
-import { answerTrackerQuestion, type TrackerAssistantContext } from "./lib/tracker-assistant";
+import {
+  answerTrackerQuestion,
+  buildTrackerAssistantQueue,
+  type TrackerAssistantContext,
+} from "./lib/tracker-assistant";
 import {
   getOwnerDigestSchedule,
   sendOwnerDigest,
@@ -553,7 +557,8 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     clientFullName: link.clientFullName,
     status: link.status,
   }));
-  return { snapshot, awaitingLinks, pendingLinks };
+  const queue = buildTrackerAssistantQueue(buildProductionQueue(snapshot));
+  return { snapshot, awaitingLinks, pendingLinks, queue };
 }
 
 async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {

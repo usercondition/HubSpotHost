@@ -23,6 +23,7 @@ import {
   Users,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
+import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -200,6 +201,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </span>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <OpsAssistantSheet />
           <AttentionBell />
           <ThemeToggle />
           {isUnlocked ? (
