@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answerTrackerQuestionRules, type TrackerAssistantContext } from "../server/lib/tracker-assistant";
+import {
+  answerTrackerQuestionRules,
+  getTrackerAssistantModel,
+  type TrackerAssistantContext,
+} from "../server/lib/tracker-assistant";
 import type { PerformanceResponse } from "../shared/schema";
 
 function sampleContext(overrides?: Partial<TrackerAssistantContext>): TrackerAssistantContext {
@@ -137,4 +141,93 @@ test("tracker assistant explains incomplete costs with Queue ops links", () => {
   assert.match(answer.reply, /quoted order amount/i);
   assert.match(answer.reply, /labor stays in the quote/i);
   assert.ok(answer.actions.some((action) => action.href.includes("/queue?dealId=d2")));
+});
+
+test("tracker assistant lists ship-ready deals that still need labels", () => {
+  const answer = answerTrackerQuestionRules(
+    "What’s ship-ready / needs a label?",
+    sampleContext({
+      queue: {
+        summary: { nextPrint: 1, inProduction: 0, shipReady: 1, blocked: 0, openOrders: 2 },
+        nextPrint: [],
+        shipReady: [
+          {
+            dealId: "d3",
+            dealName: "Packed knight",
+            stage: "Ready to ship",
+            amount: 200,
+            bucket: "ship_ready",
+            costsIncomplete: false,
+            hasPlates: true,
+            labelBought: false,
+            trackingPasted: false,
+            shipReady: true,
+          },
+        ],
+        blocked: [],
+        needsLabel: [
+          {
+            dealId: "d3",
+            dealName: "Packed knight",
+            stage: "Ready to ship",
+            amount: 200,
+            bucket: "ship_ready",
+            costsIncomplete: false,
+            hasPlates: true,
+            labelBought: false,
+            trackingPasted: false,
+            shipReady: true,
+          },
+        ],
+      },
+    }),
+  );
+  assert.match(answer.reply, /Packed knight/);
+  assert.match(answer.reply, /no label/i);
+  assert.ok(answer.actions.some((action) => action.href.includes("/labels?dealId=d3")));
+});
+
+test("tracker assistant briefing includes ship-ready label work when queue is present", () => {
+  const answer = answerTrackerQuestionRules(
+    "What should I do next?",
+    sampleContext({
+      queue: {
+        summary: { nextPrint: 0, inProduction: 0, shipReady: 1, blocked: 0, openOrders: 1 },
+        nextPrint: [],
+        shipReady: [],
+        blocked: [],
+        needsLabel: [
+          {
+            dealId: "d3",
+            dealName: "Packed knight",
+            stage: "Ready to ship",
+            amount: 200,
+            bucket: "ship_ready",
+            costsIncomplete: false,
+            hasPlates: true,
+            labelBought: false,
+            trackingPasted: false,
+            shipReady: true,
+          },
+        ],
+      },
+    }),
+  );
+  assert.match(answer.reply, /ship-ready/i);
+  assert.ok(answer.actions.some((action) => action.href.includes("/labels")));
+});
+
+test("xAI base URL defaults tracker assistant model to Grok", () => {
+  assert.equal(
+    getTrackerAssistantModel({ TRACKER_ASSISTANT_BASE_URL: "https://api.x.ai/v1" }),
+    "grok-3-mini",
+  );
+  assert.equal(getTrackerAssistantModel({}), "gpt-4o-mini");
+  assert.equal(
+    getTrackerAssistantModel({
+      TRACKER_ASSISTANT_BASE_URL: "https://api.x.ai/v1",
+      TRACKER_ASSISTANT_MODEL: "grok-3",
+    }),
+    "grok-3",
+  );
 });

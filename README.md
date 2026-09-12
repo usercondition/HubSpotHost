@@ -273,7 +273,7 @@ Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for 
 | `GET/POST /api/failures` | Protected. Reprint / failure log. |
 | `GET /api/resin-reorder` | Protected. Burn-rate “what to buy next” cues. |
 | `POST /api/buyers/lookup` | Protected. Returning-buyer prefill from HubSpot + local intake. |
-| `POST /api/tracker-assistant` | Protected. Read-only ops briefing / Q&A over live Performance + intake. |
+| `POST /api/tracker-assistant` | Protected. Read-only Ask Ops briefing / Q&A over live Performance + intake + production queue (optional OpenAI/xAI Grok phrasing). |
 | `POST /api/owner-digest/send` | Protected. Sends the live tracker briefing to Telegram immediately. |
 | `POST /api/cron/owner-digest` | Secured by `OWNER_DIGEST_CRON_SECRET`. Daily digest entrypoint (skips if already sent today unless `force: true`). |
 | `POST /api/health-nudge/send` | Protected. Health-check nudge for missing plates/costs/stale deals/stuck intake; skips Telegram when clear. |

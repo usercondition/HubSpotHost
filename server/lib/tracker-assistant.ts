@@ -1,12 +1,19 @@
 /**
  * Read-only tracker assistant for the owner hub.
  *
- * Builds answers from the live Performance snapshot + intake queue only.
- * Never writes to HubSpot. Optional OpenAI-compatible model when a key is set;
- * otherwise a deterministic intent engine answers from structured data.
+ * Builds answers from the live Performance snapshot, intake queue, and
+ * production-queue buckets (next print / ship-ready / labels gaps).
+ * Never writes to HubSpot. Optional OpenAI-compatible model (OpenAI or xAI/Grok)
+ * when a key is set; otherwise a deterministic intent engine answers from
+ * structured data.
  */
 
-import type { PerformanceResponse, OrderIntakeLink } from "../../shared/schema";
+import type {
+  PerformanceResponse,
+  OrderIntakeLink,
+  ProductionQueueItem,
+  ProductionQueueResponse,
+} from "../../shared/schema";
 import { ORDER_INTAKE_STATUS_LABELS } from "../../shared/schema";
 
 export type TrackerAssistantMode = "rules" | "model";
@@ -25,10 +32,34 @@ export type TrackerAssistantAnswer = {
   usedFacts: string[];
 };
 
+/** Slim production-queue row for rules + model context (no HubSpot writes). */
+export type TrackerAssistantQueueDeal = {
+  dealId: string;
+  dealName: string;
+  stage: string;
+  amount: number;
+  bucket: ProductionQueueItem["bucket"];
+  costsIncomplete: boolean;
+  hasPlates: boolean;
+  labelBought: boolean;
+  trackingPasted: boolean;
+  shipReady: boolean;
+};
+
+export type TrackerAssistantQueueContext = {
+  summary: ProductionQueueResponse["summary"];
+  nextPrint: TrackerAssistantQueueDeal[];
+  shipReady: TrackerAssistantQueueDeal[];
+  blocked: TrackerAssistantQueueDeal[];
+  /** Ship-ready (or nearly) without a bought label / tracking yet. */
+  needsLabel: TrackerAssistantQueueDeal[];
+};
+
 export type TrackerAssistantContext = {
   snapshot: PerformanceResponse;
   awaitingLinks: Array<Pick<OrderIntakeLink, "id" | "internalLabel" | "itemDescription" | "agreedAmount" | "expiresAt" | "status">>;
   pendingLinks: Array<Pick<OrderIntakeLink, "id" | "internalLabel" | "itemDescription" | "agreedAmount" | "clientFullName" | "status">>;
+  queue?: TrackerAssistantQueueContext;
 };
 
 function money(value: number): string {
@@ -43,32 +74,76 @@ function queueHref(dealId: string): string {
   return `/queue?dealId=${encodeURIComponent(dealId)}`;
 }
 
+function labelsHref(dealId?: string): string {
+  return dealId ? `/labels?dealId=${encodeURIComponent(dealId)}` : "/labels";
+}
+
+export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueDeal {
+  return {
+    dealId: item.dealId,
+    dealName: item.dealName,
+    stage: item.stage,
+    amount: item.amount,
+    bucket: item.bucket,
+    costsIncomplete: item.costsIncomplete,
+    hasPlates: item.hasPlates,
+    labelBought: item.fulfillment.labelBought,
+    trackingPasted: item.fulfillment.trackingPasted,
+    shipReady: item.fulfillment.shipReady || item.bucket === "ship_ready",
+  };
+}
+
+/** Build assistant queue slice from a live production-queue response. */
+export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): TrackerAssistantQueueContext {
+  const needsLabelSource = [...queue.shipReady, ...queue.inProduction].filter(
+    (item) =>
+      (item.bucket === "ship_ready" || item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) &&
+      (!item.fulfillment.labelBought || !item.fulfillment.trackingPasted),
+  );
+  return {
+    summary: queue.summary,
+    nextPrint: queue.nextPrint.slice(0, 6).map(slimQueueDeal),
+    shipReady: queue.shipReady.slice(0, 6).map(slimQueueDeal),
+    blocked: queue.blocked.slice(0, 6).map(slimQueueDeal),
+    needsLabel: needsLabelSource.slice(0, 8).map(slimQueueDeal),
+  };
+}
+
 export function getTrackerAssistantApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return (
     env.TRACKER_ASSISTANT_API_KEY?.trim() ||
+    env.XAI_API_KEY?.trim() ||
     env.OPENAI_API_KEY?.trim() ||
     env.CUSTOM_CRED_OPENAI_API_KEY_TOKEN?.trim() ||
     ""
   );
 }
 
-export function getTrackerAssistantModel(env: NodeJS.ProcessEnv = process.env): string {
-  return env.TRACKER_ASSISTANT_MODEL?.trim() || "gpt-4o-mini";
-}
-
 export function getTrackerAssistantBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.TRACKER_ASSISTANT_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/+$/, "");
 }
 
-function classifyIntent(question: string): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "margin" | "help" {
+export function getTrackerAssistantModel(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.TRACKER_ASSISTANT_MODEL?.trim()) return env.TRACKER_ASSISTANT_MODEL.trim();
+  const base = getTrackerAssistantBaseUrl(env);
+  // xAI OpenAI-compatible endpoint → Grok by default.
+  if (/api\.x\.ai/i.test(base)) return "grok-3-mini";
+  return "gpt-4o-mini";
+}
+
+function classifyIntent(
+  question: string,
+): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "margin" | "shipping" | "help" {
   const q = question.toLowerCase();
   if (/\b(remind|nudge|message|marketplace text|draft)\b/.test(q)) return "reminder";
   if (/\b(plates?|ctb|slice|attach)\b/.test(q)) return "plates";
-  if (/\b(costs?|shipping|labor|material|packaging)\b/.test(q)) return "costs";
+  if (/\b(labels?|ship.?ready|postage|tracking|pirate ship|shipengine|buy.?label)\b/.test(q)) return "shipping";
+  // "shipping cost" / postage amount → costs; bare "shipping" already caught above as labels.
+  if (/\b(costs?|labor|material|packaging)\b/.test(q) || /\bshipping (cost|fee|amount)\b/.test(q)) return "costs";
   if (/\b(margins?|profit|revenue)\b/.test(q)) return "margin";
   if (/\b(stuck|stale|idle|no activity|behind)\b/.test(q)) return "stuck";
-  if (/\b(intake|pending review|awaiting|buyer form|order form|queue)\b/.test(q)) return "intake";
-  if (/\b(next|what should|priorit|today|brief|overview|status|summary)\b/.test(q)) return "briefing";
+  if (/\b(intake|pending review|awaiting|buyer form|order form)\b/.test(q)) return "intake";
+  if (/\b(next|what should|priorit|today|brief|overview|status|summary|queue)\b/.test(q)) return "briefing";
   if (/\b(help|what can|how do)\b/.test(q)) return "help";
   if (q.trim().length < 3) return "briefing";
   return "next";
@@ -82,7 +157,7 @@ function attentionMatching(
 }
 
 export function answerTrackerQuestionRules(question: string, ctx: TrackerAssistantContext): TrackerAssistantAnswer {
-  const { snapshot, awaitingLinks, pendingLinks } = ctx;
+  const { snapshot, awaitingLinks, pendingLinks, queue } = ctx;
   const intent = classifyIntent(question);
   const actions: TrackerAssistantAction[] = [];
   const usedFacts: string[] = [];
@@ -92,6 +167,8 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   const costIssues = attentionMatching(snapshot, (issue) => issue.includes("cost"));
   const marginIssues = attentionMatching(snapshot, (issue) => issue.includes("margin"));
   const staleIssues = attentionMatching(snapshot, (issue) => issue.includes("activity") || issue.includes("stale"));
+  const needsLabel = queue?.needsLabel ?? [];
+  const shipReadyCount = queue?.summary.shipReady ?? 0;
 
   usedFacts.push(
     `pendingReview=${snapshot.intake.pendingReview}`,
@@ -99,6 +176,14 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     `activeOrders=${snapshot.summary.activeOrders}`,
     `attentionCount=${snapshot.summary.attentionCount}`,
   );
+  if (queue) {
+    usedFacts.push(
+      `queueNext=${queue.summary.nextPrint}`,
+      `queueShipReady=${queue.summary.shipReady}`,
+      `queueBlocked=${queue.summary.blocked}`,
+      `needsLabel=${needsLabel.length}`,
+    );
+  }
 
   if (intent === "help") {
     return {
@@ -108,10 +193,15 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         "I read your tracker only — no HubSpot writes. Ask things like:\n" +
         "• What should I do next?\n" +
         "• Which deals need plates?\n" +
+        "• What’s ship-ready / needs a label?\n" +
         "• What’s stuck or missing costs?\n" +
         "• Draft a Marketplace reminder for awaiting buyers\n" +
         "• How are margins looking?",
-      actions: [{ label: "Open Performance", href: "/performance" }],
+      actions: [
+        { label: "Open Queue", href: "/queue" },
+        { label: "Labels", href: "/labels" },
+        { label: "Performance", href: "/performance" },
+      ],
       usedFacts: ["capabilities"],
     };
   }
@@ -166,6 +256,48 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       actions.push({ label: `Attach · ${item.dealName.slice(0, 28)}`, href: printsHref(item.dealId) });
     }
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 4), usedFacts };
+  }
+
+  if (intent === "shipping") {
+    if (needsLabel.length === 0 && shipReadyCount === 0) {
+      return {
+        ok: true,
+        mode: "rules",
+        reply:
+          queue
+            ? `Nothing is ship-ready yet. Queue: ${queue.summary.nextPrint} next print · ${queue.summary.inProduction} in production · ${queue.summary.blocked} blocked.`
+            : "No ship-ready orders are flagged right now. Check Queue when packs are ready, then buy or drop a label on Labels.",
+        actions: [
+          { label: "Open Queue", href: "/queue" },
+          { label: "Labels", href: "/labels" },
+        ],
+        usedFacts,
+      };
+    }
+    if (needsLabel.length > 0) {
+      lines.push(
+        `${needsLabel.length} order${needsLabel.length === 1 ? "" : "s"} look ready to ship but still need a label or tracking:`,
+      );
+      for (const deal of needsLabel.slice(0, 5)) {
+        const gaps: string[] = [];
+        if (!deal.labelBought) gaps.push("no label");
+        if (!deal.trackingPasted) gaps.push("no tracking");
+        lines.push(
+          `• ${deal.dealName} — ${deal.stage}${deal.amount ? ` · ${money(deal.amount)}` : ""}${gaps.length ? ` · ${gaps.join(", ")}` : ""}`,
+        );
+        actions.push({ label: `Label · ${deal.dealName.slice(0, 24)}`, href: labelsHref(deal.dealId) });
+      }
+    } else {
+      lines.push(
+        `${shipReadyCount} order${shipReadyCount === 1 ? "" : "s"} in the ship-ready bucket — labels/tracking already look started. Open Labels to buy or attach PDFs.`,
+      );
+      actions.push({ label: "Open Labels", href: "/labels" });
+    }
+    if (queue && queue.summary.nextPrint > 0) {
+      lines.push("");
+      lines.push(`Also: ${queue.summary.nextPrint} still need plates before they can ship.`);
+    }
+    return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 5), usedFacts };
   }
 
   if (intent === "costs") {
@@ -288,6 +420,16 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     priorities.push(`${priorities.length + 1}. Fill missing costs on ${costIssues.length} deal${costIssues.length === 1 ? "" : "s"} in Queue.`);
     actions.push({ label: "Enter costs", href: queueHref(costIssues[0]!.dealId) });
   }
+  if (needsLabel.length > 0 || shipReadyCount > 0) {
+    const count = needsLabel.length || shipReadyCount;
+    priorities.push(
+      `${priorities.length + 1}. ${count} order${count === 1 ? "" : "s"} ship-ready — buy or attach a label${needsLabel[0] ? ` (start with ${needsLabel[0].dealName})` : ""}.`,
+    );
+    actions.push({
+      label: "Buy / attach labels",
+      href: labelsHref(needsLabel[0]?.dealId),
+    });
+  }
   if (snapshot.intake.awaitingClient > 0) {
     priorities.push(
       `${priorities.length + 1}. ${snapshot.intake.awaitingClient} order form${snapshot.intake.awaitingClient === 1 ? "" : "s"} still awaiting the buyer — nudge if needed.`,
@@ -305,8 +447,11 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   } else {
     lines.push(...priorities);
     lines.push("");
+    const queueBit = queue
+      ? ` · queue ${queue.summary.nextPrint}/${queue.summary.inProduction}/${queue.summary.shipReady}/${queue.summary.blocked} (next/prod/ship/blocked)`
+      : "";
     lines.push(
-      `Snapshot: ${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention · intake ${snapshot.intake.pendingReview}/${snapshot.intake.awaitingClient} (review/awaiting).`,
+      `Snapshot: ${snapshot.summary.activeOrders} active · ${snapshot.summary.attentionCount} attention · intake ${snapshot.intake.pendingReview}/${snapshot.intake.awaitingClient} (review/awaiting)${queueBit}.`,
     );
   }
 
@@ -322,7 +467,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
 }
 
 function contextForModel(ctx: TrackerAssistantContext): string {
-  const { snapshot, awaitingLinks, pendingLinks } = ctx;
+  const { snapshot, awaitingLinks, pendingLinks, queue } = ctx;
   return JSON.stringify(
     {
       summary: snapshot.summary,
@@ -332,6 +477,15 @@ function contextForModel(ctx: TrackerAssistantContext): string {
       attention: snapshot.attention,
       activeDeals: snapshot.activeDeals,
       pipeline: snapshot.pipeline.filter((stage) => !stage.closed && stage.count > 0),
+      productionQueue: queue
+        ? {
+            summary: queue.summary,
+            nextPrint: queue.nextPrint,
+            shipReady: queue.shipReady,
+            blocked: queue.blocked,
+            needsLabel: queue.needsLabel,
+          }
+        : null,
       awaitingLinks: awaitingLinks.map((link) => ({
         id: link.id,
         label: link.internalLabel,
@@ -353,6 +507,7 @@ function contextForModel(ctx: TrackerAssistantContext): string {
         "Read-only. Never claim you updated HubSpot, costs, stages, or deals.",
         "Only use facts from this JSON. If unknown, say so.",
         "Prefer concrete next actions with deal/intake names.",
+        "For ship-ready work, point to Labels (/labels?dealId=…) or Queue.",
         "For Marketplace reminders, draft short buyer-facing text.",
         "Keep answers under ~180 words unless drafting a message.",
       ],
@@ -387,7 +542,7 @@ async function answerWithModel(
           {
             role: "system",
             content:
-              "You are the Print Operations tracker assistant. You help the owner prioritize daily work from structured tracker JSON. You cannot write to HubSpot or change data. Be concise and practical.",
+              "You are the Print Operations shop-floor assistant. You help the owner prioritize Queue, Labels, plates, costs, and intake from structured tracker JSON. You cannot write to HubSpot or change data. Be concise and practical.",
           },
           {
             role: "user",
@@ -408,7 +563,7 @@ async function answerWithModel(
       mode: "model",
       reply,
       actions: fallback.actions,
-      usedFacts: [...fallback.usedFacts, "model=openai-compatible"],
+      usedFacts: [...fallback.usedFacts, `model=${model}`, `base=${base}`],
     };
   } catch {
     return fallback;

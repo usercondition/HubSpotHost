@@ -11,12 +11,25 @@ import type { TrackerAssistantResponse } from "@shared/schema";
 const SUGGESTIONS = [
   "What should I do next?",
   "Which deals need plates?",
+  "What’s ship-ready / needs a label?",
   "What’s stuck or missing costs?",
   "Draft a Marketplace reminder",
   "How are margins looking?",
 ];
 
-export function TrackerAssistantPanel({ headers }: { headers: Record<string, string> }) {
+type TrackerAssistantPanelProps = {
+  headers: Record<string, string>;
+  /** Floor uses a full WorkspaceSection; shell sheet uses compact embedded chrome. */
+  variant?: "section" | "embedded";
+  /** Called when the owner follows a deep-link (e.g. close the sheet). */
+  onNavigate?: () => void;
+};
+
+export function TrackerAssistantPanel({
+  headers,
+  variant = "section",
+  onNavigate,
+}: TrackerAssistantPanelProps) {
   const [question, setQuestion] = useState("What should I do next?");
   const [answer, setAnswer] = useState<TrackerAssistantResponse | null>(null);
   const [digestNote, setDigestNote] = useState<string | null>(null);
@@ -78,7 +91,6 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
     },
   });
 
-
   const runAsk = (value: string) => {
     const cleaned = value.trim();
     if (!cleaned || ask.isPending) return;
@@ -86,121 +98,140 @@ export function TrackerAssistantPanel({ headers }: { headers: Record<string, str
     ask.mutate(cleaned);
   };
 
+  const body = (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {SUGGESTIONS.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            className="rounded-md border border-border bg-muted/35 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/70"
+            onClick={() => runAsk(suggestion)}
+            data-testid={`button-tracker-suggestion-${suggestion.slice(0, 12).replace(/\s+/g, "-").toLowerCase()}`}
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          runAsk(question);
+        }}
+      >
+        <Textarea
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          className="min-h-20 resize-y text-sm"
+          placeholder="Ask what needs attention today…"
+          data-testid="input-tracker-assistant-question"
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={ask.isPending || question.trim().length === 0} data-testid="button-tracker-assistant-ask">
+            {ask.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquareText className="mr-2 h-4 w-4" />}
+            Ask tracker
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={sendDigest.isPending}
+            onClick={() => {
+              setDigestNote(null);
+              sendDigest.mutate();
+            }}
+            data-testid="button-owner-digest-send"
+          >
+            {sendDigest.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Send to Telegram
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={sendNudge.isPending}
+            onClick={() => {
+              setDigestNote(null);
+              sendNudge.mutate();
+            }}
+            data-testid="button-health-nudge-send"
+          >
+            {sendNudge.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Send health nudge
+          </Button>
+        </div>
+      </form>
+
+      {digestNote ? (
+        <p className="text-sm text-muted-foreground" data-testid="text-owner-digest-note">
+          {digestNote}
+        </p>
+      ) : null}
+
+      {ask.isError ? (
+        <p className="text-sm text-destructive" data-testid="text-tracker-assistant-error">
+          {(ask.error as Error).message.replace(/^\d+:\s*/, "").slice(0, 200) || "Could not ask the tracker."}
+        </p>
+      ) : null}
+
+      {answer ? (
+        <div className="space-y-3 rounded-md border border-border bg-muted/25 p-4" data-testid="panel-tracker-assistant-answer">
+          {answer.mode ? (
+            <p className="rule-label" data-testid="text-tracker-assistant-mode">
+              {answer.mode === "model" ? "Model + tracker" : "Tracker rules"}
+            </p>
+          ) : null}
+          <p className="whitespace-pre-wrap text-sm leading-6" data-testid="text-tracker-assistant-reply">
+            {answer.reply}
+          </p>
+          {answer.actions.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {answer.actions.map((action) =>
+                action.external ? (
+                  <Button key={`${action.href}-${action.label}`} asChild size="sm" variant="outline">
+                    <a href={action.href} target="_blank" rel="noopener noreferrer" onClick={() => onNavigate?.()}>
+                      {action.label}
+                      <ExternalLink className="ml-1.5 h-3 w-3" />
+                    </a>
+                  </Button>
+                ) : (
+                  <Button key={`${action.href}-${action.label}`} asChild size="sm" variant="outline">
+                    <Link href={action.href} onClick={() => onNavigate?.()}>
+                      {action.label}
+                    </Link>
+                  </Button>
+                ),
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  if (variant === "embedded") {
+    return (
+      <div data-testid="panel-tracker-assistant-embedded">
+        {body}
+      </div>
+    );
+  }
+
   return (
     <WorkspaceSection
       eyebrow="Ask the tracker"
       title="Ops briefing from live queue data"
-      description="Read-only helper — prioritizes intake, plates, costs, and stale deals. Morning Telegram digests cover the full briefing; health nudges only ping missing plates, costs, stale jobs, and stuck intake."
+      description="Read-only helper — prioritizes intake, plates, ship-ready labels, costs, and stale deals. Morning Telegram digests cover the full briefing; health nudges only ping missing plates, costs, stale jobs, and stuck intake."
       actions={
         answer ? (
-          <span className="rule-label" data-testid="text-tracker-assistant-mode">
+          <span className="rule-label" data-testid="text-tracker-assistant-mode-header">
             {answer.mode === "model" ? "Model + tracker" : "Tracker rules"}
           </span>
         ) : null
       }
       testId="panel-tracker-assistant"
     >
-      <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          {SUGGESTIONS.map((suggestion) => (
-            <button
-              key={suggestion}
-              type="button"
-              className="rounded-md border border-border bg-muted/35 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/70"
-              onClick={() => runAsk(suggestion)}
-              data-testid={`button-tracker-suggestion-${suggestion.slice(0, 12).replace(/\s+/g, "-").toLowerCase()}`}
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
-
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            runAsk(question);
-          }}
-        >
-          <Textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            className="min-h-20 resize-y text-sm"
-            placeholder="Ask what needs attention today…"
-            data-testid="input-tracker-assistant-question"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={ask.isPending || question.trim().length === 0} data-testid="button-tracker-assistant-ask">
-              {ask.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquareText className="mr-2 h-4 w-4" />}
-              Ask tracker
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={sendDigest.isPending}
-              onClick={() => {
-                setDigestNote(null);
-                sendDigest.mutate();
-              }}
-              data-testid="button-owner-digest-send"
-            >
-              {sendDigest.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-              Send to Telegram
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={sendNudge.isPending}
-              onClick={() => {
-                setDigestNote(null);
-                sendNudge.mutate();
-              }}
-              data-testid="button-health-nudge-send"
-            >
-              {sendNudge.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-              Send health nudge
-            </Button>
-          </div>
-        </form>
-
-        {digestNote ? (
-          <p className="text-sm text-muted-foreground" data-testid="text-owner-digest-note">
-            {digestNote}
-          </p>
-        ) : null}
-
-        {ask.isError ? (
-          <p className="text-sm text-destructive" data-testid="text-tracker-assistant-error">
-            {(ask.error as Error).message.replace(/^\d+:\s*/, "").slice(0, 200) || "Could not ask the tracker."}
-          </p>
-        ) : null}
-
-        {answer ? (
-          <div className="space-y-3 rounded-md border border-border bg-muted/25 p-4" data-testid="panel-tracker-assistant-answer">
-            <p className="whitespace-pre-wrap text-sm leading-6" data-testid="text-tracker-assistant-reply">
-              {answer.reply}
-            </p>
-            {answer.actions.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {answer.actions.map((action) =>
-                  action.external ? (
-                    <Button key={`${action.href}-${action.label}`} asChild size="sm" variant="outline">
-                      <a href={action.href} target="_blank" rel="noopener noreferrer">
-                        {action.label}
-                        <ExternalLink className="ml-1.5 h-3 w-3" />
-                      </a>
-                    </Button>
-                  ) : (
-                    <Button key={`${action.href}-${action.label}`} asChild size="sm" variant="outline">
-                      <Link href={action.href}>{action.label}</Link>
-                    </Button>
-                  ),
-                )}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      {body}
     </WorkspaceSection>
   );
 }
