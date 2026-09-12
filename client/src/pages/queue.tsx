@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -25,6 +25,28 @@ import { cn } from "@/lib/utils";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
 type QueueResponse = ProductionQueueResponse & { ok: true };
+
+/** Keep `#/queue` vs `#/queue?dealId=` in sync without remounting the page. */
+function replaceQueueHash(dealId: string | null) {
+  if (typeof window === "undefined") return;
+  const nextHash = dealId
+    ? `#/queue?dealId=${encodeURIComponent(dealId)}`
+    : "#/queue";
+  if (window.location.hash === nextHash) return;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  );
+}
+
+function queueBoardDealIds(data: ProductionQueueResponse): Set<string> {
+  return new Set(
+    [...data.nextPrint, ...data.inProduction, ...data.shipReady, ...data.blocked].map(
+      (item) => item.dealId,
+    ),
+  );
+}
 
 function hoursLabel(seconds: number | null): string {
   if (seconds == null || !(seconds > 0)) return "—";
@@ -168,6 +190,20 @@ export default function ProductionQueuePage() {
   });
   const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
 
+  const selectDeal = useCallback((dealId: string | null) => {
+    setSelectedDealId(dealId);
+    replaceQueueHash(dealId);
+  }, []);
+
+  // Left-nav → Queue clears `?dealId=` in the hash; keep drawer state in sync without remounting.
+  useEffect(() => {
+    const syncFromHash = () => {
+      setSelectedDealId(readHashQueryParam("dealId"));
+    };
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
+
   const queue = useQuery<QueueResponse>({
     queryKey: ["/api/production-queue", ownerCode],
     enabled: isUnlocked,
@@ -181,10 +217,20 @@ export default function ProductionQueuePage() {
 
   const selectedExists = useMemo(() => {
     if (!data || !selectedDealId) return false;
-    return [...data.nextPrint, ...data.inProduction, ...data.shipReady, ...data.blocked].some(
-      (item) => item.dealId === selectedDealId,
-    );
+    return queueBoardDealIds(data).has(selectedDealId);
   }, [data, selectedDealId]);
+
+  // Stale deep-links (Completed / left the board) still had ?dealId= and reopened ops.
+  // Only clear once when queue data first arrives — don't yank a deal the user just opened.
+  const clearedStaleHash = useRef(false);
+  useEffect(() => {
+    if (!data || clearedStaleHash.current) return;
+    clearedStaleHash.current = true;
+    const fromHash = readHashQueryParam("dealId");
+    if (!fromHash) return;
+    if (queueBoardDealIds(data).has(fromHash)) return;
+    selectDeal(null);
+  }, [data, selectDeal]);
 
   return (
     <div className="mx-auto flex max-w-[100rem] flex-col">
@@ -256,7 +302,7 @@ export default function ProductionQueuePage() {
                 subtitle="Open orders still missing plate data"
                 items={data.nextPrint}
                 selectedId={selectedDealId}
-                onSelect={setSelectedDealId}
+                onSelect={selectDeal}
                 empty="All open orders already have plates."
                 testId="column-next-print"
               />
@@ -265,7 +311,7 @@ export default function ProductionQueuePage() {
                 subtitle="Plates on, progressing toward ship"
                 items={data.inProduction}
                 selectedId={selectedDealId}
-                onSelect={setSelectedDealId}
+                onSelect={selectDeal}
                 empty="Nothing mid-flight right now."
                 testId="column-in-production"
               />
@@ -274,7 +320,7 @@ export default function ProductionQueuePage() {
                 subtitle="Needs parts QC or printer assignment"
                 items={data.blocked}
                 selectedId={selectedDealId}
-                onSelect={setSelectedDealId}
+                onSelect={selectDeal}
                 empty="No QC or assignment blockers."
                 testId="column-blocked"
               />
@@ -283,7 +329,7 @@ export default function ProductionQueuePage() {
                 subtitle="Checklist mostly done — buy label & pack"
                 items={data.shipReady}
                 selectedId={selectedDealId}
-                onSelect={setSelectedDealId}
+                onSelect={selectDeal}
                 empty="No orders near ship-ready yet."
                 testId="column-ship-ready"
               />
@@ -292,7 +338,7 @@ export default function ProductionQueuePage() {
             <DealOpsDrawer
               dealId={selectedDealId}
               headers={headers}
-              onClose={() => setSelectedDealId(null)}
+              onClose={() => selectDeal(null)}
             />
 
             {data.recentFailures.length > 0 ? (
@@ -303,7 +349,7 @@ export default function ProductionQueuePage() {
                       <button
                         type="button"
                         className="text-left font-medium text-primary hover:underline"
-                        onClick={() => setSelectedDealId(failure.dealId)}
+                        onClick={() => selectDeal(failure.dealId)}
                       >
                         {failure.dealName}
                       </button>
