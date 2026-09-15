@@ -515,9 +515,28 @@ export function dealRequiresPlates(
   props: Record<string, string | null | undefined> | null | undefined,
 ): boolean {
   const kind = normalizeOrderLineKind(props?.[PRINT_LINE_KIND_PROPERTY]);
-  if (orderLineKindSkipsPlates(kind)) return false;
-  if (dealNameLooksNonPrint(props?.dealname ?? "")) return false;
+  const dealName = props?.dealname ?? "";
+  // Fee lines never need plates.
+  if (kind === "fee") return false;
+  // Explicit shipping kind only skips when the deal name also looks like a charge line.
+  // Mis-tagged print products (e.g. "Sword Brethren" with print_line_kind=shipping) must
+  // still appear on Queue / Labels.
+  if (kind === "shipping") return !dealNameLooksNonPrint(dealName);
+  if (dealNameLooksNonPrint(dealName)) return false;
   return true;
+}
+
+/** HubSpot CRM stage labels that mean the job is past printing and waiting to ship. */
+export function hubspotStageLooksShipReady(stage: string | null | undefined): boolean {
+  const value = String(stage ?? "").trim().toLowerCase();
+  if (!value) return false;
+  return (
+    /ready\s*(to|for)?\s*ship/.test(value) ||
+    /ship\s*ready/.test(value) ||
+    /awaiting\s*shipment/.test(value) ||
+    /ready\s*to\s*pack/.test(value) ||
+    (/pack(ed|ing)?/.test(value) && /ship|fulfill/.test(value))
+  );
 }
 
 export interface OrderIntakeLineItem {

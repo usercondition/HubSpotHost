@@ -268,6 +268,30 @@ test("production queue excludes shipping and fee charge deals entirely", async (
   });
 });
 
+test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", async () => {
+  await withTempDb(() => {
+    const snapshot = sampleSnapshot([
+      {
+        dealId: "wendy",
+        dealName: "ITOKAWA Figure - Wendy Yang",
+        stageId: "ready",
+        stage: "Ready to Ship",
+        amount: 9.99,
+        hasPlates: false,
+        promptAttachPlates: true,
+        requiresPlates: true,
+        closeDate: null,
+        contactName: "Wendy Yang",
+      },
+    ]);
+    const queue = buildProductionQueue(snapshot);
+    assert.equal(queue.summary.nextPrint, 0);
+    assert.equal(queue.summary.shipReady, 1);
+    assert.equal(queue.shipReady[0]?.dealId, "wendy");
+    assert.equal(queue.shipReady[0]?.hasPlates, false);
+  });
+});
+
 test("plate printer assignment stores fleet_printer_id", async () => {
   await withTempDb(() => {
     const record = getDb()

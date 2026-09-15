@@ -16,7 +16,7 @@ export const PERFORMANCE_MARGIN_ALERT_PERCENT = 40;
 export const PERFORMANCE_COST_VARIANCE_PERCENT = 25;
 const ATTENTION_LIMIT = 8;
 /** Cap for Command Center + Orders page open-deal lists. */
-const ACTIVE_DEALS_LIMIT = 40;
+const ACTIVE_DEALS_LIMIT = 80;
 /** Cap for Orders board “Show completed & lost” cards. */
 const CLOSED_DEALS_LIMIT = 60;
 
@@ -376,7 +376,13 @@ export function buildPerformanceSnapshot(input: {
     .sort((a, b) => a.priority - b.priority || a.dealName.localeCompare(b.dealName))
     .map(({ priority: _priority, ...item }) => item);
   const activeDeals = openDeals
-    .sort((a, b) => b.sortAt - a.sortAt || a.dealName.localeCompare(b.dealName))
+    // Print jobs first so shipping/fee charge lines cannot crowd them out of the cap.
+    .sort(
+      (a, b) =>
+        Number(b.requiresPlates) - Number(a.requiresPlates) ||
+        b.sortAt - a.sortAt ||
+        a.dealName.localeCompare(b.dealName),
+    )
     .slice(0, ACTIVE_DEALS_LIMIT)
     .map(({ sortAt: _sortAt, ...item }) => item);
   const closedDeals = finishedDeals
