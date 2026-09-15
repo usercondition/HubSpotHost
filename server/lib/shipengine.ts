@@ -511,6 +511,69 @@ export const shipEnginePurchaseRequestSchema = z
     liveWrite: value.liveWrite,
   }));
 
+/** USPS / ShipEngine want 2-letter codes when country is US (HubSpot often stores "California"). */
+const US_STATE_NAME_TO_CODE: Record<string, string> = {
+  alabama: "AL",
+  alaska: "AK",
+  arizona: "AZ",
+  arkansas: "AR",
+  california: "CA",
+  colorado: "CO",
+  connecticut: "CT",
+  delaware: "DE",
+  "district of columbia": "DC",
+  florida: "FL",
+  georgia: "GA",
+  hawaii: "HI",
+  idaho: "ID",
+  illinois: "IL",
+  indiana: "IN",
+  iowa: "IA",
+  kansas: "KS",
+  kentucky: "KY",
+  louisiana: "LA",
+  maine: "ME",
+  maryland: "MD",
+  massachusetts: "MA",
+  michigan: "MI",
+  minnesota: "MN",
+  mississippi: "MS",
+  missouri: "MO",
+  montana: "MT",
+  nebraska: "NE",
+  nevada: "NV",
+  "new hampshire": "NH",
+  "new jersey": "NJ",
+  "new mexico": "NM",
+  "new york": "NY",
+  "north carolina": "NC",
+  "north dakota": "ND",
+  ohio: "OH",
+  oklahoma: "OK",
+  oregon: "OR",
+  pennsylvania: "PA",
+  "rhode island": "RI",
+  "south carolina": "SC",
+  "south dakota": "SD",
+  tennessee: "TN",
+  texas: "TX",
+  utah: "UT",
+  vermont: "VT",
+  virginia: "VA",
+  washington: "WA",
+  "west virginia": "WV",
+  wisconsin: "WI",
+  wyoming: "WY",
+};
+
+export function normalizeUsStateProvince(state: string): string {
+  const raw = state.trim();
+  if (!raw) return "";
+  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+  const key = raw.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+  return US_STATE_NAME_TO_CODE[key] ?? raw;
+}
+
 export function contactToShipEngineAddress(contact: {
   name: string;
   email: string;
@@ -525,9 +588,8 @@ export function contactToShipEngineAddress(contact: {
   const name = contact.name.trim();
   const street1 = contact.street1.trim();
   const city = contact.city.trim();
-  const state = contact.state.trim();
   const zip = contact.zip.trim();
-  if (!name || !street1 || !city || !state || !zip) return null;
+  if (!name || !street1 || !city || !contact.state.trim() || !zip) return null;
   const countryRaw = contact.country.trim() || "US";
   const country =
     countryRaw.length === 2
@@ -535,6 +597,9 @@ export function contactToShipEngineAddress(contact: {
       : /united states|usa/i.test(countryRaw)
         ? "US"
         : countryRaw.slice(0, 2).toUpperCase() || "US";
+  const state =
+    country === "US" ? normalizeUsStateProvince(contact.state) : contact.state.trim();
+  if (country === "US" && state.length !== 2) return null;
   return {
     name,
     street1,

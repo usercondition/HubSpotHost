@@ -6,6 +6,7 @@ import {
   getShipEngineApiKey,
   getShipEngineStatus,
   getShipFromAddress,
+  normalizeUsStateProvince,
   shipEngineKeyIsTest,
   shipEnginePurchaseRequestSchema,
   shipEngineRatesRequestSchema,
@@ -68,6 +69,29 @@ test("contactToShipEngineAddress requires a full street address", () => {
     country: "United States",
   });
   assert.equal(ok?.street1, "9 Print Ln");
+  assert.equal(ok?.country, "US");
+});
+
+test("normalizeUsStateProvince maps full names and keeps codes", () => {
+  assert.equal(normalizeUsStateProvince("California"), "CA");
+  assert.equal(normalizeUsStateProvince("ca"), "CA");
+  assert.equal(normalizeUsStateProvince("New York"), "NY");
+  assert.equal(normalizeUsStateProvince("  dc "), "DC");
+});
+
+test("contactToShipEngineAddress compresses HubSpot full state names for US", () => {
+  const ok = contactToShipEngineAddress({
+    name: "Wendy Yang",
+    email: "wendy@example.com",
+    phone: "",
+    street1: "8570 Aspen Brook Way",
+    street2: "",
+    city: "Elk Grove",
+    state: "California",
+    zip: "95624",
+    country: "US",
+  });
+  assert.equal(ok?.state, "CA");
   assert.equal(ok?.country, "US");
 });
 
