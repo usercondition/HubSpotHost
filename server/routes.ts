@@ -2757,6 +2757,21 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     return res.json({ ok: true, link: ownerLinkView(link) });
   });
 
+  /** Owner cancel — same terminal state as expire; clearer name for "buyer doesn't want it." */
+  app.post("/api/order-links/:id/cancel", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const link = expireOrderLink(Number(req.params.id));
+    if (!link) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    if (link.status === "created") {
+      return res.status(409).json({
+        ok: false,
+        error: "An intake that already produced HubSpot records cannot be cancelled",
+        link: ownerLinkView(link),
+      });
+    }
+    return res.json({ ok: true, link: ownerLinkView(link) });
+  });
+
   /**
    * The ONLY route in this workflow that talks to HubSpot. It requires the
    * owner's access code plus an explicit `paymentVerified: true`, and it can

@@ -468,7 +468,8 @@ export const ORDER_INTAKE_STATUS_LABELS: Record<OrderIntakeStatus, string> = {
   awaiting_client: "Awaiting client details",
   pending_review: "Pending review",
   created: "Approved / created",
-  expired: "Expired",
+  // Manual cancel and clock expiry share this terminal status.
+  expired: "Cancelled / expired",
 };
 
 export type OrderIntakeLink = typeof orderIntakeLinks.$inferSelect;

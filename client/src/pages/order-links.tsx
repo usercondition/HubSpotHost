@@ -226,21 +226,32 @@ export default function OrderLinks() {
     },
   });
 
-  const expireLink = useMutation({
+  const cancelLink = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest("POST", `/api/order-links/${id}/expire`, {}, { headers });
+      await apiRequest("POST", `/api/order-links/${id}/cancel`, {}, { headers });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
-      toast({ title: "Link expired", description: "That link can no longer be used by a buyer." });
+      toast({
+        title: "Intake cancelled",
+        description: "Moved to Cancelled / expired. The buyer link no longer works.",
+      });
     },
     onError: (error: Error) =>
       toast({
-        title: "Could not expire that link",
+        title: "Could not cancel that intake",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
         variant: "destructive",
       }),
   });
+
+  const confirmCancelIntake = (id: number, label: string): boolean => {
+    const ok = window.confirm(
+      `Cancel “${label}”?\n\nThe buyer link stops working and this intake moves to Cancelled / expired. HubSpot is not touched.`,
+    );
+    if (ok) cancelLink.mutate(id);
+    return ok;
+  };
 
   const copyLink = async () => {
     if (!newLinkUrl) return;
@@ -663,7 +674,7 @@ export default function OrderLinks() {
                 <div className="mt-5 flex gap-2 rounded-md border border-border bg-muted/35 p-3">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    A buyer submission writes only to this app's private queue. Expired, used, or
+                    A buyer submission writes only to this app's private queue. Cancelled, used, or
                     unknown links reveal no order information.
                   </p>
                 </div>
@@ -672,7 +683,7 @@ export default function OrderLinks() {
 
             <Panel
               title="Review queue"
-              description="Submitted details wait here until you approve or expire them."
+              description="Submitted details wait here until you approve or cancel them."
               actions={
                 <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Queue status">
                   {ORDER_INTAKE_STATUSES.map((status) => (
@@ -855,11 +866,11 @@ export default function OrderLinks() {
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                onClick={() => expireLink.mutate(link.id)}
-                                disabled={expireLink.isPending}
-                                data-testid={`button-expire-${link.id}`}
+                                onClick={() => confirmCancelIntake(link.id, link.internalLabel)}
+                                disabled={cancelLink.isPending}
+                                data-testid={`button-cancel-${link.id}`}
                               >
-                                Expire
+                                Cancel
                               </Button>
                             )}
                           </div>
@@ -879,6 +890,10 @@ export default function OrderLinks() {
         headers={headers}
         onClose={() => setReviewId(null)}
         link={queue.data?.links.find((item) => item.id === reviewId) ?? null}
+        onCancel={(id, label) => {
+          if (confirmCancelIntake(id, label)) setReviewId(null);
+        }}
+        cancelPending={cancelLink.isPending}
       />
     </div>
   );
@@ -891,11 +906,15 @@ function ReviewDialog({
   link,
   headers,
   onClose,
+  onCancel,
+  cancelPending,
 }: {
   id: number | null;
   link: QueueLink | null;
   headers: Record<string, string>;
   onClose: () => void;
+  onCancel: (id: number, label: string) => void;
+  cancelPending: boolean;
 }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -1292,6 +1311,16 @@ function ReviewDialog({
                     <PlusCircle className="mr-2 h-4 w-4" />
                   )}
                   Create Contact and Print Order in HubSpot
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => onCancel(link.id, link.internalLabel)}
+                  disabled={cancelPending || create.isPending}
+                  data-testid="button-cancel-review-intake"
+                >
+                  Cancel this intake
                 </Button>
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />

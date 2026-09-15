@@ -81,7 +81,7 @@ export function floorFocusMeta(kind: FloorFocusKind): {
     case "intake":
       return {
         title: "Intake review",
-        description: "Paid order forms waiting for you to approve or reject.",
+        description: "Paid order forms waiting for you to approve or cancel.",
         issueKey: null,
         workspaceHref: "/orders",
         workspaceLabel: "Open Intake",

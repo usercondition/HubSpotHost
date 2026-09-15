@@ -215,7 +215,7 @@ export function buildHealthDigestEdition(
     rows.push({
       name: `${pending} intake form${pending === 1 ? "" : "s"} waiting for review`,
       badge: "Intake review",
-      detail: "Approve or reject paid order intake",
+      detail: "Approve or cancel paid order intake",
       tone: "warn",
     });
   } else if (awaiting > 0 && attention.length === 0) {
