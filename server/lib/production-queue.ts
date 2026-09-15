@@ -4,6 +4,7 @@
  */
 import { desc } from "drizzle-orm";
 import {
+  hubspotStageLooksShipReady,
   printFileRecords,
   type PerformanceResponse,
   type ProductionQueueItem,
@@ -42,11 +43,16 @@ function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket
 
 function classifyBucket(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): ProductionQueueItem["bucket"] {
   // Print deals only reach here; charge lines are filtered out upstream.
-  if (item.requiresPlates && !item.hasPlates) return "next_print";
+  const hubspotShipReady = hubspotStageLooksShipReady(item.stage);
+  // Missing plates normally means Next print — but if HubSpot already says
+  // Ready to Ship, keep the card on the ship side so Labels can see it.
+  if (item.requiresPlates && !item.hasPlates && !hubspotShipReady) return "next_print";
   if (item.requiresPlates && (item.kitReprint > 0 || item.kitNeeded > 0 || item.unassignedPlateCount > 0)) {
     return "blocked";
   }
-  if (item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) return "ship_ready";
+  if (item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80 || hubspotShipReady) {
+    return "ship_ready";
+  }
   return "in_production";
 }
 

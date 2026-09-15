@@ -498,3 +498,42 @@ test("fee kind and shipping/fee deal names skip plate prompts without print_line
     false,
   );
 });
+
+test("mis-tagged shipping kind on a print product still requires plates", () => {
+  const now = new Date("2026-08-04T12:00:00.000Z");
+  const snapshot = buildPerformanceSnapshot({
+    now,
+    intakeCounts: { awaiting_client: 0, pending_review: 0, created: 1, expired: 0 },
+    attachedPrintDealIds: [],
+    stages: [
+      { id: "deposit", label: "Deposit received", displayOrder: 0, metadata: { isClosed: false } },
+    ],
+    deals: [
+      {
+        id: "sword",
+        properties: {
+          dealname: "Sword Brethren - Simon Maxwell Davis",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "34.99",
+          print_line_kind: "shipping",
+        },
+      },
+      {
+        id: "real-ship",
+        properties: {
+          dealname: "Shipping - Simon Maxwell Davis",
+          dealstage: "deposit",
+          createdate: "2026-08-02T10:00:00.000Z",
+          hs_lastmodifieddate: "2026-08-03T10:00:00.000Z",
+          amount: "8",
+          print_line_kind: "shipping",
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "sword")?.requiresPlates, true);
+  assert.equal(snapshot.activeDeals.find((d) => d.dealId === "real-ship")?.requiresPlates, false);
+});
