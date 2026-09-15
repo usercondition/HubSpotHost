@@ -463,6 +463,23 @@ test("owner review edits and manual expiry work over the API", async () => {
   assert.equal(rejected.status, 410);
 });
 
+test("owner can cancel an awaiting intake over the cancel API alias", async () => {
+  const create = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-4004B",
+    itemDescription: "Buyer changed mind",
+    agreedAmount: "40",
+  });
+  const token: string = create.body.token;
+  const id: number = create.body.link.id;
+
+  const cancelled = await ownerRequest("POST", `/api/order-links/${id}/cancel`);
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.body.link.status, "expired");
+
+  const rejected = await publicRequest("/api/client-order/lookup", { token });
+  assert.equal(rejected.status, 410);
+});
+
 test("a partial owner edit leaves untouched buyer fields intact", async () => {
   const create = await ownerRequest("POST", "/api/order-links", {
     internalLabel: "MIG-4005",
