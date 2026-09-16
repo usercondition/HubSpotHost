@@ -80,3 +80,21 @@ test("an open linked thread wins over a soft-closed thread on the same deal", as
 
   assert.deepEqual(writes, [["1005", true]]);
 });
+
+test("does not report a deal updated when the HubSpot write gate blocks it", async () => {
+  const brief = buildMarketplaceInboxBrief([
+    {
+      dealId: "1006",
+      title: "Flynn",
+      unread: true,
+      conversation: "Buyer: Is the order still on track?",
+    },
+  ]);
+
+  const result = await syncMarketplaceBriefNeedsReply(
+    brief,
+    async () => ({ written: false, gate: "DRY_RUN is enabled" }),
+  );
+
+  assert.deepEqual(result.updatedDealIds, []);
+});

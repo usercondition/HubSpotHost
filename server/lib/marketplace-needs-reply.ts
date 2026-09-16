@@ -18,9 +18,14 @@ export function briefStatusNeedsReply(status: MarketplaceThreadStatus): boolean 
   return REPLY_OR_CHASE_STATUSES.has(status);
 }
 
+type NeedsReplyWriter = (
+  dealId: string,
+  needsReply: boolean,
+) => Promise<void | { written: boolean; gate: string }>;
+
 export async function syncMarketplaceBriefNeedsReply(
   brief: MarketplaceInboxBrief,
-  writeFlag: (dealId: string, needsReply: boolean) => Promise<void> = patchDealNeedsReply,
+  writeFlag: NeedsReplyWriter = patchDealNeedsReply,
 ): Promise<{ updatedDealIds: string[] }> {
   // Several scanned threads can be tied to one order. Keep it surfaced while
   // any of them still needs the shop; only clear when all linked threads don't.
@@ -35,8 +40,8 @@ export async function syncMarketplaceBriefNeedsReply(
 
   const updatedDealIds: string[] = [];
   for (const [dealId, needsReply] of Array.from(desiredByDeal.entries())) {
-    await writeFlag(dealId, needsReply);
-    updatedDealIds.push(dealId);
+    const outcome = await writeFlag(dealId, needsReply);
+    if (outcome?.written !== false) updatedDealIds.push(dealId);
   }
   return { updatedDealIds };
 }
