@@ -589,13 +589,29 @@ test("priced OfferUp label attach queues tracking-only notice on OfferUp", async
 test("linked Marketplace brief sets and clears the Print Ops reply flag", async () => {
   mockCalls = [];
   mockDealProperties = { print_needs_reply: "false" };
+  const { getDb } = await import("../server/lib/order-links");
+  const { orderIntakeLinks } = await import("../shared/schema");
+  getDb()
+    .insert(orderIntakeLinks)
+    .values({
+      tokenHash: crypto.randomUUID(),
+      status: "created",
+      internalLabel: "PO-test-jamie",
+      itemDescription: "Five plate Knight",
+      agreedAmount: "120",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      clientFullName: "Jamie Carter",
+      hubspotDealId: "701",
+      hubspotDealsJson: JSON.stringify([{ dealId: "701", dealName: "Five plate Knight", amount: 120 }]),
+    })
+    .run();
   invalidatePrintOrderDealsCache();
 
   const needsReply = await jsonOwnerRequest("POST", "/api/marketplace-brief", {
     threads: [
       {
         id: "marketplace-thread-1",
-        dealIds: ["701"],
         title: "Jamie Carter",
         unread: true,
         conversation: "Buyer: Can you share an update?",
@@ -611,7 +627,6 @@ test("linked Marketplace brief sets and clears the Print Ops reply flag", async 
     threads: [
       {
         id: "marketplace-thread-1",
-        dealIds: ["701"],
         title: "Jamie Carter",
         conversation: "You: Your tracking number is 9400111899223344556678.",
       },

@@ -39,12 +39,13 @@ The only buyer auto-send is an owner-queued, tracking-only shipment notice.
 It is channel-locked and left pending if the exact buyer chat is missing or
 ambiguous.
 
-When a brief thread includes a HubSpot Print Order id in `dealIds`, Print Ops
-sets `print_needs_reply` for **Your turn**, **Paid — need shipping details**,
-and **Stale**. It clears that checkbox when every linked thread is waiting on
-the buyer or done, and after a successful linked Print Ops send. Matching is
-id-only: no partial buyer-name matching is attempted, so unlinked threads
-remain secretary-only.
+Print Ops first uses a HubSpot Print Order id in `dealIds` when present. Normal
+inbox scans also match an exact normalized thread title to one approved local
+order-link buyer name or username; it must resolve to exactly one Print Order.
+Partial or ambiguous names stay secretary-only. It sets `print_needs_reply` for
+**Your turn**, **Paid — need shipping details**, and **Stale**, then clears it
+when every linked thread is waiting/done or after a successful linked Print Ops
+send.
 
 ## Files
 
