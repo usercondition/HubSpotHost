@@ -44,6 +44,8 @@ export type TrackerAssistantQueueDeal = {
   labelBought: boolean;
   trackingPasted: boolean;
   shipReady: boolean;
+  needsReply?: boolean;
+  readyToPack?: boolean;
 };
 
 export type TrackerAssistantQueueContext = {
@@ -51,6 +53,10 @@ export type TrackerAssistantQueueContext = {
   nextPrint: TrackerAssistantQueueDeal[];
   shipReady: TrackerAssistantQueueDeal[];
   blocked: TrackerAssistantQueueDeal[];
+  /** Buyer conversations marked in HubSpot as waiting on the shop. */
+  needsReply: TrackerAssistantQueueDeal[];
+  /** Finished jobs waiting on packing, a label, or tracking. */
+  readyToPack: TrackerAssistantQueueDeal[];
   /** Ship-ready (or nearly) without a bought label / tracking yet. */
   needsLabel: TrackerAssistantQueueDeal[];
 };
@@ -90,6 +96,8 @@ export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueD
     labelBought: item.fulfillment.labelBought,
     trackingPasted: item.fulfillment.trackingPasted,
     shipReady: item.fulfillment.shipReady || item.bucket === "ship_ready",
+    needsReply: item.needsReply,
+    readyToPack: item.readyToPack,
   };
 }
 
@@ -105,6 +113,8 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
     nextPrint: queue.nextPrint.slice(0, 6).map(slimQueueDeal),
     shipReady: queue.shipReady.slice(0, 6).map(slimQueueDeal),
     blocked: queue.blocked.slice(0, 6).map(slimQueueDeal),
+    needsReply: queue.needsReply.slice(0, 8).map(slimQueueDeal),
+    readyToPack: queue.readyToPack.slice(0, 8).map(slimQueueDeal),
     needsLabel: needsLabelSource.slice(0, 8).map(slimQueueDeal),
   };
 }
@@ -133,11 +143,12 @@ export function getTrackerAssistantModel(env: NodeJS.ProcessEnv = process.env): 
 
 function classifyIntent(
   question: string,
-): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "margin" | "shipping" | "help" {
+): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "chase" | "margin" | "shipping" | "help" {
   const q = question.toLowerCase();
+  if (/\b(top|what|which|need).{0,30}\b(chase|repl(y|ies)|buyer reply|respond)\b|\b(chase|needs? reply|buyer reply)\b/.test(q)) return "chase";
   if (/\b(remind|nudge|message|marketplace text|draft)\b/.test(q)) return "reminder";
   if (/\b(plates?|ctb|slice|attach)\b/.test(q)) return "plates";
-  if (/\b(labels?|ship.?ready|postage|tracking|pirate ship|shipengine|buy.?label)\b/.test(q)) return "shipping";
+  if (/\b(labels?|ready.?to.?pack|top pack|pack.?ship|ship.?ready|postage|tracking|pirate ship|shipengine|buy.?label)\b/.test(q)) return "shipping";
   // "shipping cost" / postage amount → costs; bare "shipping" already caught above as labels.
   if (/\b(costs?|labor|material|packaging)\b/.test(q) || /\bshipping (cost|fee|amount)\b/.test(q)) return "costs";
   if (/\b(margins?|profit|revenue)\b/.test(q)) return "margin";
@@ -168,6 +179,8 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   const marginIssues = attentionMatching(snapshot, (issue) => issue.includes("margin"));
   const staleIssues = attentionMatching(snapshot, (issue) => issue.includes("activity") || issue.includes("stale"));
   const needsLabel = queue?.needsLabel ?? [];
+  const needsReply = queue?.needsReply ?? [];
+  const readyToPack = queue?.readyToPack ?? [];
   const shipReadyCount = queue?.summary.shipReady ?? 0;
 
   usedFacts.push(
@@ -182,6 +195,8 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       `queueShipReady=${queue.summary.shipReady}`,
       `queueBlocked=${queue.summary.blocked}`,
       `needsLabel=${needsLabel.length}`,
+      `needsReply=${needsReply.length}`,
+      `readyToPack=${readyToPack.length}`,
     );
   }
 
@@ -231,6 +246,24 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions, usedFacts };
   }
 
+  if (intent === "chase") {
+    if (needsReply.length === 0) {
+      return {
+        ok: true,
+        mode: "rules",
+        reply: "No open Print Orders are marked as needing a buyer reply.",
+        actions: [{ label: "Open Queue", href: "/queue" }],
+        usedFacts,
+      };
+    }
+    lines.push(`${needsReply.length} Print Order${needsReply.length === 1 ? "" : "s"} need a shop reply:`);
+    for (const deal of needsReply.slice(0, 5)) {
+      lines.push(`• ${deal.dealName} — ${deal.stage}${deal.amount ? ` · ${money(deal.amount)}` : ""}`);
+      actions.push({ label: `Reply · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+    }
+    return { ok: true, mode: "rules", reply: lines.join("\n"), actions, usedFacts };
+  }
+
   if (intent === "plates") {
     if (plateIssues.length === 0) {
       const missing = snapshot.activeDeals.filter((d) => d.promptAttachPlates);
@@ -259,7 +292,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   }
 
   if (intent === "shipping") {
-    if (needsLabel.length === 0 && shipReadyCount === 0) {
+    if (readyToPack.length === 0 && needsLabel.length === 0 && shipReadyCount === 0) {
       return {
         ok: true,
         mode: "rules",
@@ -274,14 +307,16 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         usedFacts,
       };
     }
-    if (needsLabel.length > 0) {
+    const packList = readyToPack.length > 0 ? readyToPack : needsLabel;
+    if (packList.length > 0) {
       lines.push(
-        `${needsLabel.length} order${needsLabel.length === 1 ? "" : "s"} look ready to ship but still need a label or tracking:`,
+        `${packList.length} order${packList.length === 1 ? "" : "s"} are ready to pack / ship:`,
       );
-      for (const deal of needsLabel.slice(0, 5)) {
+      for (const deal of packList.slice(0, 5)) {
         const gaps: string[] = [];
-        if (!deal.labelBought) gaps.push("no label");
-        if (!deal.trackingPasted) gaps.push("no tracking");
+        if (!deal.readyToPack) gaps.push("confirm packing");
+        else if (!deal.labelBought) gaps.push("no label");
+        else if (!deal.trackingPasted) gaps.push("no tracking");
         lines.push(
           `• ${deal.dealName} — ${deal.stage}${deal.amount ? ` · ${money(deal.amount)}` : ""}${gaps.length ? ` · ${gaps.join(", ")}` : ""}`,
         );
@@ -420,15 +455,19 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     priorities.push(`${priorities.length + 1}. Fill missing costs on ${costIssues.length} deal${costIssues.length === 1 ? "" : "s"} in Queue.`);
     actions.push({ label: "Enter costs", href: queueHref(costIssues[0]!.dealId) });
   }
-  if (needsLabel.length > 0 || shipReadyCount > 0) {
-    const count = needsLabel.length || shipReadyCount;
+  if (readyToPack.length > 0 || needsLabel.length > 0 || shipReadyCount > 0) {
+    const count = readyToPack.length || needsLabel.length || shipReadyCount;
     priorities.push(
-      `${priorities.length + 1}. ${count} order${count === 1 ? "" : "s"} ship-ready — buy or attach a label${needsLabel[0] ? ` (start with ${needsLabel[0].dealName})` : ""}.`,
+      `${priorities.length + 1}. ${count} order${count === 1 ? "" : "s"} ready to pack / ship${readyToPack[0] ? ` (start with ${readyToPack[0].dealName})` : ""}.`,
     );
     actions.push({
-      label: "Buy / attach labels",
-      href: labelsHref(needsLabel[0]?.dealId),
+      label: "Pack / ship",
+      href: labelsHref(readyToPack[0]?.dealId ?? needsLabel[0]?.dealId),
     });
+  }
+  if (needsReply.length > 0) {
+    priorities.push(`${priorities.length + 1}. Chase ${needsReply.length} buyer repl${needsReply.length === 1 ? "y" : "ies"} owed by the shop${needsReply[0] ? ` (start with ${needsReply[0].dealName})` : ""}.`);
+    actions.push({ label: "Top chase", href: queueHref(needsReply[0]?.dealId ?? "") });
   }
   if (snapshot.intake.awaitingClient > 0) {
     priorities.push(
@@ -483,6 +522,8 @@ function contextForModel(ctx: TrackerAssistantContext): string {
             nextPrint: queue.nextPrint,
             shipReady: queue.shipReady,
             blocked: queue.blocked,
+            needsReply: queue.needsReply,
+            readyToPack: queue.readyToPack,
             needsLabel: queue.needsLabel,
           }
         : null,

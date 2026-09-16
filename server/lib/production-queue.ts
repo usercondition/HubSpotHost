@@ -21,7 +21,9 @@ function parseGrams(value: string | null | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): number {
+type QueueItemBase = Omit<ProductionQueueItem, "priorityScore" | "bucket" | "readyToPack">;
+
+function priorityScore(item: QueueItemBase): number {
   let score = 0;
   if (item.closeDate) {
     const days = Math.floor((new Date(item.closeDate).getTime() - Date.now()) / 86_400_000);
@@ -41,7 +43,7 @@ function priorityScore(item: Omit<ProductionQueueItem, "priorityScore" | "bucket
   return score;
 }
 
-function classifyBucket(item: Omit<ProductionQueueItem, "priorityScore" | "bucket">): ProductionQueueItem["bucket"] {
+function classifyBucket(item: QueueItemBase): ProductionQueueItem["bucket"] {
   // Print deals only reach here; charge lines are filtered out upstream.
   const hubspotShipReady = hubspotStageLooksShipReady(item.stage);
   // Missing plates normally means Next print — but if HubSpot already says
@@ -118,6 +120,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       kitReprint: kit?.reprint ?? 0,
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
+      needsReply: deal.needsReply === true,
       fulfillment: checklists.get(deal.dealId) ?? {
         dealId: deal.dealId,
         addressVerified: false,
@@ -135,7 +138,10 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       },
     };
     const bucket = classifyBucket(base);
-    return { ...base, bucket, priorityScore: priorityScore(base) };
+    const readyToPack =
+      bucket === "ship_ready" &&
+      (!base.fulfillment.packingDone || !base.fulfillment.labelBought || !base.fulfillment.trackingPasted);
+    return { ...base, bucket, readyToPack, priorityScore: priorityScore(base) };
   });
 
   items.sort((a, b) => b.priorityScore - a.priorityScore || a.dealName.localeCompare(b.dealName));
@@ -144,6 +150,8 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
   const inProduction = items.filter((item) => item.bucket === "in_production");
   const shipReady = items.filter((item) => item.bucket === "ship_ready");
   const blocked = items.filter((item) => item.bucket === "blocked");
+  const needsReply = items.filter((item) => item.needsReply);
+  const readyToPack = items.filter((item) => item.readyToPack);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -162,12 +170,16 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
     inProduction,
     shipReady,
     blocked,
+    needsReply,
+    readyToPack,
     recentFailures: listProductionFailures(12).map(failureSummary),
     summary: {
       nextPrint: nextPrint.length,
       inProduction: inProduction.length,
       shipReady: shipReady.length,
       blocked: blocked.length,
+      needsReply: needsReply.length,
+      readyToPack: readyToPack.length,
       openOrders: items.length,
     },
   };

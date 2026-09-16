@@ -292,6 +292,45 @@ test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", 
   });
 });
 
+test("production queue exposes reply and pack-ready digest lists", async () => {
+  await withTempDb(() => {
+    const snapshot = sampleSnapshot([
+      {
+        dealId: "chase",
+        dealName: "Dragon bust - Ada",
+        stageId: "production",
+        stage: "In Production",
+        amount: 120,
+        hasPlates: true,
+        promptAttachPlates: false,
+        requiresPlates: true,
+        needsReply: true,
+        closeDate: null,
+        contactName: "Ada",
+      },
+      {
+        dealId: "pack",
+        dealName: "Knight bust - Beau",
+        stageId: "ready",
+        stage: "Ready to Ship",
+        amount: 220,
+        hasPlates: true,
+        promptAttachPlates: false,
+        requiresPlates: true,
+        closeDate: null,
+        contactName: "Beau",
+      },
+    ]);
+    const queue = buildProductionQueue(snapshot);
+
+    assert.deepEqual(queue.needsReply.map((item) => item.dealId), ["chase"]);
+    assert.deepEqual(queue.readyToPack.map((item) => item.dealId), ["pack"]);
+    assert.equal(queue.summary.needsReply, 1);
+    assert.equal(queue.summary.readyToPack, 1);
+    assert.equal(queue.readyToPack[0]?.readyToPack, true);
+  });
+});
+
 test("plate printer assignment stores fleet_printer_id", async () => {
   await withTempDb(() => {
     const record = getDb()

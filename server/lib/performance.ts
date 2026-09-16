@@ -6,6 +6,7 @@ import {
   dealRequiresPlates,
   normalizeOrderLineKind,
   PRINT_LINE_KIND_PROPERTY,
+  PRINT_NEEDS_REPLY_PROPERTY,
   type SupplyBooksBalance,
 } from "../../shared/schema";
 import { dealCostsIncomplete } from "../../shared/deal-costs";
@@ -240,6 +241,7 @@ export function buildPerformanceSnapshot(input: {
       hasPlates,
       requiresPlates,
       promptAttachPlates: false as boolean,
+      needsReply: truthyHubSpotFlag(props[PRINT_NEEDS_REPLY_PROPERTY]),
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
