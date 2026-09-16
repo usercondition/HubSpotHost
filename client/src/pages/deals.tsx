@@ -563,6 +563,11 @@ function DealCard({
     <article
       draggable
       onDragStart={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("a, button")) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer.setData(DRAG_MIME, JSON.stringify({ dealId: deal.dealId }));
         event.dataTransfer.setData("text/plain", deal.dealId);
         event.dataTransfer.effectAllowed = "move";
