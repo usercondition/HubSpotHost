@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Link } from "wouter";
 import {
   AlertTriangle,
@@ -250,9 +251,8 @@ function FloorColumn({
   count: number;
   empty: string;
   testId: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
-  const hasKids = Array.isArray(children) ? children.filter(Boolean).length > 0 : Boolean(children);
   return (
     <section className="queue-lane min-w-0" data-testid={testId}>
       <div className="queue-lane-header">
@@ -265,7 +265,7 @@ function FloorColumn({
         </div>
       </div>
       <div className="queue-lane-body">
-        {!hasKids || count === 0 ? (
+        {count === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
             {empty}
           </p>
