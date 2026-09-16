@@ -16,11 +16,8 @@ import {
   Printer,
   Settings2,
   Ship,
-  ShipWheel,
   ShoppingBag,
-  MessageSquareText,
   Sun,
-  Users,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
@@ -101,7 +98,10 @@ export function Mark({ className }: { className?: string }) {
 
 /* ---------------------------------------------------------------- shell --- */
 
-/** Shop-floor groups preserved — same routes, Railway workspace chrome. */
+/**
+ * Shop-floor groups — decluttered so each job has one primary surface.
+ * Routes still exist for Clients / Brief / Resin / Focus; they’re just off the rail.
+ */
 type NavGroup = "Run" | "Take" | "Keep" | "Office";
 
 const NAV: Array<{
@@ -112,12 +112,12 @@ const NAV: Array<{
   testId: string;
   group: NavGroup;
 }> = [
+  // Run = in-flight work. Queue is the production board; Orders lives under Office.
   { href: "/", label: "Floor", title: "Today’s floor board", icon: LayoutDashboard, testId: "link-nav-home", group: "Run" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run" },
-  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run" },
-  { href: "/deals", label: "Orders", title: "Print Orders board", icon: Boxes, testId: "link-nav-deals", group: "Run" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run" },
-  { href: "/clients", label: "Clients", title: "HubSpot clients", icon: Users, testId: "link-nav-clients", group: "Take" },
+  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run" },
+  // Take = buyers in. Intake first; Manual for typed entry. Brief/Clients are URL-only.
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take" },
   {
     href: "/paid-orders",
@@ -127,18 +127,12 @@ const NAV: Array<{
     testId: "link-nav-paid-orders",
     group: "Take",
   },
-  {
-    href: "/marketplace-brief",
-    label: "Brief",
-    title: "Marketplace secretary brief",
-    icon: MessageSquareText,
-    testId: "link-nav-marketplace-brief",
-    group: "Take",
-  },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep" },
   // Resin inventory stays at /resin (digest / direct URL) but is off the rail —
   // bottle bookkeeping is optional; plate attach + APIs still work without the tab.
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep" },
+  // Office = numbers + HubSpot stage mirror (not the daily production board).
+  { href: "/deals", label: "Orders", title: "HubSpot stage board (mirror)", icon: Boxes, testId: "link-nav-deals", group: "Office" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Office" },
@@ -272,16 +266,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <ExternalLink className="h-4 w-4" />
-          </a>
-          <a
-            href="https://ship.pirateship.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Pirate Ship"
-            data-testid="link-sidebar-pirateship"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          >
-            <ShipWheel className="h-4 w-4" />
           </a>
         </div>
       </aside>

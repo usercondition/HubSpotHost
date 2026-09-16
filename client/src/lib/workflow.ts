@@ -34,7 +34,7 @@ export function labelsDealHref(dealId?: string | null): string {
   return id ? `/labels?dealId=${encodeURIComponent(id)}` : "/labels";
 }
 
-/** Floor pressure-chip shortcuts — temporary focused lists (not in the nav rail). */
+/** Floor pressure-chip shortcuts — jump straight to the workspace (no extra focus page). */
 export const FLOOR_FOCUS_KINDS = ["plates", "costs", "stale", "intake", "buyer"] as const;
 export type FloorFocusKind = (typeof FLOOR_FOCUS_KINDS)[number];
 
@@ -43,7 +43,7 @@ export function isFloorFocusKind(value: string | null | undefined): value is Flo
 }
 
 export function floorFocusHref(kind: FloorFocusKind): string {
-  return `/focus/${encodeURIComponent(kind)}`;
+  return floorFocusMeta(kind).workspaceHref;
 }
 
 export function floorFocusMeta(kind: FloorFocusKind): {

@@ -55,10 +55,12 @@ test("attention next steps route plates to Prints and costs to Queue ops", () =>
   );
 });
 
-test("floor focus chip shortcuts map to focused lists and workspaces", () => {
+test("floor focus chip shortcuts map to workspaces not intermediate focus pages", () => {
   assert.equal(isFloorFocusKind("plates"), true);
   assert.equal(isFloorFocusKind("nope"), false);
-  assert.equal(floorFocusHref("costs"), "/focus/costs");
+  assert.equal(floorFocusHref("costs"), "/queue");
+  assert.equal(floorFocusHref("plates"), "/prints");
+  assert.equal(floorFocusHref("intake"), "/orders");
   assert.equal(floorFocusMeta("plates").issueKey, "no_plates");
   assert.equal(floorFocusMeta("plates").workspaceHref, "/prints");
   assert.equal(floorFocusMeta("intake").workspaceHref, "/orders");

@@ -85,8 +85,8 @@ export function AttentionBell() {
               Open Print Orders that need plates, costs, or a margin check.
             </p>
           </div>
-          <Link href="/performance" className="text-xs font-medium text-primary hover:underline" data-testid="link-attention-bell-all">
-            View all
+          <Link href="/" className="text-xs font-medium text-primary hover:underline" data-testid="link-attention-bell-all">
+            Floor
           </Link>
         </div>
 

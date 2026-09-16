@@ -1,4 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   AlertTriangle,
   BarChart3,
@@ -14,12 +15,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { BooksBalancePanel } from "@/components/books-balance";
-import { AttentionAlertCard } from "@/components/attention-alert-card";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -60,11 +59,10 @@ function LoadingMetrics() {
 }
 
 export default function Performance() {
-  const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
-    successTitle: 'Performance unlocked',
-    successDescription: 'Rolling books, margins, and attention for open Print Orders.',
+    successTitle: "Performance unlocked",
+    successDescription: "Rolling books, margins, and pipeline counts for open Print Orders.",
   });
 
   const performance = useQuery<PerformanceResponse>({
@@ -76,33 +74,6 @@ export default function Performance() {
     },
   });
 
-  const dismissAttention = useMutation({
-    mutationFn: async (input: { dealId: string; issueKey: string }) => {
-      const response = await apiRequest(
-        "POST",
-        "/api/attention/dismiss",
-        { dealId: input.dealId, issueKey: input.issueKey, note: "Skipped from Performance" },
-        { headers },
-      );
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
-      toast({
-        title: "Alert skipped",
-        description: "That reminder is hidden for this order. Closing the deal in HubSpot also clears it.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Could not skip that alert",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 160),
-        variant: "destructive",
-      });
-    },
-  });
-
-
   const snapshot = performance.data;
   const maxPipelineCount = Math.max(1, ...(snapshot?.pipeline.map((stage) => stage.count) ?? [0]));
 
@@ -110,7 +81,7 @@ export default function Performance() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Performance"
-        subtitle="A read-only daily view of orders, margins, workload, and supply spending."
+        subtitle="Margins, books, and pipeline counts — daily alerts live on Floor and the bell."
         actions={
           <>
             {ownerCode ? (
@@ -223,32 +194,27 @@ export default function Performance() {
 
             <section className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
               <Panel
-                title="Needs attention"
-                description="Also available from the bell next to Print Operations. Skip steps that don’t apply to legacy orders."
+                title="Alerts live on Floor"
+                description="Daily attention is on Floor and the header bell — Stats stays margins and pipeline counts."
               >
-                {snapshot.attention.length > 0 ? (
-                  <div className="space-y-2">
-                    {snapshot.attention.map((item) => (
-                      <AttentionAlertCard
-                        key={`${item.dealId}-${item.issueKey}`}
-                        item={item}
-                        portalId={snapshot.hubspotPortalId}
-                        dismissPending={dismissAttention.isPending}
-                        onDismiss={() =>
-                          dismissAttention.mutate({ dealId: item.dealId, issueKey: item.issueKey })
-                        }
-                        testId={`row-attention-${item.dealId}`}
-                      />
-                    ))}
+                <div className="rounded-md bg-muted/50 p-4" data-testid="panel-performance-attention-redirect">
+                  <p className="text-sm font-medium">
+                    {snapshot.summary.attentionCount > 0
+                      ? `${snapshot.summary.attentionCount} item${snapshot.summary.attentionCount === 1 ? "" : "s"} need attention`
+                      : "No active alerts"}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Act from Floor’s “Do this next” list or the bell — not a second copy of the same alerts here.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button asChild size="sm" data-testid="button-performance-open-floor">
+                      <Link href="/">Open Floor</Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" data-testid="button-performance-open-queue">
+                      <Link href="/queue">Open Queue</Link>
+                    </Button>
                   </div>
-                ) : (
-                  <div className="rounded-md bg-muted/50 p-4" data-testid="empty-performance-attention">
-                    <p className="text-sm font-medium">Your active orders look clear.</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      Closed HubSpot deals leave this list automatically. Skip plate or cost reminders for older orders that don’t need them.
-                    </p>
-                  </div>
-                )}
+                </div>
               </Panel>
 
               <Panel title="Pipeline workload" description="Live count by Print Orders stage.">

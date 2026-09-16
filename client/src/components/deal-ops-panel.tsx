@@ -37,8 +37,6 @@ import {
 } from "@shared/schema";
 import { defaultDealCostFields } from "@shared/deal-costs";
 
-const PIRATE_SHIP_URL = "https://ship.pirateship.com/";
-
 type DealOpsResponse = DealOpsDetail & { ok: true };
 
 function invalidateOps(dealId?: string) {
@@ -375,13 +373,8 @@ export function DealOpsPanel({
           <Button asChild size="sm" variant="outline">
             <Link href={labelsDealHref(dealId)} data-testid="link-deal-ops-labels">
               <Ship className="mr-2 h-3.5 w-3.5" />
-              Drop label PDF
+              Labels
             </Link>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <a href={PIRATE_SHIP_URL} target="_blank" rel="noopener noreferrer">
-              Pirate Ship
-            </a>
           </Button>
           {data.plates.length === 0 ? (
             <Button asChild size="sm" variant="outline">

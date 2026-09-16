@@ -15,9 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionNextStep, floorFocusHref, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
+import { attentionNextStep, floorFocusMeta, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
-import { TrackerAssistantPanel } from "@/components/tracker-assistant";
 import { PageHeader } from "@/components/shell";
 import {
   DataList,
@@ -280,35 +279,35 @@ function TodaysWork() {
             label="Plates"
             value={platesNeeded}
             tone={platesNeeded > 0 ? "warn" : "good"}
-            href={floorFocusHref("plates")}
+            href={floorFocusMeta("plates").workspaceHref}
             testId="card-todays-plates"
           />
           <PressureChip
             label="Costs"
             value={costsNeeded}
             tone={costsNeeded > 0 ? "warn" : "good"}
-            href={floorFocusHref("costs")}
+            href={floorFocusMeta("costs").workspaceHref}
             testId="card-todays-costs"
           />
           <PressureChip
             label="Stale"
             value={staleJobs}
             tone={staleJobs > 0 ? "bad" : "good"}
-            href={floorFocusHref("stale")}
+            href={floorFocusMeta("stale").workspaceHref}
             testId="card-todays-stale"
           />
           <PressureChip
             label="Intake"
             value={pendingReview}
             tone={pendingReview > 0 ? "warn" : "neutral"}
-            href={floorFocusHref("intake")}
+            href={floorFocusMeta("intake").workspaceHref}
             testId="card-todays-pending-review"
           />
           <PressureChip
             label="Buyer"
             value={awaitingClient}
             tone={awaitingClient > 0 ? "warn" : "neutral"}
-            href={floorFocusHref("buyer")}
+            href={floorFocusMeta("buyer").workspaceHref}
             testId="card-todays-awaiting-client"
           />
         </div>
@@ -326,7 +325,7 @@ function TodaysWork() {
                     {pendingReview} intake form{pendingReview === 1 ? "" : "s"} waiting for review
                   </p>
                   <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-                    Approve or reject paid order intake
+                    Approve or cancel paid order intake
                   </p>
                 </div>
                 <Button asChild size="sm" data-testid="button-glance-open-intake">
@@ -517,7 +516,6 @@ function TodaysWork() {
 
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const { isUnlocked, headers } = useOwnerSession();
   const live = health.data?.safety.liveWriteReady === true;
   const signing = health.data?.webhook.verification === "configured";
   const showSystem = !health.data || !live || !signing || Boolean(health.data.storage?.warning);
@@ -531,7 +529,6 @@ export default function Dashboard() {
 
       <div className="page-stack">
         <TodaysWork />
-        {isUnlocked ? <TrackerAssistantPanel headers={headers} /> : null}
         {showSystem ? <SystemStatus health={health.data} /> : null}
       </div>
     </div>

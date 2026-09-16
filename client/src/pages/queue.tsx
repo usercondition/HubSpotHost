@@ -236,7 +236,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Print jobs only — HubSpot Ready to Ship lands in Ship-ready. Select a card; ops slides in from the right."
+        subtitle="Primary production board — next print → ship. Select a card; ops slides in from the right."
         actions={
           isUnlocked ? (
             <Button

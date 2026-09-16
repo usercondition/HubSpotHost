@@ -37,6 +37,7 @@ function ShellRoutes() {
           <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/labels" component={ShippingLabelsPage} />
           <Route path="/deals" component={DealsPage} />
+          {/* Clients + Marketplace Brief stay routed but off the nav rail (declutter). */}
           <Route path="/clients" component={ClientsPage} />
           <Route path="/orders" component={OrderLinks} />
           <Route path="/operations" component={Operations} />
@@ -51,6 +52,7 @@ function ShellRoutes() {
             Keep kit-dry-run.tsx /api/kits for a later thin rebuild; do not re-add
             the route until attach uses the same Slice.log + printer + bits path.
           */}
+          {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
           <Route path="/performance" component={Performance} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />
