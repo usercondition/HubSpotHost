@@ -331,7 +331,7 @@ export default function OrderLinks() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Paid order intake"
-        subtitle="Create one buyer link, review their details, then approve the order into HubSpot."
+        subtitle="Create a buyer link, review details, cancel if they bail, then approve into HubSpot. Manual entry is next to Intake in the rail."
         actions={
           <>
             <StatusPill

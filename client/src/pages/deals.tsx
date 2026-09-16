@@ -138,7 +138,7 @@ export default function DealsPage() {
     <div className="mx-auto flex h-full min-h-0 max-w-[100rem] flex-col overflow-hidden">
       <PageHeader
         title="Orders"
-        subtitle="Print Orders board — print jobs only (shipping and fees stay in HubSpot as charges)."
+        subtitle="HubSpot stage mirror — day-to-day work stays on Queue. Print jobs only (shipping/fees stay in HubSpot)."
         actions={
           <>
             {isUnlocked ? (
@@ -511,7 +511,7 @@ function DealCard({
             className="hs-link inline-flex items-center gap-1 text-xs font-medium"
             data-testid={`link-deal-labels-${deal.dealId}`}
           >
-            Drop label
+            Labels
           </Link>
         ) : null}
         <a
