@@ -240,6 +240,7 @@ import {
 import { attachShippingLabelToDeals } from "./lib/shipping-label-attach";
 import {
   ShipEngineError,
+  addShipEngineCarrierFunds,
   buildShipNotesFromShipEngine,
   contactToShipEngineAddress,
   createShipEngineRates,
@@ -247,8 +248,10 @@ import {
   getShipEngineStatus,
   listShipEngineCarriers,
   purchaseShipEngineLabel,
+  shipEngineAddFundsRequestSchema,
   shipEnginePurchaseRequestSchema,
   shipEngineRatesRequestSchema,
+  summarizeShipEngineFunds,
 } from "./lib/shipengine";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
@@ -1329,6 +1332,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         carriersError = error instanceof Error ? error.message : "Could not list carriers";
       }
     }
+    const funds = carriers ? summarizeShipEngineFunds(carriers) : null;
     return res.json({
       ok: true,
       configured: status.configured,
@@ -1355,8 +1359,85 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             balance: carrier.balance,
           }))
         : null,
+      funds: funds
+        ? {
+            availableUsd: funds.availableUsd,
+            sharedWallet: funds.sharedWallet,
+            lowestBalanceUsd: funds.lowestBalanceUsd,
+            fundedCarriers: funds.fundedCarriers,
+          }
+        : null,
       carriersError,
     });
+  });
+
+  /**
+   * Add funds to a ShipStation / ShipEngine funded carrier wallet.
+   * Live charge on the ShipStation payment method — no sandbox.
+   */
+  app.post("/api/shipping-labels/shipengine/add-funds", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = shipEngineAddFundsRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    if (!getShipEngineStatus().hasApiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "Add SHIPENGINE_API_KEY on Railway before adding funds.",
+      });
+    }
+
+    try {
+      const carriers = await listShipEngineCarriers();
+      const target = carriers.find((carrier) => carrier.carrierId === parsed.data.carrierId);
+      if (!target) {
+        return res.status(404).json({
+          ok: false,
+          error: "That carrier isn’t connected on this ShipEngine account.",
+        });
+      }
+      if (!target.requiresFundedAmount) {
+        return res.status(400).json({
+          ok: false,
+          error: `${target.friendlyName || target.carrierCode} doesn’t use a prepaid wallet — add funds isn’t needed.`,
+        });
+      }
+
+      const result = await addShipEngineCarrierFunds({
+        carrierId: parsed.data.carrierId,
+        amount: parsed.data.amount,
+        currency: parsed.data.currency,
+      });
+      const refreshed = await listShipEngineCarriers().catch(() => carriers);
+      const funds = summarizeShipEngineFunds(
+        refreshed.map((carrier) =>
+          carrier.carrierId === result.carrierId
+            ? { ...carrier, balance: result.balance }
+            : carrier,
+        ),
+      );
+      return res.json({
+        ok: true,
+        carrierId: result.carrierId,
+        friendlyName: target.friendlyName || target.carrierCode,
+        amountAdded: parsed.data.amount,
+        balance: result.balance,
+        currency: result.currency,
+        funds: {
+          availableUsd: funds.availableUsd,
+          sharedWallet: funds.sharedWallet,
+          lowestBalanceUsd: funds.lowestBalanceUsd,
+          fundedCarriers: funds.fundedCarriers,
+        },
+      });
+    } catch (error) {
+      const statusCode = error instanceof ShipEngineError ? error.status : 502;
+      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not add ShipEngine funds",
+      });
+    }
   });
 
   /** Structured HubSpot ship-to for rate shopping. */

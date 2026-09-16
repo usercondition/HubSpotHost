@@ -482,8 +482,8 @@ export default function ShippingLabelsPage() {
         title="Labels"
         subtitle={
           hasPrefillDeal
-            ? `Buying or attaching a label for ${prefillDealLabel}.`
-            : "Buy a ShipEngine label or drop a PDF — attach tracking to one or more Print Orders when they ship in the same box."
+            ? `Buy or attach a label for ${prefillDealLabel} — ShipStation funds stay on this page.`
+            : "Buy a ShipEngine label or drop a PDF. ShipStation wallet balance and add-funds live here so you don’t bounce to ShipStation."
         }
       />
 
@@ -501,7 +501,8 @@ export default function ShippingLabelsPage() {
           <>
             {hasPrefillDeal ? (
               <div
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-3"
+                className="glance-item items-center justify-between gap-3"
+                data-tone="good"
                 data-testid="panel-labels-prefill"
               >
                 <div className="min-w-0">
@@ -511,9 +512,11 @@ export default function ShippingLabelsPage() {
                   </p>
                   {prefillDeal?.contactName ? (
                     <p className="truncate text-xs text-muted-foreground">{prefillDeal.contactName}</p>
-                  ) : null}
+                  ) : (
+                    <p className="truncate text-xs text-muted-foreground">Deal {prefillDealId}</p>
+                  )}
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   <Button asChild size="sm" variant="outline" data-testid="button-labels-open-queue">
                     <Link href={queueDealHref(prefillDealId)}>
                       <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
@@ -572,7 +575,7 @@ export default function ShippingLabelsPage() {
 
             <Panel
               title="Or drop a shipping label PDF"
-              description="Pirate Ship / carrier PDF exports still work. Nothing is saved until you confirm the order below."
+              description="Pirate Ship / carrier exports still work when you already bought outside Print Ops. Nothing saves until you confirm below."
               testId="panel-labels-drop"
             >
               <input
