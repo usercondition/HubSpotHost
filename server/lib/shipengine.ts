@@ -35,6 +35,10 @@ export type ShipEngineCarrier = {
   carrierCode: string;
   friendlyName: string;
   nickname: string;
+  /** Present when the carrier uses a prepaid ShipStation wallet (e.g. Stamps.com USPS). */
+  requiresFundedAmount: boolean;
+  /** Wallet balance in USD when ShipEngine reports one; null if not funded / N/A. */
+  balance: number | null;
 };
 
 export type ShipEngineRateOffer = {
@@ -227,6 +231,26 @@ async function shipEngineRequest(
   return body;
 }
 
+export function mapShipEngineCarrierRow(raw: Record<string, unknown>): ShipEngineCarrier | null {
+  const carrierId = asString(raw.carrier_id);
+  if (!carrierId) return null;
+  const balanceRaw = raw.balance;
+  const balance =
+    typeof balanceRaw === "number" && Number.isFinite(balanceRaw)
+      ? balanceRaw
+      : typeof balanceRaw === "string" && Number.isFinite(Number(balanceRaw))
+        ? Number(balanceRaw)
+        : null;
+  return {
+    carrierId,
+    carrierCode: asString(raw.carrier_code),
+    friendlyName: asString(raw.friendly_name) || asString(raw.carrier_code) || carrierId,
+    nickname: asString(raw.nickname),
+    requiresFundedAmount: Boolean(raw.requires_funded_amount),
+    balance,
+  };
+}
+
 export async function listShipEngineCarriers(apiKey?: string): Promise<ShipEngineCarrier[]> {
   const key = apiKey ?? getShipEngineApiKey();
   if (!key) throw new ShipEngineError("ShipEngine API key is not configured", 503);
@@ -237,15 +261,7 @@ export async function listShipEngineCarriers(apiKey?: string): Promise<ShipEngin
   return carriers
     .map((row) => {
       if (!row || typeof row !== "object") return null;
-      const raw = row as Record<string, unknown>;
-      const carrierId = asString(raw.carrier_id);
-      if (!carrierId) return null;
-      return {
-        carrierId,
-        carrierCode: asString(raw.carrier_code),
-        friendlyName: asString(raw.friendly_name) || asString(raw.carrier_code) || carrierId,
-        nickname: asString(raw.nickname),
-      };
+      return mapShipEngineCarrierRow(row as Record<string, unknown>);
     })
     .filter((row): row is ShipEngineCarrier => Boolean(row));
 }

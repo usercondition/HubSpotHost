@@ -105,7 +105,13 @@ type ShipEngineStatus = {
     zip: string;
     country: string;
   } | null;
-  carriers?: Array<{ carrierId: string; carrierCode: string; friendlyName: string }>;
+  carriers?: Array<{
+    carrierId: string;
+    carrierCode: string;
+    friendlyName: string;
+    requiresFundedAmount?: boolean;
+    balance?: number | null;
+  }>;
   carriersError?: string | null;
 };
 
@@ -449,9 +455,45 @@ export function ShipEngineBuyPanel({
               </p>
             </div>
           ) : status.carriers && status.carriers.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Carriers: {status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}
-            </p>
+            <div className="space-y-1.5" data-testid="panel-shipengine-carrier-balances">
+              <p className="text-xs text-muted-foreground">
+                Carriers: {status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {status.carriers.map((carrier) => {
+                  const funded = carrier.requiresFundedAmount !== false;
+                  const balance =
+                    typeof carrier.balance === "number" && Number.isFinite(carrier.balance)
+                      ? carrier.balance
+                      : null;
+                  const low = funded && balance != null && balance < 5;
+                  const empty = funded && balance != null && balance <= 0;
+                  return (
+                    <StatusPill
+                      key={carrier.carrierId}
+                      tone={empty ? "bad" : low ? "warn" : funded && balance != null ? "good" : "neutral"}
+                      icon={empty || low ? AlertTriangle : CheckCircle2}
+                      label={
+                        funded && balance != null
+                          ? `${carrier.friendlyName || carrier.carrierCode} $${balance.toFixed(2)}`
+                          : carrier.friendlyName || carrier.carrierCode
+                      }
+                      testId={`status-shipengine-balance-${carrier.carrierCode}`}
+                    />
+                  );
+                })}
+              </div>
+              {status.carriers.some(
+                (carrier) =>
+                  carrier.requiresFundedAmount !== false &&
+                  typeof carrier.balance === "number" &&
+                  carrier.balance <= 0,
+              ) ? (
+                <p className="text-xs text-destructive">
+                  A funded carrier is at $0 — add funds in ShipStation before buying that label.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
