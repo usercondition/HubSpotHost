@@ -286,6 +286,7 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     to: "Taylor",
     text: "Your Acastus Knights quote is ready.",
     channel: "marketplace",
+    dealId: "",
   });
 
   resetMarketplaceSendRequestStore();
@@ -295,6 +296,7 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     to: "Taylor",
     text: "Your Acastus Knights quote is ready.",
     channel: "marketplace",
+    dealId: "",
   });
 
   const cleared = await fetch(url, {
@@ -315,6 +317,7 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     to: "",
     text: "",
     channel: "marketplace",
+    dealId: "",
   });
 });
 
@@ -348,6 +351,7 @@ test("OfferUp shipment queue is owner-gated and identifies its chat channel", as
     to: "Jamie Carter",
     text: "Your order has shipped. Tracking: 9400111899223344556678.",
     channel: "offerup",
+    dealId: "",
   });
 
   const invalid = await fetch(url, {
