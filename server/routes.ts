@@ -28,6 +28,7 @@ import {
   fetchPrintOrderPipelineStages,
   HubSpotError,
   clearDealPrintFileMetrics,
+  patchDealNeedsReply,
   patchDealPrintFileMetrics,
   type HubSpotDealRecord,
   type HubSpotPipelineStage,
@@ -145,11 +146,13 @@ import {
 } from "./lib/messenger-scan-bridge";
 import { registerMessengerScanTestUi } from "./lib/messenger-scan-test-ui";
 import { createMarketplaceInboxBrief, getMarketplaceInboxBrief } from "./lib/marketplace-inbox-brief-store";
+import { syncMarketplaceBriefNeedsReply } from "./lib/marketplace-needs-reply";
 import {
   getMarketplaceScanRequest,
   setMarketplaceScanRequest,
 } from "./lib/marketplace-scan-request-store";
 import {
+  completeMarketplaceSendRequest,
   getMarketplaceSendRequest,
   setMarketplaceSendRequest,
 } from "./lib/marketplace-send-request-store";
@@ -2956,7 +2959,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
    * Marketplace secretary brief — batch of scanned threads → prioritized next actions.
    * The current brief is a single owner-gated persistent slot.
    */
-  app.post("/api/marketplace-brief", (req: Request, res: Response) => {
+  app.post("/api/marketplace-brief", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const body =
       req.body && typeof req.body === "object" && !Array.isArray(req.body)
@@ -2971,6 +2974,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         const item = row && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : {};
         return {
           id: typeof item.id === "string" ? item.id : `t-${index}`,
+          dealId: typeof item.dealId === "string" && /^[0-9]{1,20}$/.test(item.dealId.trim()) ? item.dealId.trim() : null,
           title: typeof item.title === "string" ? item.title : `Thread ${index + 1}`,
           conversation: typeof item.conversation === "string" ? item.conversation : "",
           unread: item.unread === true,
@@ -2978,7 +2982,8 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         };
       });
       const created = createMarketplaceInboxBrief(threads);
-      return res.status(201).json({ ok: true, id: created.id, brief: created.brief });
+      const sync = await syncMarketplaceBriefNeedsReply(created.brief);
+      return res.status(201).json({ ok: true, id: created.id, brief: created.brief, sync });
     } catch (error) {
       return res.status(400).json({
         ok: false,
@@ -3040,7 +3045,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     return res.json(getMarketplaceSendRequest());
   });
 
-  app.post("/api/marketplace-send-request", (req: Request, res: Response) => {
+  app.post("/api/marketplace-send-request", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const body =
       req.body && typeof req.body === "object" && !Array.isArray(req.body)
@@ -3051,13 +3056,19 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       return res.status(400).json({ ok: false, error: "Expected { pending: true | false }" });
     }
     if (!pending) {
-      const request = setMarketplaceSendRequest(false);
+      const completed = completeMarketplaceSendRequest();
+      if (completed.dealId) await patchDealNeedsReply(completed.dealId, false);
+      const request = getMarketplaceSendRequest();
       return res.json({ ok: true, pending: false, id: request.id });
     }
     if (typeof body.text !== "string" || !body.text.trim()) {
       return res.status(400).json({ ok: false, error: "A message text string is required when pending is true" });
     }
-    if (body.text.length > 40_000 || (body.to !== undefined && (typeof body.to !== "string" || body.to.length > 200))) {
+    if (
+      body.text.length > 40_000 ||
+      (body.to !== undefined && (typeof body.to !== "string" || body.to.length > 200)) ||
+      (body.dealId !== undefined && (typeof body.dealId !== "string" || !/^[0-9]{1,20}$/.test(body.dealId.trim())))
+    ) {
       return res.status(400).json({ ok: false, error: "Message text or recipient is too long" });
     }
     if (body.channel !== undefined && body.channel !== "marketplace" && body.channel !== "offerup") {
@@ -3066,6 +3077,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     const request = setMarketplaceSendRequest(true, {
       text: body.text,
       to: body.to ?? "",
+      dealId: typeof body.dealId === "string" ? body.dealId.trim() : "",
       channel: body.channel === "offerup" ? "offerup" : "marketplace",
     });
     return res.status(201).json({

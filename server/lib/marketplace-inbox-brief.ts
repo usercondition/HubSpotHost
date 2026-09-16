@@ -12,6 +12,11 @@ import { analyzeMarketplaceConversation } from "./intake";
 export type MarketplaceThreadInput = {
   /** Stable-ish id from the scanner (href, list index, etc.). */
   id?: string;
+  /**
+   * Explicit Print Order association supplied by Print Ops. We never infer a
+   * deal from the buyer title, since that can point at the wrong order.
+   */
+  dealId?: string | null;
   title: string;
   conversation: string;
   unread?: boolean;
@@ -38,6 +43,8 @@ export type MarketplaceBriefAction = {
 
 export type MarketplaceThreadBrief = {
   id: string;
+  /** Explicit Print Order association, when the source provided one. */
+  dealId: string | null;
   title: string;
   unread: boolean;
   status: MarketplaceThreadStatus;
@@ -231,6 +238,7 @@ function classifyThread(input: MarketplaceThreadInput, index: number): Marketpla
 
   return {
     id: clean(input.id || `${index}-${title}`, 160) || `thread-${index}`,
+    dealId: input.dealId?.trim() || null,
     title,
     unread: Boolean(input.unread),
     status,

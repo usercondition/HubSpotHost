@@ -279,6 +279,16 @@ export async function patchDealOutputs(
   invalidatePrintOrderDealsCache();
 }
 
+/** Set the Queue's buyer-reply flag without changing a deal's costs or stage. */
+export async function patchDealNeedsReply(dealId: string, needsReply: boolean): Promise<void> {
+  await ensurePrintFileDealProperties();
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { [PRINT_NEEDS_REPLY_PROPERTY]: needsReply ? "true" : "false" } }),
+  });
+  invalidatePrintOrderDealsCache();
+}
+
 function numericString(value: number | null, digits = 3): string | null {
   if (value === null || !Number.isFinite(value)) return null;
   const factor = 10 ** digits;
