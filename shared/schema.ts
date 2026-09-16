@@ -244,6 +244,8 @@ export interface PerformanceResponse {
     requiresPlates: boolean;
     /** Show Attach plates when plates missing and alert not dismissed. */
     promptAttachPlates: boolean;
+    /** HubSpot `print_needs_reply`: a buyer conversation is waiting on the shop. */
+    needsReply?: boolean;
     closeDate: string | null;
     contactName: string | null;
   }>;
@@ -260,6 +262,7 @@ export interface PerformanceResponse {
     hasPlates: boolean;
     requiresPlates: boolean;
     promptAttachPlates: boolean;
+    needsReply?: boolean;
     closeDate: string | null;
     contactName: string | null;
   }>;
@@ -486,6 +489,8 @@ export const ORDER_LINE_KIND_LABELS: Record<OrderLineKind, string> = {
 
 /** HubSpot deal property — non-print lines skip plate prompts. */
 export const PRINT_LINE_KIND_PROPERTY = "print_line_kind";
+/** HubSpot checkbox set by Secretary / Hub when the shop owes a buyer reply. */
+export const PRINT_NEEDS_REPLY_PROPERTY = "print_needs_reply";
 
 /** Deal / product titles that are never resin prints (existing HubSpot deals may lack print_line_kind). */
 export function dealNameLooksNonPrint(dealName: string): boolean {
@@ -1979,6 +1984,10 @@ export interface ProductionQueueItem {
   costsIncomplete: boolean;
   /** True when HubSpot has not updated this deal recently (Floor “Stale”). */
   isStale: boolean;
+  /** HubSpot `print_needs_reply`: a buyer conversation is waiting on the shop. */
+  needsReply: boolean;
+  /** Finished work still waiting on a pack, label, or tracking step. */
+  readyToPack: boolean;
   fulfillment: FulfillmentChecklistView;
   bucket: "next_print" | "in_production" | "ship_ready" | "blocked";
   priorityScore: number;
@@ -1993,6 +2002,10 @@ export interface ProductionQueueResponse {
   inProduction: ProductionQueueItem[];
   shipReady: ProductionQueueItem[];
   blocked: ProductionQueueItem[];
+  /** Actionable buyer conversations, ordered with the production board. */
+  needsReply: ProductionQueueItem[];
+  /** Finished jobs still waiting on packing or shipment work. */
+  readyToPack: ProductionQueueItem[];
   recentFailures: Array<{
     id: number;
     dealId: string;
@@ -2007,6 +2020,8 @@ export interface ProductionQueueResponse {
     inProduction: number;
     shipReady: number;
     blocked: number;
+    needsReply: number;
+    readyToPack: number;
     openOrders: number;
   };
 }

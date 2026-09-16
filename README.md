@@ -264,7 +264,7 @@ Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for 
 | `PATCH /api/order-links/:id` | Protected. Owner corrections while the intake is pending review. |
 | `POST /api/order-links/:id/expire` | Protected. Manually expires a link. |
 | `POST /api/order-links/:id/create-order` | Protected. The only HubSpot-writing route in this flow. Requires `paymentVerified: true`. |
-| `GET /api/production-queue` | Protected. Next print / in production / ship-ready / blocked buckets. |
+| `GET /api/production-queue` | Protected. Next print / in production / ship-ready / blocked buckets, plus ordered `needsReply` and `readyToPack` digest lists (each row includes `dealId` and `dealName`). `needsReply` reflects HubSpot `print_needs_reply`; `readyToPack` is ship-ready work missing packing, a real label, or tracking. |
 | `GET /api/deal-ops/:dealId` | Protected. Costs, checklist, plates, packing slip, failures for one deal. |
 | `PATCH /api/deal-ops/:dealId/costs` | Protected. Writes HubSpot cost inputs (gated) and recalculates margin. |
 | `POST /api/deal-ops/:dealId/stage` | Protected. Advances Print Orders `dealstage` (gated). |

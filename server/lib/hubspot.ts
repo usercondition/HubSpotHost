@@ -5,7 +5,7 @@
  * variables. No connector bridge, no SDK, and the token is never logged.
  */
 import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken } from "./config";
-import type { PrintFileOrderSummary } from "../../shared/schema";
+import { PRINT_NEEDS_REPLY_PROPERTY, type PrintFileOrderSummary } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const PERFORMANCE_DEAL_LIMIT = 1_000;
@@ -25,6 +25,7 @@ export const PERFORMANCE_PROPERTIES = [
   "print_line_kind",
   "print_tracking_number",
   "print_ship_notes",
+  PRINT_NEEDS_REPLY_PROPERTY,
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,
 ] as const;
@@ -162,6 +163,13 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     description: "Short ship notes from Print Ops fulfillment checklist.",
     type: "string",
     fieldType: "textarea",
+  },
+  {
+    name: PRINT_NEEDS_REPLY_PROPERTY,
+    label: "Print Ops needs buyer reply",
+    description: "Set when a buyer conversation is waiting on the print shop. Clear after the shop replies.",
+    type: "bool",
+    fieldType: "booleancheckbox",
   },
 ] as const;
 

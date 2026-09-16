@@ -7,6 +7,7 @@ import {
   FileUp,
   Layers3,
   Loader2,
+  MessageCircle,
   Package,
   PackageCheck,
   RefreshCw,
@@ -96,6 +97,8 @@ function QueueCard({
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {item.isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
+        {item.needsReply ? <StatusPill tone="warn" icon={MessageCircle} label="Needs reply" /> : null}
+        {item.readyToPack ? <StatusPill tone="good" icon={PackageCheck} label="Ready to pack / ship" /> : null}
         {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
         {!item.requiresPlates ? <StatusPill tone="neutral" icon={Package} label="No plates" /> : null}
         {item.costsIncomplete ? (
@@ -189,6 +192,7 @@ export default function ProductionQueuePage() {
     successDescription: "Next print, in-production jobs, and ship-ready checklists.",
   });
   const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
+  const [focus, setFocus] = useState<"needsReply" | "readyToPack" | null>(null);
 
   const selectDeal = useCallback((dealId: string | null) => {
     setSelectedDealId(dealId);
@@ -214,6 +218,10 @@ export default function ProductionQueuePage() {
   });
 
   const data = queue.data;
+  const focusedItems = useCallback(
+    (items: ProductionQueueItem[]) => (focus ? items.filter((item) => item[focus]) : items),
+    [focus],
+  );
 
   const selectedExists = useMemo(() => {
     if (!data || !selectedDealId) return false;
@@ -287,6 +295,31 @@ export default function ProductionQueuePage() {
               <StatCard label="Blocked" value={String(data.summary.blocked)} hint="Parts / unassigned" icon={AlertTriangle} tone="warn" />
               <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={focus === "needsReply" ? "default" : "outline"}
+                onClick={() => setFocus((current) => (current === "needsReply" ? null : "needsReply"))}
+                data-testid="button-filter-needs-reply"
+              >
+                <MessageCircle className="mr-2 h-3.5 w-3.5" />
+                Needs reply ({data.summary.needsReply})
+              </Button>
+              <Button
+                size="sm"
+                variant={focus === "readyToPack" ? "default" : "outline"}
+                onClick={() => setFocus((current) => (current === "readyToPack" ? null : "readyToPack"))}
+                data-testid="button-filter-ready-to-pack"
+              >
+                <PackageCheck className="mr-2 h-3.5 w-3.5" />
+                Ready to pack / ship ({data.summary.readyToPack})
+              </Button>
+              {focus ? (
+                <Button size="sm" variant="ghost" onClick={() => setFocus(null)}>
+                  Clear filter
+                </Button>
+              ) : null}
+            </div>
 
             <p className="text-sm text-muted-foreground">
               {selectedDealId
@@ -300,7 +333,7 @@ export default function ProductionQueuePage() {
               <QueueColumn
                 title="Next print"
                 subtitle="Open orders still missing plate data"
-                items={data.nextPrint}
+                items={focusedItems(data.nextPrint)}
                 selectedId={selectedDealId}
                 onSelect={selectDeal}
                 empty="All open orders already have plates."
@@ -309,7 +342,7 @@ export default function ProductionQueuePage() {
               <QueueColumn
                 title="In production"
                 subtitle="Plates on, progressing toward ship"
-                items={data.inProduction}
+                items={focusedItems(data.inProduction)}
                 selectedId={selectedDealId}
                 onSelect={selectDeal}
                 empty="Nothing mid-flight right now."
@@ -318,7 +351,7 @@ export default function ProductionQueuePage() {
               <QueueColumn
                 title="Blocked"
                 subtitle="Needs parts QC or printer assignment"
-                items={data.blocked}
+                items={focusedItems(data.blocked)}
                 selectedId={selectedDealId}
                 onSelect={selectDeal}
                 empty="No QC or assignment blockers."
@@ -327,7 +360,7 @@ export default function ProductionQueuePage() {
               <QueueColumn
                 title="Ship ready"
                 subtitle="Checklist mostly done — buy label & pack"
-                items={data.shipReady}
+                items={focusedItems(data.shipReady)}
                 selectedId={selectedDealId}
                 onSelect={selectDeal}
                 empty="No orders near ship-ready yet."

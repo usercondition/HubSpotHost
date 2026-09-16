@@ -148,7 +148,7 @@ test("tracker assistant lists ship-ready deals that still need labels", () => {
     "What’s ship-ready / needs a label?",
     sampleContext({
       queue: {
-        summary: { nextPrint: 1, inProduction: 0, shipReady: 1, blocked: 0, openOrders: 2 },
+        summary: { nextPrint: 1, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, openOrders: 2 },
         nextPrint: [],
         shipReady: [
           {
@@ -165,6 +165,8 @@ test("tracker assistant lists ship-ready deals that still need labels", () => {
           },
         ],
         blocked: [],
+        needsReply: [],
+        readyToPack: [],
         needsLabel: [
           {
             dealId: "d3",
@@ -192,10 +194,12 @@ test("tracker assistant briefing includes ship-ready label work when queue is pr
     "What should I do next?",
     sampleContext({
       queue: {
-        summary: { nextPrint: 0, inProduction: 0, shipReady: 1, blocked: 0, openOrders: 1 },
+        summary: { nextPrint: 0, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, openOrders: 1 },
         nextPrint: [],
         shipReady: [],
         blocked: [],
+        needsReply: [],
+        readyToPack: [],
         needsLabel: [
           {
             dealId: "d3",
@@ -215,6 +219,40 @@ test("tracker assistant briefing includes ship-ready label work when queue is pr
   );
   assert.match(answer.reply, /ship-ready/i);
   assert.ok(answer.actions.some((action) => action.href.includes("/labels")));
+});
+
+test("tracker assistant lists top chase work from the Print Ops reply flag", () => {
+  const answer = answerTrackerQuestionRules(
+    "What is top chase?",
+    sampleContext({
+      queue: {
+        summary: { nextPrint: 0, inProduction: 1, shipReady: 0, blocked: 0, needsReply: 1, readyToPack: 0, openOrders: 1 },
+        nextPrint: [],
+        shipReady: [],
+        blocked: [],
+        readyToPack: [],
+        needsLabel: [],
+        needsReply: [
+          {
+            dealId: "d2",
+            dealName: "Display base",
+            stage: "In Production",
+            amount: 45,
+            bucket: "in_production",
+            costsIncomplete: false,
+            hasPlates: true,
+            labelBought: false,
+            trackingPasted: false,
+            shipReady: false,
+            needsReply: true,
+          },
+        ],
+      },
+    }),
+  );
+  assert.match(answer.reply, /Display base/);
+  assert.match(answer.reply, /need a shop reply/i);
+  assert.ok(answer.actions.some((action) => action.href.includes("/queue?dealId=d2")));
 });
 
 test("xAI base URL defaults tracker assistant model to Grok", () => {
