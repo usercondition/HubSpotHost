@@ -1,10 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Loader2, Ship, AlertTriangle, ExternalLink, CheckCircle2, ArrowUpDown } from "lucide-react";
+import {
+  Loader2,
+  Ship,
+  AlertTriangle,
+  ExternalLink,
+  CheckCircle2,
+  ArrowUpDown,
+  Wallet,
+  Plus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Panel, StatusPill } from "@/components/primitives";
@@ -17,6 +34,8 @@ import {
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
 import type { ProductionQueueResponse } from "@shared/schema";
+
+const ADD_FUND_PRESETS = [10, 25, 50, 100] as const;
 
 type ShipEngineRate = {
   rateId: string;
@@ -90,6 +109,13 @@ function formatTransit(days: number | null): string {
   return days === 1 ? "1 day" : `${days} days`;
 }
 
+type ShipEngineFundedCarrier = {
+  carrierId: string;
+  carrierCode: string;
+  friendlyName: string;
+  balance: number;
+};
+
 type ShipEngineStatus = {
   ok: true;
   configured: boolean;
@@ -112,6 +138,12 @@ type ShipEngineStatus = {
     requiresFundedAmount?: boolean;
     balance?: number | null;
   }>;
+  funds?: {
+    availableUsd: number | null;
+    sharedWallet: boolean;
+    lowestBalanceUsd: number | null;
+    fundedCarriers: ShipEngineFundedCarrier[];
+  } | null;
   carriersError?: string | null;
 };
 
@@ -207,6 +239,9 @@ export function ShipEngineBuyPanel({
   const [rateSort, setRateSort] = useState<RateSort>("recommended");
   const [carrierFilter, setCarrierFilter] = useState<CarrierFilter>("all");
   const [ratePrefMode, setRatePrefMode] = useState<ShippingRatePrefMode>("usual");
+  const [addFundsOpen, setAddFundsOpen] = useState(false);
+  const [addFundsCarrierId, setAddFundsCarrierId] = useState("");
+  const [addFundsAmount, setAddFundsAmount] = useState("25");
 
   useEffect(() => {
     if (prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)) {
@@ -229,6 +264,33 @@ export function ShipEngineBuyPanel({
       return response.json();
     },
   });
+
+  const fundedCarriers = useMemo(() => {
+    const fromApi = statusQuery.data?.funds?.fundedCarriers;
+    if (fromApi && fromApi.length > 0) return fromApi;
+    return (statusQuery.data?.carriers ?? [])
+      .filter(
+        (carrier) =>
+          carrier.requiresFundedAmount !== false &&
+          typeof carrier.balance === "number" &&
+          Number.isFinite(carrier.balance),
+      )
+      .map((carrier) => ({
+        carrierId: carrier.carrierId,
+        carrierCode: carrier.carrierCode,
+        friendlyName: carrier.friendlyName || carrier.carrierCode,
+        balance: carrier.balance as number,
+      }));
+  }, [statusQuery.data]);
+
+  useEffect(() => {
+    if (!addFundsOpen) return;
+    if (addFundsCarrierId && fundedCarriers.some((row) => row.carrierId === addFundsCarrierId)) {
+      return;
+    }
+    const lowest = [...fundedCarriers].sort((a, b) => a.balance - b.balance)[0];
+    setAddFundsCarrierId(lowest?.carrierId ?? fundedCarriers[0]?.carrierId ?? "");
+  }, [addFundsOpen, fundedCarriers, addFundsCarrierId]);
 
   const queueQuery = useQuery<{ ok: true } & ProductionQueueResponse>({
     queryKey: ["/api/production-queue", ownerCode, "shipengine"],
@@ -367,6 +429,7 @@ export function ShipEngineBuyPanel({
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/shipengine/status"] });
 
       const tracking = data.shipengine?.trackingNumber ?? "";
       const dealIds = data.attachedDealIds?.length ? data.attachedDealIds : [dealId];
@@ -405,20 +468,96 @@ export function ShipEngineBuyPanel({
     },
   });
 
+  const addFunds = useMutation({
+    mutationFn: async () => {
+      const amount = Number(addFundsAmount);
+      if (!addFundsCarrierId) throw new Error("Pick a funded carrier wallet");
+      if (!Number.isFinite(amount) || amount < 10) {
+        throw new Error("Minimum add is $10");
+      }
+      const response = await apiRequest(
+        "POST",
+        "/api/shipping-labels/shipengine/add-funds",
+        {
+          carrierId: addFundsCarrierId,
+          amount,
+          currency: "usd",
+        },
+        { headers },
+      );
+      return (await response.json()) as {
+        ok: true;
+        friendlyName: string;
+        amountAdded: number;
+        balance: number;
+        currency: string;
+      };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/shipengine/status"] });
+      setAddFundsOpen(false);
+      toast({
+        title: "Funds added",
+        description: `Added $${Number(data.amountAdded).toFixed(2)} to ${data.friendlyName}. Balance now $${Number(data.balance).toFixed(2)}.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not add funds",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 280),
+        variant: "destructive",
+      });
+    },
+  });
+
   const status = statusQuery.data;
   const shipToReady = shipToQuery.data?.ready ?? false;
+  const funds = status?.funds;
+  const availableUsd =
+    typeof funds?.availableUsd === "number" && Number.isFinite(funds.availableUsd)
+      ? funds.availableUsd
+      : fundedCarriers.length > 0
+        ? fundedCarriers[0]!.balance
+        : null;
+  const fundsLow =
+    typeof funds?.lowestBalanceUsd === "number"
+      ? funds.lowestBalanceUsd < 5
+      : availableUsd != null && availableUsd < 5;
+  const fundsEmpty =
+    typeof funds?.lowestBalanceUsd === "number"
+      ? funds.lowestBalanceUsd <= 0
+      : availableUsd != null && availableUsd <= 0;
+  const selectedAddFundsCarrier =
+    fundedCarriers.find((row) => row.carrierId === addFundsCarrierId) ?? null;
+  const addFundsAmountNum = Number(addFundsAmount);
+  const canSubmitAddFunds =
+    Boolean(addFundsCarrierId) &&
+    Number.isFinite(addFundsAmountNum) &&
+    addFundsAmountNum >= 10 &&
+    !addFunds.isPending;
 
   return (
+    <>
     <Panel
       title="Buy with ShipEngine"
-      description="Rate-shop UPS (and USPS), buy the label, write tracking + postage, and move the Print Order to Completed."
+      description="Rate-shop, buy the label, write tracking + postage, and complete the Print Order — same flow as Queue ops, without leaving Print Ops."
       testId="panel-labels-shipengine"
       actions={
-        status?.testMode ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox key" />
-        ) : status?.configured ? (
-          <StatusPill tone="good" icon={CheckCircle2} label="ShipEngine ready" />
-        ) : null
+        <div className="flex flex-wrap items-center gap-1.5">
+          {status?.testMode ? (
+            <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox key" />
+          ) : status?.configured ? (
+            <StatusPill tone="good" icon={CheckCircle2} label="ShipEngine ready" />
+          ) : null}
+          {availableUsd != null ? (
+            <StatusPill
+              tone={fundsEmpty ? "bad" : fundsLow ? "warn" : "good"}
+              icon={Wallet}
+              label={`Available ${formatMoney(availableUsd)}`}
+              testId="status-shipengine-available-funds"
+            />
+          ) : null}
+        </div>
       }
     >
       {!status?.configured ? (
@@ -454,47 +593,99 @@ export function ShipEngineBuyPanel({
                 In ShipStation / ShipEngine, connect UPS and/or USPS (Stamps.com), then refresh Labels.
               </p>
             </div>
-          ) : status.carriers && status.carriers.length > 0 ? (
-            <div className="space-y-1.5" data-testid="panel-shipengine-carrier-balances">
-              <p className="text-xs text-muted-foreground">
-                Carriers: {status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {status.carriers.map((carrier) => {
-                  const funded = carrier.requiresFundedAmount !== false;
-                  const balance =
-                    typeof carrier.balance === "number" && Number.isFinite(carrier.balance)
-                      ? carrier.balance
-                      : null;
-                  const low = funded && balance != null && balance < 5;
-                  const empty = funded && balance != null && balance <= 0;
-                  return (
-                    <StatusPill
-                      key={carrier.carrierId}
-                      tone={empty ? "bad" : low ? "warn" : funded && balance != null ? "good" : "neutral"}
-                      icon={empty || low ? AlertTriangle : CheckCircle2}
-                      label={
-                        funded && balance != null
-                          ? `${carrier.friendlyName || carrier.carrierCode} $${balance.toFixed(2)}`
-                          : carrier.friendlyName || carrier.carrierCode
-                      }
-                      testId={`status-shipengine-balance-${carrier.carrierCode}`}
-                    />
-                  );
-                })}
-              </div>
-              {status.carriers.some(
-                (carrier) =>
-                  carrier.requiresFundedAmount !== false &&
-                  typeof carrier.balance === "number" &&
-                  carrier.balance <= 0,
-              ) ? (
-                <p className="text-xs text-destructive">
-                  A funded carrier is at $0 — add funds in ShipStation before buying that label.
+          ) : (
+            <div
+              className="glance-item flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"
+              data-tone={fundsEmpty ? "bad" : fundsLow ? "warn" : "good"}
+              data-testid="panel-shipengine-wallet"
+            >
+              <div className="min-w-0 space-y-1">
+                <p className="rule-label mb-0">ShipStation funds</p>
+                <p
+                  className="text-2xl font-semibold tracking-tight numeric"
+                  data-testid="text-shipengine-available-funds"
+                >
+                  {availableUsd != null ? formatMoney(availableUsd) : "—"}
                 </p>
-              ) : null}
+                <p className="text-xs text-muted-foreground">
+                  {funds?.sharedWallet
+                    ? "Shared prepaid wallet across funded carriers (not summed per carrier)."
+                    : fundedCarriers.length > 1
+                      ? "Total across funded carrier wallets."
+                      : status.carriers && status.carriers.length > 0
+                        ? `Carriers: ${status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}`
+                        : "Funded postage balance from ShipEngine."}
+                </p>
+                {fundedCarriers.length > 0 ? (
+                  <div
+                    className="flex flex-wrap gap-1.5 pt-1"
+                    data-testid="panel-shipengine-carrier-balances"
+                  >
+                    {fundedCarriers.map((carrier) => {
+                      const low = carrier.balance < 5;
+                      const empty = carrier.balance <= 0;
+                      return (
+                        <StatusPill
+                          key={carrier.carrierId}
+                          tone={empty ? "bad" : low ? "warn" : "good"}
+                          icon={empty || low ? AlertTriangle : CheckCircle2}
+                          label={`${carrier.friendlyName} $${carrier.balance.toFixed(2)}`}
+                          testId={`status-shipengine-balance-${carrier.carrierCode}`}
+                        />
+                      );
+                    })}
+                    {(status.carriers ?? [])
+                      .filter((carrier) => carrier.requiresFundedAmount === false)
+                      .map((carrier) => (
+                        <StatusPill
+                          key={carrier.carrierId}
+                          tone="neutral"
+                          icon={Ship}
+                          label={carrier.friendlyName || carrier.carrierCode}
+                          testId={`status-shipengine-balance-${carrier.carrierCode}`}
+                        />
+                      ))}
+                  </div>
+                ) : status.carriers && status.carriers.length > 0 ? (
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    Carriers: {status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}
+                  </p>
+                ) : null}
+                {fundsEmpty ? (
+                  <p className="text-xs text-destructive">
+                    Wallet is at $0 — add funds here before buying a funded-carrier label.
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={fundsEmpty || fundsLow ? "default" : "outline"}
+                  disabled={fundedCarriers.length === 0}
+                  onClick={() => setAddFundsOpen(true)}
+                  data-testid="button-shipengine-add-funds"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add funds
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={statusQuery.isFetching}
+                  onClick={() => void statusQuery.refetch()}
+                  data-testid="button-shipengine-refresh-funds"
+                >
+                  {statusQuery.isFetching ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    "Refresh"
+                  )}
+                </Button>
+              </div>
             </div>
-          ) : null}
+          )}
 
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <div className="space-y-1.5">
@@ -832,6 +1023,111 @@ export function ShipEngineBuyPanel({
         </div>
       )}
     </Panel>
+
+    <Dialog open={addFundsOpen} onOpenChange={setAddFundsOpen}>
+      <DialogContent className="max-w-md" data-testid="dialog-shipengine-add-funds">
+        <DialogHeader>
+          <DialogTitle>Add ShipStation funds</DialogTitle>
+          <DialogDescription>
+            Charges your ShipStation payment method and credits a funded carrier wallet. There is no
+            sandbox for this — live only. ShipStation Support must have enabled{" "}
+            <code className="text-xs">add_funds</code> on the account.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="shipengine-add-funds-carrier">Wallet</Label>
+            <select
+              id="shipengine-add-funds-carrier"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+              value={addFundsCarrierId}
+              onChange={(event) => setAddFundsCarrierId(event.target.value)}
+              data-testid="select-shipengine-add-funds-carrier"
+            >
+              {fundedCarriers.length === 0 ? (
+                <option value="">No funded carriers</option>
+              ) : (
+                fundedCarriers.map((carrier) => (
+                  <option key={carrier.carrierId} value={carrier.carrierId}>
+                    {carrier.friendlyName} · ${carrier.balance.toFixed(2)}
+                  </option>
+                ))
+              )}
+            </select>
+            {funds?.sharedWallet ? (
+              <p className="text-xs text-muted-foreground">
+                Shared wallet — funding any carrier refreshes the same available balance.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Amount (USD)</Label>
+            <div className="flex flex-wrap gap-2">
+              {ADD_FUND_PRESETS.map((preset) => (
+                <Button
+                  key={preset}
+                  type="button"
+                  size="sm"
+                  variant={addFundsAmount === String(preset) ? "default" : "outline"}
+                  onClick={() => setAddFundsAmount(String(preset))}
+                  data-testid={`button-shipengine-add-funds-preset-${preset}`}
+                >
+                  ${preset}
+                </Button>
+              ))}
+            </div>
+            <Input
+              inputMode="decimal"
+              value={addFundsAmount}
+              onChange={(event) => setAddFundsAmount(event.target.value.trim())}
+              placeholder="25.00"
+              data-testid="input-shipengine-add-funds-amount"
+            />
+            <p className="text-xs text-muted-foreground">Minimum $10 · max $5,000 per request.</p>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAddFundsOpen(false)}
+            disabled={addFunds.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!canSubmitAddFunds}
+            onClick={() => {
+              const label = selectedAddFundsCarrier?.friendlyName || "carrier wallet";
+              const amountLabel = Number.isFinite(addFundsAmountNum)
+                ? formatMoney(addFundsAmountNum)
+                : `$${addFundsAmount}`;
+              if (
+                !window.confirm(
+                  `Add ${amountLabel} to ${label}? This charges your ShipStation payment method now.`,
+                )
+              ) {
+                return;
+              }
+              addFunds.mutate();
+            }}
+            data-testid="button-shipengine-add-funds-confirm"
+          >
+            {addFunds.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Wallet className="mr-2 h-4 w-4" />
+            )}
+            Add {Number.isFinite(addFundsAmountNum) ? formatMoney(addFundsAmountNum) : "funds"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

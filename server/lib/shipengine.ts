@@ -266,6 +266,105 @@ export async function listShipEngineCarriers(apiKey?: string): Promise<ShipEngin
     .filter((row): row is ShipEngineCarrier => Boolean(row));
 }
 
+export type ShipEngineFundsSummary = {
+  fundedCarriers: Array<{
+    carrierId: string;
+    carrierCode: string;
+    friendlyName: string;
+    balance: number;
+  }>;
+  /**
+   * Single number for “available funds.”
+   * When every funded carrier reports the same balance (mirrored ShipStation wallet),
+   * we show that amount once — not 4× $30 = $120.
+   */
+  availableUsd: number | null;
+  sharedWallet: boolean;
+  lowestBalanceUsd: number | null;
+};
+
+/** Collapse carrier wallet rows into one Print Ops “available funds” figure. */
+export function summarizeShipEngineFunds(carriers: ShipEngineCarrier[]): ShipEngineFundsSummary {
+  const fundedCarriers = carriers
+    .filter(
+      (carrier) =>
+        carrier.requiresFundedAmount &&
+        typeof carrier.balance === "number" &&
+        Number.isFinite(carrier.balance),
+    )
+    .map((carrier) => ({
+      carrierId: carrier.carrierId,
+      carrierCode: carrier.carrierCode,
+      friendlyName: carrier.friendlyName || carrier.carrierCode,
+      balance: carrier.balance as number,
+    }));
+
+  if (fundedCarriers.length === 0) {
+    return {
+      fundedCarriers: [],
+      availableUsd: null,
+      sharedWallet: false,
+      lowestBalanceUsd: null,
+    };
+  }
+
+  const amounts = fundedCarriers.map((carrier) => carrier.balance);
+  const first = amounts[0]!;
+  const sharedWallet = amounts.every((amount) => Math.abs(amount - first) < 0.005);
+  const availableUsd = sharedWallet ? first : amounts.reduce((sum, amount) => sum + amount, 0);
+  const lowestBalanceUsd = Math.min(...amounts);
+  return { fundedCarriers, availableUsd, sharedWallet, lowestBalanceUsd };
+}
+
+/**
+ * Charge the ShipStation payment method and credit a funded carrier wallet.
+ * Live only — ShipEngine has no sandbox for add_funds.
+ * Endpoint must be enabled by ShipStation API support on the account.
+ */
+export async function addShipEngineCarrierFunds(input: {
+  carrierId: string;
+  amount: number;
+  currency?: string;
+  apiKey?: string;
+}): Promise<{ balance: number; currency: string; carrierId: string }> {
+  const apiKey = input.apiKey ?? getShipEngineApiKey();
+  if (!apiKey) throw new ShipEngineError("ShipEngine API key is not configured", 503);
+  const carrierId = input.carrierId.trim();
+  if (!carrierId) throw new ShipEngineError("carrier_id is required to add funds", 400);
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ShipEngineError("Amount must be a positive number", 400);
+  }
+  const currency = (input.currency || "usd").trim().toLowerCase() || "usd";
+
+  const body = await shipEngineRequest(`/v1/carriers/${encodeURIComponent(carrierId)}/add_funds`, {
+    method: "PUT",
+    apiKey,
+    body: JSON.stringify({ currency, amount }),
+  });
+
+  const root = (body ?? {}) as Record<string, unknown>;
+  const balanceObj =
+    typeof root.balance === "object" && root.balance
+      ? (root.balance as Record<string, unknown>)
+      : root;
+  const amountRaw = balanceObj.amount ?? root.amount;
+  const balance =
+    typeof amountRaw === "number" && Number.isFinite(amountRaw)
+      ? amountRaw
+      : typeof amountRaw === "string" && Number.isFinite(Number(amountRaw))
+        ? Number(amountRaw)
+        : NaN;
+  if (!Number.isFinite(balance)) {
+    throw new ShipEngineError("ShipEngine add_funds returned no balance", 502);
+  }
+  return {
+    carrierId,
+    balance,
+    currency: asString(balanceObj.currency || root.currency || currency).toUpperCase() || "USD",
+  };
+}
+
 async function resolveCarrierIds(apiKey: string, preferred?: string[]): Promise<string[]> {
   if (preferred && preferred.length > 0) return preferred;
   const configured = getConfiguredCarrierIds();
@@ -466,6 +565,13 @@ export const shipEngineParcelSchema = z.object({
   widthIn: z.coerce.number().positive().max(108),
   heightIn: z.coerce.number().positive().max(108),
   weightOz: z.coerce.number().positive().max(2_400),
+});
+
+/** ShipStation often enforces a $10 minimum; keep the floor aligned. */
+export const shipEngineAddFundsRequestSchema = z.object({
+  carrierId: z.string().trim().min(2).max(80),
+  amount: z.coerce.number().min(10).max(5_000),
+  currency: z.enum(["usd", "USD", "gbp", "GBP"]).optional().default("usd"),
 });
 
 export const shipEngineRatesRequestSchema = z.object({

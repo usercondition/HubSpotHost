@@ -8,10 +8,12 @@ import {
   getShipFromAddress,
   mapShipEngineCarrierRow,
   normalizeUsStateProvince,
+  shipEngineAddFundsRequestSchema,
   shipEngineKeyIsTest,
   shipEnginePurchaseRequestSchema,
   shipEngineRatesRequestSchema,
   sortShipEngineRates,
+  summarizeShipEngineFunds,
   type ShipEngineRateOffer,
 } from "../server/lib/shipengine";
 
@@ -195,4 +197,75 @@ test("mapShipEngineCarrierRow keeps funded wallet balance", () => {
   });
   assert.equal(bare?.requiresFundedAmount, false);
   assert.equal(bare?.balance, null);
+});
+
+test("summarizeShipEngineFunds collapses mirrored wallet balances", () => {
+  const shared = summarizeShipEngineFunds([
+    {
+      carrierId: "se-1",
+      carrierCode: "stamps_com",
+      friendlyName: "USPS",
+      nickname: "",
+      requiresFundedAmount: true,
+      balance: 30,
+    },
+    {
+      carrierId: "se-2",
+      carrierCode: "ups",
+      friendlyName: "UPS",
+      nickname: "",
+      requiresFundedAmount: true,
+      balance: 30,
+    },
+    {
+      carrierId: "se-3",
+      carrierCode: "fedex",
+      friendlyName: "FedEx",
+      nickname: "",
+      requiresFundedAmount: false,
+      balance: null,
+    },
+  ]);
+  assert.equal(shared.sharedWallet, true);
+  assert.equal(shared.availableUsd, 30);
+  assert.equal(shared.lowestBalanceUsd, 30);
+  assert.equal(shared.fundedCarriers.length, 2);
+
+  const split = summarizeShipEngineFunds([
+    {
+      carrierId: "se-1",
+      carrierCode: "stamps_com",
+      friendlyName: "USPS",
+      nickname: "",
+      requiresFundedAmount: true,
+      balance: 10,
+    },
+    {
+      carrierId: "se-2",
+      carrierCode: "endicia",
+      friendlyName: "Endicia",
+      nickname: "",
+      requiresFundedAmount: true,
+      balance: 25,
+    },
+  ]);
+  assert.equal(split.sharedWallet, false);
+  assert.equal(split.availableUsd, 35);
+  assert.equal(split.lowestBalanceUsd, 10);
+});
+
+test("shipEngineAddFundsRequestSchema enforces $10 minimum", () => {
+  assert.equal(
+    shipEngineAddFundsRequestSchema.safeParse({ carrierId: "se-1", amount: 5 }).success,
+    false,
+  );
+  const ok = shipEngineAddFundsRequestSchema.safeParse({
+    carrierId: "se-123",
+    amount: 25,
+  });
+  assert.equal(ok.success, true);
+  if (ok.success) {
+    assert.equal(ok.data.amount, 25);
+    assert.equal(ok.data.currency.toLowerCase(), "usd");
+  }
 });
