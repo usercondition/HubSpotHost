@@ -6,6 +6,7 @@ import {
   getShipEngineApiKey,
   getShipEngineStatus,
   getShipFromAddress,
+  mapShipEngineCarrierRow,
   normalizeUsStateProvince,
   shipEngineKeyIsTest,
   shipEnginePurchaseRequestSchema,
@@ -174,4 +175,24 @@ test("shipengine request schemas validate deal + parcel", () => {
   if (purchase.success) {
     assert.deepEqual(purchase.data.dealIds, ["1234567890"]);
   }
+});
+
+test("mapShipEngineCarrierRow keeps funded wallet balance", () => {
+  const usps = mapShipEngineCarrierRow({
+    carrier_id: "se-1",
+    carrier_code: "usps",
+    friendly_name: "USPS",
+    nickname: "USPS",
+    requires_funded_amount: true,
+    balance: 30,
+  });
+  assert.equal(usps?.requiresFundedAmount, true);
+  assert.equal(usps?.balance, 30);
+  const bare = mapShipEngineCarrierRow({
+    carrier_id: "se-2",
+    carrier_code: "ups",
+    friendly_name: "UPS",
+  });
+  assert.equal(bare?.requiresFundedAmount, false);
+  assert.equal(bare?.balance, null);
 });

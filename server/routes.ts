@@ -1351,6 +1351,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             carrierId: carrier.carrierId,
             carrierCode: carrier.carrierCode,
             friendlyName: carrier.friendlyName,
+            requiresFundedAmount: carrier.requiresFundedAmount,
+            balance: carrier.balance,
           }))
         : null,
       carriersError,
