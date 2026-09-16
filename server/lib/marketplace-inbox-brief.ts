@@ -12,6 +12,11 @@ import { analyzeMarketplaceConversation } from "./intake";
 export type MarketplaceThreadInput = {
   /** Stable-ish id from the scanner (href, list index, etc.). */
   id?: string;
+  /**
+   * HubSpot Print Order ids already known by the scan source or exact local
+   * order-link match. Never infer ids from a partial buyer-name match.
+   */
+  dealIds?: string[];
   title: string;
   conversation: string;
   unread?: boolean;
@@ -38,6 +43,8 @@ export type MarketplaceBriefAction = {
 
 export type MarketplaceThreadBrief = {
   id: string;
+  /** Verified or explicitly supplied Print Order ids this thread belongs to. */
+  dealIds: string[];
   title: string;
   unread: boolean;
   status: MarketplaceThreadStatus;
@@ -141,6 +148,14 @@ function draftFor(status: MarketplaceThreadStatus, title: string): string | null
   }
 }
 
+function cleanDealIds(value: string[] | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((id) => clean(String(id), 40))
+    .filter((id, index, ids) => Boolean(id) && ids.indexOf(id) === index)
+    .slice(0, 12);
+}
+
 function classifyThread(input: MarketplaceThreadInput, index: number): MarketplaceThreadBrief {
   const title = clean(input.title || `Thread ${index + 1}`, 120) || `Thread ${index + 1}`;
   const conversation = String(input.conversation || "").trim().slice(0, 40_000);
@@ -231,6 +246,7 @@ function classifyThread(input: MarketplaceThreadInput, index: number): Marketpla
 
   return {
     id: clean(input.id || `${index}-${title}`, 160) || `thread-${index}`,
+    dealIds: cleanDealIds(input.dealIds),
     title,
     unread: Boolean(input.unread),
     status,

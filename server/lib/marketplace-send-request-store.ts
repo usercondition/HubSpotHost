@@ -14,6 +14,7 @@ export type MarketplaceSendRequest = {
   to: string;
   text: string;
   channel: "marketplace" | "offerup";
+  dealId: string;
 };
 
 const CREATE_TABLE_SQL = `
@@ -24,7 +25,8 @@ CREATE TABLE IF NOT EXISTS marketplace_send_request (
   recipient TEXT NOT NULL,
   message_text TEXT NOT NULL,
   shipment_key TEXT NOT NULL DEFAULT '',
-  channel TEXT NOT NULL DEFAULT 'marketplace' CHECK (channel IN ('marketplace', 'offerup'))
+  channel TEXT NOT NULL DEFAULT 'marketplace' CHECK (channel IN ('marketplace', 'offerup')),
+  deal_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS marketplace_sent_shipments (
@@ -59,39 +61,46 @@ function getSqlite(): Database.Database {
   } catch {
     // The column already exists.
   }
+  try {
+    sqlite.exec("ALTER TABLE marketplace_send_request ADD COLUMN deal_id TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // The column already exists.
+  }
   return sqlite;
 }
 
 export function getMarketplaceSendRequest(): MarketplaceSendRequest {
   const row = getSqlite()
-    .prepare("SELECT pending, request_id, recipient, message_text, channel FROM marketplace_send_request WHERE singleton = 1")
-    .get() as { pending: number; request_id: number; recipient: string; message_text: string; channel: string } | undefined;
+    .prepare("SELECT pending, request_id, recipient, message_text, channel, deal_id FROM marketplace_send_request WHERE singleton = 1")
+    .get() as { pending: number; request_id: number; recipient: string; message_text: string; channel: string; deal_id: string } | undefined;
   return {
     pending: row?.pending === 1,
     id: row?.request_id ?? 0,
     to: row?.recipient ?? "",
     text: row?.message_text ?? "",
     channel: row?.channel === "offerup" ? "offerup" : "marketplace",
+    dealId: row?.deal_id ?? "",
   };
 }
 
 export function setMarketplaceSendRequest(
   pending: boolean,
-  request?: { text: string; to: string; shipmentKey?: string; channel?: "marketplace" | "offerup" },
+  request?: { text: string; to: string; shipmentKey?: string; channel?: "marketplace" | "offerup"; dealId?: string },
 ): MarketplaceSendRequest {
   const db = getSqlite();
   if (pending) {
     db.prepare(
-      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, shipment_key, channel)
-       VALUES (1, 1, 1, ?, ?, ?, ?)
+      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, shipment_key, channel, deal_id)
+       VALUES (1, 1, 1, ?, ?, ?, ?, ?)
        ON CONFLICT(singleton) DO UPDATE SET
          pending = 1,
          request_id = request_id + 1,
          recipient = excluded.recipient,
          message_text = excluded.message_text,
          shipment_key = excluded.shipment_key,
-         channel = excluded.channel`,
-    ).run(request?.to ?? "", request?.text ?? "", request?.shipmentKey ?? "", request?.channel ?? "marketplace");
+         channel = excluded.channel,
+         deal_id = excluded.deal_id`,
+    ).run(request?.to ?? "", request?.text ?? "", request?.shipmentKey ?? "", request?.channel ?? "marketplace", request?.dealId ?? "");
   } else {
     const current = db
       .prepare("SELECT shipment_key FROM marketplace_send_request WHERE singleton = 1 AND pending = 1")
@@ -102,9 +111,9 @@ export function setMarketplaceSendRequest(
       ).run(current.shipment_key, new Date().toISOString());
     }
     db.prepare(
-      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, channel)
-       VALUES (1, 0, 0, '', '', 'marketplace')
-       ON CONFLICT(singleton) DO UPDATE SET pending = 0, recipient = '', message_text = '', shipment_key = '', channel = 'marketplace'`,
+      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, channel, deal_id)
+       VALUES (1, 0, 0, '', '', 'marketplace', '')
+       ON CONFLICT(singleton) DO UPDATE SET pending = 0, recipient = '', message_text = '', shipment_key = '', channel = 'marketplace', deal_id = ''`,
     ).run();
   }
   return getMarketplaceSendRequest();
@@ -139,6 +148,7 @@ export function enqueueMarketplaceShipmentSendRequest(request: {
       text: request.text,
       shipmentKey,
       channel: request.channel ?? "marketplace",
+      dealId: request.dealId,
     }),
   };
 }

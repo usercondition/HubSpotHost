@@ -159,6 +159,14 @@
     );
   }
 
+  function listedThreadDealIds(el) {
+    return String(el.getAttribute("data-print-ops-deal-ids") || el.getAttribute("data-print-ops-deal-id") || "")
+      .split(/[,\s]+/)
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+
   function listedThreadSnippet(el, title) {
     const explicit = el.querySelector(
       "[data-print-ops-thread-snippet], .snip, [data-testid*='snippet' i], [data-testid*='preview' i]",
@@ -401,7 +409,13 @@
           el.getAttribute("data-unread") === "true" ||
           Boolean(el.querySelector('[aria-label*="unread" i], .dot')) ||
           /unread/i.test(el.getAttribute("aria-label") || "");
-        picks.set(key, { key, title, unread, snippet: listedThreadSnippet(el, title) });
+        picks.set(key, {
+          key,
+          title,
+          unread,
+          snippet: listedThreadSnippet(el, title),
+          dealIds: listedThreadDealIds(el),
+        });
         if (picks.size >= maxThreads) return;
       }
     };
@@ -444,6 +458,7 @@
         title: pick.title,
         unread: pick.unread,
         conversation: inboxConversation(pick.title, pick.snippet),
+        dealIds: pick.dealIds,
       })),
       source: "inbox-list",
     };

@@ -37,7 +37,14 @@ conversation pane never removes a row or aborts the brief.
 
 The only buyer auto-send is an owner-queued, tracking-only shipment notice.
 It is channel-locked and left pending if the exact buyer chat is missing or
-ambiguous. No HubSpot writes come from the brief itself.
+ambiguous.
+
+When a brief thread includes a HubSpot Print Order id in `dealIds`, Print Ops
+sets `print_needs_reply` for **Your turn**, **Paid — need shipping details**,
+and **Stale**. It clears that checkbox when every linked thread is waiting on
+the buyer or done, and after a successful linked Print Ops send. Matching is
+id-only: no partial buyer-name matching is attempted, so unlinked threads
+remain secretary-only.
 
 ## Files
 

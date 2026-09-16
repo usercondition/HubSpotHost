@@ -145,6 +145,7 @@ import {
 } from "./lib/messenger-scan-bridge";
 import { registerMessengerScanTestUi } from "./lib/messenger-scan-test-ui";
 import { createMarketplaceInboxBrief, getMarketplaceInboxBrief } from "./lib/marketplace-inbox-brief-store";
+import { clearPrintOrderNeedsReply, syncMarketplaceBriefNeedsReply } from "./lib/marketplace-brief-needs-reply";
 import {
   getMarketplaceScanRequest,
   setMarketplaceScanRequest,
@@ -2956,7 +2957,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
    * Marketplace secretary brief — batch of scanned threads → prioritized next actions.
    * The current brief is a single owner-gated persistent slot.
    */
-  app.post("/api/marketplace-brief", (req: Request, res: Response) => {
+  app.post("/api/marketplace-brief", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const body =
       req.body && typeof req.body === "object" && !Array.isArray(req.body)
@@ -2971,6 +2972,9 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         const item = row && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : {};
         return {
           id: typeof item.id === "string" ? item.id : `t-${index}`,
+          dealIds: Array.isArray(item.dealIds)
+            ? item.dealIds.filter((dealId): dealId is string => typeof dealId === "string")
+            : [],
           title: typeof item.title === "string" ? item.title : `Thread ${index + 1}`,
           conversation: typeof item.conversation === "string" ? item.conversation : "",
           unread: item.unread === true,
@@ -2978,7 +2982,8 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         };
       });
       const created = createMarketplaceInboxBrief(threads);
-      return res.status(201).json({ ok: true, id: created.id, brief: created.brief });
+      const sync = await syncMarketplaceBriefNeedsReply(created.brief);
+      return res.status(201).json({ ok: true, id: created.id, brief: created.brief, sync });
     } catch (error) {
       return res.status(400).json({
         ok: false,
@@ -3040,7 +3045,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     return res.json(getMarketplaceSendRequest());
   });
 
-  app.post("/api/marketplace-send-request", (req: Request, res: Response) => {
+  app.post("/api/marketplace-send-request", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const body =
       req.body && typeof req.body === "object" && !Array.isArray(req.body)
@@ -3051,7 +3056,18 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       return res.status(400).json({ ok: false, error: "Expected { pending: true | false }" });
     }
     if (!pending) {
+      const completed = getMarketplaceSendRequest();
       const request = setMarketplaceSendRequest(false);
+      if (completed.dealId) {
+        try {
+          await clearPrintOrderNeedsReply(completed.dealId);
+        } catch (error) {
+          return res.status(502).json({
+            ok: false,
+            error: error instanceof Error ? error.message : "Message sent, but Print Ops could not clear the reply flag.",
+          });
+        }
+      }
       return res.json({ ok: true, pending: false, id: request.id });
     }
     if (typeof body.text !== "string" || !body.text.trim()) {
@@ -3063,10 +3079,14 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     if (body.channel !== undefined && body.channel !== "marketplace" && body.channel !== "offerup") {
       return res.status(400).json({ ok: false, error: "Channel must be marketplace or offerup" });
     }
+    if (body.dealId !== undefined && (typeof body.dealId !== "string" || body.dealId.length > 40)) {
+      return res.status(400).json({ ok: false, error: "Deal id is too long" });
+    }
     const request = setMarketplaceSendRequest(true, {
       text: body.text,
       to: body.to ?? "",
       channel: body.channel === "offerup" ? "offerup" : "marketplace",
+      dealId: typeof body.dealId === "string" ? body.dealId.trim() : "",
     });
     return res.status(201).json({
       ok: true,

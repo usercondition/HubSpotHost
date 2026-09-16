@@ -30,6 +30,7 @@ const {
   clearMarketplaceSendRequest,
   getMarketplaceSendRequest,
 } = await import("../server/lib/marketplace-send-request-store");
+const { invalidatePrintOrderDealsCache } = await import("../server/lib/hubspot");
 const { registerRoutes } = await import("../server/routes");
 
 interface MockCall {
@@ -183,9 +184,9 @@ before(async () => {
         return res.end(JSON.stringify({ id: "701", properties: mockDealProperties }));
       }
       if (call.url === "/crm/v4/objects/deals/701/associations/contacts?limit=1") {
-        return res.end(JSON.stringify({ results: mockContactName ? [{ toObjectId: "contact-701" }] : [] }));
+        return res.end(JSON.stringify({ results: mockContactName ? [{ toObjectId: "702" }] : [] }));
       }
-      if (call.url.startsWith("/crm/v3/objects/contacts/contact-701?")) {
+      if (call.url.startsWith("/crm/v3/objects/contacts/702?")) {
         const [firstname, ...rest] = mockContactName.split(" ");
         return res.end(JSON.stringify({ properties: { firstname, lastname: rest.join(" ") } }));
       }
@@ -520,13 +521,14 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
       id: 1,
       to: "Jamie Carter",
       channel: "marketplace",
-    });
+    }, JSON.stringify(attached.body));
     assert.deepEqual(getMarketplaceSendRequest(), {
       pending: true,
       id: 1,
       to: "Jamie Carter",
       text: "Your order has shipped. Tracking: 9400111899223344556678.",
       channel: "marketplace",
+      dealId: "701",
     });
 
     const duplicate = await jsonOwnerRequest("POST", "/api/shipping-labels/attach", payload);
@@ -567,13 +569,14 @@ test("priced OfferUp label attach queues tracking-only notice on OfferUp", async
       id: 1,
       to: "Jamie Carter",
       channel: "offerup",
-    });
+    }, JSON.stringify(attached.body));
     assert.deepEqual(getMarketplaceSendRequest(), {
       pending: true,
       id: 1,
       to: "Jamie Carter",
       text: "Your order has shipped. Tracking: 9400111899223344556679.",
       channel: "offerup",
+      dealId: "701",
     });
     assert.doesNotMatch(getMarketplaceSendRequest().text, /5\.42|postage|\$/i);
   } finally {
@@ -581,6 +584,60 @@ test("priced OfferUp label attach queues tracking-only notice on OfferUp", async
     process.env.DRY_RUN = "true";
     process.env.ALLOW_HUBSPOT_WRITES = "false";
   }
+});
+
+test("linked Marketplace brief sets and clears the Print Ops reply flag", async () => {
+  mockCalls = [];
+  mockDealProperties = { print_needs_reply: "false" };
+  invalidatePrintOrderDealsCache();
+
+  const needsReply = await jsonOwnerRequest("POST", "/api/marketplace-brief", {
+    threads: [
+      {
+        id: "marketplace-thread-1",
+        dealIds: ["701"],
+        title: "Jamie Carter",
+        unread: true,
+        conversation: "Buyer: Can you share an update?",
+      },
+    ],
+  });
+  assert.equal(needsReply.status, 201, needsReply.body?.error || "brief failed");
+  assert.deepEqual(needsReply.body.sync.updatedDealIds, ["701"], JSON.stringify(needsReply.body));
+  assert.equal(mockDealProperties.print_needs_reply, "true");
+
+  invalidatePrintOrderDealsCache();
+  const resolved = await jsonOwnerRequest("POST", "/api/marketplace-brief", {
+    threads: [
+      {
+        id: "marketplace-thread-1",
+        dealIds: ["701"],
+        title: "Jamie Carter",
+        conversation: "You: Your tracking number is 9400111899223344556678.",
+      },
+    ],
+  });
+  assert.equal(resolved.status, 201, resolved.body?.error || "brief failed");
+  assert.deepEqual(resolved.body.sync.updatedDealIds, ["701"]);
+  assert.equal(mockDealProperties.print_needs_reply, "false");
+});
+
+test("successful linked Print Ops send clears the reply flag", async () => {
+  clearMarketplaceSendRequest();
+  mockDealProperties = { print_needs_reply: "true" };
+  invalidatePrintOrderDealsCache();
+  const queued = await jsonOwnerRequest("POST", "/api/marketplace-send-request", {
+    pending: true,
+    dealId: "701",
+    to: "Jamie Carter",
+    text: "Your order is ready.",
+  });
+  assert.equal(queued.status, 201);
+
+  invalidatePrintOrderDealsCache();
+  const sent = await jsonOwnerRequest("POST", "/api/marketplace-send-request", { pending: false });
+  assert.equal(sent.status, 200, sent.body?.error || "send acknowledgement failed");
+  assert.equal(mockDealProperties.print_needs_reply, "false");
 });
 
 test("plate history deal stage refreshes when HubSpot moves the order", async () => {
