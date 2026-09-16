@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertTriangle,
@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { hubspotDealHref, hubspotDealsListHref, labelsDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -40,11 +41,16 @@ type BoardColumn = PerformanceResponse["pipeline"][number] & {
   totalAmount: number;
 };
 
+type OptimisticMove = { stageId: string; stageLabel: string };
+
+const DRAG_MIME = "application/x-print-ops-deal";
+
 /**
- * Orders board — at-a-glance Print Orders pipeline columns.
- * Open Ops on a card (or Queue) to move stage, enter costs, and ship.
+ * Orders board — HubSpot Print Orders stages with drag-to-move write-back.
+ * Day-to-day production still lives on Queue; this mirrors CRM stages both ways.
  */
 export default function DealsPage() {
+  const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Orders unlocked",
@@ -54,6 +60,9 @@ export default function DealsPage() {
   const [showEmptyStages, setShowEmptyStages] = useState(false);
   const [opsDealId, setOpsDealId] = useState<string | null>(null);
   const [partsDeal, setPartsDeal] = useState<{ dealId: string; dealName: string } | null>(null);
+  const [optimisticMoves, setOptimisticMoves] = useState<Record<string, OptimisticMove>>({});
+  const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
+  const [dropStageId, setDropStageId] = useState<string | null>(null);
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -72,6 +81,82 @@ export default function DealsPage() {
       return (await response.json()) as { ok: true; summaries: OrderPartSummary[] };
     },
   });
+
+  const moveStage = useMutation({
+    mutationFn: async (input: { dealId: string; stageId: string; stageLabel: string; dealName: string }) => {
+      const response = await apiRequest(
+        "POST",
+        `/api/deal-ops/${encodeURIComponent(input.dealId)}/stage`,
+        { stageId: input.stageId, liveWrite: true },
+        { headers },
+      );
+      return (await response.json()) as {
+        ok: true;
+        dryRun?: boolean;
+        stageId: string;
+        stageLabel: string;
+        gate?: string;
+      };
+    },
+    onMutate: (input) => {
+      setOptimisticMoves((prev) => ({
+        ...prev,
+        [input.dealId]: { stageId: input.stageId, stageLabel: input.stageLabel },
+      }));
+    },
+    onSuccess: (data, input) => {
+      void queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      if (data.dryRun) {
+        setOptimisticMoves((prev) => {
+          const next = { ...prev };
+          delete next[input.dealId];
+          return next;
+        });
+        toast({
+          title: "Dry-run only — HubSpot not updated",
+          description: `${input.dealName} stayed put. Enable live HubSpot writes to move stages.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: `Moved to ${data.stageLabel || input.stageLabel}`,
+        description: `${input.dealName} updated in HubSpot.`,
+      });
+    },
+    onError: (error: Error, input) => {
+      setOptimisticMoves((prev) => {
+        const next = { ...prev };
+        delete next[input.dealId];
+        return next;
+      });
+      toast({
+        title: "Could not move that order",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Drop optimistic overrides once the server snapshot catches up.
+  useEffect(() => {
+    const snapshot = performance.data;
+    if (!snapshot || Object.keys(optimisticMoves).length === 0) return;
+    const all = [...snapshot.activeDeals, ...(snapshot.closedDeals ?? [])];
+    setOptimisticMoves((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [dealId, move] of Object.entries(prev)) {
+        const deal = all.find((row) => row.dealId === dealId);
+        if (deal && (deal.stageId === move.stageId || deal.stage === move.stageLabel)) {
+          delete next[dealId];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [performance.data, optimisticMoves]);
 
   const summaryByDeal = useMemo(() => {
     const map = new Map<string, OrderPartSummary>();
@@ -107,15 +192,19 @@ export default function DealsPage() {
       if (!deal.requiresPlates) continue;
       if (!closedIds.has(deal.dealId)) openValue += deal.amount;
       const alerts = alertsByDeal.get(deal.dealId) ?? [];
-      const key = deal.stageId || deal.stage;
-      const list = byStage.get(key) ?? [];
+      const optimistic = optimisticMoves[deal.dealId];
+      const stageId = optimistic?.stageId || deal.stageId || deal.stage;
+      const stage = optimistic?.stageLabel || deal.stage;
+      const list = byStage.get(stageId) ?? [];
       list.push({
         ...deal,
+        stageId,
+        stage,
         needsCosts: alerts.some((item) => item.issueKey === "costs_incomplete"),
         needsPlates: deal.promptAttachPlates,
         alerts,
       });
-      byStage.set(key, list);
+      byStage.set(stageId, list);
     }
 
     const allColumns: BoardColumn[] = snapshot.pipeline.map((stage) => {
@@ -127,10 +216,31 @@ export default function DealsPage() {
     const closedColumnCount = allColumns.filter((column) => column.closed).length;
     const visible = showClosedStages ? allColumns : allColumns.filter((column) => !column.closed);
     const emptyColumnCount = visible.filter((column) => column.deals.length === 0).length;
-    const columns = showEmptyStages ? visible : visible.filter((column) => column.deals.length > 0);
+    // Keep empty drop targets visible while dragging so you can land on an empty stage.
+    const columns =
+      showEmptyStages || draggingDealId
+        ? visible
+        : visible.filter((column) => column.deals.length > 0);
 
     return { columns, openValue, closedColumnCount, emptyColumnCount };
-  }, [snapshot, showClosedStages, showEmptyStages]);
+  }, [snapshot, showClosedStages, showEmptyStages, optimisticMoves, draggingDealId]);
+
+  const requestMove = (deal: BoardDeal, column: BoardColumn) => {
+    const currentId = deal.stageId || deal.stage;
+    if (currentId === column.id || moveStage.isPending) return;
+    if (column.closed) {
+      const ok = window.confirm(
+        `Move “${deal.dealName}” to ${column.label}?\n\nThat is a closed HubSpot stage (completed/lost).`,
+      );
+      if (!ok) return;
+    }
+    moveStage.mutate({
+      dealId: deal.dealId,
+      stageId: column.id,
+      stageLabel: column.label,
+      dealName: deal.dealName,
+    });
+  };
 
   const boardReady = isUnlocked && !performance.isLoading && !performance.isError && Boolean(snapshot);
 
@@ -138,7 +248,7 @@ export default function DealsPage() {
     <div className="mx-auto flex h-full min-h-0 max-w-[100rem] flex-col overflow-hidden">
       <PageHeader
         title="Orders"
-        subtitle="HubSpot stage mirror — day-to-day work stays on Queue. Print jobs only (shipping/fees stay in HubSpot)."
+        subtitle="Drag cards between stages to update HubSpot. Print jobs only — day-to-day work still lives on Queue."
         actions={
           <>
             {isUnlocked ? (
@@ -211,7 +321,7 @@ export default function DealsPage() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold tracking-tight">Print Orders</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                    Same stages as HubSpot · Ops panel moves stage and costs without leaving Print Ops
+                  Drag a card onto a stage · HubSpot updates live · Ops still handles costs
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -294,8 +404,40 @@ export default function DealsPage() {
                   {columns.map((column) => (
                     <div
                       key={column.id}
-                      className="queue-lane flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col"
+                      className={cn(
+                        "queue-lane flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col transition-colors",
+                        dropStageId === column.id && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background",
+                      )}
                       data-testid={`column-deal-stage-${column.id}`}
+                      onDragOver={(event) => {
+                        if (!draggingDealId) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        setDropStageId(column.id);
+                      }}
+                      onDragLeave={() => {
+                        setDropStageId((current) => (current === column.id ? null : current));
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setDropStageId(null);
+                        setDraggingDealId(null);
+                        const raw =
+                          event.dataTransfer.getData(DRAG_MIME) ||
+                          event.dataTransfer.getData("text/plain");
+                        if (!raw) return;
+                        let payload: { dealId: string } | null = null;
+                        try {
+                          payload = JSON.parse(raw) as { dealId: string };
+                        } catch {
+                          payload = { dealId: raw };
+                        }
+                        const dealId = String(payload?.dealId ?? "").trim();
+                        if (!dealId) return;
+                        const deal = columns.flatMap((col) => col.deals).find((row) => row.dealId === dealId);
+                        if (!deal) return;
+                        requestMove(deal, column);
+                      }}
                     >
                       <div
                         className={cn(
@@ -328,7 +470,9 @@ export default function DealsPage() {
                       <div className="queue-lane-body overflow-y-auto overscroll-contain">
                         {column.deals.length === 0 ? (
                           <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-2 py-6">
-                            <p className="text-center text-xs text-muted-foreground">No orders</p>
+                            <p className="text-center text-xs text-muted-foreground">
+                              {draggingDealId ? "Drop here" : "No orders"}
+                            </p>
                           </div>
                         ) : (
                           column.deals.map((deal) => (
@@ -337,10 +481,17 @@ export default function DealsPage() {
                               deal={deal}
                               portalId={portalId}
                               partsSummary={summaryByDeal.get(deal.dealId) ?? null}
+                              dragging={draggingDealId === deal.dealId}
+                              moving={moveStage.isPending && moveStage.variables?.dealId === deal.dealId}
                               onOpenOps={() => setOpsDealId(deal.dealId)}
                               onOpenParts={() =>
                                 setPartsDeal({ dealId: deal.dealId, dealName: deal.dealName })
                               }
+                              onDragStart={() => setDraggingDealId(deal.dealId)}
+                              onDragEnd={() => {
+                                setDraggingDealId(null);
+                                setDropStageId(null);
+                              }}
                             />
                           ))
                         )}
@@ -380,14 +531,22 @@ function DealCard({
   deal,
   portalId,
   partsSummary,
+  dragging,
+  moving,
   onOpenOps,
   onOpenParts,
+  onDragStart,
+  onDragEnd,
 }: {
   deal: BoardDeal;
   portalId: string | null;
   partsSummary: OrderPartSummary | null;
+  dragging: boolean;
+  moving: boolean;
   onOpenOps: () => void;
   onOpenParts: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
   const href = hubspotDealHref(deal.dealId, portalId);
@@ -402,9 +561,27 @@ function DealCard({
 
   return (
     <article
-      className="workspace-node group shrink-0 p-2.5"
+      draggable
+      onDragStart={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("a, button")) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer.setData(DRAG_MIME, JSON.stringify({ dealId: deal.dealId }));
+        event.dataTransfer.setData("text/plain", deal.dealId);
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        "workspace-node group shrink-0 cursor-grab p-2.5 active:cursor-grabbing",
+        dragging && "opacity-60",
+        moving && "pointer-events-none opacity-70",
+      )}
       data-tone={tone}
       data-testid={`card-deal-${deal.dealId}`}
+      title="Drag to another stage to update HubSpot"
     >
       <a
         href={href}
