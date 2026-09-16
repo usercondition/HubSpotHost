@@ -310,13 +310,13 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     const packList = readyToPack.length > 0 ? readyToPack : needsLabel;
     if (packList.length > 0) {
       lines.push(
-        `${packList.length} order${packList.length === 1 ? "" : "s"} are ready to pack / ship:`,
+        `${packList.length} order${packList.length === 1 ? " is" : "s are"} ready to pack / ship:`,
       );
       for (const deal of packList.slice(0, 5)) {
         const gaps: string[] = [];
-        if (!deal.readyToPack) gaps.push("confirm packing");
-        else if (!deal.labelBought) gaps.push("no label");
-        else if (!deal.trackingPasted) gaps.push("no tracking");
+        if (!deal.labelBought) gaps.push("no label");
+        if (!deal.trackingPasted) gaps.push("no tracking");
+        if (!deal.readyToPack && gaps.length === 0) gaps.push("confirm packing");
         lines.push(
           `• ${deal.dealName} — ${deal.stage}${deal.amount ? ` · ${money(deal.amount)}` : ""}${gaps.length ? ` · ${gaps.join(", ")}` : ""}`,
         );
@@ -458,7 +458,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   if (readyToPack.length > 0 || needsLabel.length > 0 || shipReadyCount > 0) {
     const count = readyToPack.length || needsLabel.length || shipReadyCount;
     priorities.push(
-      `${priorities.length + 1}. ${count} order${count === 1 ? "" : "s"} ready to pack / ship${readyToPack[0] ? ` (start with ${readyToPack[0].dealName})` : ""}.`,
+      `${priorities.length + 1}. ${count} order${count === 1 ? "" : "s"} ready to pack / ship (ship-ready)${readyToPack[0] ? ` (start with ${readyToPack[0].dealName})` : ""}.`,
     );
     actions.push({
       label: "Pack / ship",
