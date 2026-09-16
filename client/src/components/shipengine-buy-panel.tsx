@@ -513,12 +513,16 @@ export function ShipEngineBuyPanel({
   const status = statusQuery.data;
   const shipToReady = shipToQuery.data?.ready ?? false;
   const funds = status?.funds;
-  const availableUsd =
-    typeof funds?.availableUsd === "number" && Number.isFinite(funds.availableUsd)
-      ? funds.availableUsd
-      : fundedCarriers.length > 0
-        ? fundedCarriers[0]!.balance
-        : null;
+  const availableUsd = useMemo(() => {
+    if (typeof funds?.availableUsd === "number" && Number.isFinite(funds.availableUsd)) {
+      return funds.availableUsd;
+    }
+    if (fundedCarriers.length === 0) return null;
+    const amounts = fundedCarriers.map((row) => row.balance);
+    const first = amounts[0]!;
+    const shared = amounts.every((amount) => Math.abs(amount - first) < 0.005);
+    return shared ? first : amounts.reduce((sum, amount) => sum + amount, 0);
+  }, [funds?.availableUsd, fundedCarriers]);
   const fundsLow =
     typeof funds?.lowestBalanceUsd === "number"
       ? funds.lowestBalanceUsd < 5
