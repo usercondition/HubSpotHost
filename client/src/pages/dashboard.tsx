@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import type { CSSProperties, ReactNode } from "react";
 import { Link } from "wouter";
 import {
   AlertTriangle,
@@ -516,10 +517,10 @@ function GlanceRow({
 }: {
   title: string;
   detail: string;
-  action: React.ReactNode;
+  action: ReactNode;
   tone: "warn" | "bad" | "good";
   testId: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }) {
   return (
     <div
