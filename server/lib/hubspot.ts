@@ -4,7 +4,7 @@
  * Uses global fetch with a Bearer token taken from injected environment
  * variables. No connector bridge, no SDK, and the token is never logged.
  */
-import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken } from "./config";
+import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken, resolveWriteDecision } from "./config";
 import { PRINT_NEEDS_REPLY_PROPERTY, type PrintFileOrderSummary } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -277,6 +277,22 @@ export async function patchDealOutputs(
     body: JSON.stringify({ properties }),
   });
   invalidatePrintOrderDealsCache();
+}
+
+/** Set the Queue's buyer-reply flag without changing a deal's costs or stage. */
+export async function patchDealNeedsReply(
+  dealId: string,
+  needsReply: boolean,
+): Promise<{ written: boolean; gate: string }> {
+  const decision = resolveWriteDecision(getConfig(), true);
+  if (!decision.write) return { written: false, gate: decision.reason };
+  await ensurePrintFileDealProperties();
+  await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { [PRINT_NEEDS_REPLY_PROPERTY]: needsReply ? "true" : "false" } }),
+  });
+  invalidatePrintOrderDealsCache();
+  return { written: true, gate: decision.reason };
 }
 
 function numericString(value: number | null, digits = 3): string | null {

@@ -46,6 +46,7 @@ export function createMarketplaceInboxBrief(threads: MarketplaceThreadInput[]): 
   }
   const clipped = threads.slice(0, MAX_THREADS).map((thread, index) => ({
     id: String(thread.id || `t-${index}`).slice(0, 160),
+    dealId: thread.dealId?.trim() || null,
     title: String(thread.title || `Thread ${index + 1}`).slice(0, 200),
     conversation: String(thread.conversation || "").slice(0, 40_000),
     unread: Boolean(thread.unread),

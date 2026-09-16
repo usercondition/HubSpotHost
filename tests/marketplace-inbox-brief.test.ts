@@ -34,8 +34,10 @@ const {
 } = await import("../server/lib/marketplace-scan-request-store");
 const {
   clearMarketplaceSendRequest,
+  completeMarketplaceSendRequest,
   getMarketplaceSendRequest,
   resetMarketplaceSendRequestStore,
+  setMarketplaceSendRequest,
 } = await import("../server/lib/marketplace-send-request-store");
 const { registerRoutes } = await import("../server/routes");
 
@@ -316,6 +318,18 @@ test("Marketplace send request API is owner-gated and clears its one message slo
     text: "",
     channel: "marketplace",
   });
+});
+
+test("a successful Print Ops Messenger send retains its linked deal for reply-flag clearing", () => {
+  clearMarketplaceSendRequest();
+  setMarketplaceSendRequest(true, {
+    to: "Taylor",
+    text: "Thanks — I have your details.",
+    dealId: "9001",
+  });
+
+  assert.deepEqual(completeMarketplaceSendRequest(), { dealId: "9001" });
+  assert.equal(getMarketplaceSendRequest().pending, false);
 });
 
 test("OfferUp shipment queue is owner-gated and identifies its chat channel", async () => {

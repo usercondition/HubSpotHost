@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS marketplace_send_request (
   recipient TEXT NOT NULL,
   message_text TEXT NOT NULL,
   shipment_key TEXT NOT NULL DEFAULT '',
+  deal_id TEXT NOT NULL DEFAULT '',
   channel TEXT NOT NULL DEFAULT 'marketplace' CHECK (channel IN ('marketplace', 'offerup'))
 );
 
@@ -55,6 +56,11 @@ function getSqlite(): Database.Database {
     // The column already exists.
   }
   try {
+    sqlite.exec("ALTER TABLE marketplace_send_request ADD COLUMN deal_id TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // The column already exists.
+  }
+  try {
     sqlite.exec("ALTER TABLE marketplace_send_request ADD COLUMN channel TEXT NOT NULL DEFAULT 'marketplace'");
   } catch {
     // The column already exists.
@@ -77,21 +83,22 @@ export function getMarketplaceSendRequest(): MarketplaceSendRequest {
 
 export function setMarketplaceSendRequest(
   pending: boolean,
-  request?: { text: string; to: string; shipmentKey?: string; channel?: "marketplace" | "offerup" },
+  request?: { text: string; to: string; shipmentKey?: string; dealId?: string; channel?: "marketplace" | "offerup" },
 ): MarketplaceSendRequest {
   const db = getSqlite();
   if (pending) {
     db.prepare(
-      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, shipment_key, channel)
-       VALUES (1, 1, 1, ?, ?, ?, ?)
+      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, shipment_key, deal_id, channel)
+       VALUES (1, 1, 1, ?, ?, ?, ?, ?)
        ON CONFLICT(singleton) DO UPDATE SET
          pending = 1,
          request_id = request_id + 1,
          recipient = excluded.recipient,
          message_text = excluded.message_text,
          shipment_key = excluded.shipment_key,
+         deal_id = excluded.deal_id,
          channel = excluded.channel`,
-    ).run(request?.to ?? "", request?.text ?? "", request?.shipmentKey ?? "", request?.channel ?? "marketplace");
+    ).run(request?.to ?? "", request?.text ?? "", request?.shipmentKey ?? "", request?.dealId ?? "", request?.channel ?? "marketplace");
   } else {
     const current = db
       .prepare("SELECT shipment_key FROM marketplace_send_request WHERE singleton = 1 AND pending = 1")
@@ -102,12 +109,21 @@ export function setMarketplaceSendRequest(
       ).run(current.shipment_key, new Date().toISOString());
     }
     db.prepare(
-      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, channel)
-       VALUES (1, 0, 0, '', '', 'marketplace')
-       ON CONFLICT(singleton) DO UPDATE SET pending = 0, recipient = '', message_text = '', shipment_key = '', channel = 'marketplace'`,
+      `INSERT INTO marketplace_send_request (singleton, pending, request_id, recipient, message_text, shipment_key, deal_id, channel)
+       VALUES (1, 0, 0, '', '', '', '', 'marketplace')
+       ON CONFLICT(singleton) DO UPDATE SET pending = 0, recipient = '', message_text = '', shipment_key = '', deal_id = '', channel = 'marketplace'`,
     ).run();
   }
   return getMarketplaceSendRequest();
+}
+
+/** Consume the one-slot request after the extension confirms its Messenger send. */
+export function completeMarketplaceSendRequest(): { dealId: string } {
+  const current = getSqlite()
+    .prepare("SELECT deal_id FROM marketplace_send_request WHERE singleton = 1 AND pending = 1")
+    .get() as { deal_id: string } | undefined;
+  setMarketplaceSendRequest(false);
+  return { dealId: current?.deal_id.trim() ?? "" };
 }
 
 /**
@@ -138,6 +154,7 @@ export function enqueueMarketplaceShipmentSendRequest(request: {
       to: request.to,
       text: request.text,
       shipmentKey,
+      dealId: request.dealId,
       channel: request.channel ?? "marketplace",
     }),
   };

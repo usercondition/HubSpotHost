@@ -257,6 +257,7 @@ Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for 
 | `POST /api/webhooks/hubspot` | Receives HubSpot property-change event batches. |
 | `GET /api/calculations` | Newest calculation audit entries in local/private mode. Disabled on a public production deployment. |
 | `POST /api/paid-orders/analyze` | Protected, write-free Marketplace conversation analysis that returns editable suggestions (optional Manual assist). |
+| `POST /api/marketplace-brief` | Protected. Persists the secretary brief; threads carrying an explicit numeric Print Order `dealId` set `print_needs_reply` for a shop reply/chase and clear it when the brief says the buyer is waiting or the thread is done. Buyer names are never used to match deals. |
 | `POST /api/paid-orders` | Protected creation of a payment-confirmed Contact and associated Print Order deal(s); accepts optional `lineItems`. |
 | `POST /api/order-links` | Protected. Mints a one-time client link and returns the plain token exactly once. |
 | `GET /api/order-links` | Protected. Queue listing with per-status counts. Never returns the token hash. |
