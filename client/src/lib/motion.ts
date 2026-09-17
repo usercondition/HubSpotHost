@@ -1,19 +1,16 @@
 /**
- * Shared Print Ops motion — fast, soft, shop-floor calm.
- * Prefer opacity + small translate; avoid blur, bounce, or glow.
+ * Shared Print Ops motion — calm crossfades, no scroll-root transforms.
+ * Transform only on overlays (drawers); page content uses opacity.
  */
 import type { Transition, Variants } from "framer-motion";
 
 export const MOTION = {
-  /** Hover / active chrome */
-  fastMs: 140,
-  /** Page + panel enter */
-  pageMs: 180,
-  /** Drawer / sheet */
-  drawerMs: 220,
-  /** Max list stagger total */
-  staggerMs: 28,
-  ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
+  fastMs: 120,
+  pageMs: 200,
+  drawerMs: 280,
+  staggerMs: 40,
+  /** Slightly heavy ease — less “toy UI”, more product. */
+  ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number],
   easeOut: [0.16, 1, 0.3, 1] as [number, number, number, number],
 };
 
@@ -24,17 +21,14 @@ export function prefersReducedMotion(): boolean {
 
 export const pageTransition: Transition = {
   duration: MOTION.pageMs / 1000,
-  ease: MOTION.easeOut,
+  ease: MOTION.ease,
 };
 
+/** Opacity-only so the scroll pane never carries a transform layer. */
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 6 },
-  enter: { opacity: 1, y: 0, transition: pageTransition },
-  exit: {
-    opacity: 0,
-    y: -2,
-    transition: { duration: 0.1, ease: MOTION.ease },
-  },
+  initial: { opacity: 0 },
+  enter: { opacity: 1, transition: pageTransition },
+  exit: { opacity: 0, transition: { duration: 0.12, ease: MOTION.ease } },
 };
 
 export const drawerTransition: Transition = {
@@ -43,19 +37,15 @@ export const drawerTransition: Transition = {
 };
 
 export const drawerPanelVariants: Variants = {
-  initial: { x: "100%", opacity: 0.85 },
-  enter: { x: 0, opacity: 1, transition: drawerTransition },
-  exit: {
-    x: "100%",
-    opacity: 0.9,
-    transition: { duration: 0.16, ease: MOTION.ease },
-  },
+  initial: { x: "100%" },
+  enter: { x: 0, transition: drawerTransition },
+  exit: { x: "100%", transition: { duration: 0.2, ease: MOTION.ease } },
 };
 
 export const drawerScrimVariants: Variants = {
   initial: { opacity: 0 },
-  enter: { opacity: 1, transition: { duration: 0.16 } },
-  exit: { opacity: 0, transition: { duration: 0.12 } },
+  enter: { opacity: 1, transition: { duration: 0.2, ease: MOTION.ease } },
+  exit: { opacity: 0, transition: { duration: 0.15, ease: MOTION.ease } },
 };
 
 export const reducedPageVariants: Variants = {

@@ -165,11 +165,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
   }, [pathOnly, activeItem]);
 
-  // Soft-refresh HubSpot-backed boards when moving between areas (no hard reload).
+  // Soft-refresh HubSpot-backed boards when moving between areas (debounced).
   useEffect(() => {
     if (!isUnlocked) return;
-    void queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({
+        queryKey: ["/api/performance"],
+        refetchType: "active",
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["/api/production-queue"],
+        refetchType: "active",
+      });
+    }, 120);
+    return () => window.clearTimeout(timer);
   }, [pathOnly, isUnlocked]);
 
   return (
@@ -215,7 +224,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* Icon rail — Railway left toolbar */}
-      <aside className="hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar/95 px-1.5 py-3 text-sidebar-foreground backdrop-blur-md md:flex">
+      <aside className="hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-1.5 py-3 text-sidebar-foreground md:flex">
         <nav
           aria-label="Primary navigation"
           className="flex w-full min-h-0 flex-1 flex-col items-center gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
@@ -242,10 +251,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                       title={`${item.label} — ${item.title}`}
                       data-testid={item.testId}
                       className={cn(
-                        "relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,transform,box-shadow] duration-150 ease-out",
+                        "relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,box-shadow] duration-150 ease-out",
                         active
-                          ? "bg-sidebar-accent text-sidebar-foreground shadow-sm scale-[1.02]"
-                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground hover:scale-[1.02]",
+                          ? "bg-sidebar-accent text-sidebar-foreground shadow-sm"
+                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       )}
                     >
                       <item.icon className="h-4 w-4" />
@@ -286,7 +295,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 title={item.title}
                 data-testid={item.testId}
                 className={cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium transition-[background-color,color,transform] duration-150 ease-out",
+                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium transition-[background-color,color] duration-150 ease-out",
                   active
                     ? "bg-primary text-primary-foreground"
                     : "bg-card/70 text-muted-foreground hover:text-foreground",
@@ -313,7 +322,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </nav>
 
-        <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">
+        <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent" data-scroll-pane>
           <PageTransition routeKey={pathOnly}>{children}</PageTransition>
         </main>
       </div>
