@@ -11,6 +11,8 @@ import {
   Wallet,
   Plus,
   PackageCheck,
+  ChevronDown,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -551,6 +553,324 @@ export function ShipEngineBuyPanel({
     addFundsAmountNum >= 10 &&
     !addFunds.isPending;
 
+  const selectedPick = useMemo(
+    () => shipReadyPicks.find((row) => row.dealId === dealId) ?? null,
+    [shipReadyPicks, dealId],
+  );
+  const hasActiveDeal = /^[0-9]{1,20}$/.test(dealId);
+
+  function selectDeal(nextId: string) {
+    setDealId(nextId);
+    setRates([]);
+    setSelectedRateId("");
+    setAddressHint("");
+  }
+
+  function clearActiveDeal() {
+    selectDeal("");
+  }
+
+  const parcelFields = (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {(
+        [
+          ["weightOz", "Weight (oz)"],
+          ["lengthIn", "Length (in)"],
+          ["widthIn", "Width (in)"],
+          ["heightIn", "Height (in)"],
+        ] as const
+      ).map(([key, label]) => (
+        <div key={key} className="space-y-1.5">
+          <Label htmlFor={`shipengine-${key}`}>{label}</Label>
+          <Input
+            id={`shipengine-${key}`}
+            inputMode="decimal"
+            value={parcel[key]}
+            onChange={(event) => {
+              setParcel((prev) => ({ ...prev, [key]: event.target.value }));
+              setRates([]);
+              setSelectedRateId("");
+            }}
+            data-testid={`input-shipengine-${key}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  const shipToBlock =
+    !hasActiveDeal ? null : shipToQuery.isFetching ? (
+      <p className="text-xs text-muted-foreground">Loading HubSpot ship-to…</p>
+    ) : shipToQuery.data ? (
+      <div
+        className={cn("glance-item flex-col items-stretch gap-1", !shipToReady && "opacity-90")}
+        data-tone={shipToReady ? "good" : "warn"}
+        data-testid="panel-shipengine-ship-to"
+      >
+        <p className="text-sm font-semibold">
+          {shipToReady
+            ? "Ship to"
+            : shipToQuery.data.hasContact === false
+              ? "No HubSpot contact linked to this deal"
+              : "Ship-to incomplete on HubSpot contact"}
+        </p>
+        {shipToReady && shipToQuery.data.contact.addressLines.length ? (
+          <p className="text-sm text-muted-foreground">
+            {[shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {shipToQuery.data.hasContact === false
+              ? "Associate the buyer contact on the HubSpot deal, then refresh."
+              : `Missing: ${(shipToQuery.data.missing || []).join(", ") || "address"}`}
+          </p>
+        )}
+      </div>
+    ) : null;
+
+  const ratesBlock =
+    rates.length > 0 ? (
+      <div className="space-y-3" data-testid="list-shipengine-rates">
+        {testMode ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox — no live postage charge" />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Usual = box services you actually buy (UPS Ground / USPS Ground Advantage &amp; Priority).
+            Envelopes are hidden.
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Services</span>
+          {(
+            [
+              ["usual", "Usual boxes"],
+              ["all", "All package rates"],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={ratePrefMode === value ? "default" : "outline"}
+              onClick={() => setRatePrefMode(value)}
+              data-testid={`button-shipengine-pref-${value}`}
+            >
+              {label}
+            </Button>
+          ))}
+          {hiddenUsualCount > 0 ? (
+            <span className="text-xs text-muted-foreground">
+              +{hiddenUsualCount} express / other hidden
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <ArrowUpDown className="h-3.5 w-3.5" />
+            Sort
+          </span>
+          {(
+            [
+              ["recommended", "Recommended"],
+              ["cheapest", "Cheapest"],
+              ["fastest", "Fastest"],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={rateSort === value ? "default" : "outline"}
+              onClick={() => setRateSort(value)}
+              data-testid={`button-shipengine-sort-${value}`}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Carrier</span>
+          {(
+            [
+              ["all", `All (${carrierCounts.all})`] as const,
+              ["ups", `UPS (${carrierCounts.ups})`] as const,
+              ["usps", `USPS (${carrierCounts.usps})`] as const,
+              ...(carrierCounts.other > 0
+                ? ([["other", `Other (${carrierCounts.other})`]] as Array<[CarrierFilter, string]>)
+                : []),
+            ] satisfies Array<[CarrierFilter, string]>
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={carrierFilter === value ? "default" : "outline"}
+              onClick={() => setCarrierFilter(value)}
+              data-testid={`button-shipengine-filter-${value}`}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+
+        <div className="overflow-hidden rounded-md border border-border/70">
+          <div className="max-h-64 overflow-auto">
+            <table className="w-full caption-bottom text-sm">
+              <thead className="sticky top-0 z-10 border-b bg-background">
+                <tr>
+                  <th className="h-9 px-3 text-left font-medium text-muted-foreground">Carrier</th>
+                  <th className="h-9 px-3 text-left font-medium text-muted-foreground">Service</th>
+                  <th className="h-9 w-[5.5rem] px-3 text-left font-medium text-muted-foreground">
+                    Transit
+                  </th>
+                  <th className="h-9 w-[5.5rem] px-3 text-right font-medium text-muted-foreground">
+                    Price
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRates.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                      No rates for this carrier filter.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleRates.map((rate) => {
+                    const selected = rate.rateId === selectedRate?.rateId;
+                    const tags = [
+                      rate.attributes.includes("cheapest") ? "cheapest" : null,
+                      rate.attributes.includes("fastest") ? "fastest" : null,
+                    ].filter(Boolean);
+                    return (
+                      <tr
+                        key={rate.rateId}
+                        role="button"
+                        tabIndex={0}
+                        className={cn(
+                          "cursor-pointer border-b last:border-0 transition-colors hover:bg-muted/50",
+                          selected && "bg-primary/10 hover:bg-primary/15",
+                        )}
+                        data-testid={`button-shipengine-rate-${rate.rateId}`}
+                        onClick={() => setSelectedRateId(rate.rateId)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedRateId(rate.rateId);
+                          }
+                        }}
+                      >
+                        <td className="px-3 py-2 font-medium">
+                          {rate.carrierFriendlyName || rate.carrierCode}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block">{rate.serviceType}</span>
+                          {tags.length ? (
+                            <span className="text-xs text-muted-foreground">{tags.join(" · ")}</span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                          {formatTransit(rate.deliveryDays)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                          {formatRatePrice(rate.amount)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 bg-muted/30 px-3 py-3">
+            <div className="min-w-0 text-sm">
+              {selectedRate ? (
+                <>
+                  <p className="truncate font-semibold">
+                    {selectedRate.carrierFriendlyName} · {selectedRate.serviceType}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatTransit(selectedRate.deliveryDays)} ·{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {formatRatePrice(selectedRate.amount)}
+                    </span>
+                  </p>
+                </>
+              ) : (
+                <p className="text-muted-foreground">Select a rate to buy</p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={!selectedRate || buy.isPending}
+                onClick={() => {
+                  if (!selectedRate) return;
+                  const label = `${selectedRate.carrierFriendlyName} ${selectedRate.serviceType} for ${formatRatePrice(selectedRate.amount)}`;
+                  if (
+                    !testMode &&
+                    !window.confirm(`Buy ${label}? This charges your ShipEngine account.`)
+                  ) {
+                    return;
+                  }
+                  buy.mutate();
+                }}
+                data-testid="button-shipengine-buy"
+              >
+                {buy.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Ship className="mr-2 h-4 w-4" />
+                )}
+                {selectedRate ? `Buy · ${formatRatePrice(selectedRate.amount)}` : "Buy label"}
+              </Button>
+              {hasActiveDeal ? (
+                <Button asChild size="default" variant="outline">
+                  <Link href={queueDealHref(dealId)}>Open in Queue</Link>
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  const activeOrderWorkspace = hasActiveDeal ? (
+    <div className="space-y-3 border-t border-border/60 pt-3" data-testid="panel-shipengine-active-order-body">
+      {shipToBlock}
+      {parcelFields}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          disabled={!shipToReady || quote.isPending}
+          onClick={() => quote.mutate()}
+          data-testid="button-shipengine-get-rates"
+        >
+          {quote.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Ship className="mr-2 h-4 w-4" />
+          )}
+          Get rates
+        </Button>
+        {addressHint ? (
+          <p className="text-xs text-muted-foreground">Quoted for {addressHint}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Set weight + box, then rate-shop for this order only.
+          </p>
+        )}
+      </div>
+      {ratesBlock}
+    </div>
+  ) : null;
+
   return (
     <>
     <Panel
@@ -708,7 +1028,7 @@ export function ShipEngineBuyPanel({
                 <div>
                   <p className="text-sm font-semibold tracking-tight">Ready to label</p>
                   <p className="text-xs text-muted-foreground">
-                    Pick a Queue order — same cards as ship-ready, not a chip dump.
+                    Tap an order to open its label card — ship-to, box, and rates stay on that order.
                   </p>
                 </div>
                 <p className="text-xs tabular-nums text-muted-foreground">
@@ -727,21 +1047,80 @@ export function ShipEngineBuyPanel({
                       : item.bucket === "ship_ready"
                         ? "good"
                         : undefined;
+
+                  if (selected) {
+                    return (
+                      <li key={item.dealId}>
+                        <div
+                          className="workspace-node space-y-0 p-3"
+                          data-active="true"
+                          data-tone="good"
+                          data-testid={`panel-shipengine-order-card-${item.dealId}`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="rule-label mb-0.5">Labeling this order</p>
+                              <p
+                                className="truncate text-base font-semibold tracking-tight"
+                                data-testid="text-shipengine-active-order-name"
+                              >
+                                {item.dealName}
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {item.stage}
+                                {item.contactName ? ` · ${item.contactName}` : ""}
+                                {` · ${item.dealId}`}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                              <p className="text-sm font-medium tabular-nums">
+                                {formatMoney(item.amount)}
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={clearActiveDeal}
+                                data-testid="button-shipengine-close-order-card"
+                                aria-label="Close order card"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <StatusPill tone="good" icon={CheckCircle2} label="Open" />
+                            {item.readyToPack ? (
+                              <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
+                            ) : null}
+                            {labeled ? (
+                              <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
+                            ) : (
+                              <StatusPill tone="warn" icon={Ship} label="Needs label" />
+                            )}
+                            {packed ? (
+                              <StatusPill tone="neutral" icon={PackageCheck} label="Packed" />
+                            ) : null}
+                            <StatusPill
+                              tone={item.fulfillment.shipReady ? "good" : "neutral"}
+                              icon={Ship}
+                              label={`Ship ${item.fulfillment.readyPercent}%`}
+                            />
+                          </div>
+                          {activeOrderWorkspace}
+                        </div>
+                      </li>
+                    );
+                  }
+
                   return (
                     <li key={item.dealId}>
                       <button
                         type="button"
-                        className={cn(
-                          "glance-item w-full text-left",
-                          selected && "border-primary/50 bg-primary/10",
-                        )}
-                        data-tone={selected ? "good" : tone}
+                        className="glance-item w-full text-left"
+                        data-tone={tone}
                         data-testid={`button-shipengine-pick-${item.dealId}`}
-                        onClick={() => {
-                          setDealId(item.dealId);
-                          setRates([]);
-                          setSelectedRateId("");
-                        }}
+                        onClick={() => selectDeal(item.dealId)}
                       >
                         <span className="min-w-0 flex-1">
                           <span className="flex flex-wrap items-start justify-between gap-2">
@@ -777,11 +1156,10 @@ export function ShipEngineBuyPanel({
                             />
                           </span>
                         </span>
-                        {selected ? (
-                          <StatusPill tone="good" icon={CheckCircle2} label="Selected" />
-                        ) : (
-                          <span className="shrink-0 text-xs text-muted-foreground">Select</span>
-                        )}
+                        <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                          Open
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </span>
                       </button>
                     </li>
                   );
@@ -790,317 +1168,61 @@ export function ShipEngineBuyPanel({
             </div>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-            <div className="space-y-1.5">
-              <Label htmlFor="shipengine-deal-id">
-                {shipReadyPicks.length > 0 ? "Or paste deal ID" : "Print Order deal ID"}
-              </Label>
-              <Input
-                id="shipengine-deal-id"
-                value={dealId}
-                onChange={(event) => {
-                  setDealId(event.target.value.trim());
-                  setRates([]);
-                  setSelectedRateId("");
-                }}
-                placeholder="HubSpot deal id"
-                data-testid="input-shipengine-deal-id"
-              />
-            </div>
-            <div className="flex items-end">
-              <Button
-                type="button"
-                disabled={!/^[0-9]{1,20}$/.test(dealId) || !shipToReady || quote.isPending}
-                onClick={() => quote.mutate()}
-                data-testid="button-shipengine-get-rates"
-              >
-                {quote.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Ship className="mr-2 h-4 w-4" />
-                )}
-                Get rates
-              </Button>
-            </div>
-          </div>
-
-          {shipToQuery.isFetching ? (
-            <p className="text-xs text-muted-foreground">Loading HubSpot ship-to…</p>
-          ) : shipToQuery.data ? (
-            <div
-              className={cn("glance-item flex-col items-stretch gap-1", !shipToReady && "opacity-90")}
-              data-tone={shipToReady ? "good" : "warn"}
-            >
-              <p className="text-sm font-semibold">
-                {shipToReady
-                  ? "Ship to"
-                  : shipToQuery.data.hasContact === false
-                    ? "No HubSpot contact linked to this deal"
-                    : "Ship-to incomplete on HubSpot contact"}
-              </p>
-              {shipToReady && shipToQuery.data.contact.addressLines.length ? (
-                <p className="text-sm text-muted-foreground">
-                  {[shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {shipToQuery.data.hasContact === false
-                    ? "Associate the buyer contact on the HubSpot deal, then refresh."
-                    : `Missing: ${(shipToQuery.data.missing || []).join(", ") || "address"}`}
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(
-              [
-                ["weightOz", "Weight (oz)"],
-                ["lengthIn", "Length (in)"],
-                ["widthIn", "Width (in)"],
-                ["heightIn", "Height (in)"],
-              ] as const
-            ).map(([key, label]) => (
-              <div key={key} className="space-y-1.5">
-                <Label htmlFor={`shipengine-${key}`}>{label}</Label>
-                <Input
-                  id={`shipengine-${key}`}
-                  inputMode="decimal"
-                  value={parcel[key]}
-                  onChange={(event) => {
-                    setParcel((prev) => ({ ...prev, [key]: event.target.value }));
-                    setRates([]);
-                    setSelectedRateId("");
-                  }}
-                  data-testid={`input-shipengine-${key}`}
-                />
-              </div>
-            ))}
-          </div>
-
-          {addressHint ? (
-            <p className="text-xs text-muted-foreground">Quoted for {addressHint}</p>
-          ) : null}
-
-          {rates.length > 0 ? (
-            <div className="space-y-3" data-testid="list-shipengine-rates">
-              {testMode ? (
-                <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox — no live postage charge" />
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Usual = box services you actually buy (UPS Ground / USPS Ground Advantage &amp; Priority).
-                  Envelopes are hidden.
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">Services</span>
-                {(
-                  [
-                    ["usual", "Usual boxes"],
-                    ["all", "All package rates"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    variant={ratePrefMode === value ? "default" : "outline"}
-                    onClick={() => setRatePrefMode(value)}
-                    data-testid={`button-shipengine-pref-${value}`}
-                  >
-                    {label}
-                  </Button>
-                ))}
-                {hiddenUsualCount > 0 ? (
-                  <span className="text-xs text-muted-foreground">
-                    +{hiddenUsualCount} express / other hidden
-                  </span>
+          {!selectedPick ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="shipengine-deal-id">
+                    {shipReadyPicks.length > 0 ? "Or paste deal ID" : "Print Order deal ID"}
+                  </Label>
+                  <Input
+                    id="shipengine-deal-id"
+                    value={dealId}
+                    onChange={(event) => selectDeal(event.target.value.trim())}
+                    placeholder="HubSpot deal id"
+                    data-testid="input-shipengine-deal-id"
+                  />
+                </div>
+                {hasActiveDeal ? (
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={clearActiveDeal}
+                      data-testid="button-shipengine-clear-deal-id"
+                    >
+                      Clear
+                    </Button>
+                  </div>
                 ) : null}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                  Sort
-                </span>
-                {(
-                  [
-                    ["recommended", "Recommended"],
-                    ["cheapest", "Cheapest"],
-                    ["fastest", "Fastest"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    variant={rateSort === value ? "default" : "outline"}
-                    onClick={() => setRateSort(value)}
-                    data-testid={`button-shipengine-sort-${value}`}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">Carrier</span>
-                {(
-                  [
-                    ["all", `All (${carrierCounts.all})`] as const,
-                    ["ups", `UPS (${carrierCounts.ups})`] as const,
-                    ["usps", `USPS (${carrierCounts.usps})`] as const,
-                    ...(carrierCounts.other > 0
-                      ? ([["other", `Other (${carrierCounts.other})`]] as Array<
-                          [CarrierFilter, string]
-                        >)
-                      : []),
-                  ] satisfies Array<[CarrierFilter, string]>
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    variant={carrierFilter === value ? "default" : "outline"}
-                    onClick={() => setCarrierFilter(value)}
-                    data-testid={`button-shipengine-filter-${value}`}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="overflow-hidden rounded-md border border-border/70">
-                <div className="max-h-64 overflow-auto">
-                  <table className="w-full caption-bottom text-sm">
-                    <thead className="sticky top-0 z-10 border-b bg-background">
-                      <tr>
-                        <th className="h-9 px-3 text-left font-medium text-muted-foreground">
-                          Carrier
-                        </th>
-                        <th className="h-9 px-3 text-left font-medium text-muted-foreground">
-                          Service
-                        </th>
-                        <th className="h-9 w-[5.5rem] px-3 text-left font-medium text-muted-foreground">
-                          Transit
-                        </th>
-                        <th className="h-9 w-[5.5rem] px-3 text-right font-medium text-muted-foreground">
-                          Price
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleRates.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
-                            No rates for this carrier filter.
-                          </td>
-                        </tr>
-                      ) : (
-                        visibleRates.map((rate) => {
-                          const selected = rate.rateId === selectedRate?.rateId;
-                          const tags = [
-                            rate.attributes.includes("cheapest") ? "cheapest" : null,
-                            rate.attributes.includes("fastest") ? "fastest" : null,
-                          ].filter(Boolean);
-                          return (
-                            <tr
-                              key={rate.rateId}
-                              role="button"
-                              tabIndex={0}
-                              className={cn(
-                                "border-b last:border-0 cursor-pointer transition-colors hover:bg-muted/50",
-                                selected && "bg-primary/10 hover:bg-primary/15",
-                              )}
-                              data-testid={`button-shipengine-rate-${rate.rateId}`}
-                              onClick={() => setSelectedRateId(rate.rateId)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  setSelectedRateId(rate.rateId);
-                                }
-                              }}
-                            >
-                              <td className="px-3 py-2 font-medium">
-                                {rate.carrierFriendlyName || rate.carrierCode}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span className="block">{rate.serviceType}</span>
-                                {tags.length ? (
-                                  <span className="text-xs text-muted-foreground">
-                                    {tags.join(" · ")}
-                                  </span>
-                                ) : null}
-                              </td>
-                              <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                                {formatTransit(rate.deliveryDays)}
-                              </td>
-                              <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                                {formatRatePrice(rate.amount)}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 bg-muted/30 px-3 py-3">
-                  <div className="min-w-0 text-sm">
-                    {selectedRate ? (
-                      <>
-                        <p className="font-semibold truncate">
-                          {selectedRate.carrierFriendlyName} · {selectedRate.serviceType}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatTransit(selectedRate.deliveryDays)} ·{" "}
-                          <span className="font-semibold tabular-nums text-foreground">
-                            {formatRatePrice(selectedRate.amount)}
-                          </span>
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-muted-foreground">Select a rate to buy</p>
-                    )}
+              {hasActiveDeal ? (
+                <div
+                  className="workspace-node space-y-0 p-3"
+                  data-active="true"
+                  data-tone="good"
+                  data-testid="panel-shipengine-manual-order-card"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="rule-label mb-0.5">Labeling this order</p>
+                      <p
+                        className="truncate text-base font-semibold tracking-tight"
+                        data-testid="text-shipengine-active-order-name"
+                      >
+                        Deal {dealId}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Pasted deal id · not in the Ready to label list above
+                      </p>
+                    </div>
+                    <StatusPill tone="good" icon={CheckCircle2} label="Open" />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      disabled={!selectedRate || buy.isPending}
-                      onClick={() => {
-                        if (!selectedRate) return;
-                        const label = `${selectedRate.carrierFriendlyName} ${selectedRate.serviceType} for ${formatRatePrice(selectedRate.amount)}`;
-                        if (
-                          !testMode &&
-                          !window.confirm(`Buy ${label}? This charges your ShipEngine account.`)
-                        ) {
-                          return;
-                        }
-                        buy.mutate();
-                      }}
-                      data-testid="button-shipengine-buy"
-                    >
-                      {buy.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Ship className="mr-2 h-4 w-4" />
-                      )}
-                      {selectedRate
-                        ? `Buy · ${formatRatePrice(selectedRate.amount)}`
-                        : "Buy label"}
-                    </Button>
-                    {/^[0-9]{1,20}$/.test(dealId) ? (
-                      <Button asChild size="default" variant="outline">
-                        <Link href={queueDealHref(dealId)}>Open in Queue</Link>
-                      </Button>
-                    ) : null}
-                  </div>
+                  {activeOrderWorkspace}
                 </div>
-              </div>
+              ) : null}
             </div>
           ) : null}
         </div>
