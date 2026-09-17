@@ -21,7 +21,63 @@ function parseGrams(value: string | null | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-type QueueItemBase = Omit<ProductionQueueItem, "priorityScore" | "bucket" | "readyToPack">;
+type QueueItemBase = Omit<
+  ProductionQueueItem,
+  "priorityScore" | "bucket" | "readyToPack" | "shipBy" | "shipBySource"
+>;
+
+/** Ship-by planning always uses the shop's calendar, never the server's timezone. */
+export const SHIP_BY_TIME_ZONE = "America/Los_Angeles";
+/** Default calendar-day SLAs, kept here so the Floor and API stay aligned. */
+export const SHIP_BY_SLA_DAYS = {
+  queued: 10,
+  inProduction: 5,
+} as const;
+
+function localCalendarDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SHIP_BY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function calendarDate(value: string | null | undefined): string | null {
+  const raw = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = new Date(raw);
+  return Number.isFinite(date.getTime()) ? localCalendarDate(date) : null;
+}
+
+function addCalendarDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export function deriveShipBy(
+  item: Pick<ProductionQueueItem, "bucket" | "hasPlates" | "shipByOverride" | "createdAt">,
+  options: { now?: Date; latestPlateAttachedAt?: string | null } = {},
+): Pick<ProductionQueueItem, "shipBy" | "shipBySource"> {
+  const override = calendarDate(item.shipByOverride);
+  if (override) return { shipBy: override, shipBySource: "override" };
+
+  const today = localCalendarDate(options.now ?? new Date());
+  // Ship-ready work is due today. Printing/post-process work gets five calendar
+  // days from its latest plate attachment (or deal creation); queued work gets ten.
+  if (item.bucket === "ship_ready") return { shipBy: today, shipBySource: "derived" };
+  const anchor =
+    calendarDate(options.latestPlateAttachedAt) ??
+    calendarDate(item.createdAt) ??
+    today;
+  const days = item.bucket === "in_production" || item.hasPlates
+    ? SHIP_BY_SLA_DAYS.inProduction
+    : SHIP_BY_SLA_DAYS.queued;
+  return { shipBy: addCalendarDays(anchor, days), shipBySource: "derived" };
+}
 
 function priorityScore(item: QueueItemBase): number {
   let score = 0;
@@ -101,12 +157,18 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       if (plate.printTimeSeconds && plate.printTimeSeconds > 0) totalPrintTimeSeconds += plate.printTimeSeconds;
     }
     const kit = kitByDeal.get(deal.dealId);
+    const latestPlateAttachedAt = dealPlates.reduce<string | null>(
+      (latest, plate) => (!latest || plate.attachedAt > latest ? plate.attachedAt : latest),
+      null,
+    );
     const base = {
       dealId: deal.dealId,
       dealName: deal.dealName,
       stageId: deal.stageId,
       stage: deal.stage,
       amount: deal.amount,
+      shipByOverride: deal.shipByOverride,
+      createdAt: deal.createdAt,
       closeDate: deal.closeDate,
       contactName: deal.contactName,
       hasPlates: deal.hasPlates || dealPlates.length > 0,
@@ -141,7 +203,13 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
     const readyToPack =
       bucket === "ship_ready" &&
       (!base.fulfillment.packingDone || !base.fulfillment.labelBought || !base.fulfillment.trackingPasted);
-    return { ...base, bucket, readyToPack, priorityScore: priorityScore(base) };
+    return {
+      ...base,
+      ...deriveShipBy({ ...base, bucket }, { latestPlateAttachedAt }),
+      bucket,
+      readyToPack,
+      priorityScore: priorityScore(base),
+    };
   });
 
   items.sort((a, b) => b.priorityScore - a.priorityScore || a.dealName.localeCompare(b.dealName));

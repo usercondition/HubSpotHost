@@ -682,3 +682,21 @@ test("plate history deal stage refreshes when HubSpot moves the order", async ()
     assert.equal(row.dealStage, "Printing");
   }
 });
+
+test("production-queue API returns projected ship-by date and source", async () => {
+  mockDealStage = "ready_to_ship";
+  mockDealStageLabel = "Ready to Ship";
+  mockDealProperties = { print_ship_by: "2026-09-18" };
+  invalidatePrintOrderDealsCache();
+
+  const queue = await jsonOwnerRequest("GET", "/api/production-queue");
+  assert.equal(queue.status, 200, queue.body?.error || "production queue failed");
+  assert.equal(queue.body.ok, true);
+  const item = [...queue.body.nextPrint, ...queue.body.inProduction, ...queue.body.blocked, ...queue.body.shipReady]
+    .find((row: { dealId: string }) => row.dealId === "701");
+  assert.ok(item);
+  assert.deepEqual(
+    { shipBy: item.shipBy, shipBySource: item.shipBySource },
+    { shipBy: "2026-09-18", shipBySource: "override" },
+  );
+});
