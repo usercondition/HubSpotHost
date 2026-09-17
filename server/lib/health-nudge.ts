@@ -11,7 +11,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { PerformanceResponse } from "../../shared/schema";
-import type { TrackerAssistantContext } from "./tracker-assistant";
+import { formatShipByShort } from "../../shared/ship-by";
+import type { TrackerAssistantContext, TrackerAssistantQueueDeal } from "./tracker-assistant";
 import {
   buildHealthDigestEdition,
   digestSectionMeta,
@@ -142,24 +143,35 @@ function writeNudgeState(state: NudgeState, env: NodeJS.ProcessEnv = process.env
   );
 }
 
-export function collectHealthNudgeItems(snapshot: PerformanceResponse) {
+export function collectHealthNudgeItems(snapshot: PerformanceResponse, ctx?: TrackerAssistantContext) {
   const attention = snapshot.attention.filter((item) => NUDGE_ISSUE_KEYS.has(item.issueKey));
   const intakePending = snapshot.intake.pendingReview;
   const intakeAwaiting = snapshot.intake.awaitingClient;
+  const overdue = ctx?.queue?.shipAgenda?.overdue ?? [];
+  const dueToday = ctx?.queue?.shipAgenda?.dueToday ?? [];
   return {
     attention,
     intakePending,
     intakeAwaiting,
-    hasWork: attention.length > 0 || intakePending > 0 || intakeAwaiting > 0,
+    overdue,
+    dueToday,
+    hasWork:
+      attention.length > 0 ||
+      intakePending > 0 ||
+      intakeAwaiting > 0 ||
+      overdue.length > 0 ||
+      dueToday.length > 0,
   };
 }
 
-export function healthNudgeFingerprint(snapshot: PerformanceResponse): string {
-  const { attention, intakePending, intakeAwaiting } = collectHealthNudgeItems(snapshot);
+export function healthNudgeFingerprint(snapshot: PerformanceResponse, ctx?: TrackerAssistantContext): string {
+  const { attention, intakePending, intakeAwaiting, overdue, dueToday } = collectHealthNudgeItems(snapshot, ctx);
   const parts = [
     ...attention.map((item) => `${item.dealId}:${item.issueKey}`).sort(),
     `intake:pending:${intakePending}`,
     `intake:awaiting:${intakeAwaiting}`,
+    ...overdue.map((item) => `ship:overdue:${item.dealId}:${item.shipBy}`).sort(),
+    ...dueToday.map((item) => `ship:today:${item.dealId}:${item.shipBy}`).sort(),
   ];
   return createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -195,14 +207,24 @@ export function buildHealthNudgeButtons(
   return row.length > 0 ? { inline_keyboard: [row] } : undefined;
 }
 
+function shipLine(deal: TrackerAssistantQueueDeal, kind: "overdue" | "today"): string {
+  const when =
+    kind === "overdue" && deal.shipBy
+      ? `overdue ${formatShipByShort(deal.shipBy)}`
+      : "due today";
+  const source = deal.shipBySource === "override" ? " · set" : deal.shipBySource === "derived" ? " · plan" : "";
+  const stage = deal.stage.trim() ? ` · ${shortLabel(deal.stage, 24)}` : "";
+  return `• ${escapeHtml(shortLabel(deal.dealName))} — ${escapeHtml(when)}${escapeHtml(source)}${stage}`;
+}
+
 export function buildHealthNudgeText(
   ctx: TrackerAssistantContext,
   env: NodeJS.ProcessEnv = process.env,
   options?: { title?: string; now?: Date; timeZone?: string },
 ): { text: string; fingerprint: string; hasWork: boolean; edition: HealthDigestEdition } {
   void env;
-  const collected = collectHealthNudgeItems(ctx.snapshot);
-  const fingerprint = healthNudgeFingerprint(ctx.snapshot);
+  const collected = collectHealthNudgeItems(ctx.snapshot, ctx);
+  const fingerprint = healthNudgeFingerprint(ctx.snapshot, ctx);
   const edition = buildHealthDigestEdition(ctx, {
     title: shopDigestTitle(options?.title),
     now: options?.now,
@@ -227,6 +249,28 @@ export function buildHealthNudgeText(
   if (edition.intakeLine) {
     lines.push("");
     lines.push(`<b>Intake</b> · ${escapeHtml(edition.intakeLine)}`);
+  }
+
+  if (collected.overdue.length > 0) {
+    lines.push("");
+    lines.push(`<b>Overdue ship-by</b> · Keep these honest`);
+    for (const deal of collected.overdue.slice(0, 4)) {
+      lines.push(shipLine(deal, "overdue"));
+    }
+    if (collected.overdue.length > 4) {
+      lines.push(`• and ${collected.overdue.length - 4} more`);
+    }
+  }
+
+  if (collected.dueToday.length > 0) {
+    lines.push("");
+    lines.push(`<b>Due today</b> · Projected ship-by`);
+    for (const deal of collected.dueToday.slice(0, 4)) {
+      lines.push(shipLine(deal, "today"));
+    }
+    if (collected.dueToday.length > 4) {
+      lines.push(`• and ${collected.dueToday.length - 4} more`);
+    }
   }
 
   const byKey = new Map<string, typeof collected.attention>();
@@ -281,7 +325,7 @@ export async function sendHealthNudge(
     now,
     timeZone: schedule.timeZone,
   });
-  const buttons = buildHealthNudgeButtons(collectHealthNudgeItems(ctx.snapshot), env);
+  const buttons = buildHealthNudgeButtons(collectHealthNudgeItems(ctx.snapshot, ctx), env);
   const edition = built.edition;
 
   if (!built.hasWork && !options?.force) {
@@ -422,7 +466,7 @@ export function startHealthNudgeScheduler(
   const tick = async () => {
     try {
       const ctx = await loadContext();
-      const fingerprint = healthNudgeFingerprint(ctx.snapshot);
+      const fingerprint = healthNudgeFingerprint(ctx.snapshot, ctx);
       const due = shouldRunScheduledHealthNudge(env, new Date(), fingerprint);
       if (!due.run) return;
       const result = await sendHealthNudge(ctx, env, {

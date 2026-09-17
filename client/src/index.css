@@ -731,6 +731,115 @@
     contain: layout paint;
   }
 
+  .ship-cal-week {
+    display: grid;
+    gap: 0.55rem;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .ship-cal-day {
+    min-height: 7.5rem;
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid hsl(var(--border) / 0.9);
+    background: hsl(var(--background) / 0.4);
+    padding: 0.55rem 0.5rem 0.6rem;
+  }
+
+  .ship-cal-day.is-today {
+    border-color: hsl(var(--primary) / 0.45);
+    background: linear-gradient(165deg, hsl(var(--primary) / 0.1), hsl(var(--background) / 0.35));
+  }
+
+  .ship-cal-day[data-tone='warn'] {
+    border-color: hsl(var(--chart-4) / 0.55);
+  }
+
+  .ship-cal-day-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.45rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .ship-cal-weekday {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .ship-cal-date {
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .ship-cal-today-mark {
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: hsl(var(--primary));
+  }
+
+  .ship-cal-empty {
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground) / 0.7);
+  }
+
+  .ship-cal-overdue {
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid hsl(var(--destructive) / 0.35);
+    background: linear-gradient(90deg, hsl(var(--destructive) / 0.1), transparent 55%);
+    padding: 0.7rem 0.8rem;
+  }
+
+  .ship-cal-deal {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    border-radius: calc(var(--radius) - 1px);
+    border: 1px solid hsl(var(--border) / 0.85);
+    background: hsl(var(--card) / 0.85);
+    padding: 0.35rem 0.45rem;
+    font-size: 0.6875rem;
+    line-height: 1.25;
+    color: hsl(var(--foreground));
+    transition:
+      border-color var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft);
+  }
+
+  .ship-cal-deal:hover {
+    border-color: hsl(var(--primary) / 0.45);
+    background: hsl(var(--muted) / 0.45);
+  }
+
+  .ship-cal-deal[data-tone='bad'] {
+    border-left: 2px solid hsl(var(--destructive));
+  }
+
+  .ship-cal-deal[data-tone='warn'] {
+    border-left: 2px solid hsl(var(--chart-4));
+  }
+
+  .ship-cal-deal-meta {
+    color: hsl(var(--muted-foreground));
+  }
+
+  @media (max-width: 1100px) {
+    .ship-cal-week {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px) {
+    .ship-cal-week {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
   .queue-lane-header {
     display: flex;
     flex-wrap: wrap;
@@ -859,6 +968,8 @@
     .metric-tile,
     .glance-item,
     .queue-lane,
+    .ship-cal-day,
+    .ship-cal-deal,
     .status-live::before,
     .status-alert,
     .glance-in,

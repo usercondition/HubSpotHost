@@ -15,6 +15,7 @@ import type {
   ProductionQueueResponse,
 } from "../../shared/schema";
 import { ORDER_INTAKE_STATUS_LABELS } from "../../shared/schema";
+import { groupShipByAgenda, shipByCalendarDate, shipByHonestyLabel } from "../../shared/ship-by";
 
 export type TrackerAssistantMode = "rules" | "model";
 
@@ -46,6 +47,16 @@ export type TrackerAssistantQueueDeal = {
   shipReady: boolean;
   needsReply?: boolean;
   readyToPack?: boolean;
+  /** Projected or override ship-by (`YYYY-MM-DD`, America/Los_Angeles). */
+  shipBy?: string;
+  shipBySource?: "override" | "derived";
+};
+
+export type TrackerAssistantShipAgenda = {
+  today: string;
+  overdue: TrackerAssistantQueueDeal[];
+  dueToday: TrackerAssistantQueueDeal[];
+  thisWeek: TrackerAssistantQueueDeal[];
 };
 
 export type TrackerAssistantQueueContext = {
@@ -59,6 +70,8 @@ export type TrackerAssistantQueueContext = {
   readyToPack: TrackerAssistantQueueDeal[];
   /** Ship-ready (or nearly) without a bought label / tracking yet. */
   needsLabel: TrackerAssistantQueueDeal[];
+  /** Floor honesty calendar: overdue / due today / next 7 days. */
+  shipAgenda?: TrackerAssistantShipAgenda;
 };
 
 export type TrackerAssistantContext = {
@@ -98,6 +111,8 @@ export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueD
     shipReady: item.fulfillment.shipReady || item.bucket === "ship_ready",
     needsReply: item.needsReply,
     readyToPack: item.readyToPack,
+    shipBy: item.shipBy,
+    shipBySource: item.shipBySource,
   };
 }
 
@@ -108,6 +123,16 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
       (item.bucket === "ship_ready" || item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) &&
       (!item.fulfillment.labelBought || !item.fulfillment.trackingPasted),
   );
+  const openJobs = [
+    ...queue.nextPrint,
+    ...queue.inProduction,
+    ...queue.blocked,
+    ...queue.shipReady,
+  ].map(slimQueueDeal);
+  const agenda = groupShipByAgenda(
+    openJobs.filter((item): item is TrackerAssistantQueueDeal & { shipBy: string } => Boolean(item.shipBy)),
+    shipByCalendarDate(),
+  );
   return {
     summary: queue.summary,
     nextPrint: queue.nextPrint.slice(0, 6).map(slimQueueDeal),
@@ -116,6 +141,12 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
     needsReply: queue.needsReply.slice(0, 8).map(slimQueueDeal),
     readyToPack: queue.readyToPack.slice(0, 8).map(slimQueueDeal),
     needsLabel: needsLabelSource.slice(0, 8).map(slimQueueDeal),
+    shipAgenda: {
+      today: agenda.today,
+      overdue: agenda.overdue.slice(0, 12),
+      dueToday: agenda.dueToday.slice(0, 12),
+      thisWeek: agenda.thisWeek.slice(0, 12),
+    },
   };
 }
 
@@ -143,11 +174,17 @@ export function getTrackerAssistantModel(env: NodeJS.ProcessEnv = process.env): 
 
 function classifyIntent(
   question: string,
-): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "chase" | "margin" | "shipping" | "help" {
+): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "chase" | "margin" | "shipping" | "due" | "help" {
   const q = question.toLowerCase();
   if (/\b(top|what|which|need).{0,30}\b(chase|repl(y|ies)|buyer reply|respond)\b|\b(chase|needs? reply|buyer reply)\b/.test(q)) return "chase";
   if (/\b(remind|nudge|message|marketplace text|draft)\b/.test(q)) return "reminder";
   if (/\b(plates?|ctb|slice|attach)\b/.test(q)) return "plates";
+  if (
+    /\b(due|overdue|ship.?by|ship by|calendar|keep me honest|honesty|what.?s due|whats due)\b/.test(q) ||
+    /\b(due today|this week).{0,20}\b(ship|due|order)/.test(q)
+  ) {
+    return "due";
+  }
   if (/\b(labels?|ready.?to.?pack|top pack|pack.?ship|ship.?ready|postage|tracking|pirate ship|shipengine|buy.?label)\b/.test(q)) return "shipping";
   // "shipping cost" / postage amount → costs; bare "shipping" already caught above as labels.
   if (/\b(costs?|labor|material|packaging)\b/.test(q) || /\bshipping (cost|fee|amount)\b/.test(q)) return "costs";
@@ -207,12 +244,14 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       reply:
         "I read your tracker only — no HubSpot writes. Ask things like:\n" +
         "• What should I do next?\n" +
+        "• What’s due / overdue this week?\n" +
         "• Which deals need plates?\n" +
         "• What’s ship-ready / needs a label?\n" +
         "• What’s stuck or missing costs?\n" +
         "• Draft a Marketplace reminder for awaiting buyers\n" +
         "• How are margins looking?",
       actions: [
+        { label: "Open Floor", href: "/" },
         { label: "Open Queue", href: "/queue" },
         { label: "Labels", href: "/labels" },
         { label: "Performance", href: "/performance" },
@@ -244,6 +283,70 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     actions.push({ label: "Open intake queue", href: "/orders" });
     usedFacts.push(`awaitingLinks=${awaitingLinks.length}`);
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions, usedFacts };
+  }
+
+  if (intent === "due") {
+    const agenda = queue?.shipAgenda;
+    const today = agenda?.today ?? shipByCalendarDate();
+    const overdue = agenda?.overdue ?? [];
+    const dueToday = agenda?.dueToday ?? [];
+    const thisWeek = agenda?.thisWeek ?? [];
+    usedFacts.push(
+      `shipToday=${today}`,
+      `shipOverdue=${overdue.length}`,
+      `shipDueToday=${dueToday.length}`,
+      `shipThisWeek=${thisWeek.length}`,
+    );
+    if (overdue.length === 0 && dueToday.length === 0 && thisWeek.length === 0) {
+      return {
+        ok: true,
+        mode: "rules",
+        reply:
+          queue
+            ? `Ship calendar looks clear for ${today} (LA). No overdue, due-today, or next-7-day projected ship-bys on open Print Orders.`
+            : "I don’t have production-queue ship-by dates loaded right now — open Floor to see the calendar.",
+        actions: [
+          { label: "Open Floor", href: "/" },
+          { label: "Open Queue", href: "/queue" },
+        ],
+        usedFacts,
+      };
+    }
+    lines.push(`Ship honesty · ${today} (Los Angeles)`);
+    lines.push("");
+    if (overdue.length > 0) {
+      lines.push(`Overdue (${overdue.length}):`);
+      for (const deal of overdue.slice(0, 6)) {
+        lines.push(
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+        );
+        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+      }
+      lines.push("");
+    }
+    if (dueToday.length > 0) {
+      lines.push(`Due today (${dueToday.length}):`);
+      for (const deal of dueToday.slice(0, 6)) {
+        lines.push(
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+        );
+        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+      }
+      lines.push("");
+    }
+    if (thisWeek.length > 0) {
+      lines.push(`Next 7 days (${thisWeek.length}):`);
+      for (const deal of thisWeek.slice(0, 6)) {
+        lines.push(
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+        );
+        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+      }
+    }
+    lines.push("");
+    lines.push("Override dates (HubSpot print_ship_by) stick; derived dates move with plates/stage.");
+    actions.push({ label: "Floor calendar", href: "/" });
+    return { ok: true, mode: "rules", reply: lines.join("\n").trim(), actions: actions.slice(0, 6), usedFacts };
   }
 
   if (intent === "chase") {
@@ -436,6 +539,19 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
   lines.push("Here’s your tracker briefing:");
   lines.push("");
   const priorities: string[] = [];
+  const shipAgenda = queue?.shipAgenda;
+  if (shipAgenda && shipAgenda.overdue.length > 0) {
+    priorities.push(
+      `${priorities.length + 1}. ${shipAgenda.overdue.length} overdue ship-by${shipAgenda.overdue.length === 1 ? "" : "s"} — start with ${shipAgenda.overdue[0]!.dealName}.`,
+    );
+    actions.push({ label: "Overdue on Floor", href: "/" });
+  }
+  if (shipAgenda && shipAgenda.dueToday.length > 0) {
+    priorities.push(
+      `${priorities.length + 1}. ${shipAgenda.dueToday.length} due today — keep ${shipAgenda.dueToday[0]!.dealName} honest.`,
+    );
+    actions.push({ label: "Due today", href: "/" });
+  }
   if (snapshot.intake.pendingReview > 0) {
     priorities.push(
       `1. Review ${snapshot.intake.pendingReview} submitted buyer form${snapshot.intake.pendingReview === 1 ? "" : "s"} before creating HubSpot records.`,
@@ -525,6 +641,7 @@ function contextForModel(ctx: TrackerAssistantContext): string {
             needsReply: queue.needsReply,
             readyToPack: queue.readyToPack,
             needsLabel: queue.needsLabel,
+            shipAgenda: queue.shipAgenda ?? null,
           }
         : null,
       awaitingLinks: awaitingLinks.map((link) => ({
@@ -548,6 +665,7 @@ function contextForModel(ctx: TrackerAssistantContext): string {
         "Read-only. Never claim you updated HubSpot, costs, stages, or deals.",
         "Only use facts from this JSON. If unknown, say so.",
         "Prefer concrete next actions with deal/intake names.",
+        "Use shipAgenda (overdue / dueToday / thisWeek) to keep the owner honest on ship-by dates. Mark override vs derived when present.",
         "For ship-ready work, point to Labels (/labels?dealId=…) or Queue.",
         "For Marketplace reminders, draft short buyer-facing text.",
         "Keep answers under ~180 words unless drafting a message.",
@@ -583,7 +701,7 @@ async function answerWithModel(
           {
             role: "system",
             content:
-              "You are the Print Operations shop-floor assistant. You help the owner prioritize Queue, Labels, plates, costs, and intake from structured tracker JSON. You cannot write to HubSpot or change data. Be concise and practical.",
+              "You are the Print Operations shop-floor assistant. You help the owner prioritize Queue, Labels, plates, costs, intake, and ship-by honesty from structured tracker JSON. You cannot write to HubSpot or change data. Be concise and practical.",
           },
           {
             role: "user",

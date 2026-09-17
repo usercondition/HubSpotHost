@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import {
   AlertTriangle,
   Beaker,
+  CalendarDays,
   CheckCircle2,
   ExternalLink,
   FileUp,
@@ -25,6 +26,13 @@ import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  formatShipByShort,
+  formatShipByWeekday,
+  groupShipByAgenda,
+  shipByCalendarDate,
+  shipByHonestyLabel,
+} from "@shared/ship-by";
 import type {
   HealthResponse,
   PerformanceResponse,
@@ -41,21 +49,8 @@ type QueueResponse = ProductionQueueResponse & { ok: true };
 /** Cap in-flight strip so Floor stays scannable; full board is Queue. */
 const FLOOR_ACTIVE_DEAL_CAP = 8;
 
-function losAngelesDate(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function shipByLabel(shipBy: string, today = losAngelesDate()): string {
-  if (shipBy < today) return `Overdue · ${shipBy}`;
-  if (shipBy === today) return "Due today";
-  return `Ship ${new Date(`${shipBy}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+function shipByLabel(shipBy: string, today = shipByCalendarDate(), source?: "override" | "derived"): string {
+  return shipByHonestyLabel(shipBy, today, source);
 }
 
 function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
@@ -226,9 +221,9 @@ function FlightCard({
         {isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
         {queueItem ? (
           <StatusPill
-            tone={queueItem.shipBy < losAngelesDate() ? "bad" : queueItem.shipBy === losAngelesDate() ? "warn" : "neutral"}
+            tone={queueItem.shipBy < shipByCalendarDate() ? "bad" : queueItem.shipBy === shipByCalendarDate() ? "warn" : "neutral"}
             icon={Ship}
-            label={shipByLabel(queueItem.shipBy)}
+            label={shipByLabel(queueItem.shipBy, shipByCalendarDate(), queueItem.shipBySource)}
           />
         ) : null}
         {!needsPlates && !needsCosts && !isStale ? (
@@ -301,6 +296,124 @@ function FloorColumn({
         ) : (
           children
         )}
+      </div>
+    </section>
+  );
+}
+
+function ShipCalendarDeal({ item, today }: { item: ProductionQueueItem; today: string }) {
+  const tone = item.shipBy < today ? "bad" : item.shipBy === today ? "warn" : undefined;
+  return (
+    <Link
+      href={queueDealHref(item.dealId)}
+      className="ship-cal-deal"
+      data-tone={tone}
+      data-testid={`link-ship-cal-${item.dealId}`}
+      title={shipByLabel(item.shipBy, today, item.shipBySource)}
+    >
+      <span className="truncate font-medium">{item.dealName}</span>
+      <span className="ship-cal-deal-meta">
+        {item.shipBySource === "override" ? "set" : "plan"}
+        {item.amount > 0 ? ` · ${formatMoney(item.amount)}` : ""}
+      </span>
+    </Link>
+  );
+}
+
+function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loading: boolean }) {
+  const today = shipByCalendarDate();
+  const agenda = groupShipByAgenda(items, today);
+  const pressure = agenda.overdue.length + agenda.dueToday.length;
+
+  return (
+    <section className="queue-lane min-w-0" data-testid="panel-floor-ship-calendar">
+      <div className="queue-lane-header">
+        <div className="min-w-0">
+          <h2 className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight">
+            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+            Ship calendar{" "}
+            <span className="numeric text-muted-foreground">({items.length})</span>
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Los Angeles dates · keep overdue and due-today honest
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {pressure > 0 ? (
+            <StatusPill
+              tone={agenda.overdue.length > 0 ? "bad" : "warn"}
+              icon={Ship}
+              label={
+                agenda.overdue.length > 0
+                  ? `${agenda.overdue.length} overdue`
+                  : `${agenda.dueToday.length} due today`
+              }
+              testId="status-ship-cal-pressure"
+            />
+          ) : (
+            <StatusPill tone="good" icon={CheckCircle2} label="Dates clear" testId="status-ship-cal-clear" />
+          )}
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+        </div>
+      </div>
+
+      <div className="queue-lane-body !max-h-none space-y-3">
+        {agenda.overdue.length > 0 ? (
+          <div className="ship-cal-overdue" data-testid="panel-ship-cal-overdue">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Overdue</p>
+              <p className="text-xs text-muted-foreground">{agenda.overdue.length} past ship-by</p>
+            </div>
+            <div className="mt-2 flex flex-col gap-1.5">
+              {agenda.overdue.map((item) => (
+                <ShipCalendarDeal key={item.dealId} item={item} today={today} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="ship-cal-week" data-testid="panel-ship-cal-week">
+          {agenda.weekDays.map((day) => {
+            const isToday = day.date === today;
+            const tone = isToday && day.items.length > 0 ? "warn" : day.items.length > 0 ? "live" : undefined;
+            return (
+              <div
+                key={day.date}
+                className={cn("ship-cal-day", isToday && "is-today")}
+                data-tone={tone}
+                data-testid={`ship-cal-day-${day.date}`}
+              >
+                <div className="ship-cal-day-head">
+                  <span className="ship-cal-weekday">{formatShipByWeekday(day.date)}</span>
+                  <span className="ship-cal-date numeric">{formatShipByShort(day.date)}</span>
+                  {isToday ? <span className="ship-cal-today-mark">Today</span> : null}
+                </div>
+                {day.items.length === 0 ? (
+                  <p className="ship-cal-empty">—</p>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {day.items.slice(0, 4).map((item) => (
+                      <ShipCalendarDeal key={item.dealId} item={item} today={today} />
+                    ))}
+                    {day.items.length > 4 ? (
+                      <p className="text-[0.6875rem] text-muted-foreground">+{day.items.length - 4} more</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {agenda.later.length > 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="text-ship-cal-later">
+            +{agenda.later.length} later than this week on{" "}
+            <Link href="/queue" className="font-medium text-primary hover:underline">
+              Queue
+            </Link>
+            .
+          </p>
+        ) : null}
       </div>
     </section>
   );
@@ -427,12 +540,8 @@ function TodaysWork() {
       ]
     : [];
   const queueByDealId = new Map(queueItems.map((item) => [item.dealId, item]));
-  const today = losAngelesDate();
-  const thisWeekShipBys = queueItems.filter((item) => item.shipBy > today && item.shipBy <= (() => {
-    const end = new Date(`${today}T00:00:00.000Z`);
-    end.setUTCDate(end.getUTCDate() + 7);
-    return end.toISOString().slice(0, 10);
-  })());
+  const today = shipByCalendarDate();
+  const shipAgenda = groupShipByAgenda(queueItems, today);
 
   const plates = attention.filter((item) => item.issueKey === "no_plates");
   const costs = attention.filter((item) => item.issueKey === "costs_incomplete");
@@ -454,8 +563,9 @@ function TodaysWork() {
     (buyNow.length > 0 ? 1 : 0) +
     (fepDue.length > 0 ? 1 : 0);
 
+  const shipPressure = shipAgenda.overdue.length + shipAgenda.dueToday.length;
   const clearFloor =
-    plates.length + costs.length + stale.length + shopCount === 0;
+    plates.length + costs.length + stale.length + shopCount + shipPressure === 0;
 
   return (
     <div className="space-y-4" data-testid="panel-todays-work">
@@ -464,9 +574,9 @@ function TodaysWork() {
           <StatusPill tone="good" icon={CheckCircle2} label="Floor clear" testId="status-floor-clear" />
         ) : (
           <StatusPill
-            tone="warn"
+            tone={shipAgenda.overdue.length > 0 ? "bad" : "warn"}
             icon={AlertTriangle}
-            label={`${attention.length + pendingReview} open`}
+            label={`${attention.length + pendingReview + shipPressure} open`}
             testId="status-floor-pressure"
           />
         )}
@@ -484,6 +594,8 @@ function TodaysWork() {
         </Button>
         {performance.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
       </div>
+
+      <ShipCalendar items={queueItems} loading={productionQueue.isLoading || productionQueue.isFetching} />
 
       <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2" data-testid="panel-floor-glance">
         <FloorColumn
@@ -635,11 +747,6 @@ function TodaysWork() {
               <Link href="/queue" className="font-medium text-primary hover:underline">
                 Queue
               </Link>
-            </p>
-          ) : null}
-          {thisWeekShipBys.length > 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground" data-testid="text-floor-ship-this-week">
-              This week: {thisWeekShipBys.length} projected ship-by{thisWeekShipBys.length === 1 ? "" : "s"}.
             </p>
           ) : null}
         </div>
