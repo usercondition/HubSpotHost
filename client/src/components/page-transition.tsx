@@ -1,10 +1,10 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { pageVariants, reducedPageVariants } from "@/lib/motion";
 
 /**
- * Soft page enter/exit inside the shell main pane.
- * Shell chrome (rail + top bar) stays still; only workspace content moves.
+ * Soft page crossfade inside the shell main pane.
+ * Opacity only — never transform the scroll root (that tears while scrolling).
  */
 export function PageTransition({
   routeKey,
@@ -15,9 +15,16 @@ export function PageTransition({
 }) {
   const reduce = useReducedMotion();
   const variants = reduce ? reducedPageVariants : pageVariants;
+  const [settled, setSettled] = useState(true);
+
+  useEffect(() => {
+    setSettled(Boolean(reduce));
+    const pane = document.querySelector<HTMLElement>("[data-scroll-pane]");
+    if (pane) pane.scrollTop = 0;
+  }, [routeKey, reduce]);
 
   return (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence mode="sync" initial={false}>
       <motion.div
         key={routeKey}
         className="page-motion min-h-full"
@@ -25,6 +32,10 @@ export function PageTransition({
         initial="initial"
         animate="enter"
         exit="exit"
+        style={reduce || settled ? undefined : { willChange: "opacity" }}
+        onAnimationComplete={(definition) => {
+          if (definition === "enter") setSettled(true);
+        }}
         data-testid="page-transition"
       >
         {children}
