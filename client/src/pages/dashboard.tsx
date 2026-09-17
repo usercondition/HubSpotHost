@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { attentionNextStep, floorFocusMeta, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { Panel, StatCard, StatusPill } from "@/components/primitives";
+import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
@@ -405,49 +405,6 @@ function TodaysWork() {
 
   return (
     <div className="space-y-4" data-testid="panel-todays-work">
-      <div className="metric-strip" aria-label="Today’s attention metrics" data-testid="panel-todays-metrics">
-        <StatCard
-          label="Needs plates"
-          value={String(plates.length)}
-          hint="Open Print Orders missing CTB"
-          icon={FileUp}
-          tone={plates.length > 0 ? "warn" : "good"}
-          testId="card-todays-plates"
-        />
-        <StatCard
-          label="Needs costs"
-          value={String(costs.length)}
-          hint="Material / postage incomplete"
-          icon={AlertTriangle}
-          tone={costs.length > 0 ? "warn" : "good"}
-          testId="card-todays-costs"
-        />
-        <StatCard
-          label="Stale"
-          value={String(stale.length)}
-          hint="No HubSpot activity lately"
-          icon={Clock3}
-          tone={stale.length > 0 ? "bad" : "good"}
-          testId="card-todays-stale"
-        />
-        <StatCard
-          label="Intake"
-          value={String(pendingReview)}
-          hint="Awaiting your review"
-          icon={Link2}
-          tone={pendingReview > 0 ? "warn" : "neutral"}
-          testId="card-todays-pending-review"
-        />
-        <StatCard
-          label="Buyer"
-          value={String(awaitingClient)}
-          hint="Links still open"
-          icon={Link2}
-          tone={awaitingClient > 0 ? "warn" : "neutral"}
-          testId="card-todays-awaiting-client"
-        />
-      </div>
-
       <div className="flex flex-wrap items-center gap-2">
         {clearFloor ? (
           <StatusPill tone="good" icon={CheckCircle2} label="Floor clear" testId="status-floor-clear" />
