@@ -1,9 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  boolPropertyNeedsOptionRepair,
   fetchPrintOrderDeals,
   invalidatePrintOrderDealsCache,
 } from "../server/lib/hubspot";
+
+test("boolPropertyNeedsOptionRepair detects missing true/false options", () => {
+  assert.equal(boolPropertyNeedsOptionRepair({ type: "bool", options: [] }), true);
+  assert.equal(
+    boolPropertyNeedsOptionRepair({
+      type: "bool",
+      options: [{ value: "true" }],
+    }),
+    true,
+  );
+  assert.equal(
+    boolPropertyNeedsOptionRepair({
+      type: "bool",
+      options: [{ value: "true" }, { value: "false" }],
+    }),
+    false,
+  );
+  assert.equal(boolPropertyNeedsOptionRepair({ type: "string", options: [] }), false);
+});
 
 test("print order deals cache returns same reference within TTL and refreshes after invalidate", async (t) => {
   const previousToken = process.env.HUBSPOT_ACCESS_TOKEN;
