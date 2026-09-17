@@ -87,7 +87,12 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
   {
     name: "SHIP_FROM_NAME",
     required: "Optional (with ShipEngine)",
-    note: "Shop ship-from name; also set STREET1/CITY/STATE/ZIP",
+    note: "Shop ship-from name; also set STREET1/CITY/STATE/ZIP and SHIP_FROM_PHONE",
+  },
+  {
+    name: "SHIP_FROM_PHONE",
+    required: "Optional (with ShipEngine)",
+    note: "Shop phone for ShipEngine labels — required by carriers; client phone is not used",
   },
 ];
 
