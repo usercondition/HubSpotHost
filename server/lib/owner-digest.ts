@@ -28,6 +28,7 @@ import {
   type DigestMetric,
   type HealthDigestEdition,
 } from "./health-digest-card";
+import { formatShipByShort, shipByHonestyLabel } from "../../shared/ship-by";
 
 export type OwnerDigestContext = TrackerAssistantContext & {
   fleet: PrinterFleetSnapshot;
@@ -236,6 +237,39 @@ export function buildOwnerDigestEdition(
 
   const rows = doFirstRows(ctx);
   const lists: DigestList[] = [];
+  const shipAgenda = ctx.queue?.shipAgenda;
+  if (shipAgenda && (shipAgenda.overdue.length > 0 || shipAgenda.dueToday.length > 0 || shipAgenda.thisWeek.length > 0)) {
+    const shipRows: DigestGlanceRow[] = [
+      ...shipAgenda.overdue.slice(0, 3).map((deal) => ({
+        name: clip(deal.dealName, 34),
+        badge: "Overdue",
+        detail: clip(
+          [deal.shipBy ? formatShipByShort(deal.shipBy) : "", deal.shipBySource === "override" ? "set" : "plan", deal.stage]
+            .filter(Boolean)
+            .join(" · "),
+          52,
+        ),
+        tone: "bad" as const,
+      })),
+      ...shipAgenda.dueToday.slice(0, 3).map((deal) => ({
+        name: clip(deal.dealName, 34),
+        badge: "Due today",
+        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan"].filter(Boolean).join(" · "), 52),
+        tone: "warn" as const,
+      })),
+      ...shipAgenda.thisWeek.slice(0, 2).map((deal) => ({
+        name: clip(deal.dealName, 34),
+        badge: deal.shipBy ? formatShipByShort(deal.shipBy) : "This week",
+        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan"].filter(Boolean).join(" · "), 52),
+        tone: "neutral" as const,
+      })),
+    ];
+    lists.push({
+      eyebrow: "SHIP BY",
+      title: "Keep dates honest",
+      rows: shipRows.slice(0, 6),
+    });
+  }
   if (next.length > 0) {
     lists.push({
       eyebrow: "NEXT PRINT",
@@ -274,15 +308,38 @@ export function buildOwnerDigestEdition(
   }
 
   const deckBits: string[] = [];
+  if (shipAgenda?.overdue.length) {
+    deckBits.push(
+      shipAgenda.overdue.length === 1 ? "1 overdue ship-by" : `${shipAgenda.overdue.length} overdue ship-bys`,
+    );
+  }
+  if (shipAgenda?.dueToday.length) {
+    deckBits.push(shipAgenda.dueToday.length === 1 ? "1 due today" : `${shipAgenda.dueToday.length} due today`);
+  }
   if (plates > 0) deckBits.push(plates === 1 ? "1 need plates" : `${plates} need plates`);
   if (pending > 0) deckBits.push(pending === 1 ? "1 to review" : `${pending} to review`);
   if (fep.length > 0) deckBits.push(fep.length === 1 ? "1 FEP due" : `${fep.length} FEP due`);
-  const allClear = rows.length === 0 && next.length === 0 && fep.length === 0 && pending === 0;
+  const allClear =
+    rows.length === 0 &&
+    next.length === 0 &&
+    fep.length === 0 &&
+    pending === 0 &&
+    !(shipAgenda && (shipAgenda.overdue.length > 0 || shipAgenda.dueToday.length > 0));
 
   const metrics: DigestMetric[] = [
+    {
+      label: "Overdue",
+      value: shipAgenda?.overdue.length ?? 0,
+      hint: "Ship-by passed",
+      tone: (shipAgenda?.overdue.length ?? 0) > 0 ? "bad" : "good",
+    },
+    {
+      label: "Due today",
+      value: shipAgenda?.dueToday.length ?? 0,
+      hint: "Projected ship-by",
+      tone: (shipAgenda?.dueToday.length ?? 0) > 0 ? "warn" : "good",
+    },
     { label: "Need plates", value: plates, hint: "CTB / slice files", tone: plates > 0 ? "warn" : "good" },
-    { label: "Need costs", value: costs, hint: "Material / ship", tone: costs > 0 ? "warn" : "good" },
-    { label: "Stale", value: stale, hint: "No HubSpot update", tone: stale > 0 ? "bad" : "good" },
     { label: "FEP due", value: fep.length, hint: "Change soon", tone: fep.length > 0 ? "bad" : "good" },
     {
       label: "Resin left",
@@ -320,7 +377,7 @@ export function buildOwnerDigestEdition(
     metrics,
     folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
     allClear,
-    openCount: plates + costs + stale + pending,
+    openCount: plates + costs + stale + pending + (shipAgenda?.overdue.length ?? 0) + (shipAgenda?.dueToday.length ?? 0),
   };
 }
 
@@ -346,6 +403,27 @@ export function buildOwnerDigestText(
     lines.push(...priorityLines);
   } else {
     lines.push(briefing.reply.trim().split("\n")[0] || "Queue looks clear.");
+  }
+
+  // —— Ship honesty ——
+  const shipAgenda = ctx.queue?.shipAgenda;
+  if (shipAgenda && (shipAgenda.overdue.length > 0 || shipAgenda.dueToday.length > 0 || shipAgenda.thisWeek.length > 0)) {
+    lines.push("", "SHIP BY");
+    for (const deal of shipAgenda.overdue.slice(0, 4)) {
+      lines.push(
+        `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, shipAgenda.today, deal.shipBySource)}`,
+      );
+    }
+    for (const deal of shipAgenda.dueToday.slice(0, 4)) {
+      lines.push(
+        `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, shipAgenda.today, deal.shipBySource)}`,
+      );
+    }
+    for (const deal of shipAgenda.thisWeek.slice(0, 3)) {
+      lines.push(
+        `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, shipAgenda.today, deal.shipBySource)}`,
+      );
+    }
   }
 
   // —— Next print ——

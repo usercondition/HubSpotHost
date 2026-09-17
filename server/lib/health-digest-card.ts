@@ -179,13 +179,42 @@ export function buildHealthDigestEdition(
   );
   const pending = snapshot.intake.pendingReview;
   const awaiting = snapshot.intake.awaitingClient;
-  const allClear = attention.length === 0 && pending === 0 && awaiting === 0;
+  const overdue = ctx.queue?.shipAgenda?.overdue ?? [];
+  const dueToday = ctx.queue?.shipAgenda?.dueToday ?? [];
+  const allClear =
+    attention.length === 0 && pending === 0 && awaiting === 0 && overdue.length === 0 && dueToday.length === 0;
   const now = options?.now ?? new Date();
   const timeZone = options?.timeZone || "America/New_York";
   const { weekday } = localParts(now, timeZone);
 
   const sections: DigestSection[] = [];
   const deckBits: string[] = [];
+  if (overdue.length > 0) {
+    deckBits.push(overdue.length === 1 ? "1 overdue ship-by" : `${overdue.length} overdue ship-bys`);
+    sections.push({
+      key: "ship_overdue",
+      kicker: "Overdue ship-by",
+      hint: "Keep these honest",
+      items: overdue.slice(0, 4).map((item) => ({
+        name: clip(item.dealName, 36),
+        stage: clip(item.shipBy ? `due ${item.shipBy}` : item.stage, 22),
+      })),
+      overflow: Math.max(0, overdue.length - 4),
+    });
+  }
+  if (dueToday.length > 0) {
+    deckBits.push(dueToday.length === 1 ? "1 due today" : `${dueToday.length} due today`);
+    sections.push({
+      key: "ship_today",
+      kicker: "Due today",
+      hint: "Projected ship-by",
+      items: dueToday.slice(0, 4).map((item) => ({
+        name: clip(item.dealName, 36),
+        stage: clip(item.stage, 22),
+      })),
+      overflow: Math.max(0, dueToday.length - 4),
+    });
+  }
   for (const key of ISSUE_ORDER) {
     const rows = attention.filter((item) => item.issueKey === key);
     if (rows.length === 0) continue;
@@ -206,11 +235,27 @@ export function buildHealthDigestEdition(
   let intakeLine: string | null = null;
   if (pending > 0) {
     intakeLine = `${pending} intake form${pending === 1 ? "" : "s"} waiting for review`;
-  } else if (awaiting > 0 && attention.length === 0) {
+  } else if (awaiting > 0 && attention.length === 0 && overdue.length === 0 && dueToday.length === 0) {
     intakeLine = `${awaiting} buyer form${awaiting === 1 ? "" : "s"} still open`;
   }
 
   const rows: DigestGlanceRow[] = [];
+  for (const item of overdue.slice(0, 2)) {
+    rows.push({
+      name: clip(item.dealName, 34),
+      badge: "Overdue",
+      detail: clip([item.shipBy ? `ship ${item.shipBy}` : "", item.stage].filter(Boolean).join(" · "), 52),
+      tone: "bad",
+    });
+  }
+  for (const item of dueToday.slice(0, 2)) {
+    rows.push({
+      name: clip(item.dealName, 34),
+      badge: "Due today",
+      detail: clip([item.stage, "projected ship-by"].filter(Boolean).join(" · "), 52),
+      tone: "warn",
+    });
+  }
   if (pending > 0) {
     rows.push({
       name: `${pending} intake form${pending === 1 ? "" : "s"} waiting for review`,
@@ -218,7 +263,7 @@ export function buildHealthDigestEdition(
       detail: "Approve or cancel paid order intake",
       tone: "warn",
     });
-  } else if (awaiting > 0 && attention.length === 0) {
+  } else if (awaiting > 0 && attention.length === 0 && overdue.length === 0 && dueToday.length === 0) {
     rows.push({
       name: `${awaiting} buyer form${awaiting === 1 ? "" : "s"} still open`,
       badge: "Awaiting buyer",
@@ -226,7 +271,8 @@ export function buildHealthDigestEdition(
       tone: "warn",
     });
   }
-  for (const item of attention.slice(0, pending > 0 ? 4 : 5)) {
+  const glanceBudget = Math.max(0, 5 - rows.length);
+  for (const item of attention.slice(0, glanceBudget)) {
     const meta = digestSectionMeta(item.issueKey);
     rows.push({
       name: clip(item.dealName, 34),
@@ -235,7 +281,7 @@ export function buildHealthDigestEdition(
       tone: item.issueKey === "stale" || item.severity === "bad" ? "bad" : "warn",
     });
   }
-  const hidden = attention.length - (pending > 0 ? 4 : 5);
+  const hidden = attention.length - glanceBudget;
   if (hidden > 0) {
     rows.push({
       name: `and ${hidden} more on the floor`,
@@ -249,15 +295,15 @@ export function buildHealthDigestEdition(
   const costs = attention.filter((item) => item.issueKey === "costs_incomplete").length;
   const stale = attention.filter((item) => item.issueKey === "stale").length;
   const metrics: DigestMetric[] = [
+    { label: "Overdue", value: overdue.length, hint: "Ship-by passed", tone: overdue.length > 0 ? "bad" : "good" },
+    { label: "Due today", value: dueToday.length, hint: "Projected ship-by", tone: dueToday.length > 0 ? "warn" : "good" },
     { label: "Need plates", value: plates, hint: "CTB / slice files", tone: plates > 0 ? "warn" : "good" },
     { label: "Need costs", value: costs, hint: "Material / ship", tone: costs > 0 ? "warn" : "good" },
     { label: "Stale", value: stale, hint: "No HubSpot update", tone: stale > 0 ? "bad" : "good" },
-    { label: "Intake review", value: pending, hint: "Waiting on you", tone: pending > 0 ? "warn" : "neutral" },
-    { label: "Awaiting buyer", value: awaiting, hint: "Form not finished", tone: awaiting > 0 ? "warn" : "neutral" },
   ];
 
   const deck = allClear
-    ? "No missing plates, costs, stale jobs, or intake waiting on you."
+    ? "No overdue ship-bys, missing plates, costs, stale jobs, or intake waiting on you."
     : deckBits.join(" · ") || intakeLine || "Open items on the floor.";
 
   return {
@@ -268,14 +314,14 @@ export function buildHealthDigestEdition(
     lede: allClear ? "Floor is clear" : "Do this next",
     deck,
     pill: "HEALTH CHECK",
-    intakeLine: attention.length > 0 ? (pending > 0 ? intakeLine : null) : null,
+    intakeLine: attention.length > 0 || overdue.length > 0 || dueToday.length > 0 ? (pending > 0 ? intakeLine : null) : null,
     sections,
     rows,
     lists: [],
     metrics,
     folio: `${snapshot.summary.activeOrders} job${snapshot.summary.activeOrders === 1 ? "" : "s"} on the floor`,
     allClear,
-    openCount: attention.length + pending,
+    openCount: attention.length + pending + overdue.length + dueToday.length,
   };
 }
 

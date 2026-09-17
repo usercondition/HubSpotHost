@@ -107,7 +107,7 @@ test("floor card uses Print Ops glance language, not a newspaper masthead", () =
   );
   assert.deepEqual(
     edition.metrics.map((metric) => metric.label),
-    ["Need plates", "Need costs", "Stale", "Intake review", "Awaiting buyer"],
+    ["Overdue", "Due today", "Need plates", "Need costs", "Stale"],
   );
   const svg = renderHealthDigestSvg(edition).svg;
   assert.match(svg, /Print Ops/);
