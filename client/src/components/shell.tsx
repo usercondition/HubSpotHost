@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
+import { PageTransition } from "@/components/page-transition";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -241,10 +242,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                       title={`${item.label} — ${item.title}`}
                       data-testid={item.testId}
                       className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-xl transition-all",
+                        "relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,transform,box-shadow] duration-150 ease-out",
                         active
-                          ? "bg-sidebar-accent text-sidebar-foreground"
-                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                          ? "bg-sidebar-accent text-sidebar-foreground shadow-sm scale-[1.02]"
+                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground hover:scale-[1.02]",
                       )}
                     >
                       <item.icon className="h-4 w-4" />
@@ -285,7 +286,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 title={item.title}
                 data-testid={item.testId}
                 className={cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium",
+                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium transition-[background-color,color,transform] duration-150 ease-out",
                   active
                     ? "bg-primary text-primary-foreground"
                     : "bg-card/70 text-muted-foreground hover:text-foreground",
@@ -312,7 +313,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </nav>
 
-        <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">{children}</main>
+        <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent">
+          <PageTransition routeKey={pathOnly}>{children}</PageTransition>
+        </main>
       </div>
     </div>
   );

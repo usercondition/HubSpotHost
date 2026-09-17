@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -25,6 +26,7 @@ import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow"
 import { StatusPill, WorkspaceSection } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { drawerPanelVariants, drawerScrimVariants } from "@/lib/motion";
 import { Link } from "wouter";
 import {
   FULFILLMENT_CHECKLIST_KEYS,
@@ -64,6 +66,7 @@ export function DealOpsDrawer({
   onClose: () => void;
 }) {
   const open = Boolean(dealId);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (!open) return;
@@ -74,44 +77,61 @@ export function DealOpsDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open || !dealId) return null;
-
   return (
-    <div className="pointer-events-none fixed inset-0 z-40" data-testid="drawer-deal-ops-root">
-      <button
-        type="button"
-        aria-label="Dismiss deal ops"
-        className="pointer-events-auto absolute inset-0 bg-black/40 transition-opacity"
-        onClick={onClose}
-        data-testid="button-deal-ops-scrim"
-      />
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Deal ops"
-        className="pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl animate-in fade-in slide-in-from-right duration-200 md:max-w-2xl"
-        data-testid="drawer-deal-ops"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-          <p className="rule-label">Deal ops</p>
-          <Button
+    <AnimatePresence>
+      {open && dealId ? (
+        <motion.div
+          key="deal-ops-drawer"
+          className="pointer-events-none fixed inset-0 z-40"
+          data-testid="drawer-deal-ops-root"
+          initial="initial"
+          animate="enter"
+          exit="exit"
+        >
+          <motion.button
             type="button"
-            size="sm"
-            variant="ghost"
-            className="h-8 w-8 p-0"
+            aria-label="Dismiss deal ops"
+            className="pointer-events-auto absolute inset-0 bg-black/40 md:bg-black/25"
             onClick={onClose}
-            data-testid="button-close-deal-ops-drawer"
+            data-testid="button-deal-ops-scrim"
+            variants={reduceMotion ? undefined : drawerScrimVariants}
+            initial={reduceMotion ? false : "initial"}
+            animate={reduceMotion ? undefined : "enter"}
+            exit={reduceMotion ? undefined : "exit"}
+          />
+          <motion.aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Deal ops"
+            className="pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl md:max-w-2xl"
+            data-testid="drawer-deal-ops"
+            onClick={(event) => event.stopPropagation()}
+            variants={reduceMotion ? undefined : drawerPanelVariants}
+            initial={reduceMotion ? false : "initial"}
+            animate={reduceMotion ? undefined : "enter"}
+            exit={reduceMotion ? undefined : "exit"}
           >
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
-          <DealOpsPanel dealId={dealId} headers={headers} onClose={onClose} flush />
-        </div>
-      </aside>
-    </div>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+              <p className="rule-label">Deal ops</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                onClick={onClose}
+                data-testid="button-close-deal-ops-drawer"
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">Close</span>
+              </Button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
+              <DealOpsPanel dealId={dealId} headers={headers} onClose={onClose} flush />
+            </div>
+          </motion.aside>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
