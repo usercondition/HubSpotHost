@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { upsertFulfillmentChecklist, getFulfillmentChecklist } from "../server/lib/fulfillment";
 import { createProductionFailure, listFailuresForDeal } from "../server/lib/failures";
-import { buildProductionQueue } from "../server/lib/production-queue";
+import { buildProductionQueue, deriveShipBy } from "../server/lib/production-queue";
 import { buildResinReorderSuggestions } from "../server/lib/resin-reorder";
 import { assignPlateToPrinter } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
@@ -289,6 +289,54 @@ test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", 
     assert.equal(queue.summary.shipReady, 1);
     assert.equal(queue.shipReady[0]?.dealId, "wendy");
     assert.equal(queue.shipReady[0]?.hasPlates, false);
+  });
+});
+
+test("ship-by projection uses Los Angeles calendar SLAs and an Intern override", () => {
+  const now = new Date("2026-08-10T19:00:00.000Z"); // noon in Los Angeles
+  const dueToday = deriveShipBy(
+    { bucket: "ship_ready", hasPlates: true, shipByOverride: null, createdAt: "2026-08-01T12:00:00.000Z" },
+    { now },
+  );
+  assert.deepEqual(dueToday, { shipBy: "2026-08-10", shipBySource: "derived" });
+
+  const future = deriveShipBy(
+    { bucket: "in_production", hasPlates: true, shipByOverride: null, createdAt: "2026-08-01T12:00:00.000Z" },
+    { now, latestPlateAttachedAt: "2026-08-06T19:00:00.000Z" },
+  );
+  assert.deepEqual(future, { shipBy: "2026-08-11", shipBySource: "derived" });
+
+  const overdue = deriveShipBy(
+    { bucket: "next_print", hasPlates: false, shipByOverride: "2026-08-09", createdAt: "2026-08-01T12:00:00.000Z" },
+    { now },
+  );
+  assert.deepEqual(overdue, { shipBy: "2026-08-09", shipBySource: "override" });
+});
+
+test("production queue exposes a ship-by ISO date and source per deal", async () => {
+  await withTempDb(() => {
+    const queue = buildProductionQueue(
+      sampleSnapshot([
+        {
+          dealId: "ship-by",
+          dealName: "Ship by test - Ada",
+          stageId: "ready",
+          stage: "Ready to Ship",
+          amount: 120,
+          hasPlates: true,
+          promptAttachPlates: false,
+          requiresPlates: true,
+          shipByOverride: "2026-08-09",
+          closeDate: null,
+          contactName: "Ada",
+        },
+      ]),
+    );
+    const item = queue.shipReady[0];
+    assert.ok(item);
+    assert.match(item.shipBy, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(item.shipBy, "2026-08-09");
+    assert.equal(item.shipBySource, "override");
   });
 });
 

@@ -105,6 +105,10 @@ export interface PerformanceSnapshot {
      * “No CTB plates” attention alert for this deal.
      */
     promptAttachPlates: boolean;
+    /** Optional HubSpot ship-by override (`print_ship_by` or `ship_by_date`). */
+    shipByOverride?: string | null;
+    /** HubSpot creation timestamp used as a ship-by SLA fallback. */
+    createdAt?: string | null;
     /** HubSpot close date (ISO), when set. */
     closeDate: string | null;
     /** Best-effort contact label from “Product - Client” deal names. */
@@ -242,6 +246,8 @@ export function buildPerformanceSnapshot(input: {
       requiresPlates,
       promptAttachPlates: false as boolean,
       needsReply: truthyHubSpotFlag(props[PRINT_NEEDS_REPLY_PROPERTY]),
+      shipByOverride: props.print_ship_by?.trim() || props.ship_by_date?.trim() || null,
+      createdAt: createdAt?.toISOString() ?? null,
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),
       sortAt: (modifiedAt ?? createdAt ?? now).getTime(),
