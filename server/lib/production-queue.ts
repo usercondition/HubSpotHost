@@ -226,6 +226,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       stage: deal.stage,
       amount: deal.amount,
       shipByOverride: deal.shipByOverride,
+      shipPlanNote: deal.shipPlanNote,
       createdAt: deal.createdAt,
       closeDate: deal.closeDate,
       contactName: deal.contactName,

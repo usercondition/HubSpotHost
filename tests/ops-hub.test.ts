@@ -10,7 +10,7 @@ import { buildResinReorderSuggestions } from "../server/lib/resin-reorder";
 import { assignPlateToPrinter } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { printFileRecords } from "../shared/schema";
-import type { PerformanceResponse, ResinInventorySnapshot } from "../shared/schema";
+import { updateShipByPlanSchema, type PerformanceResponse, type ResinInventorySnapshot } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
 function withTempDb(run: () => void | Promise<void>) {
@@ -331,6 +331,31 @@ test("ship-by projection respects print duration, ready work, and overrides", ()
     shipBySource: "override",
     shipByReason: "HubSpot override",
   });
+});
+
+test("manual coordinated-batch ship plan accepts Angel's weekend override", () => {
+  const plan = updateShipByPlanSchema.parse({
+    shipBy: "2026-09-20",
+    note: "Process starts 2026-09-17; ship with Rhinos weekend",
+  });
+  assert.deepEqual(plan, {
+    shipBy: "2026-09-20",
+    note: "Process starts 2026-09-17; ship with Rhinos weekend",
+  });
+
+  const projection = deriveShipBy(
+    {
+      bucket: "in_production",
+      hasPlates: true,
+      shipByOverride: plan.shipBy,
+      createdAt: "2026-09-17T12:00:00.000Z",
+      stage: "Printing",
+      totalPrintTimeSeconds: 23 * 3_600,
+    },
+    { now: new Date("2026-09-17T19:00:00.000Z") },
+  );
+  assert.equal(projection.shipBy, "2026-09-20");
+  assert.equal(projection.shipBySource, "override");
 });
 
 test("production queue exposes a ship-by ISO date and source per deal", async () => {

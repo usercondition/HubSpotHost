@@ -266,7 +266,10 @@ work with an estimate has a minimum three-calendar-day lead time, while work
 without one retains the 10-day fallback SLA. Known print durations deliberately
 have no upper date cap: capping them could promise a date earlier than the
 physical completion time. Dates are rounded up to the America/Los_Angeles
-calendar day.
+calendar day. In Floor → Ops, set or clear the HubSpot `print_ship_by`
+override and add a coordinated-batch plan note (for example, Angel’s Defiler
+and Rhinos can use `2026-09-20` with “Process starts 2026-09-17”). Clearing
+the date immediately returns the order to the derived physical plan.
 
 ## Endpoints
 
