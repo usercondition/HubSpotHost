@@ -171,6 +171,74 @@ test("fingerprint changes when open work changes", () => {
   assert.notEqual(a, b);
 });
 
+test("health nudge includes overdue ship-bys even when attention is clear", () => {
+  const snapshot = sampleSnapshot({
+    attention: [],
+    intake: { awaitingClient: 0, pendingReview: 0, approved: 2 },
+    summary: {
+      revenue: 0,
+      grossProfit: 0,
+      weightedMarginPercent: 0,
+      orders: 0,
+      averageOrderValue: 0,
+      activeOrders: 1,
+      attentionCount: 0,
+    },
+  });
+  const overdueDeal = {
+    dealId: "late",
+    dealName: "Late bust",
+    stage: "Printing",
+    amount: 120,
+    bucket: "in_production" as const,
+    costsIncomplete: false,
+    hasPlates: true,
+    labelBought: false,
+    trackingPasted: false,
+    shipReady: false,
+    shipBy: "2026-09-10",
+    shipBySource: "override" as const,
+  };
+  const ctx: TrackerAssistantContext = {
+    snapshot,
+    awaitingLinks: [],
+    pendingLinks: [],
+    queue: {
+      summary: {
+        nextPrint: 0,
+        inProduction: 1,
+        shipReady: 0,
+        blocked: 0,
+        needsReply: 0,
+        readyToPack: 0,
+        openOrders: 1,
+      },
+      nextPrint: [],
+      shipReady: [],
+      blocked: [],
+      needsReply: [],
+      readyToPack: [],
+      needsLabel: [],
+      shipAgenda: {
+        today: "2026-09-17",
+        overdue: [overdueDeal],
+        dueToday: [],
+        thisWeek: [],
+      },
+    },
+  };
+  const collected = collectHealthNudgeItems(snapshot, ctx);
+  assert.equal(collected.hasWork, true);
+  assert.equal(collected.overdue.length, 1);
+  const built = buildHealthNudgeText(ctx);
+  assert.equal(built.hasWork, true);
+  assert.match(built.text, /Overdue ship-by/);
+  assert.match(built.text, /Late bust/);
+  const withShip = healthNudgeFingerprint(snapshot, ctx);
+  const withoutShip = healthNudgeFingerprint(snapshot);
+  assert.notEqual(withShip, withoutShip);
+});
+
 test("getHealthNudgeSchedule parses hour lists", () => {
   const schedule = getHealthNudgeSchedule({
     OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED: "true",

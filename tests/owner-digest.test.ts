@@ -335,6 +335,81 @@ test("owner digest includes do-first, next print, production, fleet, resin", () 
   assert.doesNotMatch(text, /https?:\/\//);
 });
 
+test("owner digest includes ship-by honesty when queue agenda is present", () => {
+  const ctx = sampleContext();
+  ctx.queue = {
+    summary: {
+      nextPrint: 1,
+      inProduction: 1,
+      shipReady: 0,
+      blocked: 0,
+      needsReply: 0,
+      readyToPack: 0,
+      openOrders: 2,
+    },
+    nextPrint: [],
+    shipReady: [],
+    blocked: [],
+    needsReply: [],
+    readyToPack: [],
+    needsLabel: [],
+    shipAgenda: {
+      today: "2026-09-17",
+      overdue: [
+        {
+          dealId: "late",
+          dealName: "Late bust",
+          stage: "Printing",
+          amount: 120,
+          bucket: "in_production",
+          costsIncomplete: false,
+          hasPlates: true,
+          labelBought: false,
+          trackingPasted: false,
+          shipReady: false,
+          shipBy: "2026-09-10",
+          shipBySource: "override",
+        },
+      ],
+      dueToday: [
+        {
+          dealId: "today",
+          dealName: "Due knight",
+          stage: "Queued",
+          amount: 80,
+          bucket: "next_print",
+          costsIncomplete: false,
+          hasPlates: false,
+          labelBought: false,
+          trackingPasted: false,
+          shipReady: false,
+          shipBy: "2026-09-17",
+          shipBySource: "derived",
+        },
+      ],
+      thisWeek: [],
+    },
+  };
+
+  const text = buildOwnerDigestText(ctx, {}, { now: new Date("2026-09-17T12:00:00.000Z") });
+  assert.match(text, /SHIP BY/);
+  assert.match(text, /Late bust/);
+  assert.match(text, /Due knight/);
+  assert.match(text, /Overdue|Due today|set|plan/);
+
+  const edition = buildOwnerDigestEdition(ctx, {
+    now: new Date("2026-09-17T12:00:00.000Z"),
+    timeZone: "America/Los_Angeles",
+  });
+  assert.ok(edition.lists.some((list) => list.eyebrow === "SHIP BY"));
+  assert.deepEqual(
+    edition.metrics.slice(0, 2).map((metric) => metric.label),
+    ["Overdue", "Due today"],
+  );
+  assert.equal(edition.metrics[0]?.value, 1);
+  assert.equal(edition.metrics[1]?.value, 1);
+});
+
 test("morning briefing card is a Floor board without raw URLs", () => {
   const ctx = sampleContext();
   const edition = buildOwnerDigestEdition(ctx, {
