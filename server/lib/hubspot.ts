@@ -170,8 +170,25 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     description: "Set when a buyer conversation is waiting on the print shop. Clear after the shop replies.",
     type: "bool",
     fieldType: "booleancheckbox",
+    /** HubSpot rejects bool creates without exactly these two options. */
+    options: [
+      { label: "Yes", value: "true", displayOrder: 0, hidden: false },
+      { label: "No", value: "false", displayOrder: 1, hidden: false },
+    ],
   },
 ] as const;
+
+/** True when a HubSpot bool property is missing the required true/false options. */
+export function boolPropertyNeedsOptionRepair(property: {
+  type?: string | null;
+  options?: Array<{ value?: string | null }> | null;
+}): boolean {
+  if (property.type !== "bool") return false;
+  const values = (property.options ?? [])
+    .map((option) => String(option.value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+  return !(values.includes("true") && values.includes("false"));
+}
 
 export class HubSpotError extends Error {
   status: number;
@@ -324,34 +341,53 @@ function printFileProperties(summary: PrintFileOrderSummary, attachedAt: string)
 /**
  * Create the custom deal properties only when they are missing. The operation
  * is deliberately server-side so the private app token never enters the UI.
+ * Also repairs bool properties that exist with empty/invalid options (HubSpot
+ * requires exactly true + false), which previously blocked plate attach.
  */
 export async function ensurePrintFileDealProperties(): Promise<void> {
   const data = await request("/crm/v3/properties/deals", { method: "GET" });
-  const existing = new Set(
-    (Array.isArray(data?.results) ? data.results : [])
-      .map((property: unknown) =>
-        property &&
-        typeof property === "object" &&
-        "name" in property &&
-        typeof (property as { name?: unknown }).name === "string"
-          ? (property as { name: string }).name
-          : "",
-      )
-      .filter(Boolean),
-  );
+  const results = Array.isArray(data?.results) ? data.results : [];
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const property of results) {
+    if (!property || typeof property !== "object") continue;
+    const name =
+      "name" in property && typeof (property as { name?: unknown }).name === "string"
+        ? (property as { name: string }).name
+        : "";
+    if (name) byName.set(name, property as Record<string, unknown>);
+  }
 
   for (const property of PRINT_FILE_DEAL_PROPERTIES) {
-    if (existing.has(property.name)) continue;
-    try {
-      await request("/crm/v3/properties/deals", {
-        method: "POST",
-        body: JSON.stringify({ ...property, groupName: "dealinformation" }),
+    const existing = byName.get(property.name);
+    if (!existing) {
+      try {
+        await request("/crm/v3/properties/deals", {
+          method: "POST",
+          body: JSON.stringify({ ...property, groupName: "dealinformation" }),
+        });
+      } catch (error) {
+        // A concurrent operator or workflow may have created the property after
+        // this check. That is safe to treat as success; any other HubSpot error
+        // is surfaced to the owner before the local record is written.
+        if (!(error instanceof HubSpotError) || error.status !== 409) throw error;
+      }
+      continue;
+    }
+
+    if (
+      property.type === "bool" &&
+      property.options &&
+      boolPropertyNeedsOptionRepair({
+        type: typeof existing.type === "string" ? existing.type : null,
+        options: Array.isArray(existing.options)
+          ? (existing.options as Array<{ value?: string | null }>)
+          : null,
+      })
+    ) {
+      await request(`/crm/v3/properties/deals/${encodeURIComponent(property.name)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ options: property.options }),
       });
-    } catch (error) {
-      // A concurrent operator or workflow may have created the property after
-      // this check. That is safe to treat as success; any other HubSpot error
-      // is surfaced to the owner before the local record is written.
-      if (!(error instanceof HubSpotError) || error.status !== 409) throw error;
     }
   }
 }
