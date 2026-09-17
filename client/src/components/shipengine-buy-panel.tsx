@@ -10,6 +10,7 @@ import {
   ArrowUpDown,
   Wallet,
   Plus,
+  PackageCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -316,8 +317,18 @@ export function ShipEngineBuyPanel({
   });
 
   const shipReadyPicks = useMemo(() => {
-    const items = [...(queueQuery.data?.shipReady ?? []), ...(queueQuery.data?.inProduction ?? [])];
-    return items.slice(0, 8);
+    const shipReady = queueQuery.data?.shipReady ?? [];
+    const readyToPack = queueQuery.data?.readyToPack ?? [];
+    const inProduction = queueQuery.data?.inProduction ?? [];
+    const seen = new Set<string>();
+    const picks = [];
+    for (const item of [...shipReady, ...readyToPack, ...inProduction]) {
+      if (seen.has(item.dealId)) continue;
+      seen.add(item.dealId);
+      picks.push(item);
+      if (picks.length >= 10) break;
+    }
+    return picks;
   }, [queueQuery.data]);
 
   const preferredRates = useMemo(
@@ -691,9 +702,99 @@ export function ShipEngineBuyPanel({
             </div>
           )}
 
+          {shipReadyPicks.length > 0 ? (
+            <div className="space-y-2" data-testid="panel-shipengine-order-picks">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold tracking-tight">Ready to label</p>
+                  <p className="text-xs text-muted-foreground">
+                    Pick a Queue order — same cards as ship-ready, not a chip dump.
+                  </p>
+                </div>
+                <p className="text-xs tabular-nums text-muted-foreground">
+                  {shipReadyPicks.length} shown
+                </p>
+              </div>
+              <ul className="glance-list">
+                {shipReadyPicks.map((item) => {
+                  const selected = dealId === item.dealId;
+                  const labeled = item.fulfillment.labelBought;
+                  const packed = item.fulfillment.packingDone;
+                  const tone = labeled
+                    ? "good"
+                    : item.readyToPack || item.fulfillment.shipReady
+                      ? "good"
+                      : item.bucket === "ship_ready"
+                        ? "good"
+                        : undefined;
+                  return (
+                    <li key={item.dealId}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "glance-item w-full text-left",
+                          selected && "border-primary/50 bg-primary/10",
+                        )}
+                        data-tone={selected ? "good" : tone}
+                        data-testid={`button-shipengine-pick-${item.dealId}`}
+                        onClick={() => {
+                          setDealId(item.dealId);
+                          setRates([]);
+                          setSelectedRateId("");
+                        }}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-start justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold tracking-tight">
+                                {item.dealName}
+                              </span>
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {item.stage}
+                                {item.contactName ? ` · ${item.contactName}` : ""}
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-sm font-medium tabular-nums">
+                              {formatMoney(item.amount)}
+                            </span>
+                          </span>
+                          <span className="mt-2 flex flex-wrap gap-1.5">
+                            {item.readyToPack ? (
+                              <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
+                            ) : null}
+                            {labeled ? (
+                              <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
+                            ) : (
+                              <StatusPill tone="warn" icon={Ship} label="Needs label" />
+                            )}
+                            {packed ? (
+                              <StatusPill tone="neutral" icon={PackageCheck} label="Packed" />
+                            ) : null}
+                            <StatusPill
+                              tone={item.fulfillment.shipReady ? "good" : "neutral"}
+                              icon={Ship}
+                              label={`Ship ${item.fulfillment.readyPercent}%`}
+                            />
+                          </span>
+                        </span>
+                        {selected ? (
+                          <StatusPill tone="good" icon={CheckCircle2} label="Selected" />
+                        ) : (
+                          <span className="shrink-0 text-xs text-muted-foreground">Select</span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <div className="space-y-1.5">
-              <Label htmlFor="shipengine-deal-id">Print Order deal ID</Label>
+              <Label htmlFor="shipengine-deal-id">
+                {shipReadyPicks.length > 0 ? "Or paste deal ID" : "Print Order deal ID"}
+              </Label>
               <Input
                 id="shipengine-deal-id"
                 value={dealId}
@@ -722,28 +823,6 @@ export function ShipEngineBuyPanel({
               </Button>
             </div>
           </div>
-
-          {shipReadyPicks.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {shipReadyPicks.map((item) => (
-                <Button
-                  key={item.dealId}
-                  type="button"
-                  size="sm"
-                  variant={dealId === item.dealId ? "default" : "outline"}
-                  onClick={() => {
-                    setDealId(item.dealId);
-                    setRates([]);
-                    setSelectedRateId("");
-                  }}
-                  data-testid={`button-shipengine-pick-${item.dealId}`}
-                >
-                  {item.dealName.slice(0, 28)}
-                  {item.fulfillment.labelBought ? " · labeled" : ""}
-                </Button>
-              ))}
-            </div>
-          ) : null}
 
           {shipToQuery.isFetching ? (
             <p className="text-xs text-muted-foreground">Loading HubSpot ship-to…</p>
