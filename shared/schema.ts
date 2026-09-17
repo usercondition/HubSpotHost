@@ -255,6 +255,8 @@ export interface PerformanceResponse {
     needsReply?: boolean;
     /** Optional HubSpot ship-by override (`print_ship_by` or `ship_by_date`). */
     shipByOverride?: string | null;
+  /** Optional HubSpot shipping plan note shown alongside the Floor date. */
+  shipPlanNote?: string | null;
     /** HubSpot creation timestamp used as a ship-by SLA fallback. */
     createdAt?: string | null;
     closeDate: string | null;
@@ -1988,6 +1990,8 @@ export interface ProductionQueueItem {
   shipBy: string;
   /** An Intern-set HubSpot date wins over the documented SLA projection. */
   shipBySource: "override" | "derived";
+  /** Short explanation of the override or feasible production-time projection. */
+  shipByReason: string;
   /**
    * HubSpot contact ship-to readiness for label buy.
    * Enriched for ship-ready / ready-to-pack rows; others default to missing.

@@ -292,25 +292,45 @@ test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", 
   });
 });
 
-test("ship-by projection uses Los Angeles calendar SLAs and an Intern override", () => {
+test("ship-by projection respects print duration, ready work, and overrides", () => {
   const now = new Date("2026-08-10T19:00:00.000Z"); // noon in Los Angeles
   const dueToday = deriveShipBy(
     { bucket: "ship_ready", hasPlates: true, shipByOverride: null, createdAt: "2026-08-01T12:00:00.000Z" },
     { now },
   );
-  assert.deepEqual(dueToday, { shipBy: "2026-08-10", shipBySource: "derived" });
+  assert.deepEqual(dueToday, {
+    shipBy: "2026-08-10",
+    shipBySource: "derived",
+    shipByReason: "ready to ship",
+  });
 
-  const future = deriveShipBy(
-    { bucket: "in_production", hasPlates: true, shipByOverride: null, createdAt: "2026-08-01T12:00:00.000Z" },
-    { now, latestPlateAttachedAt: "2026-08-06T19:00:00.000Z" },
+  const longPrint = deriveShipBy(
+    {
+      bucket: "in_production",
+      hasPlates: true,
+      shipByOverride: null,
+      createdAt: "2026-08-01T12:00:00.000Z",
+      stage: "Printing",
+      totalPrintTimeSeconds: 23 * 3_600,
+    },
+    { now },
   );
-  assert.deepEqual(future, { shipBy: "2026-08-11", shipBySource: "derived" });
+  // Noon PT + 23h print + 24h wash/cure/QC reaches Aug 12, never tomorrow.
+  assert.deepEqual(longPrint, {
+    shipBy: "2026-08-12",
+    shipBySource: "derived",
+    shipByReason: "print 23h + 24h QC",
+  });
 
   const overdue = deriveShipBy(
     { bucket: "next_print", hasPlates: false, shipByOverride: "2026-08-09", createdAt: "2026-08-01T12:00:00.000Z" },
     { now },
   );
-  assert.deepEqual(overdue, { shipBy: "2026-08-09", shipBySource: "override" });
+  assert.deepEqual(overdue, {
+    shipBy: "2026-08-09",
+    shipBySource: "override",
+    shipByReason: "HubSpot override",
+  });
 });
 
 test("production queue exposes a ship-by ISO date and source per deal", async () => {

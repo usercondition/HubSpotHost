@@ -50,6 +50,7 @@ export type TrackerAssistantQueueDeal = {
   /** Projected or override ship-by (`YYYY-MM-DD`, America/Los_Angeles). */
   shipBy?: string;
   shipBySource?: "override" | "derived";
+  shipByReason?: string;
   addressStatus?: ProductionQueueItem["addressStatus"];
   addressSummary?: string | null;
   chaseDraft?: string;
@@ -118,6 +119,7 @@ export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueD
     readyToPack: item.readyToPack,
     shipBy: item.shipBy,
     shipBySource: item.shipBySource,
+    shipByReason: item.shipByReason,
     addressStatus: item.addressStatus,
     addressSummary: item.addressSummary,
     chaseDraft: item.chaseDraft,
@@ -377,7 +379,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       lines.push(`Overdue (${overdue.length}):`);
       for (const deal of overdue.slice(0, 6)) {
         lines.push(
-          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
         actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
       }
@@ -387,7 +389,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       lines.push(`Due today (${dueToday.length}):`);
       for (const deal of dueToday.slice(0, 6)) {
         lines.push(
-          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
         actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
       }
@@ -397,7 +399,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       lines.push(`Next 7 days (${thisWeek.length}):`);
       for (const deal of thisWeek.slice(0, 6)) {
         lines.push(
-          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
+          `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
         actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
       }

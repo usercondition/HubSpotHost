@@ -244,7 +244,7 @@ export function buildOwnerDigestEdition(
         name: clip(deal.dealName, 34),
         badge: "Overdue",
         detail: clip(
-          [deal.shipBy ? formatShipByShort(deal.shipBy) : "", deal.shipBySource === "override" ? "set" : "plan", deal.stage]
+          [deal.shipBy ? formatShipByShort(deal.shipBy) : "", deal.shipBySource === "override" ? "set" : "plan", deal.shipByReason, deal.stage]
             .filter(Boolean)
             .join(" · "),
           52,
@@ -254,13 +254,13 @@ export function buildOwnerDigestEdition(
       ...shipAgenda.dueToday.slice(0, 3).map((deal) => ({
         name: clip(deal.dealName, 34),
         badge: "Due today",
-        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan"].filter(Boolean).join(" · "), 52),
+        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan", deal.shipByReason].filter(Boolean).join(" · "), 52),
         tone: "warn" as const,
       })),
       ...shipAgenda.thisWeek.slice(0, 2).map((deal) => ({
         name: clip(deal.dealName, 34),
         badge: deal.shipBy ? formatShipByShort(deal.shipBy) : "This week",
-        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan"].filter(Boolean).join(" · "), 52),
+        detail: clip([deal.stage, deal.shipBySource === "override" ? "set" : "plan", deal.shipByReason].filter(Boolean).join(" · "), 52),
         tone: "neutral" as const,
       })),
     ];
