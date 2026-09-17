@@ -161,6 +161,8 @@ export function DealOpsPanel({
   const [costs, setCosts] = useState(defaultDealCostFields);
   const [stageId, setStageId] = useState("");
   const [tracking, setTracking] = useState("");
+  const [shipBy, setShipBy] = useState("");
+  const [shipPlanNote, setShipPlanNote] = useState("");
   const [failureType, setFailureType] = useState<ProductionFailureType>("qc_reject");
   const [failureNotes, setFailureNotes] = useState("");
   const [failureResin, setFailureResin] = useState("");
@@ -175,6 +177,8 @@ export function DealOpsPanel({
     });
     setStageId(detail.data.stageId);
     setTracking(detail.data.checklist.trackingNumber);
+    setShipBy(detail.data.shipByOverride ?? "");
+    setShipPlanNote(detail.data.shipPlanNote ?? "");
   }, [detail.data]);
 
   const openStages = useMemo(
@@ -230,6 +234,34 @@ export function DealOpsPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not advance stage",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const saveShipByPlan = useMutation({
+    mutationFn: async (input: { shipBy: string; note: string }) => {
+      const response = await apiRequest(
+        "PATCH",
+        `/api/deal-ops/${encodeURIComponent(dealId)}/ship-by`,
+        { ...input, liveWrite: true },
+        { headers },
+      );
+      return response.json() as Promise<{ dryRun?: boolean; gate?: string; shipByOverride?: string | null }>;
+    },
+    onSuccess: (data) => {
+      invalidateOps(dealId);
+      toast({
+        title: data.dryRun ? "Ship plan previewed (dry run)" : data.shipByOverride ? "Ship-by override saved" : "Ship-by override cleared",
+        description: data.dryRun
+          ? `Write gate: ${data.gate || "dry-run"}. Enable ALLOW_HUBSPOT_WRITES for live CRM sync.`
+          : "Floor, Ask Ops, and synced ship events will use the updated plan.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not save ship plan",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
         variant: "destructive",
       });
@@ -482,6 +514,60 @@ export function DealOpsPanel({
             {advanceStage.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
             Update stage
           </Button>
+        </div>
+
+        <div className="space-y-3 rounded-md border border-border/80 p-3">
+          <div>
+            <h3 className="text-sm font-semibold">Ship-by plan</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Set a manual HubSpot date for coordinated batches. Clear the date to return to the physical print-time plan.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="ship-by-override">Ship by</Label>
+            <Input
+              id="ship-by-override"
+              type="date"
+              value={shipBy}
+              onChange={(event) => setShipBy(event.target.value)}
+              data-testid="input-ship-by-override"
+            />
+          </div>
+          <div>
+            <Label htmlFor="ship-plan-note">Ship plan note</Label>
+            <Textarea
+              id="ship-plan-note"
+              value={shipPlanNote}
+              onChange={(event) => setShipPlanNote(event.target.value)}
+              placeholder="Process Thu, ship with Rhinos weekend"
+              data-testid="input-ship-plan-note"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => saveShipByPlan.mutate({ shipBy, note: shipPlanNote })}
+              disabled={saveShipByPlan.isPending}
+              data-testid="button-save-ship-by-override"
+            >
+              {saveShipByPlan.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+              Save ship plan
+            </Button>
+            {data.shipByOverride ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShipBy("");
+                  saveShipByPlan.mutate({ shipBy: "", note: shipPlanNote });
+                }}
+                disabled={saveShipByPlan.isPending}
+                data-testid="button-clear-ship-by-override"
+              >
+                Clear override
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 

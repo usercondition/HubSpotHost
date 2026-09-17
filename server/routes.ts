@@ -194,6 +194,7 @@ import {
   openResinBottleSchema,
   setActiveResinBottleSchema,
   updateDealCostsSchema,
+  updateShipByPlanSchema,
   updateFulfillmentChecklistSchema,
   updatePrinterSchema,
   upsertResinProductSchema,
@@ -221,6 +222,7 @@ import {
   fetchDealAssociatedContact,
   seedPrintDealCosts,
   updateDealCosts,
+  updateShipByPlan,
 } from "./lib/deal-ops";
 import { createProductionFailure, listProductionFailures, failureSummary } from "./lib/failures";
 import {
@@ -1194,6 +1196,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const result = await updateDealCosts(String(req.params.dealId || ""), parsed.data);
     if (!result.ok) {
       return res.status(result.status ?? 400).json({ ok: false, error: result.error });
+    }
+    return res.json(result);
+  });
+
+  app.patch("/api/deal-ops/:dealId/ship-by", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = updateShipByPlanSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    }
+    const result = await updateShipByPlan(String(req.params.dealId || ""), parsed.data);
+    if (!result.ok) {
+      return res.status(result.status ?? 400).json(result);
     }
     return res.json(result);
   });

@@ -255,6 +255,8 @@ export interface PerformanceResponse {
     needsReply?: boolean;
     /** Optional HubSpot ship-by override (`print_ship_by` or `ship_by_date`). */
     shipByOverride?: string | null;
+    /** Optional HubSpot shipping plan note shown alongside the Floor date. */
+    shipPlanNote?: string | null;
     /** HubSpot creation timestamp used as a ship-by SLA fallback. */
     createdAt?: string | null;
     closeDate: string | null;
@@ -1896,6 +1898,15 @@ export const updateFulfillmentChecklistSchema = z.object({
 
 export type UpdateFulfillmentChecklistInput = z.infer<typeof updateFulfillmentChecklistSchema>;
 
+/** Manual Floor plan; an empty date clears the HubSpot ship-by override. */
+export const updateShipByPlanSchema = z.object({
+  shipBy: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")]),
+  note: trimmed(2_000).optional(),
+  liveWrite: z.boolean().optional(),
+});
+
+export type UpdateShipByPlanInput = z.infer<typeof updateShipByPlanSchema>;
+
 export const updateDealCostsSchema = z.object({
   material: z
     .string()
@@ -1982,12 +1993,16 @@ export interface ProductionQueueItem {
   amount: number;
   /** Optional HubSpot ship-by override used by the projection. */
   shipByOverride?: string | null;
+  /** Optional short HubSpot shipping plan note. */
+  shipPlanNote?: string | null;
   /** HubSpot creation timestamp used by the projection when no plate is attached. */
   createdAt?: string | null;
   /** Projected ship-by date in America/Los_Angeles (`YYYY-MM-DD`). */
   shipBy: string;
   /** An Intern-set HubSpot date wins over the documented SLA projection. */
   shipBySource: "override" | "derived";
+  /** Short explanation of the override or feasible production-time projection. */
+  shipByReason: string;
   /**
    * HubSpot contact ship-to readiness for label buy.
    * Enriched for ship-ready / ready-to-pack rows; others default to missing.
@@ -2100,6 +2115,8 @@ export interface DealOpsDetail {
   stage: string;
   amount: number;
   closeDate: string | null;
+  shipByOverride: string | null;
+  shipPlanNote: string | null;
   costs: DealCostFields;
   checklist: FulfillmentChecklistView;
   plates: Array<{

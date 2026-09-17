@@ -123,8 +123,11 @@ function QueueCard({
         <StatusPill
           tone={item.fulfillment.shipReady ? "good" : "neutral"}
           icon={Ship}
-          label={`Ship ${item.fulfillment.readyPercent}%`}
+          label={`Ship by ${item.shipBy}${item.shipBySource === "override" ? " · set" : ""}`}
         />
+        {item.shipPlanNote ? (
+          <StatusPill tone="neutral" icon={MessageCircle} label={item.shipPlanNote} />
+        ) : null}
       </div>
       {item.requiresPlates ? (
         <div className="mt-2 flex flex-wrap gap-2 text-xs">

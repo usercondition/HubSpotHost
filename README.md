@@ -255,6 +255,22 @@ Keep HubSpot as the CRM of record. Use Print Ops as the shop-floor control loop.
 
 Print Ops is the primary shop-floor frontend. HubSpot stays the CRM backend for contacts, deal money fields, timeline/comms, and reporting — open it when you need CRM history, not for routine stage moves or cost entry.
 
+### Ship-by planning
+
+`GET /api/production-queue` returns `shipBy`, `shipBySource`, and a short
+`shipByReason` for every Print Order. A valid HubSpot `print_ship_by` (or
+`ship_by_date`) is always retained as an override. Otherwise, ready-to-ship
+work is due today; printing uses the known print duration plus a 24-hour
+wash/cure/QC buffer; and post-process/QC work gets that 24-hour buffer. Queued
+work with an estimate has a minimum three-calendar-day lead time, while work
+without one retains the 10-day fallback SLA. Known print durations deliberately
+have no upper date cap: capping them could promise a date earlier than the
+physical completion time. Dates are rounded up to the America/Los_Angeles
+calendar day. In Floor → Ops, set or clear the HubSpot `print_ship_by`
+override and add a coordinated-batch plan note (for example, Angel’s Defiler
+and Rhinos can use `2026-09-20` with “Process starts 2026-09-17”). Clearing
+the date immediately returns the order to the derived physical plan.
+
 ## Endpoints
 
 | Endpoint | Use |

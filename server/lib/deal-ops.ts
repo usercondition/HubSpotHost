@@ -11,6 +11,7 @@ import {
   type DealOpsDetail,
   type PackingSlip,
   type UpdateDealCostsInput,
+  type UpdateShipByPlanInput,
   dealRequiresPlates,
 } from "../../shared/schema";
 import { calculateProfit } from "./calc";
@@ -23,6 +24,7 @@ import {
   hubspotRequest,
   HubSpotError,
   invalidatePrintOrderDealsCache,
+  ensurePrintFileDealProperties,
   PRINT_ORDERS_PIPELINE,
 } from "./hubspot";
 import { getKitForDeal } from "./kits";
@@ -102,6 +104,9 @@ async function fetchDealWithCosts(dealId: string): Promise<{
       "print_packaging_cost",
       "print_actual_shipping_cost",
       "print_tracking_number",
+      "print_ship_notes",
+      "print_ship_by",
+      "ship_by_date",
       "print_gross_profit",
       "print_margin_percentage",
       "description",
@@ -273,6 +278,51 @@ export function assignPlateToPrinter(
 
   // API keeps assignedPrinter* names for DealOpsPanel; DB column is fleet_printer_id.
   return { ok: true, recordId: input.recordId, assignedPrinterId: fleetPrinterId, assignedPrinterName };
+}
+
+/** Set or clear the manual Floor ship-by override and optional shipping plan note. */
+export async function updateShipByPlan(
+  dealId: string,
+  input: UpdateShipByPlanInput,
+): Promise<
+  | { ok: true; dryRun: boolean; gate: string; shipByOverride: string | null; shipPlanNote: string | null }
+  | { ok: false; error: string; status?: number }
+> {
+  const id = dealId.trim();
+  if (!/^[0-9]{1,20}$/.test(id)) return { ok: false, error: "Select a valid Print Order.", status: 400 };
+
+  const config = getConfig();
+  const decision = resolveWriteDecision(config, input.liveWrite !== false);
+  const shipByOverride = input.shipBy || null;
+  // Clear the legacy alias too: otherwise an older `ship_by_date` value would
+  // silently continue to override the derived plan after Floor clears this one.
+  const properties: Record<string, string> = {
+    print_ship_by: input.shipBy,
+    ...(input.shipBy ? {} : { ship_by_date: "" }),
+  };
+  if (input.note !== undefined) properties.print_ship_notes = input.note;
+
+  try {
+    if (decision.write) {
+      await ensurePrintFileDealProperties();
+      await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ properties }),
+      });
+      invalidatePrintOrderDealsCache();
+    }
+    return {
+      ok: true,
+      dryRun: !decision.write,
+      gate: decision.reason,
+      shipByOverride,
+      shipPlanNote: input.note ?? null,
+    };
+  } catch (error) {
+    const message = error instanceof HubSpotError ? error.message : "Could not update ship-by plan.";
+    const status = error instanceof HubSpotError ? error.status : 502;
+    return { ok: false, error: message, status };
+  }
 }
 
 export async function updateDealCosts(
@@ -550,6 +600,8 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
       stage: stageLabel,
       amount: costs.amount,
       closeDate: props.closedate ? new Date(Number(props.closedate) || props.closedate).toISOString() : null,
+      shipByOverride: String(props.print_ship_by ?? props.ship_by_date ?? "").trim() || null,
+      shipPlanNote: String(props.print_ship_notes ?? "").trim() || null,
       costs,
       checklist,
       plates: plateViews,

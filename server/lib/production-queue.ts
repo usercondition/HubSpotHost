@@ -31,6 +31,7 @@ type QueueItemBase = Omit<
   | "readyToPack"
   | "shipBy"
   | "shipBySource"
+  | "shipByReason"
   | "addressStatus"
   | "addressSummary"
   | "chaseDraft"
@@ -38,11 +39,14 @@ type QueueItemBase = Omit<
 
 /** Ship-by planning always uses the shop's calendar, never the server's timezone. */
 export const SHIP_BY_TIME_ZONE = "America/Los_Angeles";
-/** Default calendar-day SLAs, kept here so the Floor and API stay aligned. */
+export const SHIP_BY_POST_PROCESS_BUFFER_SECONDS = 24 * 60 * 60;
+/** Default calendar-day SLAs used only when no print-duration estimate exists. */
 export const SHIP_BY_SLA_DAYS = {
   queued: 10,
   inProduction: 5,
 } as const;
+/** Queued jobs with a duration estimate still need at least this much calendar lead time. */
+export const SHIP_BY_QUEUED_MIN_DAYS = 3;
 
 function localCalendarDate(value: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -68,25 +72,69 @@ function addCalendarDays(date: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
-export function deriveShipBy(
-  item: Pick<ProductionQueueItem, "bucket" | "hasPlates" | "shipByOverride" | "createdAt">,
-  options: { now?: Date; latestPlateAttachedAt?: string | null } = {},
-): Pick<ProductionQueueItem, "shipBy" | "shipBySource"> {
-  const override = calendarDate(item.shipByOverride);
-  if (override) return { shipBy: override, shipBySource: "override" };
+function durationHours(seconds: number): string {
+  const hours = Math.round((seconds / 3_600) * 10) / 10;
+  return `${Number.isInteger(hours) ? hours.toFixed(0) : hours}h`;
+}
 
-  const today = localCalendarDate(options.now ?? new Date());
-  // Ship-ready work is due today. Printing/post-process work gets five calendar
-  // days from its latest plate attachment (or deal creation); queued work gets ten.
-  if (item.bucket === "ship_ready") return { shipBy: today, shipBySource: "derived" };
-  const anchor =
-    calendarDate(options.latestPlateAttachedAt) ??
-    calendarDate(item.createdAt) ??
-    today;
-  const days = item.bucket === "in_production" || item.hasPlates
-    ? SHIP_BY_SLA_DAYS.inProduction
-    : SHIP_BY_SLA_DAYS.queued;
-  return { shipBy: addCalendarDays(anchor, days), shipBySource: "derived" };
+function isPostProcessStage(stage: string | null | undefined): boolean {
+  return /\b(post[\s-]?process(?:ing)?|wash(?:ing)?|cur(?:e|ing)|qc|quality control|inspection)\b/i.test(stage ?? "");
+}
+
+export function deriveShipBy(
+  item: Pick<ProductionQueueItem, "bucket" | "hasPlates" | "shipByOverride" | "createdAt">
+    & Partial<Pick<ProductionQueueItem, "stage" | "totalPrintTimeSeconds">>,
+  options: { now?: Date; remainingPrintTimeSeconds?: number | null } = {},
+): Pick<ProductionQueueItem, "shipBy" | "shipBySource" | "shipByReason"> {
+  const override = calendarDate(item.shipByOverride);
+  if (override) return { shipBy: override, shipBySource: "override", shipByReason: "HubSpot override" };
+
+  const now = options.now ?? new Date();
+  const today = localCalendarDate(now);
+  // Finished work may ship today; all other calculations represent an earliest
+  // feasible completion time, rounded up to its Los Angeles calendar date.
+  if (item.bucket === "ship_ready") {
+    return { shipBy: today, shipBySource: "derived", shipByReason: "ready to ship" };
+  }
+  if (item.hasPlates && isPostProcessStage(item.stage)) {
+    return {
+      shipBy: localCalendarDate(new Date(now.getTime() + SHIP_BY_POST_PROCESS_BUFFER_SECONDS * 1_000)),
+      shipBySource: "derived",
+      shipByReason: "post-process + 24h QC",
+    };
+  }
+
+  const remainingSeconds = options.remainingPrintTimeSeconds ?? item.totalPrintTimeSeconds;
+  if (remainingSeconds != null && Number.isFinite(remainingSeconds) && remainingSeconds > 0) {
+    const earliest = localCalendarDate(new Date(now.getTime() + (remainingSeconds + SHIP_BY_POST_PROCESS_BUFFER_SECONDS) * 1_000));
+    if (item.bucket === "next_print") {
+      return {
+        shipBy: earliest < addCalendarDays(today, SHIP_BY_QUEUED_MIN_DAYS)
+          ? addCalendarDays(today, SHIP_BY_QUEUED_MIN_DAYS)
+          : earliest,
+        shipBySource: "derived",
+        shipByReason: `queued print ${durationHours(remainingSeconds)} + 24h QC (min 3d)`,
+      };
+    }
+    return {
+      shipBy: earliest,
+      shipBySource: "derived",
+      shipByReason: `print ${durationHours(remainingSeconds)} + 24h QC`,
+    };
+  }
+
+  if (item.bucket === "next_print") {
+    return {
+      shipBy: addCalendarDays(today, SHIP_BY_SLA_DAYS.queued),
+      shipBySource: "derived",
+      shipByReason: "queued SLA (no print estimate)",
+    };
+  }
+  return {
+    shipBy: addCalendarDays(today, SHIP_BY_SLA_DAYS.inProduction),
+    shipBySource: "derived",
+    shipByReason: "production SLA (no print estimate)",
+  };
 }
 
 function priorityScore(item: QueueItemBase): number {
@@ -178,6 +226,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       stage: deal.stage,
       amount: deal.amount,
       shipByOverride: deal.shipByOverride,
+      shipPlanNote: deal.shipPlanNote,
       createdAt: deal.createdAt,
       closeDate: deal.closeDate,
       contactName: deal.contactName,
@@ -215,7 +264,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       (!base.fulfillment.packingDone || !base.fulfillment.labelBought || !base.fulfillment.trackingPasted);
     return {
       ...base,
-      ...deriveShipBy({ ...base, bucket }, { latestPlateAttachedAt }),
+      ...deriveShipBy({ ...base, bucket }),
       bucket,
       readyToPack,
       priorityScore: priorityScore(base),

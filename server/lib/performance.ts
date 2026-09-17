@@ -247,6 +247,7 @@ export function buildPerformanceSnapshot(input: {
       promptAttachPlates: false as boolean,
       needsReply: truthyHubSpotFlag(props[PRINT_NEEDS_REPLY_PROPERTY]),
       shipByOverride: props.print_ship_by?.trim() || props.ship_by_date?.trim() || null,
+      shipPlanNote: props.print_ship_notes?.trim() || null,
       createdAt: createdAt?.toISOString() ?? null,
       closeDate: closeDateIso(props.closedate),
       contactName: contactNameFromDeal(dealName),

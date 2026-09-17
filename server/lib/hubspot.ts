@@ -25,8 +25,8 @@ export const PERFORMANCE_PROPERTIES = [
   "print_line_kind",
   "print_tracking_number",
   "print_ship_notes",
-  // Optional date overrides; this app only reads them. Either existing
-  // property name is accepted so an Intern can keep calendar and Floor aligned.
+  // `print_ship_by` is the Floor's writable override. `ship_by_date` remains
+  // readable for compatibility with existing HubSpot workflows.
   "print_ship_by",
   "ship_by_date",
   PRINT_NEEDS_REPLY_PROPERTY,
@@ -167,6 +167,13 @@ const PRINT_FILE_DEAL_PROPERTIES = [
     description: "Short ship notes from Print Ops fulfillment checklist.",
     type: "string",
     fieldType: "textarea",
+  },
+  {
+    name: "print_ship_by",
+    label: "Print ship-by override",
+    description: "Manual Print Ops ship-by date. Clear it to resume the derived production plan.",
+    type: "date",
+    fieldType: "date",
   },
   {
     name: PRINT_NEEDS_REPLY_PROPERTY,

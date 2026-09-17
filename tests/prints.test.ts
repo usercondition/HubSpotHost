@@ -696,7 +696,7 @@ test("production-queue API returns projected ship-by date and source", async () 
     .find((row: { dealId: string }) => row.dealId === "701");
   assert.ok(item);
   assert.deepEqual(
-    { shipBy: item.shipBy, shipBySource: item.shipBySource },
-    { shipBy: "2026-09-18", shipBySource: "override" },
+    { shipBy: item.shipBy, shipBySource: item.shipBySource, shipByReason: item.shipByReason },
+    { shipBy: "2026-09-18", shipBySource: "override", shipByReason: "HubSpot override" },
   );
 });
