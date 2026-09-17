@@ -294,7 +294,12 @@ export async function updateShipByPlan(
   const config = getConfig();
   const decision = resolveWriteDecision(config, input.liveWrite !== false);
   const shipByOverride = input.shipBy || null;
-  const properties: Record<string, string> = { print_ship_by: input.shipBy };
+  // Clear the legacy alias too: otherwise an older `ship_by_date` value would
+  // silently continue to override the derived plan after Floor clears this one.
+  const properties: Record<string, string> = {
+    print_ship_by: input.shipBy,
+    ...(input.shipBy ? {} : { ship_by_date: "" }),
+  };
   if (input.note !== undefined) properties.print_ship_notes = input.note;
 
   try {
