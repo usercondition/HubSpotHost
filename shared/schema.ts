@@ -124,6 +124,13 @@ export interface HealthResponse {
     telegramConfigured: boolean;
     schedule: { enabled: boolean; timeZone: string; hours: number[] };
   };
+  shipByGcal?: {
+    configured: boolean;
+    calendarId: string;
+    schedule: { enabled: boolean; intervalMinutes: number };
+    lastError?: string | null;
+    lastSyncedAt?: string | null;
+  };
   shipengine?: {
     configured: boolean;
     hasApiKey: boolean;

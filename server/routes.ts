@@ -230,6 +230,13 @@ import {
   listExistingTrackingAttachments,
 } from "./lib/fulfillment";
 import { buildProductionQueue, attachShipAddressReadiness } from "./lib/production-queue";
+import {
+  getShipByGcalConfig,
+  queueItemsForShipByGcal,
+  readShipByGcalState,
+  startShipByGcalScheduler,
+  syncShipByGoogleCalendar,
+} from "./lib/shipby-gcal";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 import {
   attachShippingLabelSchema,
@@ -855,6 +862,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         telegramConfigured: telegramConfigured(),
         schedule: getHealthNudgeSchedule(),
       },
+      shipByGcal: (() => {
+        const config = getShipByGcalConfig();
+        const state = config.configured ? readShipByGcalState() : { events: {}, lastError: null, lastSyncedAt: null };
+        return {
+          configured: config.configured,
+          calendarId: config.calendarId,
+          schedule: {
+            enabled: config.scheduleEnabled,
+            intervalMinutes: config.intervalMinutes,
+          },
+          lastError: state.lastError ?? null,
+          lastSyncedAt: state.lastSyncedAt ?? null,
+        };
+      })(),
       shipengine: (() => {
         const se = getShipEngineStatus();
         return {
@@ -2110,6 +2131,73 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** Manual ship-by → Google Calendar sync (owner unlock). Skips when Google unset. */
+  app.post("/api/shipby-gcal/sync", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const [deals, stages, portalId] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
+      ]);
+      refreshPrintFileStagesFromHubSpot(deals, stages);
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        attachedPrintDealIds: attachedPrintFileDealIds(),
+        shippingLabelDealIds: attachedShippingLabelDealIds(),
+        hubspotPortalId: portalId,
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
+      });
+      const queue = buildProductionQueue(snapshot);
+      const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
+      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not sync ship-by Google Calendar",
+      });
+    }
+  });
+
+  /**
+   * Cron / scheduler entrypoint for ship-by Google Calendar sync.
+   * Reuses OWNER_DIGEST_CRON_SECRET. Returns skipped when Google is unset.
+   */
+  app.post("/api/cron/shipby-gcal", async (req: Request, res: Response) => {
+    if (rejectUnsecuredOwnerDigestCron(req, res)) return;
+    try {
+      const [deals, stages, portalId] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
+      ]);
+      refreshPrintFileStagesFromHubSpot(deals, stages);
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        attachedPrintDealIds: attachedPrintFileDealIds(),
+        shippingLabelDealIds: attachedShippingLabelDealIds(),
+        hubspotPortalId: portalId,
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
+      });
+      const queue = buildProductionQueue(snapshot);
+      const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
+      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+    } catch (error) {
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not run ship-by Google Calendar cron",
+      });
+    }
+  });
+
 startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     console.log(`${new Date().toISOString()} [owner-digest] ${message}`);
   });
@@ -2117,6 +2205,32 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   startHealthNudgeScheduler(loadTrackerAssistantContext, process.env, (message) => {
     console.log(`${new Date().toISOString()} [health-nudge] ${message}`);
   });
+
+  startShipByGcalScheduler(
+    async () => {
+      const [deals, stages, portalId] = await Promise.all([
+        fetchPrintOrderDeals(),
+        fetchPrintOrderPipelineStages(),
+        fetchHubSpotPortalId(),
+      ]);
+      refreshPrintFileStagesFromHubSpot(deals, stages);
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        attachedPrintDealIds: attachedPrintFileDealIds(),
+        shippingLabelDealIds: attachedShippingLabelDealIds(),
+        hubspotPortalId: portalId,
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
+      });
+      return buildProductionQueue(snapshot);
+    },
+    process.env,
+    (message) => {
+      console.log(`${new Date().toISOString()} [shipby-gcal] ${message}`);
+    },
+  );
 
   /**
    * Owner-only view for attaching production metrics from a sliced CTB file.
