@@ -13,6 +13,8 @@ import {
   PackageCheck,
   ChevronDown,
   X,
+  MapPin,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +38,8 @@ import {
   isShopUsualBoxRate,
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
-import type { ProductionQueueResponse } from "@shared/schema";
+import { addressStatusPill } from "@shared/ship-address";
+import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
 const ADD_FUND_PRESETS = [10, 25, 50, 100] as const;
 
@@ -525,6 +528,50 @@ export function ShipEngineBuyPanel({
 
   const status = statusQuery.data;
   const shipToReady = shipToQuery.data?.ready ?? false;
+  const selectedPick = useMemo(
+    () => shipReadyPicks.find((row) => row.dealId === dealId) ?? null,
+    [shipReadyPicks, dealId],
+  );
+  const hasActiveDeal = /^[0-9]{1,20}$/.test(dealId);
+  const queueAddressStatus = selectedPick?.addressStatus;
+  const showAddressWarn =
+    Boolean(hasActiveDeal) &&
+    ((shipToQuery.data && !shipToReady) ||
+      (queueAddressStatus && queueAddressStatus !== "ready" && !shipToReady));
+
+  const copyChaseDraft = async (item: ProductionQueueItem) => {
+    const draft = item.chaseDraft?.trim();
+    if (!draft) return;
+    try {
+      await navigator.clipboard.writeText(draft);
+      toast({
+        title: "Chase draft copied",
+        description: "Paste into Messenger or email — nothing was sent.",
+      });
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: draft.slice(0, 140),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const addressChip = (item: ProductionQueueItem) => {
+    const pill = addressStatusPill(item.addressStatus ?? "missing");
+    return (
+      <StatusPill
+        tone={pill.tone}
+        icon={MapPin}
+        label={
+          item.addressStatus === "ready" && item.addressSummary
+            ? `Address · ${item.addressSummary}`
+            : pill.label
+        }
+        testId={`status-shipengine-address-${item.dealId}`}
+      />
+    );
+  };
   const funds = status?.funds;
   const availableUsd = useMemo(() => {
     if (typeof funds?.availableUsd === "number" && Number.isFinite(funds.availableUsd)) {
@@ -552,12 +599,6 @@ export function ShipEngineBuyPanel({
     Number.isFinite(addFundsAmountNum) &&
     addFundsAmountNum >= 10 &&
     !addFunds.isPending;
-
-  const selectedPick = useMemo(
-    () => shipReadyPicks.find((row) => row.dealId === dealId) ?? null,
-    [shipReadyPicks, dealId],
-  );
-  const hasActiveDeal = /^[0-9]{1,20}$/.test(dealId);
 
   function selectDeal(nextId: string) {
     setDealId(nextId);
@@ -627,6 +668,20 @@ export function ShipEngineBuyPanel({
               : `Missing: ${(shipToQuery.data.missing || []).join(", ") || "address"}`}
           </p>
         )}
+        {!shipToReady && selectedPick?.chaseDraft ? (
+          <div className="mt-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void copyChaseDraft(selectedPick)}
+              data-testid="button-shipengine-copy-chase"
+            >
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+              Copy chase draft
+            </Button>
+          </div>
+        ) : null}
       </div>
     ) : null;
 
@@ -851,6 +906,7 @@ export function ShipEngineBuyPanel({
           disabled={!shipToReady || quote.isPending}
           onClick={() => quote.mutate()}
           data-testid="button-shipengine-get-rates"
+          title={!shipToReady ? "Fix HubSpot ship-to before rate shopping" : undefined}
         >
           {quote.isPending ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -859,6 +915,9 @@ export function ShipEngineBuyPanel({
           )}
           Get rates
         </Button>
+        {showAddressWarn ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Address required for rates" />
+        ) : null}
         {addressHint ? (
           <p className="text-xs text-muted-foreground">Quoted for {addressHint}</p>
         ) : (
@@ -1093,6 +1152,7 @@ export function ShipEngineBuyPanel({
                             {item.readyToPack ? (
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
+                            {addressChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
                             ) : (
@@ -1106,6 +1166,22 @@ export function ShipEngineBuyPanel({
                               icon={Ship}
                               label={`Ship ${item.fulfillment.readyPercent}%`}
                             />
+                            {item.addressStatus !== "ready" && item.chaseDraft ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void copyChaseDraft(item);
+                                }}
+                                data-testid={`button-shipengine-card-chase-${item.dealId}`}
+                              >
+                                <Copy className="mr-1.5 h-3.5 w-3.5" />
+                                Chase
+                              </Button>
+                            ) : null}
                           </div>
                           {activeOrderWorkspace}
                         </div>
@@ -1141,6 +1217,7 @@ export function ShipEngineBuyPanel({
                             {item.readyToPack ? (
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
+                            {addressChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
                             ) : (

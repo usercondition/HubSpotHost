@@ -50,6 +50,9 @@ export type TrackerAssistantQueueDeal = {
   /** Projected or override ship-by (`YYYY-MM-DD`, America/Los_Angeles). */
   shipBy?: string;
   shipBySource?: "override" | "derived";
+  addressStatus?: ProductionQueueItem["addressStatus"];
+  addressSummary?: string | null;
+  chaseDraft?: string;
 };
 
 export type TrackerAssistantShipAgenda = {
@@ -70,6 +73,8 @@ export type TrackerAssistantQueueContext = {
   readyToPack: TrackerAssistantQueueDeal[];
   /** Ship-ready (or nearly) without a bought label / tracking yet. */
   needsLabel: TrackerAssistantQueueDeal[];
+  /** Ready to ship but HubSpot ship-to is missing or partial. */
+  needsAddress: TrackerAssistantQueueDeal[];
   /** Floor honesty calendar: overdue / due today / next 7 days. */
   shipAgenda?: TrackerAssistantShipAgenda;
 };
@@ -113,6 +118,9 @@ export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueD
     readyToPack: item.readyToPack,
     shipBy: item.shipBy,
     shipBySource: item.shipBySource,
+    addressStatus: item.addressStatus,
+    addressSummary: item.addressSummary,
+    chaseDraft: item.chaseDraft,
   };
 }
 
@@ -122,6 +130,11 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
     (item) =>
       (item.bucket === "ship_ready" || item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) &&
       (!item.fulfillment.labelBought || !item.fulfillment.trackingPasted),
+  );
+  const needsAddressSource = [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction].filter(
+    (item) =>
+      (item.bucket === "ship_ready" || item.readyToPack || item.fulfillment.readyPercent >= 80) &&
+      item.addressStatus !== "ready",
   );
   const openJobs = [
     ...queue.nextPrint,
@@ -141,6 +154,7 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
     needsReply: queue.needsReply.slice(0, 8).map(slimQueueDeal),
     readyToPack: queue.readyToPack.slice(0, 8).map(slimQueueDeal),
     needsLabel: needsLabelSource.slice(0, 8).map(slimQueueDeal),
+    needsAddress: needsAddressSource.slice(0, 8).map(slimQueueDeal),
     shipAgenda: {
       today: agenda.today,
       overdue: agenda.overdue.slice(0, 12),
@@ -174,11 +188,16 @@ export function getTrackerAssistantModel(env: NodeJS.ProcessEnv = process.env): 
 
 function classifyIntent(
   question: string,
-): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "chase" | "margin" | "shipping" | "due" | "help" {
+): "briefing" | "next" | "plates" | "costs" | "stuck" | "intake" | "reminder" | "chase" | "margin" | "shipping" | "due" | "address" | "help" {
   const q = question.toLowerCase();
   if (/\b(top|what|which|need).{0,30}\b(chase|repl(y|ies)|buyer reply|respond)\b|\b(chase|needs? reply|buyer reply)\b/.test(q)) return "chase";
-  if (/\b(remind|nudge|message|marketplace text|draft)\b/.test(q)) return "reminder";
+  if (/\b(remind|nudge|message|marketplace text|draft)\b/.test(q) && !/\baddress\b/.test(q)) return "reminder";
   if (/\b(plates?|ctb|slice|attach)\b/.test(q)) return "plates";
+  if (
+    /\b(address|ship.?to|shipping address|need(s)? an? address|confirm.{0,20}address)\b/.test(q)
+  ) {
+    return "address";
+  }
   if (
     /\b(due|overdue|ship.?by|ship by|calendar|keep me honest|honesty|what.?s due|whats due)\b/.test(q) ||
     /\b(due today|this week).{0,20}\b(ship|due|order)/.test(q)
@@ -234,8 +253,11 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       `needsLabel=${needsLabel.length}`,
       `needsReply=${needsReply.length}`,
       `readyToPack=${readyToPack.length}`,
+      `needsAddress=${queue.needsAddress?.length ?? queue.summary.needsAddress ?? 0}`,
     );
   }
+
+  const needsAddress = queue?.needsAddress ?? [];
 
   if (intent === "help") {
     return {
@@ -245,6 +267,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         "I read your tracker only — no HubSpot writes. Ask things like:\n" +
         "• What should I do next?\n" +
         "• What’s due / overdue this week?\n" +
+        "• What needs an address before label buy?\n" +
         "• Which deals need plates?\n" +
         "• What’s ship-ready / needs a label?\n" +
         "• What’s stuck or missing costs?\n" +
@@ -283,6 +306,42 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     actions.push({ label: "Open intake queue", href: "/orders" });
     usedFacts.push(`awaitingLinks=${awaitingLinks.length}`);
     return { ok: true, mode: "rules", reply: lines.join("\n"), actions, usedFacts };
+  }
+
+  if (intent === "address") {
+    usedFacts.push(`needsAddress=${needsAddress.length}`);
+    if (needsAddress.length === 0) {
+      return {
+        ok: true,
+        mode: "rules",
+        reply:
+          queue
+            ? "No Ready to Ship orders are missing a HubSpot ship-to right now. Address-ready deals can rate-shop on Labels."
+            : "I don’t have production-queue address readiness loaded — open Labels or Floor.",
+        actions: [
+          { label: "Open Labels", href: "/labels" },
+          { label: "Open Floor", href: "/" },
+        ],
+        usedFacts,
+      };
+    }
+    lines.push(
+      `${needsAddress.length} Ready to Ship order${needsAddress.length === 1 ? "" : "s"} need${needsAddress.length === 1 ? "s" : ""} an address chase:`,
+    );
+    lines.push("");
+    for (const deal of needsAddress.slice(0, 5)) {
+      const status = deal.addressStatus === "partial" ? "partial" : "missing";
+      const where = deal.addressSummary ? ` · ${deal.addressSummary}` : "";
+      lines.push(`• ${deal.dealName} — ${status}${where}${deal.amount ? ` · ${money(deal.amount)}` : ""}`);
+      if (deal.chaseDraft) {
+        lines.push(`  Draft: ${deal.chaseDraft}`);
+      }
+      actions.push({ label: `Label · ${deal.dealName.slice(0, 24)}`, href: labelsHref(deal.dealId) });
+    }
+    lines.push("");
+    lines.push("Copy the draft into Messenger/email — I never send it for you.");
+    actions.push({ label: "Open Labels", href: "/labels" });
+    return { ok: true, mode: "rules", reply: lines.join("\n"), actions: actions.slice(0, 6), usedFacts };
   }
 
   if (intent === "due") {
@@ -552,6 +611,12 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
     );
     actions.push({ label: "Due today", href: "/" });
   }
+  if (needsAddress.length > 0) {
+    priorities.push(
+      `${priorities.length + 1}. Confirm ship-to on ${needsAddress.length} Ready to Ship order${needsAddress.length === 1 ? "" : "s"} (start with ${needsAddress[0]!.dealName}).`,
+    );
+    actions.push({ label: "Needs address", href: labelsHref(needsAddress[0]?.dealId) });
+  }
   if (snapshot.intake.pendingReview > 0) {
     priorities.push(
       `1. Review ${snapshot.intake.pendingReview} submitted buyer form${snapshot.intake.pendingReview === 1 ? "" : "s"} before creating HubSpot records.`,
@@ -641,6 +706,7 @@ function contextForModel(ctx: TrackerAssistantContext): string {
             needsReply: queue.needsReply,
             readyToPack: queue.readyToPack,
             needsLabel: queue.needsLabel,
+            needsAddress: queue.needsAddress,
             shipAgenda: queue.shipAgenda ?? null,
           }
         : null,
@@ -666,6 +732,7 @@ function contextForModel(ctx: TrackerAssistantContext): string {
         "Only use facts from this JSON. If unknown, say so.",
         "Prefer concrete next actions with deal/intake names.",
         "Use shipAgenda (overdue / dueToday / thisWeek) to keep the owner honest on ship-by dates. Mark override vs derived when present.",
+        "Use needsAddress + chaseDraft for Ready to Ship deals missing HubSpot ship-to. Never invent addresses; never claim you messaged the buyer.",
         "For ship-ready work, point to Labels (/labels?dealId=…) or Queue.",
         "For Marketplace reminders, draft short buyer-facing text.",
         "Keep answers under ~180 words unless drafting a message.",

@@ -1981,6 +1981,15 @@ export interface ProductionQueueItem {
   shipBy: string;
   /** An Intern-set HubSpot date wins over the documented SLA projection. */
   shipBySource: "override" | "derived";
+  /**
+   * HubSpot contact ship-to readiness for label buy.
+   * Enriched for ship-ready / ready-to-pack rows; others default to missing.
+   */
+  addressStatus: "ready" | "partial" | "missing";
+  /** Compact "City, ST" when available. */
+  addressSummary: string | null;
+  /** Copy-only Messenger/email chase when address is incomplete. */
+  chaseDraft: string;
   closeDate: string | null;
   contactName: string | null;
   hasPlates: boolean;
@@ -2034,6 +2043,8 @@ export interface ProductionQueueResponse {
     blocked: number;
     needsReply: number;
     readyToPack: number;
+    /** Ship-ready / ready-to-pack deals without a label-ready HubSpot ship-to. */
+    needsAddress: number;
     openOrders: number;
   };
 }

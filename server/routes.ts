@@ -229,7 +229,7 @@ import {
   upsertFulfillmentChecklist,
   listExistingTrackingAttachments,
 } from "./lib/fulfillment";
-import { buildProductionQueue } from "./lib/production-queue";
+import { buildProductionQueue, attachShipAddressReadiness } from "./lib/production-queue";
 import { buildResinReorderSuggestions } from "./lib/resin-reorder";
 import {
   attachShippingLabelSchema,
@@ -561,7 +561,9 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     clientFullName: link.clientFullName,
     status: link.status,
   }));
-  const queue = buildTrackerAssistantQueue(buildProductionQueue(snapshot));
+  const queue = buildTrackerAssistantQueue(
+    await attachShipAddressReadiness(buildProductionQueue(snapshot)),
+  );
   return { snapshot, awaitingLinks, pendingLinks, queue };
 }
 
@@ -1144,7 +1146,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         dismissedAttentionKeys: activeAttentionOverrideKeys(),
         hubspotPortalId: portalId,
       }) as PerformanceResponse;
-      return res.json({ ok: true, ...buildProductionQueue(snapshot) });
+      return res.json({ ok: true, ...(await attachShipAddressReadiness(buildProductionQueue(snapshot))) });
     } catch (error) {
       return res.status(error instanceof HubSpotError ? error.status : 500).json({
         ok: false,

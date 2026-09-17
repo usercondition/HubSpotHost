@@ -10,11 +10,14 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
+import { deriveShipAddressReadiness } from "../../shared/ship-address";
+import { fetchDealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
 import { getDb } from "./order-links";
 import { ensureDefaultPrinters, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
+import { contactToShipEngineAddress } from "./shipengine";
 
 function parseGrams(value: string | null | undefined): number {
   const n = Number(value ?? "");
@@ -23,7 +26,14 @@ function parseGrams(value: string | null | undefined): number {
 
 type QueueItemBase = Omit<
   ProductionQueueItem,
-  "priorityScore" | "bucket" | "readyToPack" | "shipBy" | "shipBySource"
+  | "priorityScore"
+  | "bucket"
+  | "readyToPack"
+  | "shipBy"
+  | "shipBySource"
+  | "addressStatus"
+  | "addressSummary"
+  | "chaseDraft"
 >;
 
 /** Ship-by planning always uses the shop's calendar, never the server's timezone. */
@@ -209,6 +219,11 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       bucket,
       readyToPack,
       priorityScore: priorityScore(base),
+      // Defaults until attachShipAddressReadiness enriches ship-ready rows.
+      ...deriveShipAddressReadiness({
+        dealName: deal.dealName,
+        contactNameHint: deal.contactName,
+      }),
     };
   });
 
@@ -248,7 +263,103 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       blocked: blocked.length,
       needsReply: needsReply.length,
       readyToPack: readyToPack.length,
+      needsAddress: items.filter(
+        (item) =>
+          (item.bucket === "ship_ready" || item.readyToPack) && item.addressStatus !== "ready",
+      ).length,
       openOrders: items.length,
+    },
+  };
+}
+
+/**
+ * Fetch HubSpot ship-to for Ready to Ship / ready-to-pack deals and attach
+ * addressStatus / addressSummary / chaseDraft. Other rows keep heuristic defaults.
+ */
+export async function attachShipAddressReadiness(
+  queue: ProductionQueueResponse,
+): Promise<ProductionQueueResponse> {
+  const targets = new Map<string, ProductionQueueItem>();
+  for (const item of [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction]) {
+    if (item.bucket === "ship_ready" || item.readyToPack || item.fulfillment.readyPercent >= 80) {
+      targets.set(item.dealId, item);
+    }
+  }
+  if (targets.size === 0) return queue;
+
+  const entries = await Promise.all(
+    [...targets.keys()].map(async (dealId) => {
+      try {
+        const contact = await fetchDealAssociatedContact(dealId);
+        const engineAddress = contactToShipEngineAddress(contact);
+        const item = targets.get(dealId)!;
+        const readiness = deriveShipAddressReadiness({
+          name: contact.name,
+          firstName: contact.name.split(/\s+/)[0] || null,
+          street1: contact.street1,
+          city: contact.city,
+          state: contact.state,
+          zip: contact.zip,
+          country: contact.country,
+          dealName: item.dealName,
+          contactNameHint: item.contactName ?? contact.name,
+        });
+        // Prefer ShipEngine gate: ready only when label buy would accept the address.
+        const addressStatus =
+          engineAddress != null
+            ? ("ready" as const)
+            : readiness.addressStatus === "ready"
+              ? ("partial" as const)
+              : readiness.addressStatus;
+        return [
+          dealId,
+          {
+            addressStatus,
+            addressSummary:
+              engineAddress != null
+                ? `${engineAddress.city}, ${engineAddress.state}`
+                : readiness.addressSummary,
+            chaseDraft: readiness.chaseDraft,
+          },
+        ] as const;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const byDeal = new Map<string, Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">>();
+  for (const entry of entries) {
+    if (entry) byDeal.set(entry[0], entry[1]);
+  }
+
+  const patch = (item: ProductionQueueItem): ProductionQueueItem => {
+    const next = byDeal.get(item.dealId);
+    return next ? { ...item, ...next } : item;
+  };
+
+  const nextPrint = queue.nextPrint.map(patch);
+  const inProduction = queue.inProduction.map(patch);
+  const shipReady = queue.shipReady.map(patch);
+  const blocked = queue.blocked.map(patch);
+  const needsReply = queue.needsReply.map(patch);
+  const readyToPack = queue.readyToPack.map(patch);
+  const all = [...nextPrint, ...inProduction, ...shipReady, ...blocked];
+
+  return {
+    ...queue,
+    nextPrint,
+    inProduction,
+    shipReady,
+    blocked,
+    needsReply,
+    readyToPack,
+    summary: {
+      ...queue.summary,
+      needsAddress: all.filter(
+        (item) =>
+          (item.bucket === "ship_ready" || item.readyToPack) && item.addressStatus !== "ready",
+      ).length,
     },
   };
 }

@@ -148,7 +148,7 @@ test("tracker assistant lists ship-ready deals that still need labels", () => {
     "What’s ship-ready / needs a label?",
     sampleContext({
       queue: {
-        summary: { nextPrint: 1, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, openOrders: 2 },
+        summary: { nextPrint: 1, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, needsAddress: 0, openOrders: 2 },
         nextPrint: [],
         shipReady: [
           {
@@ -162,6 +162,9 @@ test("tracker assistant lists ship-ready deals that still need labels", () => {
             labelBought: false,
             trackingPasted: false,
             shipReady: true,
+            addressStatus: "ready",
+            addressSummary: "Austin, TX",
+            chaseDraft: "Hey there — your Packed knight is ready to ship. Can you confirm the best address to send it to?",
           },
         ],
         blocked: [],
@@ -179,8 +182,12 @@ test("tracker assistant lists ship-ready deals that still need labels", () => {
             labelBought: false,
             trackingPasted: false,
             shipReady: true,
+            addressStatus: "ready",
+            addressSummary: "Austin, TX",
+            chaseDraft: "Hey there — your Packed knight is ready to ship. Can you confirm the best address to send it to?",
           },
         ],
+        needsAddress: [],
       },
     }),
   );
@@ -194,7 +201,7 @@ test("tracker assistant briefing includes ship-ready label work when queue is pr
     "What should I do next?",
     sampleContext({
       queue: {
-        summary: { nextPrint: 0, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, openOrders: 1 },
+        summary: { nextPrint: 0, inProduction: 0, shipReady: 1, blocked: 0, needsReply: 0, readyToPack: 1, needsAddress: 0, openOrders: 1 },
         nextPrint: [],
         shipReady: [],
         blocked: [],
@@ -214,6 +221,7 @@ test("tracker assistant briefing includes ship-ready label work when queue is pr
             shipReady: true,
           },
         ],
+        needsAddress: [],
       },
     }),
   );
@@ -226,12 +234,13 @@ test("tracker assistant lists top chase work from the Print Ops reply flag", () 
     "What is top chase?",
     sampleContext({
       queue: {
-        summary: { nextPrint: 0, inProduction: 1, shipReady: 0, blocked: 0, needsReply: 1, readyToPack: 0, openOrders: 1 },
+        summary: { nextPrint: 0, inProduction: 1, shipReady: 0, blocked: 0, needsReply: 1, readyToPack: 0, needsAddress: 0, openOrders: 1 },
         nextPrint: [],
         shipReady: [],
         blocked: [],
         readyToPack: [],
         needsLabel: [],
+        needsAddress: [],
         needsReply: [
           {
             dealId: "d2",

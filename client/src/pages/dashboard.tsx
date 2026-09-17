@@ -11,6 +11,7 @@ import {
   Link2,
   ListOrdered,
   Loader2,
+  MapPin,
   Printer,
   RefreshCw,
   Ship,
@@ -33,6 +34,7 @@ import {
   shipByCalendarDate,
   shipByHonestyLabel,
 } from "@shared/ship-by";
+import { addressStatusPill } from "@shared/ship-address";
 import type {
   HealthResponse,
   PerformanceResponse,
@@ -187,17 +189,27 @@ function FlightCard({
   queueItem,
   attention,
   portalId,
+  onCopyChase,
 }: {
   deal: ActiveDeal;
   queueItem?: ProductionQueueItem;
   attention: AttentionItem[];
   portalId: string | null | undefined;
+  onCopyChase?: (draft: string) => void;
 }) {
   const needsPlates = deal.promptAttachPlates;
   const dealAlerts = attention.filter((item) => item.dealId === deal.dealId);
   const needsCosts = dealAlerts.some((item) => item.issueKey === "costs_incomplete");
   const isStale = dealAlerts.some((item) => item.issueKey === "stale");
-  const tone = isStale ? "bad" : needsPlates || needsCosts ? "warn" : "good";
+  const showAddress =
+    queueItem &&
+    (queueItem.bucket === "ship_ready" || queueItem.readyToPack || queueItem.fulfillment.readyPercent >= 80);
+  const addressPill = showAddress && queueItem ? addressStatusPill(queueItem.addressStatus) : null;
+  const tone = isStale
+    ? "bad"
+    : needsPlates || needsCosts || (addressPill && addressPill.tone !== "good")
+      ? "warn"
+      : "good";
 
   return (
     <article
@@ -211,6 +223,7 @@ function FlightCard({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {deal.stage}
             {deal.amount > 0 ? ` · ${formatMoney(deal.amount)}` : ""}
+            {queueItem?.addressSummary ? ` · ${queueItem.addressSummary}` : ""}
           </p>
         </div>
         <p className="text-sm font-medium">{formatMoney(deal.amount)}</p>
@@ -219,6 +232,17 @@ function FlightCard({
         {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
         {needsCosts ? <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" /> : null}
         {isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
+        {queueItem?.readyToPack || queueItem?.bucket === "ship_ready" ? (
+          <StatusPill tone="good" icon={Ship} label="Ready to ship" />
+        ) : null}
+        {addressPill ? (
+          <StatusPill
+            tone={addressPill.tone}
+            icon={MapPin}
+            label={addressPill.label}
+            testId={`status-address-${deal.dealId}`}
+          />
+        ) : null}
         {queueItem ? (
           <StatusPill
             tone={queueItem.shipBy < shipByCalendarDate() ? "bad" : queueItem.shipBy === shipByCalendarDate() ? "warn" : "neutral"}
@@ -226,7 +250,7 @@ function FlightCard({
             label={shipByLabel(queueItem.shipBy, shipByCalendarDate(), queueItem.shipBySource)}
           />
         ) : null}
-        {!needsPlates && !needsCosts && !isStale ? (
+        {!needsPlates && !needsCosts && !isStale && !addressPill ? (
           <StatusPill tone="good" icon={CheckCircle2} label="On track" />
         ) : null}
       </div>
@@ -246,6 +270,16 @@ function FlightCard({
           >
             Plates
           </Link>
+        ) : null}
+        {showAddress && queueItem && queueItem.addressStatus !== "ready" && queueItem.chaseDraft ? (
+          <button
+            type="button"
+            className="font-medium text-primary hover:underline"
+            data-testid={`button-chase-address-${deal.dealId}`}
+            onClick={() => onCopyChase?.(queueItem.chaseDraft)}
+          >
+            Copy chase
+          </button>
         ) : null}
         <a
           href={hubspotDealHref(deal.dealId, portalId)}
@@ -737,6 +771,21 @@ function TodaysWork() {
                   queueItem={queueByDealId.get(deal.dealId)}
                   attention={attention}
                   portalId={portalId}
+                  onCopyChase={async (draft) => {
+                    try {
+                      await navigator.clipboard.writeText(draft);
+                      toast({
+                        title: "Chase draft copied",
+                        description: "Paste into Messenger or email — nothing was sent.",
+                      });
+                    } catch {
+                      toast({
+                        title: "Could not copy",
+                        description: draft.slice(0, 120),
+                        variant: "destructive",
+                      });
+                    }
+                  }}
                 />
               ))}
             </div>
