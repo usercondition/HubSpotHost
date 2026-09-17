@@ -182,16 +182,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [pathOnly, isUnlocked]);
 
   return (
-    <div className="grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[4.25rem_1fr] md:grid-rows-[auto_1fr]">
+    <div
+      className="ops-shell grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[4.25rem_1fr] md:grid-rows-[auto_1fr]"
+      data-nav-group={activeGroup.toLowerCase()}
+    >
       {/* Top project bar — Railway header energy */}
-      <header className="accent-wash col-span-full z-20 flex items-center gap-3 border-b border-border px-3 py-2 md:px-4">
+      <header className="accent-wash ops-topbar col-span-full z-20 flex items-center gap-3 border-b border-border px-3 py-2 md:px-4">
         <Link
           href="/"
           className="flex min-w-0 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="link-home"
           title="Print Ops"
         >
-          <Mark className="h-7 w-7 shrink-0 text-primary" />
+          <span className="ops-mark-wrap inline-flex h-8 w-8 items-center justify-center rounded-lg">
+            <Mark className="h-7 w-7 shrink-0 text-primary" />
+          </span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
             <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
@@ -224,7 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* Icon rail — Railway left toolbar */}
-      <aside className="hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-1.5 py-3 text-sidebar-foreground md:flex">
+      <aside className="ops-rail hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-1.5 py-3 text-sidebar-foreground md:flex">
         <nav
           aria-label="Primary navigation"
           className="flex w-full min-h-0 flex-1 flex-col items-center gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
@@ -235,7 +240,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div key={group.id} className="flex w-full flex-col items-center gap-0.5">
                 <p
                   className={cn(
-                    "mb-0.5 max-w-full truncate px-0.5 text-center text-[0.55rem] font-bold uppercase tracking-[0.1em]",
+                    "mb-0.5 max-w-full truncate px-0.5 text-center text-[0.55rem] font-bold uppercase tracking-[0.1em] transition-colors duration-150",
                     isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/30",
                   )}
                   title={group.hint}
@@ -250,8 +255,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                       href={item.href}
                       title={`${item.label} — ${item.title}`}
                       data-testid={item.testId}
+                      data-active={active ? "true" : "false"}
                       className={cn(
-                        "relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,box-shadow] duration-150 ease-out",
+                        "ops-rail-link relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,box-shadow] duration-150 ease-out",
                         active
                           ? "bg-sidebar-accent text-sidebar-foreground shadow-sm"
                           : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
@@ -281,10 +287,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile horizontal nav — Run pinned; Take/Keep/Office behind More */}
-      <div className="flex min-h-0 min-w-0 flex-col md:col-start-2">
+      <div className="ops-stage relative flex min-h-0 min-w-0 flex-col md:col-start-2">
+        <div className="ops-atmosphere pointer-events-none absolute inset-0" aria-hidden />
         <nav
           aria-label="Mobile navigation"
-          className="flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
+          className="relative z-[1] flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
         >
           {mobileNav.map((item) => {
             const active = pathOnly === item.href;
@@ -322,7 +329,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </nav>
 
-        <main className="scroll-pane min-h-0 min-w-0 flex-1 bg-transparent" data-scroll-pane>
+        <main
+          className="scroll-pane relative z-[1] min-h-0 min-w-0 flex-1 bg-transparent"
+          data-scroll-pane
+        >
           <PageTransition routeKey={pathOnly}>{children}</PageTransition>
         </main>
       </div>
@@ -355,18 +365,21 @@ export function PageHeader({
   const label = eyebrow?.trim() || GROUP_EYEBROW[group];
 
   return (
-    <header className="accent-wash sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
+    <header className="accent-wash ops-page-header sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="rule-label mb-0.5">{label}</p>
+          <p className="rule-label mb-0.5 flex items-center gap-2">
+            <span className="ops-eyebrow-dot" aria-hidden />
+            {label}
+          </p>
           <h1
-            className="truncate text-xl font-semibold tracking-tight text-foreground md:text-2xl"
+            className="truncate text-xl font-semibold tracking-tight text-foreground md:text-[1.65rem] md:leading-tight"
             data-testid="text-page-title"
           >
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground md:whitespace-normal">
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground md:whitespace-normal md:text-[0.8125rem]">
               {subtitle}
             </p>
           ) : null}
