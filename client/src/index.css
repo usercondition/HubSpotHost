@@ -65,6 +65,12 @@
   --shadow-2xl: 0 32px 64px hsl(215 30% 12% / 0.14);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
+  --motion-fast: 140ms;
+  --motion-page: 180ms;
+  --motion-drawer: 220ms;
+  --motion-stagger: 28ms;
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(
@@ -323,6 +329,7 @@
   .scroll-pane {
     overflow-y: auto;
     overscroll-behavior: contain;
+    scroll-behavior: smooth;
   }
 
   .rule-label {
@@ -336,6 +343,51 @@
 
   .page-stack {
     @apply space-y-4 px-3 py-3 md:px-5 md:py-4;
+  }
+
+  /* Nested rise after page swap — soft stagger, not a second page slide */
+  .page-motion .workspace-section,
+  .page-motion .metric-tile,
+  .page-motion .queue-lane,
+  .page-motion .glance-list > *,
+  .page-motion .workspace-node {
+    animation: glance-in var(--motion-page) var(--ease-out-soft) both;
+  }
+
+  .page-motion .metric-strip > *:nth-child(1),
+  .page-motion .glance-list > *:nth-child(1),
+  .page-motion .page-stack > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .page-motion .metric-strip > *:nth-child(2),
+  .page-motion .glance-list > *:nth-child(2),
+  .page-motion .page-stack > *:nth-child(2) {
+    animation-delay: calc(var(--motion-stagger) * 1);
+  }
+  .page-motion .metric-strip > *:nth-child(3),
+  .page-motion .glance-list > *:nth-child(3),
+  .page-motion .page-stack > *:nth-child(3) {
+    animation-delay: calc(var(--motion-stagger) * 2);
+  }
+  .page-motion .metric-strip > *:nth-child(4),
+  .page-motion .glance-list > *:nth-child(4),
+  .page-motion .page-stack > *:nth-child(4) {
+    animation-delay: calc(var(--motion-stagger) * 3);
+  }
+  .page-motion .metric-strip > *:nth-child(5),
+  .page-motion .glance-list > *:nth-child(5),
+  .page-motion .page-stack > *:nth-child(5) {
+    animation-delay: calc(var(--motion-stagger) * 4);
+  }
+  .page-motion .metric-strip > *:nth-child(6),
+  .page-motion .glance-list > *:nth-child(6),
+  .page-motion .page-stack > *:nth-child(6) {
+    animation-delay: calc(var(--motion-stagger) * 5);
+  }
+  .page-motion .metric-strip > *:nth-child(n + 7),
+  .page-motion .glance-list > *:nth-child(n + 7),
+  .page-motion .page-stack > *:nth-child(n + 7) {
+    animation-delay: calc(var(--motion-stagger) * 6);
   }
 
   /* Settings surface — Patreon-adjacent: subnav + large title + soft card */
@@ -381,9 +433,10 @@
     background: hsl(var(--card) / 0.92);
     box-shadow: var(--shadow-sm);
     transition:
-      border-color 180ms ease,
-      box-shadow 180ms ease,
-      transform 180ms ease;
+      border-color var(--motion-fast) var(--ease-out-soft),
+      box-shadow var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft),
+      transform var(--motion-fast) var(--ease-out-soft);
   }
 
   .workspace-node:hover {
@@ -424,9 +477,10 @@
     background: hsl(var(--card) / 0.92);
     box-shadow: var(--shadow-sm);
     transition:
-      border-color 180ms ease,
-      box-shadow 180ms ease,
-      transform 180ms ease;
+      border-color var(--motion-fast) var(--ease-out-soft),
+      box-shadow var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft),
+      transform var(--motion-fast) var(--ease-out-soft);
   }
 
   .board-card:hover {
@@ -461,8 +515,9 @@
     box-shadow: none;
     overflow: hidden;
     transition:
-      border-color 180ms ease,
-      background-color 180ms ease;
+      border-color var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft),
+      box-shadow var(--motion-fast) var(--ease-out-soft);
   }
 
   .dark .workspace-section {
@@ -475,9 +530,9 @@
     background: hsl(var(--muted) / 0.35);
     padding: 0.85rem 0.9rem;
     transition:
-      border-color 160ms ease,
-      background-color 160ms ease,
-      transform 160ms ease;
+      border-color var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft),
+      transform var(--motion-fast) var(--ease-out-soft);
   }
 
   .metric-tile[data-tone='warn'] {
@@ -518,9 +573,10 @@
     background: hsl(var(--background) / 0.45);
     padding: 0.7rem 0.85rem;
     transition:
-      border-color 160ms ease,
-      background-color 160ms ease,
-      transform 160ms ease;
+      border-color var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft),
+      transform var(--motion-fast) var(--ease-out-soft),
+      box-shadow var(--motion-fast) var(--ease-out-soft);
   }
 
   .glance-item:hover {
@@ -569,6 +625,9 @@
     border: 1px solid hsl(var(--card-border));
     background: hsl(var(--card) / 0.72);
     overflow: hidden;
+    transition:
+      border-color var(--motion-fast) var(--ease-out-soft),
+      background-color var(--motion-fast) var(--ease-out-soft);
   }
 
   .queue-lane-header {
@@ -654,7 +713,7 @@
   @keyframes glance-in {
     from {
       opacity: 0;
-      transform: translateY(4px);
+      transform: translateY(6px);
     }
     to {
       opacity: 1;
@@ -663,16 +722,36 @@
   }
 
   .glance-in {
-    animation: glance-in 280ms ease-out both;
+    animation: glance-in var(--motion-page) var(--ease-out-soft) both;
   }
 
   @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    .scroll-pane {
+      scroll-behavior: auto;
+    }
+
     .workspace-node,
+    .board-card,
+    .workspace-section,
+    .metric-tile,
+    .glance-item,
+    .queue-lane,
     .status-live::before,
     .status-alert,
-    .glance-in {
-      animation: none;
-      transition: none;
+    .glance-in,
+    .page-motion .workspace-section,
+    .page-motion .metric-tile,
+    .page-motion .queue-lane,
+    .page-motion .glance-list > *,
+    .page-motion .workspace-node,
+    .page-motion .metric-strip > *,
+    .page-motion .page-stack > * {
+      animation: none !important;
+      transition: none !important;
     }
   }
 }
