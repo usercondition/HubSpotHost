@@ -25,6 +25,10 @@ export const PERFORMANCE_PROPERTIES = [
   "print_line_kind",
   "print_tracking_number",
   "print_ship_notes",
+  // Optional date overrides; this app only reads them. Either existing
+  // property name is accepted so an Intern can keep calendar and Floor aligned.
+  "print_ship_by",
+  "ship_by_date",
   PRINT_NEEDS_REPLY_PROPERTY,
   ...INPUT_PROPERTIES,
   ...OUTPUT_PROPERTIES,

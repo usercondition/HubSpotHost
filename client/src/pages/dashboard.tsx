@@ -13,6 +13,7 @@ import {
   Loader2,
   Printer,
   RefreshCw,
+  Ship,
   SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,14 +30,34 @@ import type {
   HealthResponse,
   PerformanceResponse,
   PrinterFleetSnapshot,
+  ProductionQueueItem,
+  ProductionQueueResponse,
   ResinReorderResponse,
 } from "@shared/schema";
 
 type AttentionItem = PerformanceResponse["attention"][number];
 type ActiveDeal = PerformanceResponse["activeDeals"][number];
+type QueueResponse = ProductionQueueResponse & { ok: true };
 
 /** Cap in-flight strip so Floor stays scannable; full board is Queue. */
 const FLOOR_ACTIVE_DEAL_CAP = 8;
+
+function losAngelesDate(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function shipByLabel(shipBy: string, today = losAngelesDate()): string {
+  if (shipBy < today) return `Overdue · ${shipBy}`;
+  if (shipBy === today) return "Due today";
+  return `Ship ${new Date(`${shipBy}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
 
 function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
   if (!health) return null;
@@ -169,10 +190,12 @@ function ShopCard({
 
 function FlightCard({
   deal,
+  queueItem,
   attention,
   portalId,
 }: {
   deal: ActiveDeal;
+  queueItem?: ProductionQueueItem;
   attention: AttentionItem[];
   portalId: string | null | undefined;
 }) {
@@ -202,6 +225,13 @@ function FlightCard({
         {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
         {needsCosts ? <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" /> : null}
         {isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
+        {queueItem ? (
+          <StatusPill
+            tone={queueItem.shipBy < losAngelesDate() ? "bad" : queueItem.shipBy === losAngelesDate() ? "warn" : "neutral"}
+            icon={Ship}
+            label={shipByLabel(queueItem.shipBy)}
+          />
+        ) : null}
         {!needsPlates && !needsCosts && !isStale ? (
           <StatusPill tone="good" icon={CheckCircle2} label="On track" />
         ) : null}
@@ -314,6 +344,16 @@ function TodaysWork() {
     staleTime: 60_000,
   });
 
+  const productionQueue = useQuery<QueueResponse>({
+    queryKey: ["/api/production-queue", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/production-queue", undefined, { headers });
+      return (await response.json()) as QueueResponse;
+    },
+    staleTime: 30_000,
+  });
+
   const dismissAttention = useMutation({
     mutationFn: async (input: { dealId: string; issueKey: string }) => {
       const response = await apiRequest(
@@ -379,6 +419,23 @@ function TodaysWork() {
   const visibleDeals = activeDeals.slice(0, FLOOR_ACTIVE_DEAL_CAP);
   const hiddenDealCount = Math.max(0, activeDeals.length - visibleDeals.length);
   const portalId = snapshot.hubspotPortalId;
+  const queueItems = productionQueue.data
+    ? [
+        ...productionQueue.data.nextPrint,
+        ...productionQueue.data.inProduction,
+        ...productionQueue.data.blocked,
+        ...productionQueue.data.shipReady,
+      ]
+    : [];
+  const queueByDealId = new Map(queueItems.map((item) => [item.dealId, item]));
+  const today = losAngelesDate();
+  const overdueShipBys = queueItems.filter((item) => item.shipBy < today);
+  const dueTodayShipBys = queueItems.filter((item) => item.shipBy === today);
+  const thisWeekShipBys = queueItems.filter((item) => item.shipBy > today && item.shipBy <= (() => {
+    const end = new Date(`${today}T00:00:00.000Z`);
+    end.setUTCDate(end.getUTCDate() + 7);
+    return end.toISOString().slice(0, 10);
+  })());
 
   const plates = attention.filter((item) => item.issueKey === "no_plates");
   const costs = attention.filter((item) => item.issueKey === "costs_incomplete");
@@ -406,6 +463,22 @@ function TodaysWork() {
   return (
     <div className="space-y-4" data-testid="panel-todays-work">
       <div className="metric-strip" aria-label="Today’s attention metrics" data-testid="panel-todays-metrics">
+        <StatCard
+          label="Overdue ship"
+          value={String(overdueShipBys.length)}
+          hint="Projected ship-by passed"
+          icon={Ship}
+          tone={overdueShipBys.length > 0 ? "bad" : "good"}
+          testId="card-todays-overdue-ship"
+        />
+        <StatCard
+          label="Due today"
+          value={String(dueTodayShipBys.length)}
+          hint="Projected ship-by today"
+          icon={Ship}
+          tone={dueTodayShipBys.length > 0 ? "warn" : "good"}
+          testId="card-todays-due-ship"
+        />
         <StatCard
           label="Needs plates"
           value={String(plates.length)}
@@ -608,7 +681,13 @@ function TodaysWork() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {visibleDeals.map((deal) => (
-                <FlightCard key={deal.dealId} deal={deal} attention={attention} portalId={portalId} />
+                <FlightCard
+                  key={deal.dealId}
+                  deal={deal}
+                  queueItem={queueByDealId.get(deal.dealId)}
+                  attention={attention}
+                  portalId={portalId}
+                />
               ))}
             </div>
           )}
@@ -618,6 +697,11 @@ function TodaysWork() {
               <Link href="/queue" className="font-medium text-primary hover:underline">
                 Queue
               </Link>
+            </p>
+          ) : null}
+          {thisWeekShipBys.length > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground" data-testid="text-floor-ship-this-week">
+              This week: {thisWeekShipBys.length} projected ship-by{thisWeekShipBys.length === 1 ? "" : "s"}.
             </p>
           ) : null}
         </div>

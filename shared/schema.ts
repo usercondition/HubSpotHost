@@ -246,6 +246,10 @@ export interface PerformanceResponse {
     promptAttachPlates: boolean;
     /** HubSpot `print_needs_reply`: a buyer conversation is waiting on the shop. */
     needsReply?: boolean;
+    /** Optional HubSpot ship-by override (`print_ship_by` or `ship_by_date`). */
+    shipByOverride?: string | null;
+    /** HubSpot creation timestamp used as a ship-by SLA fallback. */
+    createdAt?: string | null;
     closeDate: string | null;
     contactName: string | null;
   }>;
@@ -1969,6 +1973,14 @@ export interface ProductionQueueItem {
   stageId: string;
   stage: string;
   amount: number;
+  /** Optional HubSpot ship-by override used by the projection. */
+  shipByOverride?: string | null;
+  /** HubSpot creation timestamp used by the projection when no plate is attached. */
+  createdAt?: string | null;
+  /** Projected ship-by date in America/Los_Angeles (`YYYY-MM-DD`). */
+  shipBy: string;
+  /** An Intern-set HubSpot date wins over the documented SLA projection. */
+  shipBySource: "override" | "derived";
   closeDate: string | null;
   contactName: string | null;
   hasPlates: boolean;
