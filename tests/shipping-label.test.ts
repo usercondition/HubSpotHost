@@ -7,11 +7,15 @@ import {
   extractShippingLabelFromPdf,
   extractTrackingNumber,
   matchShippingLabelToDeals,
+  augmentMatchesWithSameClient,
   buildShipNotesFromLabel,
   attachShippingLabelSchema,
+  fuzzyPersonNameScore,
+  editDistance,
 } from "../server/lib/shipping-label";
 import { defaultLabelMatchDealIds } from "../shared/shipping-label-select";
 import { extractIndexedImageFromPdf } from "../server/lib/shipping-label-ocr";
+import { samePersonName } from "../shared/person-name";
 
 const PIRATE_SHIP_LIKE = `
 USPS GROUND ADVANTAGE
@@ -287,4 +291,97 @@ test("ShipStation Angel label PDF OCR recovers UPS tracking", async () => {
     extracted.fields.warnings.some((warning) => /OCR/i.test(warning)),
     "should note OCR was used",
   );
+});
+
+test("fuzzy person names tolerate common OCR splits and typos", () => {
+  assert.ok(fuzzyPersonNameScore("ANGEL PINS EDA", "Angel Pineda") >= 70);
+  assert.ok(fuzzyPersonNameScore("JOSE MONTES", "Jose Montes") >= 95);
+  assert.ok(fuzzyPersonNameScore("SPNECER PATTERSON", "Spencer Patterson") >= 70);
+  assert.ok(fuzzyPersonNameScore("LukePrice", "Luke Price") >= 90);
+  assert.ok(fuzzyPersonNameScore("MIGUEL E MERCADO", "Miguel Mercado") >= 70);
+  assert.ok(fuzzyPersonNameScore("Angel Pineda", "Ryan Shipp") < 35);
+  assert.equal(editDistance("pinseda", "pineda"), 1);
+  assert.equal(samePersonName("Angel Pineda", "ANGEL PINEDA"), true);
+});
+
+test("OCR-garbled ship-to still fuzzy-matches every same-client Print Order", () => {
+  const fields = extractShippingLabelFields(`
+UPS GROUND
+SHIP TO:
+ANGEL PINS EDA
+123 ANY ST
+BAKERSFIELD CA 93309
+TRACKING #: 1Z276 1D1 03 0000 3019
+`);
+  assert.equal(fields.trackingNumber, "1Z2761D10300003019");
+  const matches = matchShippingLabelToDeals(fields, [
+    {
+      dealId: "angel-a",
+      dealName: "Termi Bits - Angel Pineda",
+      stage: "Ready to Ship",
+      contactName: "Angel Pineda",
+      amount: 40,
+      closed: false,
+    },
+    {
+      dealId: "angel-b",
+      dealName: "Extra Bits - Angel Pineda",
+      stage: "Post-Process",
+      contactName: "Angel Pineda",
+      amount: 25,
+      closed: false,
+    },
+    {
+      dealId: "other",
+      dealName: "Cover - Ryan Shipp",
+      stage: "Ready to Ship",
+      contactName: "Ryan Shipp",
+      amount: 80,
+      closed: false,
+    },
+  ]);
+  assert.ok(matches.every((row) => row.dealId.startsWith("angel")));
+  assert.ok(!matches.some((row) => row.dealId === "other"));
+  assert.deepEqual(defaultLabelMatchDealIds(matches).sort(), ["angel-a", "angel-b"].sort());
+});
+
+test("anchor deal pulls same-client companions when OCR name is unusable", () => {
+  const fields = extractShippingLabelFields(`
+UPS GROUND
+SHIP TO:
+UNKNOWN RECIPIENT
+TRACKING #: 1Z2761D10300003019
+`);
+  const deals = [
+    {
+      dealId: "1001",
+      dealName: "Order A - Jordan Lee",
+      stage: "Ready to Ship",
+      contactName: "Jordan Lee",
+      amount: 10,
+      closed: false,
+    },
+    {
+      dealId: "1002",
+      dealName: "Order B - Jordan Lee",
+      stage: "Packaging",
+      contactName: "Jordan Lee",
+      amount: 20,
+      closed: false,
+    },
+    {
+      dealId: "1003",
+      dealName: "Order C - Pat Kim",
+      stage: "Ready to Ship",
+      contactName: "Pat Kim",
+      amount: 30,
+      closed: false,
+    },
+  ];
+  const ocrMatches = matchShippingLabelToDeals(fields, deals);
+  const augmented = augmentMatchesWithSameClient(ocrMatches, deals, { anchorDealId: "1001" });
+  const ids = augmented.map((row) => row.dealId).sort();
+  assert.deepEqual(ids, ["1001", "1002"]);
+  assert.ok(augmented.every((row) => row.score >= 70));
+  assert.deepEqual(defaultLabelMatchDealIds(augmented).sort(), ["1001", "1002"].sort());
 });

@@ -2,14 +2,7 @@
  * Default multi-select for Labels: same client → same box / same tracking.
  * Used when Pirate Ship ships multiple Print Orders together (e.g. Land Raider + panels).
  */
-
-function normalizePersonName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+import { normalizePersonName, samePersonName } from "./person-name";
 
 /** Prefer HubSpot contact; fall back to "Item - Client" deal title suffix. */
 export function labelMatchContactKey(match: {
@@ -25,7 +18,7 @@ export function labelMatchContactKey(match: {
 }
 
 /**
- * Auto-select every match that shares the top candidate's client.
+ * Auto-select every match that shares the top candidate's client (OCR-tolerant).
  * Single unmatched / different-client rows stay unselected.
  */
 export function defaultLabelMatchDealIds(
@@ -40,5 +33,11 @@ export function defaultLabelMatchDealIds(
   const top = matches[0]!;
   const key = labelMatchContactKey(top);
   if (!key) return [top.dealId];
-  return matches.filter((row) => labelMatchContactKey(row) === key).map((row) => row.dealId);
+  return matches
+    .filter((row) => {
+      const rowKey = labelMatchContactKey(row);
+      if (!rowKey) return row.dealId === top.dealId;
+      return samePersonName(key, rowKey, 70);
+    })
+    .map((row) => row.dealId);
 }

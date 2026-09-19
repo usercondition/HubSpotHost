@@ -5,6 +5,14 @@
 import fs from "node:fs/promises";
 import pdfParse from "pdf-parse";
 import { z } from "zod";
+import {
+  editDistance,
+  fuzzyPersonNameScore,
+  normalizePersonName,
+  samePersonName,
+} from "../../shared/person-name";
+
+export { editDistance, fuzzyPersonNameScore } from "../../shared/person-name";
 
 export type ShippingLabelFields = {
   trackingNumber: string | null;
@@ -57,11 +65,7 @@ const SERVICE_PATTERNS: Array<{ re: RegExp; label: string; carrier: string }> = 
 ];
 
 function normalizeName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizePersonName(value);
 }
 
 function compactDigits(value: string): string {
@@ -386,15 +390,15 @@ function contactFromDealName(dealName: string): string | null {
   return contact.length >= 2 ? contact : null;
 }
 
-function tokenOverlap(a: string, b: string): number {
-  const left = new Set(normalizeName(a).split(" ").filter((t) => t.length > 1));
-  const right = new Set(normalizeName(b).split(" ").filter((t) => t.length > 1));
-  if (left.size === 0 || right.size === 0) return 0;
-  let hit = 0;
-  for (const token of left) {
-    if (right.has(token)) hit += 1;
-  }
-  return hit / Math.max(left.size, right.size);
+function dealContactLabel(deal: {
+  contactName: string | null;
+  dealName: string;
+}): string {
+  return (deal.contactName || contactFromDealName(deal.dealName) || "").trim();
+}
+
+function condenseName(value: string): string {
+  return normalizeName(value).replace(/\s+/g, "");
 }
 
 function scoreNameAgainstDeal(needle: string, contactNorm: string, dealNorm: string): {
@@ -406,24 +410,33 @@ function scoreNameAgainstDeal(needle: string, contactNorm: string, dealNorm: str
   let score = 0;
 
   if (contactNorm) {
-    if (contactNorm === needle) {
-      score += 100;
+    const fuzzy = fuzzyPersonNameScore(needle, contactNorm);
+    if (fuzzy >= 95) {
+      score += fuzzy;
       reasons.push("Exact client name");
-    } else if (contactNorm.includes(needle) || needle.includes(contactNorm)) {
-      score += 70;
-      reasons.push("Client name contains match");
-    } else {
-      const overlap = tokenOverlap(contactNorm, needle);
-      if (overlap >= 0.5) {
-        score += Math.round(overlap * 60);
-        reasons.push("Partial client name match");
-      }
+    } else if (fuzzy >= 70) {
+      score += fuzzy;
+      reasons.push("Fuzzy client name match (OCR-tolerant)");
+    } else if (fuzzy >= 35) {
+      score += fuzzy;
+      reasons.push("Partial client name match");
     }
   }
 
-  if (dealNorm.includes(needle)) {
-    score += 40;
-    reasons.push("Name appears in deal title");
+  if (dealNorm) {
+    // dealNorm may be a full title; try suffix "product - client" on a restored hyphen form.
+    const suffix = contactFromDealName(dealNorm.replace(/\s+-\s+/g, " - ")) || "";
+    const dealContact = suffix ? normalizeName(suffix) : "";
+    if (dealContact) {
+      const fuzzyDeal = fuzzyPersonNameScore(needle, dealContact);
+      if (fuzzyDeal >= 70) {
+        score += Math.round(fuzzyDeal * 0.55);
+        reasons.push("Fuzzy name in deal title");
+      }
+    } else if (condenseName(dealNorm).includes(condenseName(needle)) && condenseName(needle).length >= 6) {
+      score += 40;
+      reasons.push("Name appears in deal title");
+    }
   }
 
   return { score, reasons };
@@ -457,7 +470,7 @@ export function matchShippingLabelToDeals(
     const reasons: string[] = [];
 
     if (primaryNeedle) {
-      const primary = scoreNameAgainstDeal(primaryNeedle, contactNorm, dealNorm);
+      const primary = scoreNameAgainstDeal(primaryNeedle, contactNorm, deal.dealName);
       if (primary.score > 0) {
         score += primary.score + 20; // Prefer file-name client over ship-to-only hits.
         reasons.push(...primary.reasons.map((reason) => `${reason} (file name)`));
@@ -465,7 +478,7 @@ export function matchShippingLabelToDeals(
     }
 
     if (shipToNeedle) {
-      const shipTo = scoreNameAgainstDeal(shipToNeedle, contactNorm, dealNorm);
+      const shipTo = scoreNameAgainstDeal(shipToNeedle, contactNorm, deal.dealName);
       if (shipTo.score > 0) {
         score += shipTo.score;
         reasons.push(...shipTo.reasons.map((reason) => `${reason} (ship-to)`));
@@ -504,6 +517,87 @@ export function matchShippingLabelToDeals(
   }
 
   return scored.sort((a, b) => b.score - a.score || a.dealName.localeCompare(b.dealName)).slice(0, 8);
+}
+
+type LabelMatchDeal = {
+  dealId: string;
+  dealName: string;
+  stage: string;
+  contactName: string | null;
+  amount: number;
+  closed?: boolean;
+};
+
+/**
+ * Ensure shared-box companions appear even when OCR name is weak/wrong.
+ * Uses the Labels/Ops anchor deal (or the top OCR match) as the client identity.
+ */
+export function augmentMatchesWithSameClient(
+  matches: ShippingLabelMatchCandidate[],
+  deals: LabelMatchDeal[],
+  options?: { anchorDealId?: string | null },
+): ShippingLabelMatchCandidate[] {
+  const byId = new Map(matches.map((row) => [row.dealId, { ...row }]));
+  const anchorId = String(options?.anchorDealId ?? "").trim();
+  const anchorDeal = anchorId ? deals.find((deal) => deal.dealId === anchorId) : undefined;
+
+  let clientName = "";
+  if (anchorDeal) {
+    clientName = dealContactLabel(anchorDeal);
+    const existing = byId.get(anchorDeal.dealId);
+    const baseScore = Math.max(existing?.score ?? 0, 95);
+    byId.set(anchorDeal.dealId, {
+      dealId: anchorDeal.dealId,
+      dealName: anchorDeal.dealName,
+      stage: anchorDeal.stage,
+      contactName: anchorDeal.contactName,
+      amount: anchorDeal.amount,
+      closed: Boolean(anchorDeal.closed),
+      score: baseScore,
+      reason: existing?.reason
+        ? `${existing.reason} · Selected order`
+        : "Selected order — attach here even if OCR name is weak",
+    });
+  }
+
+  if (!clientName) {
+    const top = matches.find((row) => dealContactLabel(row));
+    clientName = top ? dealContactLabel(top) : "";
+  }
+  if (!clientName) {
+    return Array.from(byId.values())
+      .sort((a, b) => b.score - a.score || a.dealName.localeCompare(b.dealName))
+      .slice(0, 12);
+  }
+
+  for (const deal of deals) {
+    const label = dealContactLabel(deal);
+    if (!label || !samePersonName(clientName, label, 70)) continue;
+    const existing = byId.get(deal.dealId);
+    if (existing) {
+      if (!/same client/i.test(existing.reason) && deal.dealId !== anchorId) {
+        existing.reason = `${existing.reason} · Same client (shared box)`;
+      }
+      continue;
+    }
+    let stageBonus = 0;
+    if (deal.closed) stageBonus = 8;
+    else if (/ready\s*to\s*ship|packag|ship/i.test(deal.stage)) stageBonus = 12;
+    byId.set(deal.dealId, {
+      dealId: deal.dealId,
+      dealName: deal.dealName,
+      stage: deal.stage,
+      contactName: deal.contactName,
+      amount: deal.amount,
+      closed: Boolean(deal.closed),
+      score: 80 + stageBonus,
+      reason: "Same client as selected / matched order (shared box)",
+    });
+  }
+
+  return Array.from(byId.values())
+    .sort((a, b) => b.score - a.score || a.dealName.localeCompare(b.dealName))
+    .slice(0, 12);
 }
 
 export function buildShipNotesFromLabel(fields: ShippingLabelFields): string {

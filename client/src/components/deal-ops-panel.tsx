@@ -2,7 +2,7 @@
  * Shared deal ops drawer: costs, stage, ship checklist, packing slip,
  * plate→printer assignment, and failure log.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -14,6 +14,7 @@ import {
   Package,
   Printer,
   Ship,
+  FileUp,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -166,6 +167,7 @@ export function DealOpsPanel({
   const [failureType, setFailureType] = useState<ProductionFailureType>("qc_reject");
   const [failureNotes, setFailureNotes] = useState("");
   const [failureResin, setFailureResin] = useState("");
+  const labelFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!detail.data) return;
@@ -301,6 +303,85 @@ export function DealOpsPanel({
       toast({
         title: "Checklist update failed",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 200),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const attachLabelPdf = useMutation({
+    mutationFn: async (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("anchorDealId", dealId);
+      const parsedResponse = await apiRequest("POST", "/api/shipping-labels/parse", body, { headers });
+      const parsed = (await parsedResponse.json()) as {
+        ok: true;
+        fields: {
+          trackingNumber: string | null;
+          service: string | null;
+          carrier: string | null;
+          postageUsd: string | null;
+          recipientName: string | null;
+        };
+        suggestedNotes: string;
+        matches: Array<{ dealId: string; contactName: string | null; dealName: string; score: number }>;
+      };
+      const trackingNumber = parsed.fields.trackingNumber?.trim() || "";
+      if (trackingNumber.length < 6) {
+        throw new Error("Could not read a tracking number from that PDF — confirm on Labels.");
+      }
+      // This deal always; plus any same-client companions (OCR fuzzy or HubSpot identity).
+      const companionIds = parsed.matches
+        .filter((row) => row.dealId !== dealId && row.score >= 70)
+        .map((row) => row.dealId);
+      const dealIds = Array.from(new Set([dealId, ...companionIds]));
+      const attachResponse = await apiRequest(
+        "POST",
+        "/api/shipping-labels/attach",
+        {
+          dealIds,
+          trackingNumber,
+          notes: parsed.suggestedNotes || "",
+          postageUsd: parsed.fields.postageUsd || "",
+          packingDone: true,
+          labelBought: true,
+          markComplete: true,
+          messageChannel: "marketplace",
+          liveWrite: true,
+        },
+        { headers },
+      );
+      const attached = (await attachResponse.json()) as {
+        ok: boolean;
+        attachedDealIds?: string[];
+        error?: string;
+      };
+      if (!attached.ok) {
+        throw new Error(attached.error || "Could not attach tracking");
+      }
+      return {
+        trackingNumber,
+        dealIds: attached.attachedDealIds?.length ? attached.attachedDealIds : dealIds,
+        recipientName: parsed.fields.recipientName,
+      };
+    },
+    onSuccess: (data) => {
+      setTracking(data.trackingNumber);
+      invalidateOps(dealId);
+      queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      toast({
+        title: data.dealIds.length > 1 ? `Tracking on ${data.dealIds.length} orders` : "Label attached",
+        description:
+          data.dealIds.length > 1
+            ? `${data.trackingNumber} saved on this order plus same-client companions (shared box).`
+            : `${data.trackingNumber} saved on this Print Order.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not attach label PDF",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
         variant: "destructive",
       });
     },
@@ -624,7 +705,37 @@ export function DealOpsPanel({
           >
             Save tracking
           </Button>
+          <input
+            ref={labelFileRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            data-testid="input-deal-ops-label-pdf"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) attachLabelPdf.mutate(file);
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={attachLabelPdf.isPending}
+            onClick={() => labelFileRef.current?.click()}
+            data-testid="button-deal-ops-upload-label"
+          >
+            {attachLabelPdf.isPending ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileUp className="mr-2 h-3.5 w-3.5" />
+            )}
+            Upload label PDF
+          </Button>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Upload reads the PDF (OCR if needed), saves tracking on this order, and onto every other open/recent order for the same HubSpot client when they share a box.
+        </p>
       </div>
 
       <div className="space-y-3 rounded-md border border-border/80 p-3">

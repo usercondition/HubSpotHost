@@ -158,6 +158,9 @@ export default function ShippingLabelsPage() {
     mutationFn: async (file: File) => {
       const body = new FormData();
       body.append("file", file);
+      if (prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)) {
+        body.append("anchorDealId", prefillDealId);
+      }
       const response = await apiRequest("POST", "/api/shipping-labels/parse", body, { headers });
       return (await response.json()) as ParseResponse;
     },
@@ -170,14 +173,15 @@ export default function ShippingLabelsPage() {
       setPostage(data.fields.postageUsd ?? "");
       setManualDealId("");
       const defaults = defaultLabelMatchDealIds(data.matches);
-      const seeded =
-        defaults.length > 0
-          ? defaults
-          : data.alreadyAttached?.dealId
+      const seeded = Array.from(
+        new Set([
+          ...defaults,
+          ...(data.alreadyAttached?.dealId && defaults.length === 0
             ? [data.alreadyAttached.dealId]
-            : prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)
-              ? [prefillDealId]
-              : [];
+            : []),
+          ...(prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId) ? [prefillDealId] : []),
+        ]),
+      );
       setSelectedDealIds(seeded);
       const attachedIds = data.alreadyAttachedDealIds ?? (data.alreadyAttached ? [data.alreadyAttached.dealId] : []);
       const pendingDefaults = defaults.filter((id) => !attachedIds.includes(id));
@@ -907,15 +911,15 @@ export default function ShippingLabelsPage() {
                     ) : null}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Select every order in the box. Same-client matches are pre-selected when we can tell.
+                    Select every order going in this physical box. Same-client matches are pre-selected from OCR, the file name, or the order you opened Labels from — including fuzzy OCR names.
                   </p>
                   {parsed.matches.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No automatic match — paste HubSpot deal id(s) below, or open{" "}
+                      No name match yet — paste HubSpot deal id(s) below for every order in the box, or open{" "}
                       <Link href="/deals" className="text-primary hover:underline">
                         Orders
                       </Link>{" "}
-                      and use Ops → Save tracking.
+                      → Ops → Upload label PDF on the primary order (that always attaches there and pulls same-client companions).
                     </p>
                   ) : (
                     <ul className="glance-list">

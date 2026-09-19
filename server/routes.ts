@@ -244,7 +244,9 @@ import {
   attachShippingLabelSchema,
   buildShipNotesFromLabel,
   extractShippingLabelFromPdf,
+  fuzzyPersonNameScore,
   matchShippingLabelToDeals,
+  augmentMatchesWithSameClient,
 } from "./lib/shipping-label";
 import { attachShippingLabelToDeals } from "./lib/shipping-label-attach";
 import {
@@ -1295,10 +1297,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           dismissedAttentionKeys: activeAttentionOverrideKeys(),
           hubspotPortalId,
         });
-        const candidates = matchShippingLabelToDeals(extracted.fields, [
+        const dealPool = [
           ...snapshot.activeDeals.map((deal) => ({ ...deal, closed: false })),
           ...(snapshot.closedDeals ?? []).map((deal) => ({ ...deal, closed: true })),
-        ]);
+        ];
+        const anchorDealId = String(
+          (req.body as { anchorDealId?: string } | undefined)?.anchorDealId ?? "",
+        ).trim();
+        let candidates = matchShippingLabelToDeals(extracted.fields, dealPool);
+        candidates = augmentMatchesWithSameClient(candidates, dealPool, {
+          anchorDealId: /^[0-9]{1,20}$/.test(anchorDealId) ? anchorDealId : null,
+        });
+        // Prefer HubSpot contact spelling over OCR garbage once we have a match / anchor.
+        const anchorContact =
+          (/^[0-9]{1,20}$/.test(anchorDealId)
+            ? dealPool.find((row) => row.dealId === anchorDealId)?.contactName?.trim()
+            : null) || null;
+        const topContact =
+          anchorContact || candidates.find((row) => row.contactName)?.contactName?.trim() || null;
+        if (topContact) {
+          const clientFuzzyOk =
+            !extracted.fields.clientName ||
+            fuzzyPersonNameScore(extracted.fields.clientName, topContact) >= 70;
+          const recipientFuzzyOk =
+            Boolean(extracted.fields.recipientName) &&
+            fuzzyPersonNameScore(extracted.fields.recipientName!, topContact) >= 70;
+          // Anchor upload: trust the open order's HubSpot client even when OCR name is garbage.
+          if (anchorContact || clientFuzzyOk || recipientFuzzyOk) {
+            extracted.fields.clientName = topContact;
+          }
+          if (recipientFuzzyOk) {
+            extracted.fields.recipientName = topContact;
+          }
+        }
         const alreadyAttachedRows = listExistingTrackingAttachments(
           extracted.fields.trackingNumber,
           deals,

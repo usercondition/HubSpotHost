@@ -177,6 +177,8 @@ function scoreOcrText(text: string): number {
   if (/tracking\s*#/i.test(text)) score += 20;
   if (/\bUPS\b/i.test(text) || /ground/i.test(text)) score += 5;
   if (/[A-Z]{2}\s+\d{5}/.test(text)) score += 10;
+  // Prefer orientations that show a real city line (any CITY STATE ZIP), not a specific town.
+  if (/\b[A-Z]{3,}(?:\s+[A-Z]{2,}){0,3}\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(text)) score += 20;
   score += Math.min(20, Math.floor(text.replace(/\s+/g, "").length / 40));
   return score;
 }

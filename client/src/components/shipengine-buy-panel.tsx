@@ -1242,6 +1242,9 @@ export function ShipEngineBuyPanel({
                               <p className="text-xs font-semibold tracking-tight">
                                 Shared box · {purchaseDealIds.length} orders get this tracking
                               </p>
+                              <p className="text-[0.6875rem] text-muted-foreground">
+                                Keep checked when these ship together in one package. Uncheck anything that goes out separately.
+                              </p>
                               <ul className="space-y-1.5">
                                 {companionPicks.map((companion) => {
                                   const checked = bundleDealIds.includes(companion.dealId);
