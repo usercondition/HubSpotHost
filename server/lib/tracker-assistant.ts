@@ -135,7 +135,11 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
   );
   const needsAddressSource = [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction].filter(
     (item) =>
-      (item.bucket === "ship_ready" || item.readyToPack || item.fulfillment.readyPercent >= 80) &&
+      (item.bucket === "ship_ready" ||
+        item.readyToPack ||
+        item.fulfillment.readyPercent >= 80 ||
+        // Labels shows in-production near-ship rows; count real HubSpot gaps after enrichment.
+        item.bucket === "in_production") &&
       item.addressStatus !== "ready",
   );
   const openJobs = [

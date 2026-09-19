@@ -314,7 +314,10 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       readyToPack: readyToPack.length,
       needsAddress: items.filter(
         (item) =>
-          (item.bucket === "ship_ready" || item.readyToPack) && item.addressStatus !== "ready",
+          (item.bucket === "ship_ready" ||
+            item.readyToPack ||
+            item.bucket === "in_production") &&
+          item.addressStatus !== "ready",
       ).length,
       openOrders: items.length,
     },
@@ -322,18 +325,29 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
 }
 
 /**
- * Fetch HubSpot ship-to for Ready to Ship / ready-to-pack deals and attach
+ * Deals Labels shows in the order pick list (and Floor may chip once ship-side).
+ * Includes in-production rows — Post-Process / QC often sits there with Ship <80%
+ * and previously kept a false default "Needs address" without a HubSpot fetch.
+ */
+export function queueItemsForShipAddressEnrichment(
+  queue: ProductionQueueResponse,
+): ProductionQueueItem[] {
+  const targets = new Map<string, ProductionQueueItem>();
+  for (const item of [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction]) {
+    targets.set(item.dealId, item);
+  }
+  return [...targets.values()];
+}
+
+/**
+ * Fetch HubSpot ship-to for Labels-visible deals and attach
  * addressStatus / addressSummary / chaseDraft. Other rows keep heuristic defaults.
  */
 export async function attachShipAddressReadiness(
   queue: ProductionQueueResponse,
 ): Promise<ProductionQueueResponse> {
-  const targets = new Map<string, ProductionQueueItem>();
-  for (const item of [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction]) {
-    if (item.bucket === "ship_ready" || item.readyToPack || item.fulfillment.readyPercent >= 80) {
-      targets.set(item.dealId, item);
-    }
-  }
+  const targetItems = queueItemsForShipAddressEnrichment(queue);
+  const targets = new Map(targetItems.map((item) => [item.dealId, item]));
   if (targets.size === 0) return queue;
 
   const entries = await Promise.all(
@@ -407,7 +421,10 @@ export async function attachShipAddressReadiness(
       ...queue.summary,
       needsAddress: all.filter(
         (item) =>
-          (item.bucket === "ship_ready" || item.readyToPack) && item.addressStatus !== "ready",
+          (item.bucket === "ship_ready" ||
+            item.readyToPack ||
+            item.bucket === "in_production") &&
+          item.addressStatus !== "ready",
       ).length,
     },
   };

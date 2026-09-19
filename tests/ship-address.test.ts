@@ -5,7 +5,9 @@ import {
   draftAddressChaseMessage,
   dealNameForChase,
 } from "../shared/ship-address";
+import { hubspotStageLooksShipReady, type ProductionQueueItem, type ProductionQueueResponse } from "../shared/schema";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
+import { queueItemsForShipAddressEnrichment } from "../server/lib/production-queue";
 import {
   answerTrackerQuestionRules,
   type TrackerAssistantContext,
@@ -93,6 +95,105 @@ test("ShipEngine gate agrees with ready address fields", () => {
   assert.equal(address.state, "CA");
   const readiness = deriveShipAddressReadiness(contact);
   assert.equal(readiness.addressStatus, "ready");
+});
+
+test("Angel-shaped HubSpot contact (Ca + United States) is address-ready", () => {
+  const contact = {
+    name: "Angel Pineda",
+    email: "marfar138@gmail.com",
+    phone: "6614317094",
+    street1: "3509 janene way",
+    street2: "",
+    city: "Bakersfield",
+    state: "Ca",
+    zip: "93306",
+    country: "United States",
+  };
+  const address = contactToShipEngineAddress(contact);
+  assert.ok(address);
+  assert.equal(address.state, "CA");
+  assert.equal(address.country, "US");
+  assert.equal(deriveShipAddressReadiness(contact).addressStatus, "ready");
+});
+
+test("Post-Process / QC counts as HubSpot ship-ready stage", () => {
+  assert.equal(hubspotStageLooksShipReady("Post-Process / QC"), true);
+  assert.equal(hubspotStageLooksShipReady("Ready to Ship"), true);
+  assert.equal(hubspotStageLooksShipReady("In Production"), false);
+  assert.equal(hubspotStageLooksShipReady("Queued to Print"), false);
+});
+
+test("Labels enrichment targets include low readyPercent in-production deals", () => {
+  const thin = (dealId: string, bucket: ProductionQueueItem["bucket"], readyPercent: number): ProductionQueueItem =>
+    ({
+      dealId,
+      dealName: dealId,
+      stageId: "s",
+      stage: bucket === "ship_ready" ? "Ready to Ship" : "In Production",
+      amount: 10,
+      contactName: "Ada",
+      hasPlates: true,
+      requiresPlates: true,
+      promptAttachPlates: false,
+      costsIncomplete: false,
+      needsReply: false,
+      kitNeeded: 0,
+      kitReprint: 0,
+      unassignedPlateCount: 0,
+      assignedPrinterIds: [],
+      assignedPrinterNames: [],
+      plateCount: 1,
+      totalPrintTimeSeconds: 0,
+      totalResinMassG: 0,
+      latestPlateAttachedAt: null,
+      fulfillment: {
+        packingDone: false,
+        labelBought: false,
+        trackingPasted: false,
+        shipReady: false,
+        readyPercent,
+        notes: null,
+        updatedAt: null,
+      },
+      priorityScore: 0,
+      bucket,
+      readyToPack: false,
+      shipBy: "2026-09-20",
+      shipBySource: "derived",
+      shipByReason: "test",
+      shipByOverride: null,
+      shipPlanNote: null,
+      addressStatus: "missing",
+      addressSummary: null,
+      chaseDraft: "Hey Ada — your order is ready to ship. Can you confirm the best address to send it to?",
+    }) as ProductionQueueItem;
+
+  const queue = {
+    generatedAt: "2026-09-19T00:00:00.000Z",
+    hubspotPortalId: null,
+    stages: [],
+    printers: [],
+    nextPrint: [],
+    inProduction: [thin("angel-qc", "in_production", 40)],
+    shipReady: [thin("ready-1", "ship_ready", 100)],
+    blocked: [],
+    needsReply: [],
+    readyToPack: [],
+    recentFailures: [],
+    summary: {
+      nextPrint: 0,
+      inProduction: 1,
+      shipReady: 1,
+      blocked: 0,
+      needsReply: 0,
+      readyToPack: 0,
+      needsAddress: 2,
+      openOrders: 2,
+    },
+  } as ProductionQueueResponse;
+
+  const ids = queueItemsForShipAddressEnrichment(queue).map((item) => item.dealId).sort();
+  assert.deepEqual(ids, ["angel-qc", "ready-1"]);
 });
 
 function emptySnapshot(): PerformanceResponse {

@@ -554,6 +554,9 @@ export function hubspotStageLooksShipReady(stage: string | null | undefined): bo
     /ship\s*ready/.test(value) ||
     /awaiting\s*shipment/.test(value) ||
     /ready\s*to\s*pack/.test(value) ||
+    // Post-print QC / post-process — Labels buys labels from these stages too.
+    /post[- ]?process/.test(value) ||
+    (/\bqc\b/.test(value) && /post|process|pack|ship|fulfill|quality/.test(value)) ||
     (/pack(ed|ing)?/.test(value) && /ship|fulfill/.test(value))
   );
 }

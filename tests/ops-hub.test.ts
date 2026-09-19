@@ -292,6 +292,29 @@ test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", 
   });
 });
 
+test("HubSpot Post-Process / QC lands in ship-ready for Labels address enrichment", async () => {
+  await withTempDb(() => {
+    const snapshot = sampleSnapshot([
+      {
+        dealId: "angel-rhino",
+        dealName: "Rhino (x3) - Angel pineda",
+        stageId: "qc",
+        stage: "Post-Process / QC",
+        amount: 104.97,
+        hasPlates: true,
+        promptAttachPlates: false,
+        requiresPlates: true,
+        closeDate: null,
+        contactName: "Angel pineda",
+      },
+    ]);
+    const queue = buildProductionQueue(snapshot);
+    assert.equal(queue.summary.shipReady, 1);
+    assert.equal(queue.shipReady[0]?.dealId, "angel-rhino");
+    assert.equal(queue.inProduction.length, 0);
+  });
+});
+
 test("ship-by projection respects print duration, ready work, and overrides", () => {
   const now = new Date("2026-08-10T19:00:00.000Z"); // noon in Los Angeles
   const dueToday = deriveShipBy(
