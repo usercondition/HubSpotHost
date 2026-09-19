@@ -261,6 +261,8 @@ type Props = {
     carrier: string | null;
     labelUrl: string | null;
   }) => void;
+  /** When true, skip the outer Panel — parent owns the shell (combined Buy / Attach PDF). */
+  embedded?: boolean;
 };
 
 export function ShipEngineBuyPanel({
@@ -270,6 +272,7 @@ export function ShipEngineBuyPanel({
   prefillDealId,
   messageChannel,
   onPurchased,
+  embedded = false,
 }: Props) {
   const { toast } = useToast();
   const [dealId, setDealId] = useState(
@@ -1006,10 +1009,7 @@ export function ShipEngineBuyPanel({
     ) : null;
 
   const activeOrderWorkspace = hasActiveDeal ? (
-    <div className="space-y-3 border-t border-border/60 pt-3" data-testid="panel-shipengine-active-order-body">
-      <p className="text-xs font-semibold tracking-tight text-muted-foreground">
-        2 · Confirm ship-to · 3 · Box & rates · 4 · Buy (label opens automatically)
-      </p>
+    <div className="space-y-2.5 border-t border-border/60 pt-2.5" data-testid="panel-shipengine-active-order-body">
       {shipToBlock}
       {parcelFields}
       <div className="flex flex-wrap items-center gap-2">
@@ -1042,31 +1042,58 @@ export function ShipEngineBuyPanel({
     </div>
   ) : null;
 
-  return (
-    <>
-    <Panel
-      title="Buy with ShipEngine"
-      description="One flow: pick the box (and any same-client companions), get rates, buy — label downloads and opens automatically, tracking hits every selected order."
-      testId="panel-labels-shipengine"
-      actions={
-        <div className="flex flex-wrap items-center gap-1.5">
-          {status?.testMode ? (
-            <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox key" />
-          ) : status?.configured ? (
-            <StatusPill tone="good" icon={CheckCircle2} label="ShipEngine ready" />
-          ) : null}
-          {availableUsd != null ? (
+  const walletStrip =
+    status?.configured && !status.carriersError && (status.carriers?.length ?? 0) > 0 ? (
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2"
+        data-tone={fundsEmpty ? "bad" : fundsLow ? "warn" : undefined}
+        data-testid="panel-shipengine-wallet"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Wallet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span
+            className="text-sm font-semibold tabular-nums tracking-tight"
+            data-testid="text-shipengine-available-funds"
+          >
+            {availableUsd != null ? formatMoney(availableUsd) : "—"}
+          </span>
+          {fundedCarriers.slice(0, 2).map((carrier) => (
             <StatusPill
-              tone={fundsEmpty ? "bad" : fundsLow ? "warn" : "good"}
-              icon={Wallet}
-              label={`Available ${formatMoney(availableUsd)}`}
-              testId="status-shipengine-available-funds"
+              key={carrier.carrierId}
+              tone={carrier.balance <= 0 ? "bad" : carrier.balance < 5 ? "warn" : "neutral"}
+              icon={carrier.balance < 5 ? AlertTriangle : CheckCircle2}
+              label={`${carrier.friendlyName} $${carrier.balance.toFixed(2)}`}
+              testId={`status-shipengine-balance-${carrier.carrierCode}`}
             />
-          ) : null}
+          ))}
         </div>
-      }
-    >
-      {!status?.configured ? (
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant={fundsEmpty || fundsLow ? "default" : "ghost"}
+            disabled={fundedCarriers.length === 0}
+            onClick={() => setAddFundsOpen(true)}
+            data-testid="button-shipengine-add-funds"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Funds
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={statusQuery.isFetching}
+            onClick={() => void statusQuery.refetch()}
+            data-testid="button-shipengine-refresh-funds"
+          >
+            {statusQuery.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "↻"}
+          </Button>
+        </div>
+      </div>
+    ) : null;
+
+  const buyBody = !status?.configured ? (
         <div className="glance-item flex-col items-stretch gap-2" data-tone="warn">
           <p className="text-sm font-semibold">ShipEngine isn’t fully configured yet</p>
           <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
@@ -1086,7 +1113,7 @@ export function ShipEngineBuyPanel({
           </ul>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {status.carriersError ? (
             <div className="glance-item flex-col items-stretch gap-1" data-tone="warn">
               <p className="text-sm font-semibold">Couldn’t list carriers</p>
@@ -1100,97 +1127,7 @@ export function ShipEngineBuyPanel({
               </p>
             </div>
           ) : (
-            <div
-              className="glance-item flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"
-              data-tone={fundsEmpty ? "bad" : fundsLow ? "warn" : "good"}
-              data-testid="panel-shipengine-wallet"
-            >
-              <div className="min-w-0 space-y-1">
-                <p className="rule-label mb-0">ShipStation funds</p>
-                <p
-                  className="text-2xl font-semibold tracking-tight numeric"
-                  data-testid="text-shipengine-available-funds"
-                >
-                  {availableUsd != null ? formatMoney(availableUsd) : "—"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {funds?.sharedWallet
-                    ? "Shared prepaid wallet across funded carriers (not summed per carrier)."
-                    : fundedCarriers.length > 1
-                      ? "Total across funded carrier wallets."
-                      : status.carriers && status.carriers.length > 0
-                        ? `Carriers: ${status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}`
-                        : "Funded postage balance from ShipEngine."}
-                </p>
-                {fundedCarriers.length > 0 ? (
-                  <div
-                    className="flex flex-wrap gap-1.5 pt-1"
-                    data-testid="panel-shipengine-carrier-balances"
-                  >
-                    {fundedCarriers.map((carrier) => {
-                      const low = carrier.balance < 5;
-                      const empty = carrier.balance <= 0;
-                      return (
-                        <StatusPill
-                          key={carrier.carrierId}
-                          tone={empty ? "bad" : low ? "warn" : "good"}
-                          icon={empty || low ? AlertTriangle : CheckCircle2}
-                          label={`${carrier.friendlyName} $${carrier.balance.toFixed(2)}`}
-                          testId={`status-shipengine-balance-${carrier.carrierCode}`}
-                        />
-                      );
-                    })}
-                    {(status.carriers ?? [])
-                      .filter((carrier) => carrier.requiresFundedAmount === false)
-                      .map((carrier) => (
-                        <StatusPill
-                          key={carrier.carrierId}
-                          tone="neutral"
-                          icon={Ship}
-                          label={carrier.friendlyName || carrier.carrierCode}
-                          testId={`status-shipengine-balance-${carrier.carrierCode}`}
-                        />
-                      ))}
-                  </div>
-                ) : status.carriers && status.carriers.length > 0 ? (
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    Carriers: {status.carriers.map((c) => c.friendlyName || c.carrierCode).join(" · ")}
-                  </p>
-                ) : null}
-                {fundsEmpty ? (
-                  <p className="text-xs text-destructive">
-                    Wallet is at $0 — add funds here before buying a funded-carrier label.
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={fundsEmpty || fundsLow ? "default" : "outline"}
-                  disabled={fundedCarriers.length === 0}
-                  onClick={() => setAddFundsOpen(true)}
-                  data-testid="button-shipengine-add-funds"
-                >
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Add funds
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={statusQuery.isFetching}
-                  onClick={() => void statusQuery.refetch()}
-                  data-testid="button-shipengine-refresh-funds"
-                >
-                  {statusQuery.isFetching ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    "Refresh"
-                  )}
-                </Button>
-              </div>
-            </div>
+            walletStrip
           )}
 
           {shipReadyPicks.length > 0 ? (
@@ -1456,8 +1393,40 @@ export function ShipEngineBuyPanel({
             </div>
           ) : null}
         </div>
-      )}
+      );
+
+  const statusActions = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {status?.testMode ? (
+        <StatusPill tone="warn" icon={AlertTriangle} label="Sandbox key" />
+      ) : status?.configured ? (
+        <StatusPill tone="good" icon={CheckCircle2} label="ShipEngine ready" />
+      ) : null}
+      {availableUsd != null ? (
+        <StatusPill
+          tone={fundsEmpty ? "bad" : fundsLow ? "warn" : "good"}
+          icon={Wallet}
+          label={`Available ${formatMoney(availableUsd)}`}
+          testId="status-shipengine-available-funds"
+        />
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+    {embedded ? (
+      <div data-testid="panel-labels-shipengine">{buyBody}</div>
+    ) : (
+    <Panel
+      title="Buy with ShipEngine"
+      description="One flow: pick the box (and any same-client companions), get rates, buy — label downloads and opens automatically, tracking hits every selected order."
+      testId="panel-labels-shipengine"
+      actions={statusActions}
+    >
+      {buyBody}
     </Panel>
+    )}
 
     <Dialog open={addFundsOpen} onOpenChange={setAddFundsOpen}>
       <DialogContent className="max-w-md" data-testid="dialog-shipengine-add-funds">

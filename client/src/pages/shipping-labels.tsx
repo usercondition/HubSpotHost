@@ -92,6 +92,7 @@ export default function ShippingLabelsPage() {
   });
 
   const [dragOver, setDragOver] = useState(false);
+  const [labelMode, setLabelMode] = useState<"buy" | "pdf">("buy");
   const [parsed, setParsed] = useState<ParseResponse | null>(null);
   const [tracking, setTracking] = useState("");
   const [notes, setNotes] = useState("");
@@ -162,6 +163,7 @@ export default function ShippingLabelsPage() {
     },
     onSuccess: (data) => {
       setAttachedDraft(null);
+      setLabelMode("pdf");
       setParsed(data);
       setTracking(data.fields.trackingNumber ?? "");
       setNotes(data.suggestedNotes || "");
@@ -482,8 +484,8 @@ export default function ShippingLabelsPage() {
         title="Labels"
         subtitle={
           hasPrefillDeal
-            ? `Ship ${prefillDealLabel}: pick companions if needed, buy once — label opens automatically.`
-            : "Pick order(s) → rates → buy. Label downloads/opens immediately; drop a PDF only if you bought outside Print Ops."
+            ? `Ship ${prefillDealLabel}: buy in Print Ops or attach a PDF — one panel.`
+            : "Buy with ShipEngine or attach a PDF you already bought — same place, less scrolling."
         }
       />
 
@@ -631,96 +633,136 @@ export default function ShippingLabelsPage() {
               </Panel>
             ) : null}
 
-            <ShipEngineBuyPanel
-              headers={headers}
-              ownerCode={ownerCode}
-              isUnlocked={isUnlocked}
-              prefillDealId={prefillDealId}
-              messageChannel={messageChannel}
-              onPurchased={(result) => {
-                const message = draftBuyerTrackingMessage({
-                  contactName: result.contactName,
-                  dealName: result.dealName,
-                  dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
-                  trackingNumber: result.trackingNumber,
-                  service: result.service,
-                  carrier: result.carrier,
-                });
-                setAttachedDraft({
-                  dealIds: result.dealIds,
-                  dealName: result.dealName,
-                  dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
-                  contactName: result.contactName,
-                  contactEmail: result.contactEmail,
-                  trackingNumber: result.trackingNumber,
-                  service: result.service,
-                  carrier: result.carrier,
-                  message,
-                  labelUrl: result.labelUrl,
-                });
-                setParsed(null);
-                setTracking("");
-                setNotes("");
-                setPostage("");
-                setSelectedDealIds([]);
-                setManualDealId("");
-                requestAnimationFrame(() => {
-                  document
-                    .querySelector('[data-testid="panel-labels-buyer-draft"]')
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                });
-              }}
-            />
-
             <Panel
-              title="Or drop a shipping label PDF"
-              description="For labels bought outside Print Ops (Pirate Ship / ShipStation download). Image-only PDFs are OCR’d. Nothing saves until you confirm below."
-              testId="panel-labels-drop"
+              title="Ship label"
+              description="Buy in Print Ops, or attach a PDF you already bought — one place."
+              testId="panel-labels-ship"
             >
-              <input
-                ref={inputRef}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="hidden"
-                data-testid="input-shipping-label-file"
-                onChange={(event) => {
-                  onFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                className={cn(
-                  "glance-item glance-in w-full flex-col items-stretch gap-2 border-dashed py-10 text-center",
-                  dragOver && "border-primary bg-primary/5",
-                )}
-                data-tone="good"
-                data-testid="button-shipping-label-dropzone"
-                disabled={parseLabel.isPending}
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragOver(false);
-                  onFiles(event.dataTransfer.files);
-                }}
+              <div
+                className="mb-3 flex flex-wrap gap-1 rounded-md border border-border/60 bg-muted/25 p-1"
+                data-testid="panel-labels-mode"
               >
-                {parseLabel.isPending ? (
-                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-                ) : (
-                  <FileUp className="mx-auto h-6 w-6 text-primary" />
-                )}
-                <p className="text-sm font-semibold">
-                  {parseLabel.isPending ? "Reading label…" : "Drop label PDF here"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  ShipStation / Pirate Ship PDFs are often image-only — we OCR them. Prefer Buy with ShipEngine above when you can; that skips the drop step.
-                </p>
-              </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    labelMode === "buy"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  data-testid="button-labels-mode-buy"
+                  onClick={() => setLabelMode("buy")}
+                >
+                  Buy with ShipEngine
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    labelMode === "pdf"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  data-testid="button-labels-mode-pdf"
+                  onClick={() => setLabelMode("pdf")}
+                >
+                  Attach PDF
+                </button>
+              </div>
+
+              {labelMode === "buy" ? (
+                <ShipEngineBuyPanel
+                  embedded
+                  headers={headers}
+                  ownerCode={ownerCode}
+                  isUnlocked={isUnlocked}
+                  prefillDealId={prefillDealId}
+                  messageChannel={messageChannel}
+                  onPurchased={(result) => {
+                    const message = draftBuyerTrackingMessage({
+                      contactName: result.contactName,
+                      dealName: result.dealName,
+                      dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
+                      trackingNumber: result.trackingNumber,
+                      service: result.service,
+                      carrier: result.carrier,
+                    });
+                    setAttachedDraft({
+                      dealIds: result.dealIds,
+                      dealName: result.dealName,
+                      dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
+                      contactName: result.contactName,
+                      contactEmail: result.contactEmail,
+                      trackingNumber: result.trackingNumber,
+                      service: result.service,
+                      carrier: result.carrier,
+                      message,
+                      labelUrl: result.labelUrl,
+                    });
+                    setParsed(null);
+                    setTracking("");
+                    setNotes("");
+                    setPostage("");
+                    setSelectedDealIds([]);
+                    setManualDealId("");
+                    setLabelMode("buy");
+                    requestAnimationFrame(() => {
+                      document
+                        .querySelector('[data-testid="panel-labels-buyer-draft"]')
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    });
+                  }}
+                />
+              ) : (
+                <>
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    data-testid="input-shipping-label-file"
+                    onChange={(event) => {
+                      onFiles(event.target.files);
+                      event.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className={cn(
+                      "glance-item glance-in w-full flex-row items-center gap-3 border-dashed px-3 py-3 text-left",
+                      dragOver && "border-primary bg-primary/5",
+                    )}
+                    data-tone="good"
+                    data-testid="button-shipping-label-dropzone"
+                    disabled={parseLabel.isPending}
+                    onClick={() => inputRef.current?.click()}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setDragOver(false);
+                      onFiles(event.dataTransfer.files);
+                    }}
+                  >
+                    {parseLabel.isPending ? (
+                      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+                    ) : (
+                      <FileUp className="h-5 w-5 shrink-0 text-primary" />
+                    )}
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">
+                        {parseLabel.isPending ? "Reading label…" : "Drop PDF or click to browse"}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Pirate Ship / ShipStation exports — OCR works on image-only PDFs. Nothing saves until you confirm.
+                      </span>
+                    </span>
+                  </button>
+                </>
+              )}
             </Panel>
 
             {parsed ? (
