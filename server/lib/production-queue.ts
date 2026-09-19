@@ -190,7 +190,12 @@ function classifyBucket(item: QueueItemBase): ProductionQueueItem["bucket"] {
   if (item.requiresPlates && (item.kitReprint > 0 || item.kitNeeded > 0 || item.unassignedPlateCount > 0)) {
     return "blocked";
   }
-  if (item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80 || hubspotShipReady) {
+  // Checklist can mark ship-ready; HubSpot stage alone must be an actual ship/pack stage
+  // (Post-Process / QC stay in production even with a high readyPercent).
+  if (item.fulfillment.shipReady || hubspotShipReady) {
+    return "ship_ready";
+  }
+  if (item.fulfillment.readyPercent >= 80 && !isPostProcessStage(item.stage)) {
     return "ship_ready";
   }
   return "in_production";
@@ -367,8 +372,8 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
 
 /**
  * Deals Labels shows in the order pick list (and Floor may chip once ship-side).
- * Includes in-production rows — Post-Process / QC often sits there with Ship <80%
- * and previously kept a false default "Needs address" without a HubSpot fetch.
+ * Includes in-production rows so Post-Process / QC still get HubSpot address
+ * enrichment without being treated as ship-ready.
  */
 export function queueItemsForShipAddressEnrichment(
   queue: ProductionQueueResponse,

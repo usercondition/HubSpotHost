@@ -545,18 +545,22 @@ export function dealRequiresPlates(
   return true;
 }
 
-/** HubSpot CRM stage labels that mean the job is past printing and waiting to ship. */
+/** HubSpot CRM stage labels that mean the job is waiting to pack/ship (not still in QC). */
 export function hubspotStageLooksShipReady(stage: string | null | undefined): boolean {
   const value = String(stage ?? "").trim().toLowerCase();
   if (!value) return false;
+  // Post-Process / wash / cure / QC are still production — not ship-ready.
+  if (
+    /post[- ]?process/.test(value) ||
+    /\b(wash(?:ing)?|cur(?:e|ing)|qc|quality control|inspection)\b/.test(value)
+  ) {
+    return false;
+  }
   return (
     /ready\s*(to|for)?\s*ship/.test(value) ||
     /ship\s*ready/.test(value) ||
     /awaiting\s*shipment/.test(value) ||
     /ready\s*to\s*pack/.test(value) ||
-    // Post-print QC / post-process — Labels buys labels from these stages too.
-    /post[- ]?process/.test(value) ||
-    (/\bqc\b/.test(value) && /post|process|pack|ship|fulfill|quality/.test(value)) ||
     (/pack(ed|ing)?/.test(value) && /ship|fulfill/.test(value))
   );
 }

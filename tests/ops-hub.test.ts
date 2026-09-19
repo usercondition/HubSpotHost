@@ -292,7 +292,7 @@ test("HubSpot Ready to Ship without plates lands in ship-ready not next-print", 
   });
 });
 
-test("HubSpot Post-Process / QC lands in ship-ready for Labels address enrichment", async () => {
+test("HubSpot Post-Process / QC stays in production, not ship-ready", async () => {
   await withTempDb(() => {
     const snapshot = sampleSnapshot([
       {
@@ -309,9 +309,11 @@ test("HubSpot Post-Process / QC lands in ship-ready for Labels address enrichmen
       },
     ]);
     const queue = buildProductionQueue(snapshot);
-    assert.equal(queue.summary.shipReady, 1);
-    assert.equal(queue.shipReady[0]?.dealId, "angel-rhino");
-    assert.equal(queue.inProduction.length, 0);
+    assert.equal(queue.summary.shipReady, 0);
+    assert.equal(queue.shipReady.length, 0);
+    assert.equal(queue.inProduction.length, 1);
+    assert.equal(queue.inProduction[0]?.dealId, "angel-rhino");
+    assert.equal(queue.inProduction[0]?.bucket, "in_production");
   });
 });
 

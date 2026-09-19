@@ -135,8 +135,10 @@ test("local pickup never needs a ship-to address", () => {
   assert.equal(fromNote.addressStatus, "pickup");
 });
 
-test("Post-Process / QC counts as HubSpot ship-ready stage", () => {
-  assert.equal(hubspotStageLooksShipReady("Post-Process / QC"), true);
+test("Post-Process / QC is not a HubSpot ship-ready stage", () => {
+  assert.equal(hubspotStageLooksShipReady("Post-Process / QC"), false);
+  assert.equal(hubspotStageLooksShipReady("Post-Process"), false);
+  assert.equal(hubspotStageLooksShipReady("QC"), false);
   assert.equal(hubspotStageLooksShipReady("Ready to Ship"), true);
   assert.equal(hubspotStageLooksShipReady("In Production"), false);
   assert.equal(hubspotStageLooksShipReady("Queued to Print"), false);
