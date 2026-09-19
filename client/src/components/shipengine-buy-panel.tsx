@@ -15,6 +15,8 @@ import {
   X,
   MapPin,
   Copy,
+  Download,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,9 +41,44 @@ import {
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
 import { addressStatusPill } from "@shared/ship-address";
+import { labelMatchContactKey } from "@shared/shipping-label-select";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
 const ADD_FUND_PRESETS = [10, 25, 50, 100] as const;
+
+/** Open / download a ShipEngine label PDF immediately after buy. */
+export async function deliverShipEngineLabel(
+  url: string,
+  options?: { fileName?: string; open?: boolean; download?: boolean },
+): Promise<void> {
+  const open = options?.open !== false;
+  const download = options?.download !== false;
+  const fileName = options?.fileName ?? "shipping-label.pdf";
+
+  if (download) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = fileName;
+        anchor.rel = "noreferrer";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      // Fall through to open tab.
+    }
+  }
+
+  if (open) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 type ShipEngineRate = {
   rateId: string;
@@ -216,6 +253,7 @@ type Props = {
   onPurchased: (result: {
     dealIds: string[];
     dealName: string;
+    dealNames: string[];
     contactName: string | null;
     contactEmail: string | null;
     trackingNumber: string;
@@ -248,12 +286,15 @@ export function ShipEngineBuyPanel({
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [addFundsCarrierId, setAddFundsCarrierId] = useState("");
   const [addFundsAmount, setAddFundsAmount] = useState("25");
+  /** Extra same-client deals that share this label / tracking (shared box). */
+  const [bundleDealIds, setBundleDealIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)) {
       setDealId(prefillDealId);
       setRates([]);
       setSelectedRateId("");
+      setBundleDealIds([]);
     }
   }, [prefillDealId]);
 
@@ -335,6 +376,45 @@ export function ShipEngineBuyPanel({
     }
     return picks;
   }, [queueQuery.data]);
+
+  const selectedPick = useMemo(
+    () => shipReadyPicks.find((row) => row.dealId === dealId) ?? null,
+    [shipReadyPicks, dealId],
+  );
+
+  const companionPicks = useMemo(() => {
+    if (!selectedPick) return [];
+    const key = labelMatchContactKey({
+      contactName: selectedPick.contactName,
+      dealName: selectedPick.dealName,
+    });
+    if (!key) return [];
+    return shipReadyPicks.filter((item) => {
+      if (item.dealId === selectedPick.dealId) return false;
+      return (
+        labelMatchContactKey({
+          contactName: item.contactName,
+          dealName: item.dealName,
+        }) === key
+      );
+    });
+  }, [selectedPick, shipReadyPicks]);
+
+  const companionIdsKey = companionPicks.map((item) => item.dealId).join("|");
+
+  useEffect(() => {
+    if (!selectedPick) {
+      setBundleDealIds([]);
+      return;
+    }
+    // Default: every same-client companion shares the box.
+    setBundleDealIds(companionPicks.map((item) => item.dealId));
+  }, [selectedPick?.dealId, companionIdsKey]);
+
+  const purchaseDealIds = useMemo(() => {
+    const ids = [dealId, ...bundleDealIds].filter((id) => /^[0-9]{1,20}$/.test(id));
+    return Array.from(new Set(ids));
+  }, [dealId, bundleDealIds]);
 
   const preferredRates = useMemo(
     () => filterShopShippingRates(rates, ratePrefMode),
@@ -425,11 +505,12 @@ export function ShipEngineBuyPanel({
   const buy = useMutation({
     mutationFn: async () => {
       if (!selectedRate) throw new Error("Pick a rate first");
+      if (purchaseDealIds.length === 0) throw new Error("Pick at least one Print Order");
       const response = await apiRequest(
         "POST",
         "/api/shipping-labels/shipengine/purchase",
         {
-          dealIds: [dealId],
+          dealIds: purchaseDealIds,
           rateId: selectedRate.rateId,
           amount: selectedRate.amount,
           carrierCode: selectedRate.carrierCode,
@@ -448,17 +529,28 @@ export function ShipEngineBuyPanel({
       queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/shipengine/status"] });
 
       const tracking = data.shipengine?.trackingNumber ?? "";
-      const dealIds = data.attachedDealIds?.length ? data.attachedDealIds : [dealId];
-      const match = shipReadyPicks.find((row) => row.dealId === dealId);
+      const dealIds = data.attachedDealIds?.length ? data.attachedDealIds : purchaseDealIds;
+      const dealNames = dealIds.map(
+        (id) => shipReadyPicks.find((row) => row.dealId === id)?.dealName ?? `Deal ${id}`,
+      );
+      const labelUrl = data.shipengine?.labelUrl ?? null;
+      if (labelUrl) {
+        void deliverShipEngineLabel(labelUrl, {
+          fileName: tracking ? `label-${tracking}.pdf` : "shipping-label.pdf",
+          open: true,
+          download: true,
+        });
+      }
       onPurchased({
         dealIds,
-        dealName: match?.dealName ?? `Deal ${dealId}`,
+        dealName: dealNames[0] ?? `Deal ${dealId}`,
+        dealNames,
         contactName: data.contact?.name ?? shipToQuery.data?.contact.name ?? null,
         contactEmail: data.contact?.email ?? shipToQuery.data?.contact.email ?? null,
         trackingNumber: tracking,
         service: data.shipengine?.serviceCode ?? selectedRate?.serviceType ?? null,
         carrier: data.shipengine?.carrierCode ?? selectedRate?.carrierFriendlyName ?? null,
-        labelUrl: data.shipengine?.labelUrl ?? null,
+        labelUrl,
       });
       setRates([]);
       setSelectedRateId("");
@@ -468,11 +560,13 @@ export function ShipEngineBuyPanel({
         : data.stageMoves?.some((row) => !row.ok)
           ? " · tracking saved (stage move failed)"
           : "";
+      const bundleHint =
+        dealIds.length > 1 ? ` · shared box on ${dealIds.length} orders` : "";
       toast({
         title: data.shipengine?.testMode ? "Test label bought" : "Label bought",
         description: tracking
-          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached${stageHint}`
-          : data.message ?? `Tracking attached${stageHint}`,
+          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached${bundleHint}${stageHint}`
+          : data.message ?? `Tracking attached${bundleHint}${stageHint}`,
       });
     },
     onError: (error: Error) => {
@@ -528,14 +622,12 @@ export function ShipEngineBuyPanel({
 
   const status = statusQuery.data;
   const shipToReady = shipToQuery.data?.ready ?? false;
-  const selectedPick = useMemo(
-    () => shipReadyPicks.find((row) => row.dealId === dealId) ?? null,
-    [shipReadyPicks, dealId],
-  );
   const hasActiveDeal = /^[0-9]{1,20}$/.test(dealId);
   const queueAddressStatus = selectedPick?.addressStatus;
   const showAddressWarn =
     Boolean(hasActiveDeal) &&
+    selectedPick?.addressStatus !== "pickup" &&
+    selectedPick?.shippingRequired !== false &&
     ((shipToQuery.data && !shipToReady) ||
       (queueAddressStatus && queueAddressStatus !== "ready" && !shipToReady));
 
@@ -564,9 +656,11 @@ export function ShipEngineBuyPanel({
         tone={pill.tone}
         icon={MapPin}
         label={
-          item.addressStatus === "ready" && item.addressSummary
-            ? `Address · ${item.addressSummary}`
-            : pill.label
+          item.addressStatus === "pickup"
+            ? "Pickup"
+            : item.addressStatus === "ready" && item.addressSummary
+              ? `Address · ${item.addressSummary}`
+              : pill.label
         }
         testId={`status-shipengine-address-${item.dealId}`}
       />
@@ -605,10 +699,17 @@ export function ShipEngineBuyPanel({
     setRates([]);
     setSelectedRateId("");
     setAddressHint("");
+    setBundleDealIds([]);
   }
 
   function clearActiveDeal() {
     selectDeal("");
+  }
+
+  function toggleBundleDeal(id: string) {
+    setBundleDealIds((prev) =>
+      prev.includes(id) ? prev.filter((row) => row !== id) : [...prev, id],
+    );
   }
 
   const parcelFields = (
@@ -868,9 +969,13 @@ export function ShipEngineBuyPanel({
                 onClick={() => {
                   if (!selectedRate) return;
                   const label = `${selectedRate.carrierFriendlyName} ${selectedRate.serviceType} for ${formatRatePrice(selectedRate.amount)}`;
+                  const boxHint =
+                    purchaseDealIds.length > 1
+                      ? ` Tracking writes to ${purchaseDealIds.length} orders (shared box).`
+                      : "";
                   if (
                     !testMode &&
-                    !window.confirm(`Buy ${label}? This charges your ShipEngine account.`)
+                    !window.confirm(`Buy ${label}?${boxHint} This charges your ShipEngine account.`)
                   ) {
                     return;
                   }
@@ -883,7 +988,11 @@ export function ShipEngineBuyPanel({
                 ) : (
                   <Ship className="mr-2 h-4 w-4" />
                 )}
-                {selectedRate ? `Buy · ${formatRatePrice(selectedRate.amount)}` : "Buy label"}
+                {selectedRate
+                  ? purchaseDealIds.length > 1
+                    ? `Buy · ${formatRatePrice(selectedRate.amount)} · ${purchaseDealIds.length} orders`
+                    : `Buy · ${formatRatePrice(selectedRate.amount)}`
+                  : "Buy label"}
               </Button>
               {hasActiveDeal ? (
                 <Button asChild size="default" variant="outline">
@@ -898,6 +1007,9 @@ export function ShipEngineBuyPanel({
 
   const activeOrderWorkspace = hasActiveDeal ? (
     <div className="space-y-3 border-t border-border/60 pt-3" data-testid="panel-shipengine-active-order-body">
+      <p className="text-xs font-semibold tracking-tight text-muted-foreground">
+        2 · Confirm ship-to · 3 · Box & rates · 4 · Buy (label opens automatically)
+      </p>
       {shipToBlock}
       {parcelFields}
       <div className="flex flex-wrap items-center gap-2">
@@ -934,7 +1046,7 @@ export function ShipEngineBuyPanel({
     <>
     <Panel
       title="Buy with ShipEngine"
-      description="Rate-shop, buy the label, write tracking + postage, and complete the Print Order — same flow as Queue ops, without leaving Print Ops."
+      description="One flow: pick the box (and any same-client companions), get rates, buy — label downloads and opens automatically, tracking hits every selected order."
       testId="panel-labels-shipengine"
       actions={
         <div className="flex flex-wrap items-center gap-1.5">
@@ -1085,9 +1197,9 @@ export function ShipEngineBuyPanel({
             <div className="space-y-2" data-testid="panel-shipengine-order-picks">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold tracking-tight">Ready to label</p>
+                  <p className="text-sm font-semibold tracking-tight">1 · Pick orders</p>
                   <p className="text-xs text-muted-foreground">
-                    Tap an order to open its label card — ship-to, box, and rates stay on that order.
+                    Tap the primary order, then keep same-client companions checked for one shared box.
                   </p>
                 </div>
                 <p className="text-xs tabular-nums text-muted-foreground">
@@ -1166,7 +1278,9 @@ export function ShipEngineBuyPanel({
                               icon={Ship}
                               label={`Ship ${item.fulfillment.readyPercent}%`}
                             />
-                            {item.addressStatus !== "ready" && item.chaseDraft ? (
+                            {item.addressStatus !== "ready" &&
+                            item.addressStatus !== "pickup" &&
+                            item.chaseDraft ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -1183,6 +1297,45 @@ export function ShipEngineBuyPanel({
                               </Button>
                             ) : null}
                           </div>
+                          {companionPicks.length > 0 ? (
+                            <div
+                              className="mt-3 space-y-2 rounded-md border border-border/70 bg-muted/25 p-2.5"
+                              data-testid="panel-shipengine-shared-box"
+                            >
+                              <p className="text-xs font-semibold tracking-tight">
+                                Shared box · {purchaseDealIds.length} orders get this tracking
+                              </p>
+                              <ul className="space-y-1.5">
+                                {companionPicks.map((companion) => {
+                                  const checked = bundleDealIds.includes(companion.dealId);
+                                  return (
+                                    <li key={companion.dealId}>
+                                      <label
+                                        className="flex cursor-pointer items-start gap-2 text-sm"
+                                        data-testid={`label-shipengine-bundle-${companion.dealId}`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="mt-1"
+                                          checked={checked}
+                                          onChange={() => toggleBundleDeal(companion.dealId)}
+                                          data-testid={`checkbox-shipengine-bundle-${companion.dealId}`}
+                                        />
+                                        <span className="min-w-0">
+                                          <span className="block truncate font-medium">
+                                            {companion.dealName}
+                                          </span>
+                                          <span className="block text-xs text-muted-foreground">
+                                            {formatMoney(companion.amount)}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          ) : null}
                           {activeOrderWorkspace}
                         </div>
                       </li>
@@ -1413,13 +1566,43 @@ export function ShipEngineBuyPanel({
   );
 }
 
-export function ShipEngineLabelLink({ url }: { url: string }) {
+export function ShipEngineLabelLink({
+  url,
+  trackingNumber,
+}: {
+  url: string;
+  trackingNumber?: string | null;
+}) {
+  const fileName = trackingNumber ? `label-${trackingNumber}.pdf` : "shipping-label.pdf";
   return (
-    <Button asChild size="sm" variant="outline">
-      <a href={url} target="_blank" rel="noreferrer">
-        <ExternalLink className="mr-2 h-3.5 w-3.5" />
-        Open label PDF
-      </a>
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => void deliverShipEngineLabel(url, { fileName, open: true, download: true })}
+        data-testid="button-shipengine-label-download"
+      >
+        <Download className="mr-2 h-3.5 w-3.5" />
+        Download label
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }}
+        data-testid="button-shipengine-label-print"
+      >
+        <Printer className="mr-2 h-3.5 w-3.5" />
+        Print / open
+      </Button>
+      <Button asChild size="sm" variant="ghost">
+        <a href={url} target="_blank" rel="noreferrer">
+          <ExternalLink className="mr-2 h-3.5 w-3.5" />
+          Open tab
+        </a>
+      </Button>
+    </div>
   );
 }

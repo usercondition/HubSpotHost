@@ -10,14 +10,37 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
-import { deriveShipAddressReadiness } from "../../shared/ship-address";
+import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressIsSatisfied } from "../../shared/ship-address";
 import { fetchDealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
-import { getDb } from "./order-links";
+import { getDb, listOrderLinks } from "./order-links";
 import { ensureDefaultPrinters, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
 import { contactToShipEngineAddress } from "./shipengine";
+
+/** Map HubSpot deal id → intake shippingRequired (false = pickup). */
+export function intakeShippingRequiredByDealId(): Map<string, boolean> {
+  const map = new Map<string, boolean>();
+  for (const link of listOrderLinks()) {
+    const dealIds = new Set<string>();
+    if (link.hubspotDealId) dealIds.add(String(link.hubspotDealId));
+    try {
+      const deals = JSON.parse(link.hubspotDealsJson || "[]") as Array<{ dealId?: string }>;
+      for (const deal of deals) {
+        if (deal?.dealId) dealIds.add(String(deal.dealId));
+      }
+    } catch {
+      // ignore bad JSON
+    }
+    for (const dealId of dealIds) {
+      // Pickup wins if any linked intake says no shipping.
+      if (map.get(dealId) === false) continue;
+      map.set(dealId, link.shippingRequired !== false);
+    }
+  }
+  return map;
+}
 
 function parseGrams(value: string | null | undefined): number {
   const n = Number(value ?? "");
@@ -35,6 +58,7 @@ type QueueItemBase = Omit<
   | "addressStatus"
   | "addressSummary"
   | "chaseDraft"
+  | "shippingRequired"
 >;
 
 /** Ship-by planning always uses the shop's calendar, never the server's timezone. */
@@ -196,6 +220,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
 
   const kitByDeal = new Map(listKitSummaries(200).map((kit) => [kit.hubspotDealId, kit]));
   const checklists = listFulfillmentChecklists(printDeals.map((deal) => deal.dealId));
+  const shippingByDeal = intakeShippingRequiredByDealId();
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
   );
@@ -259,20 +284,35 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       },
     };
     const bucket = classifyBucket(base);
+    const shippingRequired =
+      shippingByDeal.has(deal.dealId)
+        ? shippingByDeal.get(deal.dealId) !== false
+        : !looksLikePickup({
+            shipPlanNote: deal.shipPlanNote,
+            dealName: deal.dealName,
+          });
     const readyToPack =
       bucket === "ship_ready" &&
-      (!base.fulfillment.packingDone || !base.fulfillment.labelBought || !base.fulfillment.trackingPasted);
+      (!base.fulfillment.packingDone ||
+        (shippingRequired &&
+          (!base.fulfillment.labelBought || !base.fulfillment.trackingPasted)));
+    const addressDefaults = shippingRequired
+      ? deriveShipAddressReadiness({
+          dealName: deal.dealName,
+          contactNameHint: deal.contactName,
+          shippingRequired,
+          shipPlanNote: deal.shipPlanNote,
+        })
+      : pickupAddressReadiness();
     return {
       ...base,
       ...deriveShipBy({ ...base, bucket }),
       bucket,
       readyToPack,
+      shippingRequired,
       priorityScore: priorityScore(base),
-      // Defaults until attachShipAddressReadiness enriches ship-ready rows.
-      ...deriveShipAddressReadiness({
-        dealName: deal.dealName,
-        contactNameHint: deal.contactName,
-      }),
+      // Defaults until attachShipAddressReadiness enriches ship-side rows.
+      ...addressDefaults,
     };
   });
 
@@ -314,10 +354,11 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       readyToPack: readyToPack.length,
       needsAddress: items.filter(
         (item) =>
+          item.shippingRequired &&
           (item.bucket === "ship_ready" ||
             item.readyToPack ||
             item.bucket === "in_production") &&
-          item.addressStatus !== "ready",
+          !addressIsSatisfied(item.addressStatus),
       ).length,
       openOrders: items.length,
     },
@@ -334,6 +375,8 @@ export function queueItemsForShipAddressEnrichment(
 ): ProductionQueueItem[] {
   const targets = new Map<string, ProductionQueueItem>();
   for (const item of [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction]) {
+    // Pickup orders never need HubSpot ship-to enrichment.
+    if (item.shippingRequired === false || item.addressStatus === "pickup") continue;
     targets.set(item.dealId, item);
   }
   return [...targets.values()];
@@ -366,7 +409,12 @@ export async function attachShipAddressReadiness(
           country: contact.country,
           dealName: item.dealName,
           contactNameHint: item.contactName ?? contact.name,
+          shippingRequired: item.shippingRequired,
+          shipPlanNote: item.shipPlanNote,
         });
+        if (readiness.addressStatus === "pickup") {
+          return [dealId, readiness] as const;
+        }
         // Prefer ShipEngine gate: ready only when label buy would accept the address.
         const addressStatus =
           engineAddress != null
@@ -421,10 +469,11 @@ export async function attachShipAddressReadiness(
       ...queue.summary,
       needsAddress: all.filter(
         (item) =>
+          item.shippingRequired !== false &&
           (item.bucket === "ship_ready" ||
             item.readyToPack ||
             item.bucket === "in_production") &&
-          item.addressStatus !== "ready",
+          !addressIsSatisfied(item.addressStatus),
       ).length,
     },
   };

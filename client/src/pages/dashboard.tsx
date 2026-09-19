@@ -271,7 +271,11 @@ function FlightCard({
             Plates
           </Link>
         ) : null}
-        {showAddress && queueItem && queueItem.addressStatus !== "ready" && queueItem.chaseDraft ? (
+        {showAddress &&
+        queueItem &&
+        queueItem.addressStatus !== "ready" &&
+        queueItem.addressStatus !== "pickup" &&
+        queueItem.chaseDraft ? (
           <button
             type="button"
             className="font-medium text-primary hover:underline"

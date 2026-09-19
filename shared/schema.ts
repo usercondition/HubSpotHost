@@ -2010,11 +2010,16 @@ export interface ProductionQueueItem {
    * HubSpot contact ship-to readiness for label buy.
    * Enriched for ship-ready / ready-to-pack rows; others default to missing.
    */
-  addressStatus: "ready" | "partial" | "missing";
-  /** Compact "City, ST" when available. */
+  addressStatus: "ready" | "partial" | "missing" | "pickup";
+  /** Compact "City, ST" when available; "Local pickup" for pickup orders. */
   addressSummary: string | null;
   /** Copy-only Messenger/email chase when address is incomplete. */
   chaseDraft: string;
+  /**
+   * False when the buyer chose local pickup on intake (or notes say pickup).
+   * Pickup orders do not need HubSpot ship-to or a shipping label.
+   */
+  shippingRequired: boolean;
   closeDate: string | null;
   contactName: string | null;
   hasPlates: boolean;

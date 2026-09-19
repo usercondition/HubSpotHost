@@ -1,9 +1,10 @@
 /**
  * Ship-to address readiness for Ready to Ship / Labels.
  * Presence-only (HubSpot contact fields) — never invents addresses.
+ * Local pickup skips ship-to entirely.
  */
 
-export type AddressStatus = "ready" | "partial" | "missing";
+export type AddressStatus = "ready" | "partial" | "missing" | "pickup";
 
 export type ShipAddressInput = {
   name?: string | null;
@@ -16,6 +17,9 @@ export type ShipAddressInput = {
   dealName?: string | null;
   /** Fallback when HubSpot first name is empty (deal "Product - Client"). */
   contactNameHint?: string | null;
+  /** From intake: false means local pickup — no ship-to needed. */
+  shippingRequired?: boolean | null;
+  shipPlanNote?: string | null;
 };
 
 export type ShipAddressReadiness = {
@@ -29,6 +33,31 @@ export type ShipAddressReadiness = {
 
 function trim(value: string | null | undefined): string {
   return String(value ?? "").trim();
+}
+
+/** True when intake or notes say the buyer is picking up (no ship-to). */
+export function looksLikePickup(input: {
+  shippingRequired?: boolean | null;
+  shipPlanNote?: string | null;
+  dealName?: string | null;
+}): boolean {
+  if (input.shippingRequired === false) return true;
+  const blob = `${trim(input.shipPlanNote)} ${trim(input.dealName)}`.toLowerCase();
+  return /\b(local\s*)?pick[\s-]*up\b/.test(blob) || /\bpickup\b/.test(blob);
+}
+
+export function pickupAddressReadiness(): ShipAddressReadiness {
+  return {
+    addressStatus: "pickup",
+    addressSummary: "Local pickup",
+    chaseDraft: "",
+    missingFields: [],
+  };
+}
+
+/** Address is fine for labeling / digests (ready ship-to or pickup). */
+export function addressIsSatisfied(status: AddressStatus | null | undefined): boolean {
+  return status === "ready" || status === "pickup";
 }
 
 function firstNameFrom(value: string | null | undefined): string {
@@ -80,6 +109,10 @@ export function deriveShipAddressReadiness(
   input: ShipAddressInput,
   options?: { stateOk?: boolean },
 ): ShipAddressReadiness {
+  if (looksLikePickup(input)) {
+    return pickupAddressReadiness();
+  }
+
   const name = trim(input.name);
   const street1 = trim(input.street1);
   const city = trim(input.city);
@@ -130,6 +163,8 @@ export function addressStatusPill(status: AddressStatus): {
   switch (status) {
     case "ready":
       return { label: "Address ready", tone: "good" };
+    case "pickup":
+      return { label: "Pickup", tone: "good" };
     case "partial":
       return { label: "Address partial", tone: "warn" };
     default:

@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   extractShippingLabelFields,
   extractShippingLabelFromPdf,
+  extractTrackingNumber,
   matchShippingLabelToDeals,
   buildShipNotesFromLabel,
   attachShippingLabelSchema,
 } from "../server/lib/shipping-label";
 import { defaultLabelMatchDealIds } from "../shared/shipping-label-select";
+import { extractIndexedImageFromPdf } from "../server/lib/shipping-label-ocr";
 
 const PIRATE_SHIP_LIKE = `
 USPS GROUND ADVANTAGE
@@ -131,8 +135,14 @@ TRUMANN AR 72472-2056
 });
 
 test("real Spencer Patterson Pirate Ship PDF prefers file-name client matches", async () => {
+  const fixture =
+    "/home/ubuntu/.cursor/projects/workspace/uploads/2026-08-26---Spencer-Patterson---9300111043900010978789_dfc6.pdf";
+  if (!existsSync(fixture)) {
+    // Optional local upload fixture — skip when absent in clean CI/cloud agents.
+    return;
+  }
   const extracted = await extractShippingLabelFromPdf(
-    "/home/ubuntu/.cursor/projects/workspace/uploads/2026-08-26---Spencer-Patterson---9300111043900010978789_dfc6.pdf",
+    fixture,
     "2026-08-26---Spencer-Patterson---9300111043900010978789.pdf",
   );
   assert.equal(extracted.fields.trackingNumber, "9300111043900010978789");
@@ -248,4 +258,33 @@ test("attach schema accepts dealIds for multi-order shared tracking", () => {
     trackingNumber: "9300111043900010978789",
   });
   assert.equal(missing.success, false);
+});
+
+test("OCR-spaced UPS tracking compact to 1Z…18", () => {
+  const hit = extractTrackingNumber("TRACKING #: 1Z276 1D1 03 0000 3019");
+  assert.equal(hit.tracking, "1Z2761D10300003019");
+  assert.equal(hit.carrier, "UPS");
+});
+
+test("ShipStation image PDF embeds an Indexed label image", async () => {
+  const fixture = join(process.cwd(), "tests/fixtures/label-201442302-angel.pdf");
+  assert.equal(existsSync(fixture), true);
+  const buffer = await import("node:fs/promises").then((fs) => fs.readFile(fixture));
+  const image = extractIndexedImageFromPdf(buffer);
+  assert.ok(image);
+  assert.equal(image.width, 1400);
+  assert.equal(image.height, 800);
+});
+
+test("ShipStation Angel label PDF OCR recovers UPS tracking", async () => {
+  const fixture = join(process.cwd(), "tests/fixtures/label-201442302-angel.pdf");
+  assert.equal(existsSync(fixture), true);
+  const extracted = await extractShippingLabelFromPdf(fixture, "label-201442302.pdf");
+  assert.equal(extracted.fields.trackingNumber, "1Z2761D10300003019");
+  assert.equal(extracted.fields.carrier, "UPS");
+  assert.match(extracted.fields.recipientName ?? "", /ANGEL/i);
+  assert.ok(
+    extracted.fields.warnings.some((warning) => /OCR/i.test(warning)),
+    "should note OCR was used",
+  );
 });

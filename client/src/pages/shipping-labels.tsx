@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, MessageSquareText, Mail, ArrowLeft, X } from "lucide-react";
+import { FileUp, Loader2, Ship, CheckCircle2, AlertTriangle, Copy, Mail, ArrowLeft, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -482,8 +482,8 @@ export default function ShippingLabelsPage() {
         title="Labels"
         subtitle={
           hasPrefillDeal
-            ? `Buy or attach a label for ${prefillDealLabel} — ShipStation funds stay on this page.`
-            : "Buy a ShipEngine label or drop a PDF. ShipStation wallet balance and add-funds live here so you don’t bounce to ShipStation."
+            ? `Ship ${prefillDealLabel}: pick companions if needed, buy once — label opens automatically.`
+            : "Pick order(s) → rates → buy. Label downloads/opens immediately; drop a PDF only if you bought outside Print Ops."
         }
       />
 
@@ -537,6 +537,100 @@ export default function ShippingLabelsPage() {
               </div>
             ) : null}
 
+            {attachedDraft ? (
+              <Panel
+                title="Label ready"
+                description={
+                  attachedDraft.dealIds.length > 1
+                    ? `${attachedDraft.dealIds.length} orders share this tracking — print the label, then message the buyer.`
+                    : `${attachedDraft.dealName} · tracking saved — print the label, then message the buyer.`
+                }
+                testId="panel-labels-buyer-draft"
+              >
+                <div className="glance-item glance-in flex-col items-stretch gap-3" data-tone="good">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                    {attachedDraft.trackingNumber || "Tracking attached"}
+                    <StatusPill
+                      tone="good"
+                      icon={CheckCircle2}
+                      label={
+                        attachedDraft.dealIds.length > 1
+                          ? `On ${attachedDraft.dealIds.length} orders`
+                          : "Tracking attached"
+                      }
+                    />
+                    {attachedDraft.contactEmail ? (
+                      <StatusPill tone="neutral" icon={Mail} label={attachedDraft.contactEmail} />
+                    ) : (
+                      <StatusPill tone="warn" icon={AlertTriangle} label="No HubSpot email" />
+                    )}
+                  </div>
+                  {attachedDraft.dealNames.length > 1 ? (
+                    <p className="text-xs text-muted-foreground">{attachedDraft.dealNames.join(" · ")}</p>
+                  ) : null}
+                  {attachedDraft.labelUrl ? (
+                    <div className="space-y-1.5" data-testid="panel-labels-print-actions">
+                      <p className="text-xs font-semibold tracking-tight">Print this label</p>
+                      <ShipEngineLabelLink
+                        url={attachedDraft.labelUrl}
+                        trackingNumber={attachedDraft.trackingNumber}
+                      />
+                    </div>
+                  ) : null}
+                  <pre
+                    className="whitespace-pre-wrap rounded-md border border-border/80 bg-muted/35 px-3 py-2.5 font-sans text-sm leading-relaxed text-foreground"
+                    data-testid="text-buyer-tracking-draft"
+                  >
+                    {attachedDraft.message}
+                  </pre>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEmailPreviewOpen(true)}
+                      data-testid="button-open-email-template-attached"
+                    >
+                      <Mail className="mr-2 h-3.5 w-3.5" />
+                      Shipped email
+                    </Button>
+                    {attachedMailto ? (
+                      <Button asChild size="sm" data-testid="button-email-buyer-draft">
+                        <a href={attachedMailto}>
+                          <Mail className="mr-2 h-3.5 w-3.5" />
+                          Open mail app
+                        </a>
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant={attachedMailto ? "outline" : "default"}
+                      onClick={() => void copyMessage(attachedDraft.message)}
+                      data-testid="button-copy-buyer-draft"
+                    >
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      Copy message
+                    </Button>
+                    {attachedDraft.dealIds.slice(0, 3).map((id) => (
+                      <Button key={id} asChild size="sm" variant="outline">
+                        <Link href={queueDealHref(id)}>
+                          {attachedDraft.dealIds.length > 1 ? `Queue · ${id.slice(-4)}` : "Open in Queue"}
+                        </Link>
+                      </Button>
+                    ))}
+                    <Button size="sm" variant="ghost" onClick={() => setAttachedDraft(null)}>
+                      Done
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {attachedDraft.contactEmail
+                      ? "Print Ops does not send email by itself — copy or open your mail app."
+                      : "No email on the HubSpot contact — copy for Marketplace, or add email on the contact."}
+                  </p>
+                </div>
+              </Panel>
+            ) : null}
+
             <ShipEngineBuyPanel
               headers={headers}
               ownerCode={ownerCode}
@@ -547,7 +641,7 @@ export default function ShippingLabelsPage() {
                 const message = draftBuyerTrackingMessage({
                   contactName: result.contactName,
                   dealName: result.dealName,
-                  dealNames: [result.dealName],
+                  dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
                   trackingNumber: result.trackingNumber,
                   service: result.service,
                   carrier: result.carrier,
@@ -555,7 +649,7 @@ export default function ShippingLabelsPage() {
                 setAttachedDraft({
                   dealIds: result.dealIds,
                   dealName: result.dealName,
-                  dealNames: [result.dealName],
+                  dealNames: result.dealNames.length ? result.dealNames : [result.dealName],
                   contactName: result.contactName,
                   contactEmail: result.contactEmail,
                   trackingNumber: result.trackingNumber,
@@ -570,12 +664,17 @@ export default function ShippingLabelsPage() {
                 setPostage("");
                 setSelectedDealIds([]);
                 setManualDealId("");
+                requestAnimationFrame(() => {
+                  document
+                    .querySelector('[data-testid="panel-labels-buyer-draft"]')
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                });
               }}
             />
 
             <Panel
               title="Or drop a shipping label PDF"
-              description="Pirate Ship / carrier exports still work when you already bought outside Print Ops. Nothing saves until you confirm below."
+              description="For labels bought outside Print Ops (Pirate Ship / ShipStation download). Image-only PDFs are OCR’d. Nothing saves until you confirm below."
               testId="panel-labels-drop"
             >
               <input
@@ -619,96 +718,10 @@ export default function ShippingLabelsPage() {
                   {parseLabel.isPending ? "Reading label…" : "Drop label PDF here"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Completing an order in HubSpot is enough for “shipped.” Pirate Ship PDFs are often image-only — we still read tracking + client from the file name when needed.
+                  ShipStation / Pirate Ship PDFs are often image-only — we OCR them. Prefer Buy with ShipEngine above when you can; that skips the drop step.
                 </p>
               </button>
             </Panel>
-
-            {attachedDraft ? (
-              <Panel
-                title="Message the buyer"
-                description={
-                  attachedDraft.dealIds.length > 1
-                    ? `${attachedDraft.dealIds.length} orders · shared tracking saved — copy this into Marketplace (not sent automatically).`
-                    : `${attachedDraft.dealName} · tracking saved — copy this into Marketplace (not sent automatically).`
-                }
-                testId="panel-labels-buyer-draft"
-              >
-                <div className="glance-item glance-in flex-col items-stretch gap-3" data-tone="good">
-                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-                    <MessageSquareText className="h-4 w-4 text-primary" />
-                    Draft ready
-                    <StatusPill
-                      tone="good"
-                      icon={CheckCircle2}
-                      label={
-                        attachedDraft.dealIds.length > 1
-                          ? `Tracking on ${attachedDraft.dealIds.length} orders`
-                          : "Tracking attached"
-                      }
-                    />
-                    {attachedDraft.contactEmail ? (
-                      <StatusPill tone="neutral" icon={Mail} label={attachedDraft.contactEmail} />
-                    ) : (
-                      <StatusPill tone="warn" icon={AlertTriangle} label="No HubSpot email" />
-                    )}
-                  </div>
-                  {attachedDraft.dealNames.length > 1 ? (
-                    <p className="text-xs text-muted-foreground">{attachedDraft.dealNames.join(" · ")}</p>
-                  ) : null}
-                  <pre
-                    className="whitespace-pre-wrap rounded-md border border-border/80 bg-muted/35 px-3 py-2.5 font-sans text-sm leading-relaxed text-foreground"
-                    data-testid="text-buyer-tracking-draft"
-                  >
-                    {attachedDraft.message}
-                  </pre>
-                  <div className="flex flex-wrap gap-2">
-                    {attachedDraft.labelUrl ? <ShipEngineLabelLink url={attachedDraft.labelUrl} /> : null}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEmailPreviewOpen(true)}
-                      data-testid="button-open-email-template-attached"
-                    >
-                      <Mail className="mr-2 h-3.5 w-3.5" />
-                      Shipped email
-                    </Button>
-                    {attachedMailto ? (
-                      <Button asChild size="sm" data-testid="button-email-buyer-draft">
-                        <a href={attachedMailto}>
-                          <Mail className="mr-2 h-3.5 w-3.5" />
-                          Open mail app
-                        </a>
-                      </Button>
-                    ) : null}
-                    <Button
-                      size="sm"
-                      variant={attachedMailto ? "outline" : "default"}
-                      onClick={() => void copyMessage(attachedDraft.message)}
-                      data-testid="button-copy-buyer-draft"
-                    >
-                      <Copy className="mr-2 h-3.5 w-3.5" />
-                      Copy message
-                    </Button>
-                    {attachedDraft.dealIds.slice(0, 3).map((id) => (
-                      <Button key={id} asChild size="sm" variant="outline">
-                        <Link href={queueDealHref(id)}>
-                          {attachedDraft.dealIds.length > 1 ? `Queue · ${id.slice(-4)}` : "Open in Queue"}
-                        </Link>
-                      </Button>
-                    ))}
-                    <Button size="sm" variant="ghost" onClick={() => setAttachedDraft(null)}>
-                      Done
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {attachedDraft.contactEmail
-                      ? "Email buyer opens your mail app with the HubSpot contact address and this draft filled in. Print Ops does not send email by itself yet."
-                      : "No email on the HubSpot contact — copy for Marketplace, or add email on the contact and try again."}
-                  </p>
-                </div>
-              </Panel>
-            ) : null}
 
             {parsed ? (
               <Panel

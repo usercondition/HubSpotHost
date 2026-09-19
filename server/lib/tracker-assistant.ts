@@ -135,6 +135,8 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
   );
   const needsAddressSource = [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction].filter(
     (item) =>
+      item.shippingRequired !== false &&
+      item.addressStatus !== "pickup" &&
       (item.bucket === "ship_ready" ||
         item.readyToPack ||
         item.fulfillment.readyPercent >= 80 ||

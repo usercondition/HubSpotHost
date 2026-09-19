@@ -4,6 +4,7 @@ import {
   deriveShipAddressReadiness,
   draftAddressChaseMessage,
   dealNameForChase,
+  addressStatusPill,
 } from "../shared/ship-address";
 import { hubspotStageLooksShipReady, type ProductionQueueItem, type ProductionQueueResponse } from "../shared/schema";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
@@ -116,6 +117,24 @@ test("Angel-shaped HubSpot contact (Ca + United States) is address-ready", () =>
   assert.equal(deriveShipAddressReadiness(contact).addressStatus, "ready");
 });
 
+test("local pickup never needs a ship-to address", () => {
+  const pickup = deriveShipAddressReadiness({
+    dealName: "Knight bust - Ada",
+    shippingRequired: false,
+  });
+  assert.equal(pickup.addressStatus, "pickup");
+  assert.equal(pickup.addressSummary, "Local pickup");
+  assert.equal(pickup.chaseDraft, "");
+  assert.equal(addressStatusPill("pickup").label, "Pickup");
+  assert.equal(addressStatusPill("pickup").tone, "good");
+
+  const fromNote = deriveShipAddressReadiness({
+    dealName: "Terrain pack - Beau",
+    shipPlanNote: "Local pickup Sat",
+  });
+  assert.equal(fromNote.addressStatus, "pickup");
+});
+
 test("Post-Process / QC counts as HubSpot ship-ready stage", () => {
   assert.equal(hubspotStageLooksShipReady("Post-Process / QC"), true);
   assert.equal(hubspotStageLooksShipReady("Ready to Ship"), true);
@@ -166,6 +185,7 @@ test("Labels enrichment targets include low readyPercent in-production deals", (
       addressStatus: "missing",
       addressSummary: null,
       chaseDraft: "Hey Ada — your order is ready to ship. Can you confirm the best address to send it to?",
+      shippingRequired: true,
     }) as ProductionQueueItem;
 
   const queue = {

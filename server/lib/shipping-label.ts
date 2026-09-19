@@ -38,6 +38,11 @@ export type ShippingLabelMatchCandidate = {
 const USPS_TRACKING =
   /\b((?:94|93|92|91|95|70|14|03)\d{18}|\d{20,22})\b/g;
 const UPS_TRACKING = /\b(1Z[0-9A-Z]{16})\b/gi;
+/**
+ * OCR often inserts spaces in UPS tracking (e.g. 1Z276 1D1 03 0000 3019).
+ * Match exactly 16 alphanumerics after 1Z with optional single spaces — never newlines.
+ */
+const UPS_TRACKING_SPACED = /1Z(?:[0-9A-Z] ?){16}/gi;
 const FEDEX_TRACKING = /\b(\d{12,15})\b/g;
 
 const SERVICE_PATTERNS: Array<{ re: RegExp; label: string; carrier: string }> = [
@@ -72,6 +77,15 @@ function looksLikeUspsTracking(digits: string): boolean {
 export function extractTrackingNumber(text: string): { tracking: string | null; carrier: string | null } {
   const ups = text.match(UPS_TRACKING);
   if (ups?.[0]) return { tracking: ups[0].toUpperCase(), carrier: "UPS" };
+
+  for (const match of text.matchAll(UPS_TRACKING_SPACED)) {
+    const compact = String(match[0] ?? "")
+      .replace(/[^0-9A-Za-z]/g, "")
+      .toUpperCase();
+    if (/^1Z[0-9A-Z]{16}$/.test(compact)) {
+      return { tracking: compact, carrier: "UPS" };
+    }
+  }
 
   const uspsHits: string[] = [];
   for (const match of text.matchAll(USPS_TRACKING)) {
@@ -336,9 +350,27 @@ export async function extractShippingLabelFromPdf(
   } catch {
     throw new Error("The shipping label PDF could not be read.");
   }
-  const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+  let text = typeof parsed.text === "string" ? parsed.text.trim() : "";
   const resolvedName = fileName || filePath.split(/[\\/]/).pop() || "";
+  let ocrUsed = false;
+  if (!text || (!extractTrackingNumber(text).tracking && !extractFieldsFromFileName(resolvedName).trackingNumber)) {
+    try {
+      const { ocrShippingLabelPdf } = await import("./shipping-label-ocr");
+      const ocrText = await ocrShippingLabelPdf(filePath);
+      if (ocrText.trim()) {
+        text = ocrText.trim();
+        ocrUsed = true;
+      }
+    } catch {
+      // Keep filename / empty-text fallbacks below.
+    }
+  }
   const fields = extractShippingLabelFields(text, resolvedName);
+  if (ocrUsed) {
+    fields.warnings.unshift(
+      "Image-only label — read with OCR. Confirm tracking and postage before attaching.",
+    );
+  }
   return {
     fields,
     pageCount: typeof parsed.numpages === "number" ? parsed.numpages : 1,
