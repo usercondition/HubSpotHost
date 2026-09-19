@@ -15,3 +15,6 @@ data.db-journal
 
 *.log
 .DS_Store
+
+# Tesseract OCR language pack downloaded at runtime — do not commit
+*.traineddata
