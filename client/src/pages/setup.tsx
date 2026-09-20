@@ -85,6 +85,16 @@ const ENV_VARS: { name: string; required: string; note: string }[] = [
     note: "ShipStation API / ShipEngine key for Labels rate shop + buy (TEST_… for sandbox)",
   },
   {
+    name: "RESEND_API_KEY",
+    required: "Optional",
+    note: "Resend API key — auto-emails buyers when tracking is attached",
+  },
+  {
+    name: "RESEND_FROM_EMAIL",
+    required: "Optional (with Resend)",
+    note: "Verified from address, e.g. Print Ops <shipping@yourdomain.com>",
+  },
+  {
     name: "SHIP_FROM_NAME",
     required: "Optional (with ShipEngine)",
     note: "Shop ship-from name; also set STREET1/CITY/STATE/ZIP",

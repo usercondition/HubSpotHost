@@ -2,7 +2,7 @@
  * Quirky-but-professional “your order is on its way” email for Labels.
  * Hipster-maker vibe: hero art, postage stamp, warm copy, table-based HTML.
  * Images load from assetBaseUrl (your app origin) — required for HTML preview + future senders.
- * Configure brand defaults below — no live send from Print Ops yet.
+ * Configure brand defaults below. Live send uses Resend when RESEND_API_KEY + RESEND_FROM_EMAIL are set.
  */
 
 export type ShippingEmailBrandConfig = {

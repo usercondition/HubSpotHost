@@ -245,6 +245,14 @@ export default function ShippingLabelsPage() {
         skippedDealIds?: string[];
         contact?: { id: string | null; name: string; email: string };
         alreadyAttached?: { dealId: string; trackingNumber: string };
+        buyerEmail?: {
+          attempted: boolean;
+          sent: boolean;
+          skipped: boolean;
+          to: string | null;
+          reason: string | null;
+          error: string | null;
+        } | null;
         stageMoves?: Array<{
           dealId: string;
           ok: boolean;
@@ -315,11 +323,18 @@ export default function ShippingLabelsPage() {
         : data.stageMoves?.some((row) => !row.ok)
           ? " · stage move failed"
           : "";
+      const emailHint = data.buyerEmail?.sent
+        ? ` · emailed ${data.buyerEmail.to}`
+        : data.buyerEmail?.error
+          ? ` · email failed: ${data.buyerEmail.error}`
+          : data.buyerEmail?.skipped && data.buyerEmail.reason
+            ? ` · email skipped (${data.buyerEmail.reason})`
+            : contactEmail
+              ? ` · draft ready for ${contactEmail}`
+              : " · draft ready — copy for Marketplace";
       toast({
         title: attachedIds.length > 1 ? `Tracking on ${attachedIds.length} orders` : "Tracking attached",
-        description: contactEmail
-          ? `Draft ready for ${contactEmail}${stageHint}${skipCount ? ` · ${skipCount} already had it` : ""}`
-          : `Draft ready — copy for Marketplace.${stageHint}${skipCount ? ` (${skipCount} already had tracking)` : ""}`,
+        description: `${emailHint.slice(3)}${stageHint}${skipCount ? ` · ${skipCount} already had it` : ""}`,
       });
       setParsed(null);
       setTracking("");
@@ -630,7 +645,7 @@ export default function ShippingLabelsPage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {attachedDraft.contactEmail
-                      ? "Print Ops does not send email by itself — copy or open your mail app."
+                      ? "If Resend is configured, a shipped email already went to the HubSpot contact — copy below is still handy for Marketplace."
                       : "No email on the HubSpot contact — copy for Marketplace, or add email on the contact."}
                   </p>
                 </div>

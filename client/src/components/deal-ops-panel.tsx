@@ -355,6 +355,13 @@ export function DealOpsPanel({
         ok: boolean;
         attachedDealIds?: string[];
         error?: string;
+        buyerEmail?: {
+          sent?: boolean;
+          skipped?: boolean;
+          to?: string | null;
+          reason?: string | null;
+          error?: string | null;
+        } | null;
       };
       if (!attached.ok) {
         throw new Error(attached.error || "Could not attach tracking");
@@ -363,6 +370,7 @@ export function DealOpsPanel({
         trackingNumber,
         dealIds: attached.attachedDealIds?.length ? attached.attachedDealIds : dealIds,
         recipientName: parsed.fields.recipientName,
+        buyerEmail: attached.buyerEmail ?? null,
       };
     },
     onSuccess: (data) => {
@@ -370,12 +378,17 @@ export function DealOpsPanel({
       invalidateOps(dealId);
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
+      const emailBit = data.buyerEmail?.sent
+        ? ` · emailed ${data.buyerEmail.to}`
+        : data.buyerEmail?.error
+          ? ` · email failed`
+          : "";
       toast({
         title: data.dealIds.length > 1 ? `Tracking on ${data.dealIds.length} orders` : "Label attached",
         description:
           data.dealIds.length > 1
-            ? `${data.trackingNumber} saved on this order plus same-client companions (shared box).`
-            : `${data.trackingNumber} saved on this Print Order.`,
+            ? `${data.trackingNumber} saved on this order plus same-client companions (shared box).${emailBit}`
+            : `${data.trackingNumber} saved on this Print Order.${emailBit}`,
       });
     },
     onError: (error: Error) => {

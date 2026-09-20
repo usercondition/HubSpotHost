@@ -17,6 +17,8 @@ import {
   type HubSpotShippingSync,
 } from "./fulfillment";
 import type { AttachShippingLabelInput } from "./shipping-label";
+import { sendShippedEmailViaResend } from "./resend-shipped-email";
+import { recordShippedEmailSent, wasShippedEmailSent } from "./shipped-email-store";
 
 export type LabelStageMove = {
   dealId: string;
@@ -26,6 +28,16 @@ export type LabelStageMove = {
   stageLabel?: string;
   error?: string;
   skipped?: boolean;
+};
+
+export type BuyerEmailSend = {
+  attempted: boolean;
+  sent: boolean;
+  skipped: boolean;
+  to: string | null;
+  id: string | null;
+  reason: string | null;
+  error: string | null;
 };
 
 export type AttachShippingLabelResult =
@@ -49,6 +61,7 @@ export type AttachShippingLabelResult =
         updatedAt: string | null;
       };
       marketplaceSend: null;
+      buyerEmail: BuyerEmailSend | null;
     }
   | {
       ok: true;
@@ -67,8 +80,101 @@ export type AttachShippingLabelResult =
         to: string;
         channel: "marketplace" | "offerup";
       } | null;
+      buyerEmail: BuyerEmailSend | null;
     }
   | { ok: false; error: string; attachedDealIds: string[]; failedDealId: string };
+
+function carrierFromNotes(notes: string): { service: string | null; carrier: string | null } {
+  const text = notes.trim();
+  if (!text) return { service: null, carrier: null };
+  const ups = /\bUPS\b/i.test(text) ? "UPS" : null;
+  const usps = /\bUSPS\b/i.test(text) ? "USPS" : null;
+  const fedex = /\bFedEx\b/i.test(text) ? "FedEx" : null;
+  const carrier = ups || usps || fedex;
+  const serviceMatch = text.match(
+    /\b(UPS\s+Ground|USPS\s+Ground\s+Advantage|USPS\s+Priority(?:\s+Mail)?|FedEx\s+Ground|FedEx\s+Home(?:\s+Delivery)?)\b/i,
+  );
+  return { service: serviceMatch?.[1] ?? null, carrier };
+}
+
+async function maybeSendBuyerShippedEmail(input: {
+  dealId: string;
+  dealName?: string | null;
+  trackingNumber: string;
+  notes: string;
+  contactName: string;
+  contactEmail: string;
+}): Promise<BuyerEmailSend> {
+  const email = input.contactEmail.trim();
+  if (!email.includes("@")) {
+    return {
+      attempted: false,
+      sent: false,
+      skipped: true,
+      to: null,
+      id: null,
+      reason: "No buyer email on HubSpot contact",
+      error: null,
+    };
+  }
+  if (wasShippedEmailSent(input.dealId, input.trackingNumber)) {
+    return {
+      attempted: false,
+      sent: false,
+      skipped: true,
+      to: email,
+      id: null,
+      reason: "Shipped email already sent for this tracking",
+      error: null,
+    };
+  }
+  const { service, carrier } = carrierFromNotes(input.notes);
+  const result = await sendShippedEmailViaResend({
+    to: email,
+    contactName: input.contactName,
+    dealName: input.dealName,
+    trackingNumber: input.trackingNumber,
+    service,
+    carrier,
+  });
+  if (result.ok && result.skipped) {
+    return {
+      attempted: false,
+      sent: false,
+      skipped: true,
+      to: email,
+      id: null,
+      reason: result.reason,
+      error: null,
+    };
+  }
+  if (!result.ok) {
+    return {
+      attempted: true,
+      sent: false,
+      skipped: false,
+      to: email,
+      id: null,
+      reason: null,
+      error: result.error,
+    };
+  }
+  recordShippedEmailSent({
+    dealId: input.dealId,
+    trackingNumber: input.trackingNumber,
+    email,
+    resendId: result.id,
+  });
+  return {
+    attempted: true,
+    sent: true,
+    skipped: false,
+    to: email,
+    id: result.id,
+    reason: null,
+    error: null,
+  };
+}
 
 export async function attachShippingLabelToDeals(
   input: AttachShippingLabelInput,
@@ -116,6 +222,7 @@ export async function attachShippingLabelToDeals(
         updatedAt: primary.updatedAt,
       },
       marketplaceSend: null,
+      buyerEmail: null,
     };
   }
 
@@ -209,6 +316,15 @@ export async function attachShippingLabelToDeals(
         })
       : null;
 
+  const buyerEmail = await maybeSendBuyerShippedEmail({
+    dealId: primaryDealId,
+    dealName: null,
+    trackingNumber: input.trackingNumber,
+    notes: sharedNote,
+    contactName: contact.name,
+    contactEmail: contact.email,
+  });
+
   return {
     ok: true,
     attachedDealIds,
@@ -231,5 +347,6 @@ export async function attachShippingLabelToDeals(
           channel: marketplaceSend.request.channel,
         }
       : null,
+    buyerEmail,
   };
 }

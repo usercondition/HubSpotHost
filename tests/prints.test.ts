@@ -522,6 +522,7 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
       to: "Jamie Carter",
       channel: "marketplace",
     }, JSON.stringify(attached.body));
+    assert.equal(attached.body.buyerEmail?.skipped, true);
     assert.deepEqual(getMarketplaceSendRequest(), {
       pending: true,
       id: 1,

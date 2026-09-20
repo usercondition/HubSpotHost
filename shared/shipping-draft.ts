@@ -1,6 +1,6 @@
 /**
  * Buyer-facing tracking draft text (Marketplace / DM).
- * Print Ops does not auto-send — owner copies and pastes.
+ * Resend may also email when configured; this draft stays for Marketplace paste.
  */
 
 function firstNameFrom(value: string | null | undefined): string {
