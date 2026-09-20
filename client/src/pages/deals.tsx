@@ -39,6 +39,8 @@ type BoardDeal = PerformanceResponse["activeDeals"][number] & {
 type BoardColumn = PerformanceResponse["pipeline"][number] & {
   deals: BoardDeal[];
   totalAmount: number;
+  totalProductionCost: number;
+  totalGrossProfit: number;
 };
 
 type OptimisticMove = { stageId: string; stageLabel: string };
@@ -210,7 +212,9 @@ export default function DealsPage() {
     const allColumns: BoardColumn[] = snapshot.pipeline.map((stage) => {
       const deals = byStage.get(stage.id) ?? [];
       const totalAmount = deals.reduce((sum, deal) => sum + deal.amount, 0);
-      return { ...stage, deals, totalAmount };
+      const totalProductionCost = deals.reduce((sum, deal) => sum + (deal.productionCost ?? 0), 0);
+      const totalGrossProfit = deals.reduce((sum, deal) => sum + (deal.grossProfit ?? 0), 0);
+      return { ...stage, deals, totalAmount, totalProductionCost, totalGrossProfit };
     });
 
     const closedColumnCount = allColumns.filter((column) => column.closed).length;
@@ -461,9 +465,24 @@ export default function DealsPage() {
                           </span>
                         </div>
                         {column.totalAmount > 0 ? (
-                          <p className="mt-1 text-[0.6875rem] text-muted-foreground numeric">
-                            {formatMoney(column.totalAmount)}
-                          </p>
+                          <div className="mt-1 space-y-0.5 text-[0.6875rem] text-muted-foreground">
+                            <p className="numeric">
+                              Paid {formatMoney(column.totalAmount)}
+                              {column.totalProductionCost > 0
+                                ? ` · cost ${formatMoney(column.totalProductionCost)}`
+                                : ""}
+                            </p>
+                            {column.deals.some((deal) => deal.costsComplete) ? (
+                              <p
+                                className={cn(
+                                  "numeric font-medium",
+                                  column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive",
+                                )}
+                              >
+                                GP {formatMoney(column.totalGrossProfit)}
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
 
@@ -594,7 +613,11 @@ function DealCard({
       </a>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1 font-semibold text-foreground numeric">
+        <span
+          className="inline-flex items-center gap-1 font-semibold text-foreground numeric"
+          title="Paid / quoted amount"
+          data-testid={`text-deal-paid-${deal.dealId}`}
+        >
           <CircleDollarSign className="h-3.5 w-3.5 shrink-0 opacity-70" />
           {formatMoney(deal.amount)}
         </span>
@@ -610,6 +633,53 @@ function DealCard({
             {closeLabel}
           </span>
         ) : null}
+      </div>
+
+      <div
+        className="mt-1.5 grid grid-cols-3 gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1.5 text-[0.6875rem]"
+        data-testid={`panel-deal-economics-${deal.dealId}`}
+      >
+        <div>
+          <p className="text-muted-foreground">Paid</p>
+          <p className="numeric font-semibold text-foreground">{formatMoney(deal.amount)}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Production</p>
+          <p
+            className={cn(
+              "numeric font-semibold",
+              deal.costsComplete ? "text-foreground" : "text-muted-foreground",
+            )}
+            data-testid={`text-deal-production-${deal.dealId}`}
+          >
+            {deal.costsComplete || (deal.productionCost ?? 0) > 0
+              ? formatMoney(deal.productionCost ?? 0)
+              : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Revenue</p>
+          <p
+            className={cn(
+              "numeric font-semibold",
+              !deal.costsComplete && !((deal.productionCost ?? 0) > 0)
+                ? "text-muted-foreground"
+                : (deal.grossProfit ?? 0) >= 0
+                  ? "text-chart-4"
+                  : "text-destructive",
+            )}
+            data-testid={`text-deal-revenue-${deal.dealId}`}
+            title="Gross profit = paid − production costs"
+          >
+            {deal.costsComplete || (deal.productionCost ?? 0) > 0
+              ? `${formatMoney(deal.grossProfit ?? 0)}${
+                  deal.amount > 0 && deal.costsComplete
+                    ? ` · ${(deal.marginPercentage ?? 0).toFixed(0)}%`
+                    : ""
+                }`
+              : "—"}
+          </p>
+        </div>
       </div>
 
       {(deal.needsPlates || deal.needsCosts || isStale || partsSummary) && (

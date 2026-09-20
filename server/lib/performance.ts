@@ -95,6 +95,10 @@ export interface PerformanceSnapshot {
     stageId: string;
     stage: string;
     amount: number;
+    productionCost: number;
+    grossProfit: number;
+    marginPercentage: number;
+    costsComplete: boolean;
     hasPlates: boolean;
     /**
      * False for shipping / fee / name-heuristic non-print deals.
@@ -242,6 +246,10 @@ export function buildPerformanceSnapshot(input: {
       stageId: stageId ?? "",
       stage: displayStage,
       amount: round2(calculation.amount),
+      productionCost: round2(calculation.costTotal),
+      grossProfit: round2(calculation.grossProfit),
+      marginPercentage: round2(calculation.marginPercentage),
+      costsComplete: !missingCosts,
       hasPlates,
       requiresPlates,
       promptAttachPlates: false as boolean,

@@ -245,7 +245,16 @@ export interface PerformanceResponse {
     /** HubSpot dealstage id for pipeline board columns. */
     stageId: string;
     stage: string;
+    /** Paid / quoted order amount (HubSpot `amount`). */
     amount: number;
+    /** Sum of material + labor + packaging + shipping actuals. */
+    productionCost: number;
+    /** amount − productionCost (gross profit on the order). */
+    grossProfit: number;
+    /** Gross profit as % of amount; 0 when amount is 0. */
+    marginPercentage: number;
+    /** True when material (and shipping when labeled) look entered. */
+    costsComplete: boolean;
     hasPlates: boolean;
     /** False for shipping/fee (and name-heuristic non-print) deals — never ask for plates. */
     requiresPlates: boolean;
@@ -272,6 +281,10 @@ export interface PerformanceResponse {
     stageId: string;
     stage: string;
     amount: number;
+    productionCost: number;
+    grossProfit: number;
+    marginPercentage: number;
+    costsComplete: boolean;
     hasPlates: boolean;
     requiresPlates: boolean;
     promptAttachPlates: boolean;
