@@ -1130,6 +1130,23 @@ export interface PrintFileDealBoard {
   totalResinCost: number | null;
   latestAttachedAt: string;
   records: PrintFileRecord[];
+  /** True when HubSpot stage is closed / completed / shipped — hide from active Prints. */
+  archived?: boolean;
+}
+
+/**
+ * Closed / completed / shipped Print Orders leave the active Prints boards.
+ * Matches HubSpot closed stages plus common “done” labels on local plate history.
+ */
+export function printOrderStageLooksArchived(stage: string | null | undefined): boolean {
+  const value = String(stage ?? "").trim().toLowerCase();
+  if (!value) return false;
+  return (
+    /completed/.test(value) ||
+    /closed\s*(won|lost)/.test(value) ||
+    /\bshipped\b/.test(value) ||
+    /closed\s*won/.test(value)
+  );
 }
 
 export const PRINTER_STATUSES = ["active", "retired"] as const;

@@ -95,7 +95,9 @@ interface PrintsResponse {
   ok: true;
   candidates: PrintFileCandidateDeal[];
   records: PrintFileRecordWithBits[];
+  archivedRecords?: PrintFileRecordWithBits[];
   boards: PrintFileDealBoard[];
+  archivedBoards?: PrintFileDealBoard[];
   includeAttached: boolean;
   lastAttachedDealId: string | null;
   attachPreview: PrintFileOrderSummary | null;
@@ -277,6 +279,7 @@ export default function Prints() {
   const [resinRateOpen, setResinRateOpen] = useState(false);
   const [costDefaultsOpen, setCostDefaultsOpen] = useState(false);
   const [showAllPlateHistory, setShowAllPlateHistory] = useState(false);
+  const [showArchives, setShowArchives] = useState(false);
   const [logsPathCopied, setLogsPathCopied] = useState(false);
   const [includeMaterial, setIncludeMaterial] = useState(true);
   const [includeLabor, setIncludeLabor] = useState(false);
@@ -731,6 +734,8 @@ export default function Prints() {
 
   const candidates = prints.data?.candidates ?? [];
   const boards = prints.data?.boards ?? [];
+  const archivedBoards = prints.data?.archivedBoards ?? [];
+  const archivedRecords = prints.data?.archivedRecords ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
   const attachPreview = prints.data?.attachPreview;
   const selectedHasPlates =
@@ -1488,7 +1493,7 @@ export default function Prints() {
 
             <Panel
               title="Order plate boards"
-              description="Attached plates grouped by Print Order. Detaching is confirmed and updates only the order's HubSpot production-planning totals."
+              description="Active Print Orders with attached plates. Completed / shipped orders move to Archives below."
             >
               {boards.length ? (
                 <div className="space-y-3" data-testid="list-print-deal-boards">
@@ -1533,13 +1538,78 @@ export default function Prints() {
                   ))}
                 </div>
               ) : (
-                <p className="py-3 text-sm text-muted-foreground">No plates are attached to an order yet.</p>
+                <p className="py-3 text-sm text-muted-foreground">No active orders have plates attached.</p>
               )}
             </Panel>
 
+            {archivedBoards.length > 0 || archivedRecords.length > 0 ? (
+              <Panel
+                title="Archives / historical"
+                description="Completed, closed, or shipped Print Orders — kept for plate history, off the active board."
+                testId="panel-prints-archives"
+                actions={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowArchives((open) => !open)}
+                    data-testid="button-toggle-prints-archives"
+                  >
+                    {showArchives ? (
+                      <ChevronDown className="mr-1.5 h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronRight className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    {showArchives ? "Hide" : "Show"} · {archivedBoards.length || archivedRecords.length}
+                  </Button>
+                }
+              >
+                {showArchives ? (
+                  <div className="space-y-3" data-testid="list-print-archived-boards">
+                    {(archivedBoards.length ? archivedBoards : []).map((board) => (
+                      <article
+                        key={board.dealId}
+                        className="rounded-md border border-border/70 bg-muted/20 p-4"
+                        data-testid={`row-print-archived-board-${board.dealId}`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold">{board.dealName}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{board.dealStage}</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                            <span>{board.plateCount} plate{board.plateCount === 1 ? "" : "s"}</span>
+                            <span>{formatHours(board.totalPrintTimeSeconds)}</span>
+                            <span>{formatNumber(board.totalResinVolumeMl, " ml")}</span>
+                            <span>${formatMoney(board.totalResinCost)}</span>
+                          </div>
+                        </div>
+                        <ul className="mt-3 space-y-1">
+                          {board.records.map((record) => (
+                            <li key={record.id} className="truncate text-xs text-muted-foreground">
+                              {record.fileName}
+                            </li>
+                          ))}
+                        </ul>
+                      </article>
+                    ))}
+                    {archivedBoards.length === 0 && archivedRecords.length > 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {archivedRecords.length} archived plate{archivedRecords.length === 1 ? "" : "s"} on completed orders.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {archivedBoards.length} completed order{archivedBoards.length === 1 ? "" : "s"} tucked away — expand when you need history.
+                  </p>
+                )}
+              </Panel>
+            ) : null}
+
             <Panel
               title="Recent plate history"
-              description="Each attached slice file is a plate. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
+              description="Each attached slice file is a plate on an active order. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
             >
               {dealId && (hiddenOtherDealCount > 0 || showAllPlateHistory) ? (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

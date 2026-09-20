@@ -167,7 +167,15 @@ before(async () => {
                 id: mockDealStage,
                 label: mockDealStageLabel,
                 displayOrder: 9,
-                metadata: { isClosed: false },
+                metadata: {
+                  isClosed: /completed|closed|shipped/i.test(mockDealStageLabel),
+                },
+              },
+              {
+                id: "completed",
+                label: "Completed / Closed Won",
+                displayOrder: 99,
+                metadata: { isClosed: true },
               },
             ],
           }),
@@ -681,6 +689,21 @@ test("plate history deal stage refreshes when HubSpot moves the order", async ()
   assert.ok(forDeal.length >= 1);
   for (const row of forDeal) {
     assert.equal(row.dealStage, "Printing");
+  }
+});
+
+test("completed Print Orders leave active boards and land in archives", async () => {
+  mockDealStage = "completed";
+  mockDealStageLabel = "Completed / Closed Won";
+  invalidatePrintOrderDealsCache();
+
+  const listed = await jsonOwnerRequest("GET", "/api/prints?includeAttached=true");
+  assert.equal(listed.status, 200, listed.body?.error || "prints list failed");
+  assert.equal(listed.body.candidates.length, 0);
+  assert.ok((listed.body.archivedBoards?.length ?? 0) >= 1 || (listed.body.boards?.length ?? 0) === 0);
+  if ((listed.body.archivedBoards?.length ?? 0) > 0) {
+    assert.ok(listed.body.archivedBoards.some((board: { dealId: string }) => board.dealId === "701"));
+    assert.ok(!(listed.body.boards ?? []).some((board: { dealId: string }) => board.dealId === "701"));
   }
 });
 

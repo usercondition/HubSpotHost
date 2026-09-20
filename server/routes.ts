@@ -208,6 +208,7 @@ import {
   normalizeOrderLineKind,
   orderLineKindSkipsPlates,
   formatShippingStreetLine,
+  printOrderStageLooksArchived,
   type PrintFileCandidateDeal,
   type OrderIntakeLink,
   type OrderIntakeStatus,
@@ -597,6 +598,25 @@ function firstIssue(error: { issues: Array<{ message: string }> }): string {
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
+}
+
+function partitionPrintDealBoards(
+  boards: ReturnType<typeof groupPrintFileRecordsByDeal>,
+  activeOpenDealIds: Set<string>,
+): {
+  activeBoards: Array<ReturnType<typeof groupPrintFileRecordsByDeal>[number] & { archived: boolean }>;
+  archivedBoards: Array<ReturnType<typeof groupPrintFileRecordsByDeal>[number] & { archived: boolean }>;
+} {
+  const activeBoards = [];
+  const archivedBoards = [];
+  for (const board of boards) {
+    const archived =
+      !activeOpenDealIds.has(board.dealId) || printOrderStageLooksArchived(board.dealStage);
+    const row = { ...board, archived };
+    if (archived) archivedBoards.push(row);
+    else activeBoards.push(row);
+  }
+  return { activeBoards, archivedBoards };
 }
 
 /** Map live HubSpot Print Orders → stage label / name for plate-history refresh. */
@@ -2299,6 +2319,16 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       const boards = groupPrintFileRecordsByDeal();
       const boardByDealId = new Map(boards.map((board) => [board.dealId, board]));
       const attachedDealIds = attachedPrintFileDealIds();
+      const activeOpenDealIds = new Set(
+        deals
+          .filter((deal) => {
+            const pipeline = deal.properties.pipeline ?? "";
+            const stage = stageById.get(deal.properties.dealstage ?? "");
+            return pipeline === "default" && !stageIsClosed(stage);
+          })
+          .map((deal) => deal.id),
+      );
+      const { activeBoards, archivedBoards } = partitionPrintDealBoards(boards, activeOpenDealIds);
       const candidates: PrintFileCandidateDeal[] = deals
         .filter((deal) => {
           const pipeline = deal.properties.pipeline ?? "";
@@ -2327,8 +2357,13 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
           ...record,
           bits,
           bitSummary: summarizeBits(bits),
+          archived:
+            !activeOpenDealIds.has(record.hubspotDealId) ||
+            printOrderStageLooksArchived(record.dealStage),
         };
       });
+      const activeRecords = recordsWithBits.filter((row) => !row.archived);
+      const archivedRecords = recordsWithBits.filter((row) => row.archived);
       const staged = previewAnalysisId ? getStagedPrintFile(previewAnalysisId) : null;
       const attachPreview =
         previewDealId && deals.some((deal) => deal.id === previewDealId)
@@ -2338,10 +2373,12 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       return res.json({
         ok: true,
         candidates,
-        records: recordsWithBits,
-        boards,
+        records: activeRecords,
+        archivedRecords,
+        boards: activeBoards,
+        archivedBoards,
         includeAttached,
-        lastAttachedDealId: boards[0]?.dealId ?? null,
+        lastAttachedDealId: activeBoards[0]?.dealId ?? boards[0]?.dealId ?? null,
         attachPreview,
         resin: resinProfileView(),
       });
