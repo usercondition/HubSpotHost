@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * Shell chrome: Ask Ops — read-only tracker / Grok assistant on every unlocked page
  * (especially Queue + Labels). Deep-links only; never writes HubSpot.
  */
-export function OpsAssistantSheet() {
+export function OpsAssistantSheet({ rail = false }: { rail?: boolean }) {
   const { isUnlocked, headers } = useOwnerSession();
   const [open, setOpen] = useState(false);
 
@@ -31,11 +31,13 @@ export function OpsAssistantSheet() {
           aria-label="Ask Ops assistant"
           data-testid="button-ops-assistant"
           className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card/80 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            rail
+              ? "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              : "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
-          <MessageSquareText className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Ask Ops</span>
+          <MessageSquareText className="h-4 w-4 shrink-0" />
+          <span className={rail ? "truncate" : "hidden sm:inline"}>Ask Ops</span>
         </button>
       </SheetTrigger>
       <SheetContent
