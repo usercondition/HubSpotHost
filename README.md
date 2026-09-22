@@ -87,6 +87,7 @@ For the initial single-service setup:
    HUBSPOT_ACCESS_TOKEN=<HubSpot private-app token>
    HUBSPOT_WEBHOOK_SECRET=<HubSpot private-app client secret>
    PUBLIC_BASE_URL=https://<your-railway-domain>
+   REDIS_URL=${{Redis.REDIS_URL}}
    ```
 
    Optional Telegram morning digest (set these as Railway **Variables**, never in git):
@@ -117,6 +118,10 @@ For the initial single-service setup:
 5. Add the Railway HTTPS URL plus `/api/webhooks/hubspot` as the HubSpot webhook target, then send a dry-run test before relying on automatic updates.
 
 This works well for a single service and keeps the current SQLite queue across routine deployments when the `/data` volume is mounted. Railway Volumes are persistent but a service with a volume cannot scale through replicas and has a brief deployment interruption, so the longer-term production design is to migrate the intake queue and customer records to Railway PostgreSQL.
+
+### Background shipment jobs
+
+With `REDIS_URL`, Print Ops uses BullMQ for shipped-email and Marketplace/OfferUp ship-note jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback.
 
 ### Durable production direction
 
