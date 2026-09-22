@@ -43,13 +43,25 @@ function logRedisWarning(error: unknown): void {
   console.warn(`[print-ops-jobs] Redis unavailable; background jobs will retry when Redis returns: ${message}`);
 }
 
-function connection(forWorker = false): IORedis {
+function connection(kind: "queue" | "worker"): IORedis {
   const client = new IORedis(redisUrl(), {
-    connectTimeout: 1_000,
-    commandTimeout: 1_000,
+    // Railway private hostnames may resolve to IPv4 or IPv6. Let ioredis use
+    // either family and leave room for the private network to establish.
+    family: 0,
+    connectTimeout: 10_000,
     enableOfflineQueue: false,
-    maxRetriesPerRequest: forWorker ? null : 1,
+    // BullMQ requires this for worker and blocking connections. Keeping it on
+    // the producer too prevents a short retry limit from tearing down a job.
+    maxRetriesPerRequest: null,
     retryStrategy: (times: number) => Math.min(times * 1_000, 30_000),
+  });
+  let connectedOnce = false;
+  client.on("ready", () => {
+    if (connectedOnce) {
+      loggedRedisError = false;
+      console.info(`[print-ops-jobs] Redis ${kind} connection re-established.`);
+    }
+    connectedOnce = true;
   });
   client.on("error", logRedisWarning);
   return client;
@@ -72,9 +84,9 @@ export function startPrintOpsJobWorker(): void {
     return;
   }
 
-  const queueConnection = connection();
+  const queueConnection = connection("queue");
   queue = new Queue(QUEUE_NAME, { connection: queueConnection });
-  worker = new Worker(QUEUE_NAME, processJob, { connection: connection(true), concurrency: 4 });
+  worker = new Worker(QUEUE_NAME, processJob, { connection: connection("worker"), concurrency: 4 });
   worker.on("error", logRedisWarning);
   worker.on("failed", (job, error) => {
     console.warn(
