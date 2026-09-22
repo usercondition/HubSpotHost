@@ -30,19 +30,19 @@ import { cn } from "@/lib/utils";
 
 type Theme = "dark" | "light";
 
-const THEME_KEY = "print-ops-theme-hs";
+const THEME_KEY = "print-ops-theme-shop";
 
 const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: "light",
+  theme: "dark",
   toggle: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light";
+    if (typeof window === "undefined") return "dark";
     const saved = window.localStorage.getItem(THEME_KEY);
     if (saved === "light" || saved === "dark") return saved;
-    return "light";
+    return "dark";
   });
 
   useEffect(() => {

@@ -8,53 +8,53 @@
  * teal primary signal, Space Grotesk + IBM Plex Mono.
  */
 
-  /* LIGHT MODE — HubSpot deals board: gray canvas, white cards, navy nav, teal names */
+  /* LIGHT MODE — cool paper bench */
 :root {
-  --button-outline: rgba(45, 62, 80, 0.12);
-  --badge-outline: rgba(45, 62, 80, 0.06);
+  --button-outline: rgba(15, 23, 42, 0.12);
+  --badge-outline: rgba(15, 23, 42, 0.06);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(45, 62, 80, 0.04);
-  --elevate-2: rgba(45, 62, 80, 0.08);
+  --elevate-1: rgba(15, 23, 42, 0.04);
+  --elevate-2: rgba(15, 23, 42, 0.08);
 
-  --background: 204 33% 97%;
-  --foreground: 210 29% 27%;
-  --border: 210 23% 84%;
+  --background: 210 20% 97%;
+  --foreground: 215 28% 12%;
+  --border: 210 14% 88%;
   --card: 0 0% 100%;
-  --card-foreground: 210 29% 27%;
-  --card-border: 210 23% 86%;
-  --sidebar: 210 28% 24%;
-  --sidebar-foreground: 204 33% 96%;
-  --sidebar-border: 210 24% 18%;
-  --sidebar-primary: 188 100% 34%;
+  --card-foreground: 215 28% 12%;
+  --card-border: 210 14% 90%;
+  --sidebar: 215 28% 11%;
+  --sidebar-foreground: 200 12% 92%;
+  --sidebar-border: 215 22% 16%;
+  --sidebar-primary: 186 72% 38%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 24% 30%;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 188 100% 34%;
+  --sidebar-accent: 215 22% 15%;
+  --sidebar-accent-foreground: 200 12% 94%;
+  --sidebar-ring: 186 72% 38%;
   --popover: 0 0% 100%;
-  --popover-foreground: 210 29% 27%;
-  --popover-border: 210 23% 84%;
-  --primary: 188 100% 31%;
+  --popover-foreground: 215 28% 12%;
+  --popover-border: 210 14% 88%;
+  --primary: 186 72% 32%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 204 33% 96%;
-  --secondary-foreground: 210 29% 27%;
-  --muted: 204 24% 94%;
-  --muted-foreground: 210 24% 40%;
-  --accent: 152 55% 32%;
+  --secondary: 210 16% 94%;
+  --secondary-foreground: 215 20% 22%;
+  --muted: 210 14% 94%;
+  --muted-foreground: 215 10% 40%;
+  --accent: 158 52% 34%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 46%;
+  --destructive: 0 72% 48%;
   --destructive-foreground: 0 0% 98%;
-  --input: 210 16% 70%;
-  --ring: 188 100% 31%;
-  --chart-1: 188 100% 31%;
-  --chart-2: 152 55% 32%;
-  --chart-3: 210 16% 46%;
-  --chart-4: 38 92% 42%;
+  --input: 210 12% 72%;
+  --ring: 186 72% 32%;
+  --chart-1: 186 72% 36%;
+  --chart-2: 158 52% 34%;
+  --chart-3: 215 12% 42%;
+  --chart-4: 38 92% 46%;
   --chart-5: 350 55% 44%;
 
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --radius: 0.3rem;
+  --radius: 0.55rem;
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(215 30% 12% / 0.05);
   --shadow-sm: 0 1px 3px hsl(215 30% 12% / 0.06);
@@ -109,43 +109,43 @@
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.07);
 
-  /* Near-black canvas. Cards step up so type has a surface; teal stays the signal. */
+  /* Near-black canvas — teal is the shop signal, amber money, green clear, red overdue. */
   --background: 0 0% 4%;
-  --foreground: 0 0% 98%;
-  --border: 0 0% 24%;
-  --card: 0 0% 13%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 0 0% 28%;
+  --foreground: 0 0% 96%;
+  --border: 0 0% 14%;
+  --card: 0 0% 10%;
+  --card-foreground: 0 0% 96%;
+  --card-border: 0 0% 14%;
   --sidebar: 0 0% 5%;
-  --sidebar-foreground: 0 0% 92%;
-  --sidebar-border: 0 0% 20%;
-  --sidebar-primary: 186 72% 62%;
+  --sidebar-foreground: 0 0% 88%;
+  --sidebar-border: 0 0% 12%;
+  --sidebar-primary: 186 72% 48%;
   --sidebar-primary-foreground: 0 0% 6%;
-  --sidebar-accent: 0 0% 16%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 186 72% 62%;
-  --popover: 0 0% 14%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 0 0% 28%;
-  --primary: 186 72% 62%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 0 0% 96%;
+  --sidebar-ring: 186 72% 48%;
+  --popover: 0 0% 10%;
+  --popover-foreground: 0 0% 96%;
+  --popover-border: 0 0% 16%;
+  --primary: 186 72% 48%;
   --primary-foreground: 0 0% 6%;
   --secondary: 0 0% 18%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 18%;
-  --muted-foreground: 0 0% 78%;
-  --accent: 158 48% 56%;
-  --accent-foreground: 0 0% 8%;
-  --destructive: 0 78% 68%;
-  --destructive-foreground: 0 0% 8%;
-  --input: 0 0% 22%;
-  --ring: 186 72% 62%;
-  --chart-1: 186 72% 62%;
-  --chart-2: 158 48% 56%;
-  --chart-3: 0 0% 78%;
-  --chart-4: 38 92% 64%;
-  --chart-5: 350 70% 70%;
+  --secondary-foreground: 0 0% 96%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 58%;
+  --accent: 158 50% 44%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 98%;
+  --input: 0 0% 16%;
+  --ring: 186 72% 48%;
+  --chart-1: 186 72% 48%;
+  --chart-2: 158 50% 44%;
+  --chart-3: 0 0% 62%;
+  --chart-4: 38 92% 52%;
+  --chart-5: 350 55% 58%;
 
-  --radius: 0.3rem;
+  --radius: 0.75rem;
 
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.35);
@@ -433,11 +433,11 @@
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.35;
-    color: hsl(var(--primary));
+    color: hsl(var(--foreground));
   }
 
   .board-name:hover {
-    text-decoration: underline;
+    color: hsl(var(--primary));
   }
 
   .board-meta {
