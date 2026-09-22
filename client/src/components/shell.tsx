@@ -241,7 +241,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <p
                   className={cn(
                     "mb-0.5 max-w-full truncate px-0.5 text-center text-[0.55rem] font-bold uppercase tracking-[0.1em] transition-colors duration-150",
-                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/30",
+                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/70",
                   )}
                   title={group.hint}
                 >
@@ -260,7 +260,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         "ops-rail-link relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,box-shadow] duration-150 ease-out",
                         active
                           ? "bg-sidebar-accent text-sidebar-foreground shadow-sm"
-                          : "text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       )}
                     >
                       <item.icon className="h-4 w-4" />
@@ -279,7 +279,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <ExternalLink className="h-4 w-4" />
           </a>
