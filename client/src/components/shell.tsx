@@ -185,30 +185,24 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="ops-shell grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[14rem_1fr] md:grid-rows-[auto_1fr]"
+      className="ops-shell flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground md:flex-row"
       data-nav-group={activeGroup.toLowerCase()}
     >
-      {/* Top project bar — Railway header energy */}
-      <header className="accent-wash ops-topbar col-span-full z-20 flex items-center gap-3 border-b border-border px-3 py-2 md:px-4">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
         <Link
           href="/"
-          className="flex min-w-0 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          data-testid="link-home"
+          className="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="link-home-mobile"
           title="Print Ops"
         >
-          <span className="ops-mark-wrap inline-flex h-8 w-8 items-center justify-center rounded-lg">
-            <Mark className="h-7 w-7 shrink-0 text-primary" />
+          <span className="ops-mark-wrap inline-flex h-7 w-7 items-center justify-center rounded-full">
+            <Mark className="h-5 w-5 shrink-0 text-primary-foreground" />
           </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
-            <span className="hidden text-xs text-muted-foreground sm:block">Shop floor</span>
-          </span>
+          <span className="truncate text-sm font-medium">Print Ops</span>
         </Link>
-
-        <span className="status-live hidden sm:inline-flex" data-testid="status-workspace-live">
+        <span className="status-live" data-testid="status-workspace-live-mobile">
           Online
         </span>
-
         <div className="ml-auto flex items-center gap-1.5">
           <OpsAssistantSheet />
           <AttentionBell />
@@ -218,69 +212,95 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="button"
               onClick={lock}
               title="Lock owner session"
-              data-testid="button-lock-owner-session"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card/80 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              data-testid="button-lock-owner-session-mobile"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <Lock className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Lock</span>
             </button>
           ) : null}
         </div>
       </header>
 
-      {/* Icon rail — Railway left toolbar */}
-      <aside className="ops-rail hidden min-h-0 flex-col gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-2 py-3 text-sidebar-foreground md:flex">
+      <aside className="ops-rail hidden min-h-0 w-[15rem] shrink-0 flex-col overflow-x-hidden border-r border-sidebar-border bg-sidebar px-2 py-3 text-sidebar-foreground md:flex">
+        <Link
+          href="/"
+          className="mb-3 flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          data-testid="link-home"
+          title="Print Ops"
+        >
+          <span className="ops-mark-wrap inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
+            <Mark className="h-5 w-5 text-primary-foreground" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-sidebar-accent-foreground">Print Ops</span>
+          </span>
+          <span className="status-live ml-auto" data-testid="status-workspace-live">
+            Online
+          </span>
+        </Link>
+
         <nav
           aria-label="Primary navigation"
           className="flex w-full min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
-          {GROUPS.map((group) => {
-            const isActiveGroup = activeGroup === group.id;
-            return (
-              <div key={group.id} className="flex w-full flex-col gap-0.5">
-                <p
-                  className={cn(
-                    "mb-0.5 truncate px-2.5 text-left text-[0.65rem] font-semibold uppercase tracking-[0.12em]",
-                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/45",
-                  )}
-                  title={group.hint}
-                >
-                  {group.id}
-                </p>
-                {NAV.filter((item) => item.group === group.id).map((item) => {
-                  const active = pathOnly === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      title={item.title}
-                      data-testid={item.testId}
-                      data-active={active ? "true" : "false"}
-                      className={cn(
-                        "ops-rail-link relative flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-[background-color,color] duration-150 ease-out",
-                        active
-                          ? "bg-sidebar-accent text-sidebar-foreground"
-                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-                      )}
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            );
-          })}
+          {GROUPS.map((group) => (
+            <div key={group.id} className="flex w-full flex-col gap-0.5">
+              <p
+                className="mb-0.5 truncate px-2.5 text-left text-[0.6875rem] font-medium text-sidebar-foreground/45"
+                title={group.hint}
+              >
+                {group.id}
+              </p>
+              {NAV.filter((item) => item.group === group.id).map((item) => {
+                const active = pathOnly === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={item.title}
+                    data-testid={item.testId}
+                    data-active={active ? "true" : "false"}
+                    className={cn(
+                      "ops-rail-link flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm transition-[background-color,color] duration-150 ease-out",
+                      active
+                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        : "font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
-        <div className="mt-auto border-t border-sidebar-border pt-2">
+        <div className="mt-auto flex flex-col gap-0.5 border-t border-sidebar-border pt-2">
+          <OpsAssistantSheet rail />
+          <div className="flex items-center gap-1 px-1">
+            <AttentionBell />
+            <ThemeToggle className="border-sidebar-border bg-transparent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+            {isUnlocked ? (
+              <button
+                type="button"
+                onClick={lock}
+                title="Lock owner session"
+                data-testid="button-lock-owner-session"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                Lock
+              </button>
+            ) : null}
+          </div>
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <ExternalLink className="h-4 w-4 shrink-0" />
             <span className="truncate">HubSpot</span>
@@ -288,9 +308,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile horizontal nav — Run pinned; Take/Keep/Office behind More */}
-      <div className="ops-stage relative flex min-h-0 min-w-0 flex-col md:col-start-2">
-        <div className="ops-atmosphere pointer-events-none absolute inset-0" aria-hidden />
+      <div className="ops-stage relative flex min-h-0 min-w-0 flex-1 flex-col">
         <nav
           aria-label="Mobile navigation"
           className="relative z-[1] flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
@@ -342,48 +360,29 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-const GROUP_EYEBROW: Record<NavGroup, string> = {
-  Run: "Run",
-  Take: "Take",
-  Keep: "Keep",
-  Office: "Office",
-};
-
 export function PageHeader({
   title,
   subtitle,
   actions,
-  eyebrow,
 }: {
   title: string;
   subtitle: string;
   actions?: ReactNode;
-  /** Override auto group label (Run / Take / Keep / Office). */
+  /** Kept so existing pages can pass a group label. The title stands alone. */
   eyebrow?: string;
 }) {
-  const [location] = useLocation();
-  const pathOnly = location.split("?")[0] || "/";
-  const group = NAV.find((item) => item.href === pathOnly)?.group ?? "Run";
-  const label = eyebrow?.trim() || GROUP_EYEBROW[group];
-
   return (
-    <header className="accent-wash ops-page-header sticky top-0 z-10 border-b border-border px-3 py-3 md:px-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <header className="ops-page-header px-4 pb-2 pt-6 md:px-8 md:pt-8">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="rule-label mb-0.5 flex items-center gap-2">
-            <span className="ops-eyebrow-dot" aria-hidden />
-            {label}
-          </p>
           <h1
-            className="truncate text-xl font-semibold tracking-tight text-foreground md:text-[1.65rem] md:leading-tight"
+            className="truncate text-[1.65rem] font-semibold tracking-tight text-foreground md:text-[1.85rem] md:leading-tight"
             data-testid="text-page-title"
           >
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
-              {subtitle}
-            </p>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
