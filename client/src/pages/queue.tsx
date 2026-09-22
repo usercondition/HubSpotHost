@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
 import {
   AlertTriangle,
   Clock3,
   FileUp,
-  Layers3,
   Loader2,
   MessageCircle,
   Package,
@@ -16,7 +14,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { printsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
@@ -76,67 +75,79 @@ function QueueCard({
           ? "good"
           : undefined;
 
+  const detail = [
+    item.plateCount > 0 ? `${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}` : "",
+    item.assignedPrinterNames.length > 0 ? item.assignedPrinterNames.join(", ") : "",
+    item.unassignedPlateCount > 0 ? `${item.unassignedPlateCount} unassigned` : "",
+    item.kitNeeded > 0 || item.kitReprint > 0
+      ? `Parts ${item.kitNeeded} open${item.kitReprint ? ` · ${item.kitReprint} reprint` : ""}`
+      : "",
+    item.shipPlanNote ?? "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <button
-      type="button"
+    <article
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={cn("workspace-node w-full p-3 text-left", selected && "ring-0")}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn("workspace-node w-full cursor-pointer p-3.5 text-left", selected && "ring-0")}
       data-active={selected ? "true" : "false"}
       data-tone={tone}
       data-testid={`button-queue-deal-${item.dealId}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight">{item.dealName}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {item.stage}
-            {item.contactName ? ` · ${item.contactName}` : ""}
-          </p>
-        </div>
-        <p className="text-sm font-medium">{formatMoney(item.amount)}</p>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {item.isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
-        {item.needsReply ? <StatusPill tone="warn" icon={MessageCircle} label="Needs reply" /> : null}
-        {item.readyToPack ? <StatusPill tone="good" icon={PackageCheck} label="Ready to pack / ship" /> : null}
-        {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
-        {!item.requiresPlates ? <StatusPill tone="neutral" icon={Package} label="No plates" /> : null}
-        {item.costsIncomplete ? (
+      <p className="board-name truncate text-foreground">{item.dealName}</p>
+      <p className="board-meta truncate">
+        {item.stage}
+        {item.contactName ? ` · ${item.contactName}` : ""}
+      </p>
+      <p
+        className={cn(
+          "board-figure mt-2.5",
+          item.shipBy < shipByCalendarDate() && "text-destructive",
+          item.shipBy === shipByCalendarDate() && "text-chart-4",
+        )}
+      >
+        <span>{formatShipByShort(item.shipBy)}</span>
+        <span className="board-figure-label">
+          {item.shipBy < shipByCalendarDate()
+            ? "Overdue"
+            : item.shipBy === shipByCalendarDate()
+              ? "Due today"
+              : "Ship by"}
+          {item.shipBySource === "override" ? " · set" : ""}
+        </span>
+      </p>
+      <p className="board-figure">
+        <span>{formatMoney(item.amount)}</span>
+        <span className="board-figure-label">Paid</span>
+      </p>
+      {detail ? <p className="board-meta">{detail}</p> : null}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {item.isStale ? (
+          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+        ) : item.needsReply ? (
+          <StatusPill tone="warn" icon={MessageCircle} label="Needs reply" />
+        ) : needsPlates ? (
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+        ) : item.costsIncomplete ? (
           <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
-        ) : null}
-        {item.plateCount > 0 ? (
-          <StatusPill tone="neutral" icon={Clock3} label={`${item.plateCount} plate · ${hoursLabel(item.totalPrintTimeSeconds)}`} />
-        ) : null}
-        {item.assignedPrinterNames.length > 0 ? (
-          <StatusPill tone="good" icon={PackageCheck} label={item.assignedPrinterNames.join(", ")} />
-        ) : null}
-        {item.unassignedPlateCount > 0 ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label={`${item.unassignedPlateCount} unassigned`} />
-        ) : null}
-        {item.kitReprint > 0 || item.kitNeeded > 0 ? (
-          <StatusPill
-            tone="warn"
-            icon={Layers3}
-            label={`Parts ${item.kitNeeded} open${item.kitReprint ? ` · ${item.kitReprint} reprint` : ""}`}
-          />
-        ) : null}
-        <StatusPill
-          tone={item.fulfillment.shipReady ? "good" : "neutral"}
-          icon={Ship}
-          label={`Ship by ${item.shipBy}${item.shipBySource === "override" ? " · set" : ""}`}
-        />
-        {item.shipPlanNote ? (
-          <StatusPill tone="neutral" icon={MessageCircle} label={item.shipPlanNote} />
+        ) : item.bucket === "blocked" ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Blocked" />
+        ) : item.readyToPack || item.bucket === "ship_ready" ? (
+          <StatusPill tone="good" icon={PackageCheck} label="Ready to ship" />
+        ) : !item.requiresPlates ? (
+          <StatusPill tone="neutral" icon={Package} label="No plates" />
         ) : null}
       </div>
-      {item.requiresPlates ? (
-        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-          <Link href={printsDealHref(item.dealId)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-            Plates
-          </Link>
-        </div>
-      ) : null}
-    </button>
+    </article>
   );
 }
 
@@ -161,11 +172,11 @@ function QueueColumn({
     <section className="queue-lane min-w-0" data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight">
             {title}{" "}
-            <span className="numeric text-muted-foreground">({items.length})</span>
+            <span className="numeric font-medium text-muted-foreground">{items.length}</span>
           </h2>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </div>
       <div className="queue-lane-body">
@@ -389,7 +400,7 @@ export default function ProductionQueuePage() {
                       >
                         {failure.dealName}
                       </button>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm text-muted-foreground">
                         {failure.failureType.replaceAll("_", " ")} · {new Date(failure.occurredAt).toLocaleString()}
                       </span>
                     </li>
@@ -398,7 +409,7 @@ export default function ProductionQueuePage() {
               </Panel>
             ) : null}
 
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Deep-link any deal with{" "}
               <code className="rounded bg-muted px-1 py-0.5">{queueDealHref("DEAL_ID")}</code>
             </p>

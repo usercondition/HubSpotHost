@@ -428,6 +428,39 @@
     font-feature-settings: "tnum" 1;
   }
 
+  /* Board reading scale — names and figures stay at 15px+, labels at 13px. */
+  .board-name {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.35;
+    color: hsl(var(--primary));
+  }
+
+  .board-meta {
+    margin-top: 0.15rem;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .board-figure {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  .board-figure-label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+  }
+
   .hs-link {
     color: hsl(var(--primary));
   }
@@ -763,7 +796,7 @@
   }
 
   .ship-cal-weekday {
-    font-size: 0.6875rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -771,12 +804,13 @@
   }
 
   .ship-cal-date {
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 1rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
   }
 
   .ship-cal-today-mark {
-    font-size: 0.625rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     letter-spacing: 0.03em;
     text-transform: uppercase;
@@ -784,7 +818,7 @@
   }
 
   .ship-cal-empty {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: hsl(var(--muted-foreground) / 0.7);
   }
 
@@ -802,9 +836,9 @@
     border-radius: calc(var(--radius) - 1px);
     border: 1px solid hsl(var(--border) / 0.85);
     background: hsl(var(--card) / 0.85);
-    padding: 0.35rem 0.45rem;
-    font-size: 0.6875rem;
-    line-height: 1.25;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
     color: hsl(var(--foreground));
     transition:
       border-color var(--motion-fast) var(--ease-out-soft),
@@ -825,7 +859,14 @@
   }
 
   .ship-cal-deal-meta {
+    font-size: 0.8125rem;
     color: hsl(var(--muted-foreground));
+  }
+
+  .queue-lane-footer {
+    border-top: 1px solid hsl(var(--border) / 0.85);
+    background: hsl(var(--muted) / 0.22);
+    padding: 0.7rem 0.85rem 0.8rem;
   }
 
   @media (max-width: 1100px) {
