@@ -60,21 +60,33 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-export function ThemeToggle({ className, testId = "button-theme-toggle" }: { className?: string; testId?: string }) {
+export function ThemeToggle({
+  className,
+  testId = "button-theme-toggle",
+  rail = false,
+}: {
+  className?: string;
+  testId?: string;
+  rail?: boolean;
+}) {
   const { theme, toggle } = useContext(ThemeContext);
+  const label = theme === "dark" ? "Light mode" : "Dark mode";
   return (
     <button
       type="button"
       onClick={toggle}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      title={label}
       data-testid={testId}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        rail
+          ? "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          : "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
-      {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+      {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+      {rail ? <span className="truncate">{label}</span> : null}
     </button>
   );
 }
@@ -278,29 +290,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="mt-auto flex flex-col gap-0.5 border-t border-sidebar-border pt-2">
           <OpsAssistantSheet rail />
-          <div className="flex items-center gap-1 px-1">
-            <AttentionBell />
-            <ThemeToggle className="border-sidebar-border bg-transparent text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
-            {isUnlocked ? (
-              <button
-                type="button"
-                onClick={lock}
-                title="Lock owner session"
-                data-testid="button-lock-owner-session"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              >
-                <Lock className="h-3.5 w-3.5" />
-                Lock
-              </button>
-            ) : null}
-          </div>
+          <AttentionBell rail />
+          <ThemeToggle rail />
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock owner session"
+              data-testid="button-lock-owner-session"
+              className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <Lock className="h-4 w-4 shrink-0" />
+              Lock
+            </button>
+          ) : null}
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <ExternalLink className="h-4 w-4 shrink-0" />
             <span className="truncate">HubSpot</span>

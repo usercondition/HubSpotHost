@@ -153,7 +153,7 @@ after(() => {
   }
 });
 
-test("link tokens are high entropy and only their SHA-256 hash is stored", () => {
+test("link tokens are high entropy and the raw token is kept only while awaiting the buyer", () => {
   const created = newLink();
   // 32 random bytes, base64url encoded => 43 characters, 256 bits of entropy.
   assert.equal(created.token.length, 43);
@@ -170,10 +170,12 @@ test("link tokens are high entropy and only their SHA-256 hash is stored", () =>
   assert.equal(row.tokenHash, crypto.createHash("sha256").update(created.token).digest("hex"));
   assert.equal(row.tokenHash.length, 64);
   assert.notEqual(row.tokenHash, created.token);
-  // The raw token appears nowhere in the persisted row.
-  assert.equal(JSON.stringify(row).includes(created.token), false);
+  assert.equal(row.shareToken, created.token);
   assert.equal(store.hashLinkToken(created.token), row.tokenHash);
   assert.equal(created.url, `/#/order-form/${created.token}`);
+
+  store.submitClientOrder(created.token, submission);
+  assert.equal(store.getOrderLink(created.link.id)?.shareToken, "");
 });
 
 test("a valid token exposes only client-safe order details", () => {
@@ -324,6 +326,8 @@ test("a client submission writes to the queue and never calls HubSpot", async ()
   assert.equal(create.status, 201);
   const token: string = create.body.token;
   assert.equal(create.body.link.tokenHash, undefined);
+  assert.equal(create.body.link.shareToken, undefined);
+  assert.equal(create.body.link.clientPath, `/#/order-form/${encodeURIComponent(token)}`);
 
   mockCalls = [];
   const lookup = await publicRequest("/api/client-order/lookup", { token });
@@ -748,5 +752,49 @@ test("shipping submissions require phone and a complete address", async () => {
     .where(eq(orderIntakeLinks.id, create.body.link.id))
     .get();
   assert.equal(row?.shippingStreet2, submission.shippingStreet2);
+});
+
+test("the owner can copy a live form link, and reissue replaces a legacy hash-only link", async () => {
+  const create = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-COPY",
+    itemDescription: "Copyable form",
+    agreedAmount: "40",
+  });
+  assert.equal(create.status, 201);
+  const token: string = create.body.token;
+  const id: number = create.body.link.id;
+  assert.equal(create.body.link.shareToken, undefined);
+  assert.equal(create.body.link.tokenHash, undefined);
+  assert.equal(create.body.link.clientPath, `/#/order-form/${encodeURIComponent(token)}`);
+
+  const listed = await ownerRequest("GET", "/api/order-links?status=awaiting_client");
+  const row = listed.body.links.find((link: { id: number }) => link.id === id);
+  assert.equal(row.clientPath, create.body.link.clientPath);
+  assert.equal(row.shareToken, undefined);
+
+  store.getDb().update(orderIntakeLinks).set({ shareToken: "" }).where(eq(orderIntakeLinks.id, id)).run();
+  const legacy = await ownerRequest("GET", `/api/order-links/${id}`);
+  assert.equal(legacy.body.link.clientPath, null);
+
+  const reissued = await ownerRequest("POST", `/api/order-links/${id}/reissue`);
+  assert.equal(reissued.status, 200);
+  assert.notEqual(reissued.body.path, create.body.link.clientPath);
+  assert.match(reissued.body.path, /^\/#\/order-form\//);
+  assert.equal(reissued.body.link.shareToken, undefined);
+  assert.equal(reissued.body.link.clientPath, reissued.body.path);
+
+  const oldLookup = await publicRequest("/api/client-order/lookup", { token });
+  assert.equal(oldLookup.status, 404);
+  const nextToken = decodeURIComponent(String(reissued.body.path).split("/").pop());
+  const nextLookup = await publicRequest("/api/client-order/lookup", { token: nextToken });
+  assert.equal(nextLookup.status, 200);
+
+  await publicRequest("/api/client-order/submit", { token: nextToken, ...submission });
+  const afterSubmit = await ownerRequest("GET", `/api/order-links/${id}`);
+  assert.equal(afterSubmit.body.link.clientPath, null);
+  assert.equal(afterSubmit.body.link.status, "pending_review");
+
+  const blocked = await ownerRequest("POST", `/api/order-links/${id}/reissue`);
+  assert.equal(blocked.status, 409);
 });
 

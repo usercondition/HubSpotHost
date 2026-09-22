@@ -48,9 +48,10 @@ import { cn } from "@/lib/utils";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { printsDealHref } from "@/lib/workflow";
 
-/** Owner-side rows never carry the token hash. */
-type QueueLink = Omit<OrderIntakeLink, "tokenHash"> & {
+/** Owner-side rows never carry the token hash or the raw share token. */
+type QueueLink = Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
   priorMatch?: PriorClientMatch | null;
+  clientPath?: string | null;
 };
 
 interface QueueResponse {
@@ -158,6 +159,7 @@ export default function OrderLinks() {
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [copied, setCopied] = useState(false);
   const [reviewId, setReviewId] = useState<number | null>(null);
+  const [copyingFormId, setCopyingFormId] = useState<number | null>(null);
   const [usernameQuery, setUsernameQuery] = useState("");
 
   const queue = useQuery<QueueResponse>({
@@ -172,6 +174,37 @@ export default function OrderLinks() {
   });
 
   const counts = queue.data?.counts;
+
+  async function copyFormLink(link: QueueLink) {
+    setCopyingFormId(link.id);
+    try {
+      let path = link.clientPath?.trim() ?? "";
+      let reissued = false;
+      if (!path) {
+        const res = await apiRequest("POST", `/api/order-links/${link.id}/reissue`, {}, { headers });
+        const body = (await res.json()) as { path?: string };
+        path = body.path?.trim() ?? "";
+        reissued = true;
+        await queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
+      }
+      if (!path) throw new Error("missing path");
+      await navigator.clipboard.writeText(absoluteClientUrl(path));
+      toast({
+        title: "Form link copied",
+        description: reissued
+          ? "Any link you sent earlier for this order no longer works. Paste this new one."
+          : "Paste it into Marketplace if the buyer still needs the form.",
+      });
+    } catch {
+      toast({
+        title: "Could not copy the form link",
+        description: "Try again from this card. The link stays available while the order is awaiting the buyer.",
+        variant: "destructive",
+      });
+    } finally {
+      setCopyingFormId(null);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => setUsernameQuery(form.buyerUsernameHint.trim()), 250);
@@ -633,7 +666,7 @@ export default function OrderLinks() {
                         {copied ? "Copied" : "Copy link"}
                       </Button>
                       <span className="text-xs text-muted-foreground">
-                        Shown once. Paste this order form link to your buyer.
+                        Paste this to your buyer. You can copy it again from the awaiting-client card.
                       </span>
                     </div>
                   </div>
@@ -798,6 +831,18 @@ export default function OrderLinks() {
                             )}
                           </div>
                           <div className="flex shrink-0 flex-wrap gap-2">
+                            {link.status === "awaiting_client" && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => copyFormLink(link)}
+                                disabled={copyingFormId === link.id}
+                                data-testid={`button-copy-form-${link.id}`}
+                              >
+                                <Link2 className="mr-2 h-4 w-4" />
+                                {copyingFormId === link.id ? "Copying…" : "Copy form link"}
+                              </Button>
+                            )}
                             {link.status === "awaiting_client" && (
                               <Button
                                 type="button"
