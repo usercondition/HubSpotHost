@@ -198,9 +198,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Mark className="h-7 w-7 shrink-0 text-primary" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
-            <span className="hidden text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:block">
-              Shop floor
+            <span className="block truncate text-sm font-semibold uppercase tracking-[0.18em]">PRINTOPS</span>
+            <span className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-primary sm:block">
+              C:\SHOP
             </span>
           </span>
         </Link>
@@ -369,7 +369,9 @@ export function PageHeader({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="rule-label mb-0.5 flex items-center gap-2">
-            <span className="ops-eyebrow-dot" aria-hidden />
+            <span className="text-primary" aria-hidden>
+              C:\&gt;
+            </span>
             {label}
           </p>
           <h1

@@ -145,16 +145,18 @@
   --chart-4: 38 92% 64%;
   --chart-5: 350 70% 70%;
 
-  --radius: 0.75rem;
+  --font-sans: "IBM Plex Mono", ui-monospace, monospace;
+  --font-serif: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 0px;
 
   --shadow-2xs: 0 0 0 0 transparent;
-  --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.35);
-  --shadow-sm: 0 1px 3px hsl(0 0% 0% / 0.4);
-  --shadow: 0 4px 16px hsl(0 0% 0% / 0.45);
-  --shadow-md: 0 8px 28px hsl(0 0% 0% / 0.5);
-  --shadow-lg: 0 16px 40px hsl(0 0% 0% / 0.55);
-  --shadow-xl: 0 24px 48px hsl(0 0% 0% / 0.6);
-  --shadow-2xl: 0 32px 64px hsl(0 0% 0% / 0.65);
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
 
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(
@@ -883,6 +885,49 @@
     .ship-cal-week {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+  }
+
+  /* Dark theme keeps the palette and the board layout, with DOS chrome. */
+  .dark .ops-shell,
+  .dark .ops-shell * {
+    border-radius: 0 !important;
+  }
+
+  .dark .ops-atmosphere,
+  .dark .ops-shell[data-nav-group="take"] .ops-atmosphere,
+  .dark .ops-shell[data-nav-group="keep"] .ops-atmosphere,
+  .dark .ops-shell[data-nav-group="office"] .ops-atmosphere {
+    background: none;
+  }
+
+  .dark .ops-atmosphere::after {
+    opacity: 0;
+  }
+
+  .dark .ops-topbar::after {
+    background: hsl(var(--primary));
+  }
+
+  .dark .ops-mark-wrap {
+    background: transparent;
+    border-color: hsl(var(--primary));
+  }
+
+  .dark .ops-page-header h1,
+  .dark .queue-lane-header,
+  .dark .rule-label,
+  .dark .board-figure-label,
+  .dark .board-meta {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .dark .workspace-node,
+  .dark .queue-lane,
+  .dark .board-card,
+  .dark .metric-tile,
+  .dark .workspace-section {
+    box-shadow: none;
   }
 
   .queue-lane-header {
