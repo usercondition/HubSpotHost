@@ -8,7 +8,7 @@ import { useOwnerSession } from "@/hooks/use-owner-session";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { PerformanceResponse } from "@shared/schema";
 
-export function AttentionBell() {
+export function AttentionBell({ rail = false }: { rail?: boolean }) {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
 
@@ -58,14 +58,23 @@ export function AttentionBell() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          className={
+            rail
+              ? "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              : "relative inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          }
           aria-label={count > 0 ? `${count} alerts need attention` : "No alerts"}
           data-testid="button-attention-bell"
         >
-          {performance.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+          {performance.isFetching ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Bell className="h-4 w-4 shrink-0" />}
+          {rail ? <span className="truncate">Alerts</span> : null}
           {count > 0 ? (
             <span
-              className="status-alert absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold"
+              className={
+                rail
+                  ? "ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-chart-4/20 px-1.5 text-xs font-semibold text-chart-4"
+                  : "status-alert absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold"
+              }
               data-testid="badge-attention-count"
             >
               {count > 9 ? "9+" : count}
@@ -74,6 +83,7 @@ export function AttentionBell() {
         </button>
       </PopoverTrigger>
       <PopoverContent
+        side={rail ? "right" : "bottom"}
         align="end"
         className="w-[22rem] max-w-[calc(100vw-1.5rem)] space-y-3 p-3"
         data-testid="panel-attention-bell"

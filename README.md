@@ -53,7 +53,7 @@ Queue tabs: **Awaiting client details**, **Pending review**, **Approved / create
 
 ### Link security model
 
-- The token is 32 bytes of `crypto.randomBytes` (256 bits) rendered base64url. Only its SHA-256 hash is stored; the plain token is returned exactly once in the creation response and never persisted, re-displayed, logged, or written to the audit file.
+- The token is 32 bytes of `crypto.randomBytes` (256 bits) rendered base64url. Its SHA-256 hash is what the public form checks. The raw token is also stored while the intake is awaiting the buyer so the owner can copy the form link again, then cleared on submit, cancel, or expiry. It is never logged or written to the audit file.
 - The buyer's token travels in the JSON request body, not in a URL path or query string, so the request logger never records it.
 - A link accepts exactly one submission. The single-submission and expiry checks are enforced in the SQL `WHERE` clause, so concurrent or repeated posts cannot double-submit.
 - An unknown, expired, or already-used token returns a generic "not valid" or "closed" message. The buyer page renders no order information until the token validates.

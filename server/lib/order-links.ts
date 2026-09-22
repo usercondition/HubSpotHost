@@ -6,8 +6,10 @@
  *
  * Security notes:
  * - The link token is 256 bits of CSPRNG randomness, base64url encoded.
- * - Only its SHA-256 hash is stored. The raw token is returned once, by
- *   `createOrderLink`, and is never persisted, logged, or echoed back later.
+ * - Its SHA-256 hash is what public lookup checks. The raw token is also stored
+ *   in `share_token` while the intake is awaiting the buyer, so the owner can
+ *   copy the form link again. It is cleared on submit, cancel, and expiry, and
+ *   it is never logged.
  * - A client submission only ever writes to this table. HubSpot is untouched
  *   until the owner explicitly approves the intake.
  */
@@ -38,6 +40,7 @@ const CREATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS order_intake_links (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash TEXT NOT NULL UNIQUE,
+  share_token TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
   internal_label TEXT NOT NULL,
   item_description TEXT NOT NULL,
@@ -419,6 +422,7 @@ const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["line_items_json", "TEXT NOT NULL DEFAULT '[]'"],
   ["hubspot_deals_json", "TEXT NOT NULL DEFAULT '[]'"],
   ["shipping_street_2", "TEXT NOT NULL DEFAULT ''"],
+  ["share_token", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function ensureOrderIntakeColumns(sqlite: Database.Database): void {
@@ -628,10 +632,10 @@ function settleExpiry(link: OrderIntakeLink): OrderIntakeLink {
   if (link.status !== "awaiting_client" || !isExpired(link)) return link;
   getDb()
     .update(orderIntakeLinks)
-    .set({ status: "expired", decidedAt: nowIso() })
+    .set({ status: "expired", decidedAt: nowIso(), shareToken: "" })
     .where(and(eq(orderIntakeLinks.id, link.id), eq(orderIntakeLinks.status, "awaiting_client")))
     .run();
-  return { ...link, status: "expired" };
+  return { ...link, status: "expired", shareToken: "" };
 }
 
 /* ------------------------------------------------------------------ owner */
@@ -648,6 +652,7 @@ export function createOrderLink(
     .insert(orderIntakeLinks)
     .values({
       tokenHash: hashLinkToken(token),
+      shareToken: token,
       status: "awaiting_client",
       internalLabel: input.internalLabel || "Generating reference",
       itemDescription: summary.itemDescription,
@@ -695,10 +700,28 @@ export function expireOrderLink(id: number): OrderIntakeLink | null {
   if (link.status === "created") return link;
   getDb()
     .update(orderIntakeLinks)
-    .set({ status: "expired", decidedAt: nowIso() })
+    .set({ status: "expired", decidedAt: nowIso(), shareToken: "" })
     .where(eq(orderIntakeLinks.id, id))
     .run();
   return getOrderLink(id);
+}
+
+/**
+ * Mint a new form token for an intake that is still awaiting the buyer.
+ * Used when an older row has no stored token. The previous URL stops working.
+ */
+export function reissueOrderLink(id: number): CreatedOrderLink | null {
+  const link = getOrderLink(id);
+  if (!link || link.status !== "awaiting_client") return null;
+  const token = generateLinkToken();
+  const updated = getDb()
+    .update(orderIntakeLinks)
+    .set({ tokenHash: hashLinkToken(token), shareToken: token })
+    .where(and(eq(orderIntakeLinks.id, id), eq(orderIntakeLinks.status, "awaiting_client")))
+    .returning()
+    .get();
+  if (!updated) return null;
+  return { link: updated, token, url: clientLinkPath(token) };
 }
 
 /** Owner corrections. Only allowed while the intake is still pending review. */
@@ -749,6 +772,7 @@ export function markOrderLinkCreated(
     .set({
       status: "created",
       decidedAt: nowIso(),
+      shareToken: "",
       hubspotContactId: hubspot.contactId,
       hubspotDealId: primary.dealId,
       hubspotDealName: primary.dealName,
@@ -860,6 +884,7 @@ export function submitClientOrder(token: string, input: ClientOrderSubmission): 
     .set({
       status: "pending_review",
       submittedAt: nowIso(),
+      shareToken: "",
       clientFullName: input.clientFullName,
       clientUsername: input.clientUsername,
       clientEmail: input.clientEmail,

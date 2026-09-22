@@ -168,6 +168,7 @@ import {
   markOrderLinkCreated,
   orderLinkCounts,
   describeOrderLinksStorage,
+  reissueOrderLink,
   submitClientOrder,
 } from "./lib/order-links";
 import { applyCostDefaults, previewCostDefaults } from "./lib/cost-defaults";
@@ -644,14 +645,18 @@ function refreshPrintFileStagesFromHubSpot(
   syncPrintFileDealStages(livePrintOrderStageMap(deals, stages));
 }
 
-/** The owner-side representation. `tokenHash` never leaves the server. */
-function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash"> & {
+/** The owner-side representation. The hash and raw token never leave as fields; a live form path does. */
+function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
   priorMatch: ReturnType<typeof findPriorClientDetails>;
+  clientPath: string | null;
 } {
-  const { tokenHash: _tokenHash, ...safe } = link;
+  const { tokenHash: _tokenHash, shareToken, ...safe } = link;
   const submitted = link.status === "pending_review" || link.status === "created";
+  const clientPath =
+    link.status === "awaiting_client" && shareToken.trim() ? clientLinkPath(shareToken.trim()) : null;
   return {
     ...safe,
+    clientPath,
     priorMatch: submitted
       ? findPriorClientDetails({
           username: link.clientUsername || link.buyerUsernameHint,
@@ -3038,6 +3043,32 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       });
     }
     return res.json({ ok: true, link: ownerLinkView(link) });
+  });
+
+  /**
+   * Replace a live form token. Older intakes were stored as a hash only, so the
+   * original URL cannot be recovered. Reissue is the way to copy a link again.
+   */
+  app.post("/api/order-links/:id/reissue", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const existing = getOrderLink(Number(req.params.id));
+    if (!existing) return res.status(404).json({ ok: false, error: "That intake no longer exists" });
+    if (existing.status !== "awaiting_client") {
+      return res.status(409).json({
+        ok: false,
+        error: "Only an intake that is still awaiting the buyer can get a new form link",
+        link: ownerLinkView(existing),
+      });
+    }
+    const created = reissueOrderLink(existing.id);
+    if (!created) {
+      return res.status(409).json({ ok: false, error: "That form link could not be reissued" });
+    }
+    return res.json({
+      ok: true,
+      link: ownerLinkView(created.link),
+      path: clientLinkPath(created.token),
+    });
   });
 
   /** Owner cancel — same terminal state as expire; clearer name for "buyer doesn't want it." */

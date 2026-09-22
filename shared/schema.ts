@@ -426,14 +426,18 @@ export interface PaidOrderCreateResult {
 /**
  * One row per one-time client details link.
  *
- * Only a SHA-256 hash of the link token is stored. The raw token is returned
- * exactly once, in the creation response, and is never logged or persisted.
+ * The SHA-256 hash is what the public form checks. The raw token is also kept
+ * in `shareToken` while the intake is awaiting the buyer, so the owner can
+ * copy the form link again. It is cleared when the buyer submits or the owner
+ * cancels or the link expires, and it is never written to logs.
  * Client submissions land here and never touch HubSpot; the owner's explicit
  * approval is the only path that creates HubSpot records.
  */
 export const orderIntakeLinks = sqliteTable("order_intake_links", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tokenHash: text("token_hash").notNull().unique(),
+  /** Raw form token while status is awaiting_client. Empty after submit, cancel, or expiry. */
+  shareToken: text("share_token").notNull().default(""),
   status: text("status").notNull().$type<OrderIntakeStatus>(),
 
   /* Owner-entered, agreed before the link is sent */
@@ -1842,7 +1846,7 @@ export interface ClientOrderView {
 
 export interface CreatedOrderLink {
   link: OrderIntakeLink;
-  /** Returned exactly once. Never stored, never logged. */
+  /** Raw form token. Stored only while the intake is awaiting the buyer. Never logged. */
   token: string;
   url: string;
 }
