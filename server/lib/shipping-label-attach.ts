@@ -249,7 +249,9 @@ export async function attachShippingLabelToDeals(
     },
     marketplaceSend: marketplaceDispatch
       ? {
-          queued: marketplaceDispatch.queued,
+          // With no Redis configured, the synchronous fallback has already
+          // armed the existing Marketplace handoff; report that result.
+          queued: marketplaceDispatch.result?.queued ?? marketplaceDispatch.queued,
           id: marketplaceDispatch.result?.request.id ?? 0,
           to: contact.name,
           channel: input.messageChannel,

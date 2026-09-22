@@ -49,7 +49,7 @@ function connection(forWorker = false): IORedis {
     commandTimeout: 1_000,
     enableOfflineQueue: false,
     maxRetriesPerRequest: forWorker ? null : 1,
-    retryStrategy: (times) => Math.min(times * 1_000, 30_000),
+    retryStrategy: (times: number) => Math.min(times * 1_000, 30_000),
   });
   client.on("error", logRedisWarning);
   return client;
