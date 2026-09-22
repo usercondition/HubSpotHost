@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -25,9 +25,9 @@
     <script>
       (function () {
         try {
-          var theme = localStorage.getItem("print-ops-theme");
-          if (theme === "light") document.documentElement.classList.remove("dark");
-          else document.documentElement.classList.add("dark");
+          var theme = localStorage.getItem("print-ops-theme-hs");
+          if (theme === "dark") document.documentElement.classList.add("dark");
+          else document.documentElement.classList.remove("dark");
         } catch (e) {}
       })();
     </script>

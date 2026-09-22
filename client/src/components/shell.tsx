@@ -30,24 +30,26 @@ import { cn } from "@/lib/utils";
 
 type Theme = "dark" | "light";
 
+const THEME_KEY = "print-ops-theme-hs";
+
 const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: "dark",
+  theme: "light",
   toggle: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "dark";
-    const saved = window.localStorage.getItem("print-ops-theme");
+    if (typeof window === "undefined") return "light";
+    const saved = window.localStorage.getItem(THEME_KEY);
     if (saved === "light" || saved === "dark") return saved;
-    return "dark";
+    return "light";
   });
 
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
-    window.localStorage.setItem("print-ops-theme", theme);
+    window.localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   const value = useMemo(
@@ -183,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="ops-shell grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[4.25rem_1fr] md:grid-rows-[auto_1fr]"
+      className="ops-shell grid h-[100dvh] grid-rows-[auto_1fr] overflow-hidden bg-background text-foreground md:grid-cols-[14rem_1fr] md:grid-rows-[auto_1fr]"
       data-nav-group={activeGroup.toLowerCase()}
     >
       {/* Top project bar — Railway header energy */}
@@ -198,10 +200,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Mark className="h-7 w-7 shrink-0 text-primary" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold uppercase tracking-[0.18em]">PRINTOPS</span>
-            <span className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-primary sm:block">
-              C:\SHOP
-            </span>
+            <span className="block truncate text-sm font-semibold tracking-tight">Print Ops</span>
+            <span className="hidden text-xs text-muted-foreground sm:block">Shop floor</span>
           </span>
         </Link>
 
@@ -229,19 +229,19 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* Icon rail — Railway left toolbar */}
-      <aside className="ops-rail hidden min-h-0 flex-col items-center gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-1.5 py-3 text-sidebar-foreground md:flex">
+      <aside className="ops-rail hidden min-h-0 flex-col gap-1 overflow-x-hidden border-r border-sidebar-border bg-sidebar px-2 py-3 text-sidebar-foreground md:flex">
         <nav
           aria-label="Primary navigation"
-          className="flex w-full min-h-0 flex-1 flex-col items-center gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="flex w-full min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           {GROUPS.map((group) => {
             const isActiveGroup = activeGroup === group.id;
             return (
-              <div key={group.id} className="flex w-full flex-col items-center gap-0.5">
+              <div key={group.id} className="flex w-full flex-col gap-0.5">
                 <p
                   className={cn(
-                    "mb-0.5 max-w-full truncate px-0.5 text-center text-[0.55rem] font-bold uppercase tracking-[0.1em] transition-colors duration-150",
-                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/70",
+                    "mb-0.5 truncate px-2.5 text-left text-[0.65rem] font-semibold uppercase tracking-[0.12em]",
+                    isActiveGroup ? "text-sidebar-primary" : "text-sidebar-foreground/45",
                   )}
                   title={group.hint}
                 >
@@ -253,17 +253,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Link
                       key={item.href}
                       href={item.href}
-                      title={`${item.label} — ${item.title}`}
+                      title={item.title}
                       data-testid={item.testId}
                       data-active={active ? "true" : "false"}
                       className={cn(
-                        "ops-rail-link relative flex h-10 w-10 items-center justify-center rounded-xl transition-[background-color,color,box-shadow] duration-150 ease-out",
+                        "ops-rail-link relative flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-[background-color,color] duration-150 ease-out",
                         active
-                          ? "bg-sidebar-accent text-sidebar-foreground shadow-sm"
+                          ? "bg-sidebar-accent text-sidebar-foreground"
                           : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       )}
                     >
-                      <item.icon className="h-4 w-4" />
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
                     </Link>
                   );
                 })}
@@ -272,16 +273,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-auto flex flex-col items-center gap-0.5 border-t border-sidebar-border pt-2">
+        <div className="mt-auto border-t border-sidebar-border pt-2">
           <a
             href="https://app.hubspot.com/"
             target="_blank"
             rel="noopener noreferrer"
             title="HubSpot CRM"
             data-testid="link-sidebar-hubspot"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className="h-4 w-4 shrink-0" />
+            <span className="truncate">HubSpot</span>
           </a>
         </div>
       </aside>
@@ -369,9 +371,7 @@ export function PageHeader({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="rule-label mb-0.5 flex items-center gap-2">
-            <span className="text-primary" aria-hidden>
-              C:\&gt;
-            </span>
+            <span className="ops-eyebrow-dot" aria-hidden />
             {label}
           </p>
           <h1

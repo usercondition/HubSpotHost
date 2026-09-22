@@ -103,7 +103,7 @@ function QueueCard({
       data-tone={tone}
       data-testid={`button-queue-deal-${item.dealId}`}
     >
-      <p className="board-name truncate text-foreground">{item.dealName}</p>
+      <p className="board-name truncate">{item.dealName}</p>
       <p className="board-meta truncate">
         {item.stage}
         {item.contactName ? ` · ${item.contactName}` : ""}
