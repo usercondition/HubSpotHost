@@ -8,53 +8,53 @@
  * teal primary signal, Space Grotesk + IBM Plex Mono.
  */
 
-  /* LIGHT MODE — cool paper bench */
+  /* LIGHT MODE — HubSpot deals board: gray canvas, white cards, navy nav, teal names */
 :root {
-  --button-outline: rgba(15, 23, 42, 0.12);
-  --badge-outline: rgba(15, 23, 42, 0.06);
+  --button-outline: rgba(45, 62, 80, 0.12);
+  --badge-outline: rgba(45, 62, 80, 0.06);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(15, 23, 42, 0.04);
-  --elevate-2: rgba(15, 23, 42, 0.08);
+  --elevate-1: rgba(45, 62, 80, 0.04);
+  --elevate-2: rgba(45, 62, 80, 0.08);
 
-  --background: 210 20% 97%;
-  --foreground: 215 28% 12%;
-  --border: 210 14% 88%;
+  --background: 204 33% 97%;
+  --foreground: 210 29% 27%;
+  --border: 210 23% 84%;
   --card: 0 0% 100%;
-  --card-foreground: 215 28% 12%;
-  --card-border: 210 14% 90%;
-  --sidebar: 215 28% 11%;
-  --sidebar-foreground: 200 12% 92%;
-  --sidebar-border: 215 22% 16%;
-  --sidebar-primary: 186 72% 38%;
+  --card-foreground: 210 29% 27%;
+  --card-border: 210 23% 86%;
+  --sidebar: 210 28% 24%;
+  --sidebar-foreground: 204 33% 96%;
+  --sidebar-border: 210 24% 18%;
+  --sidebar-primary: 188 100% 34%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 215 22% 15%;
-  --sidebar-accent-foreground: 200 12% 94%;
-  --sidebar-ring: 186 72% 38%;
+  --sidebar-accent: 210 24% 30%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: 188 100% 34%;
   --popover: 0 0% 100%;
-  --popover-foreground: 215 28% 12%;
-  --popover-border: 210 14% 88%;
-  --primary: 186 72% 32%;
+  --popover-foreground: 210 29% 27%;
+  --popover-border: 210 23% 84%;
+  --primary: 188 100% 31%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 16% 94%;
-  --secondary-foreground: 215 20% 22%;
-  --muted: 210 14% 94%;
-  --muted-foreground: 215 16% 28%;
-  --accent: 158 52% 34%;
+  --secondary: 204 33% 96%;
+  --secondary-foreground: 210 29% 27%;
+  --muted: 204 24% 94%;
+  --muted-foreground: 210 24% 40%;
+  --accent: 152 55% 32%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 48%;
+  --destructive: 0 72% 46%;
   --destructive-foreground: 0 0% 98%;
-  --input: 210 12% 72%;
-  --ring: 186 72% 32%;
-  --chart-1: 186 72% 36%;
-  --chart-2: 158 52% 34%;
-  --chart-3: 215 12% 42%;
-  --chart-4: 38 92% 46%;
+  --input: 210 16% 70%;
+  --ring: 188 100% 31%;
+  --chart-1: 188 100% 31%;
+  --chart-2: 152 55% 32%;
+  --chart-3: 210 16% 46%;
+  --chart-4: 38 92% 42%;
   --chart-5: 350 55% 44%;
 
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --radius: 0.55rem;
+  --radius: 0.3rem;
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(215 30% 12% / 0.05);
   --shadow-sm: 0 1px 3px hsl(215 30% 12% / 0.06);
@@ -145,16 +145,16 @@
   --chart-4: 38 92% 64%;
   --chart-5: 350 70% 70%;
 
-  --radius: 0px;
+  --radius: 0.3rem;
 
   --shadow-2xs: 0 0 0 0 transparent;
-  --shadow-xs: none;
-  --shadow-sm: none;
-  --shadow: none;
-  --shadow-md: none;
-  --shadow-lg: none;
-  --shadow-xl: none;
-  --shadow-2xl: none;
+  --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.35);
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.28);
+  --shadow: 0 1px 3px hsl(0 0% 0% / 0.28);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.28);
+  --shadow-lg: 0 8px 20px hsl(0 0% 0% / 0.32);
+  --shadow-xl: 0 12px 28px hsl(0 0% 0% / 0.36);
+  --shadow-2xl: 0 16px 36px hsl(0 0% 0% / 0.4);
 
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(
@@ -351,13 +351,12 @@
   .ops-rail-link[data-active="true"]::before {
     content: "";
     position: absolute;
-    left: -0.35rem;
+    left: 0;
     top: 50%;
-    width: 0.18rem;
+    width: 3px;
     height: 1.15rem;
-    border-radius: 999px;
+    border-radius: 2px;
     background: hsl(var(--sidebar-primary));
-    box-shadow: 0 0 0 3px hsl(var(--sidebar-primary) / 0.18);
     transform: translateY(-50%);
   }
 
@@ -434,11 +433,11 @@
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.35;
-    color: hsl(var(--foreground));
+    color: hsl(var(--primary));
   }
 
   .board-name:hover {
-    color: hsl(var(--primary));
+    text-decoration: underline;
   }
 
   .board-meta {
@@ -883,49 +882,6 @@
     .ship-cal-week {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-  }
-
-  /* Dark theme keeps the palette and the board layout, with DOS chrome. */
-  .dark .ops-shell,
-  .dark .ops-shell * {
-    border-radius: 0 !important;
-  }
-
-  .dark .ops-atmosphere,
-  .dark .ops-shell[data-nav-group="take"] .ops-atmosphere,
-  .dark .ops-shell[data-nav-group="keep"] .ops-atmosphere,
-  .dark .ops-shell[data-nav-group="office"] .ops-atmosphere {
-    background: none;
-  }
-
-  .dark .ops-atmosphere::after {
-    opacity: 0;
-  }
-
-  .dark .ops-topbar::after {
-    background: hsl(var(--primary));
-  }
-
-  .dark .ops-mark-wrap {
-    background: transparent;
-    border-color: hsl(var(--primary));
-  }
-
-  .dark .ops-page-header h1,
-  .dark .queue-lane-header,
-  .dark .rule-label,
-  .dark .board-figure-label,
-  .dark .board-meta {
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .dark .workspace-node,
-  .dark .queue-lane,
-  .dark .board-card,
-  .dark .metric-tile,
-  .dark .workspace-section {
-    box-shadow: none;
   }
 
   .queue-lane-header {
