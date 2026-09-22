@@ -3,8 +3,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertTriangle,
-  Calendar,
-  CircleDollarSign,
   ExternalLink,
   FileUp,
   Loader2,
@@ -25,7 +23,8 @@ import {
   formatPartsBadge,
   type OrderPartSummary,
 } from "@/components/order-parts-dialog";
-import { Panel } from "@/components/primitives";
+import { CardMenu, Panel, StatusPill } from "@/components/primitives";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { formatMoney, formatLocalDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
@@ -450,46 +449,26 @@ export default function DealsPage() {
                           column.closed && !/lost/i.test(column.label) && "bg-chart-4/10",
                         )}
                       >
-                        <div className="flex w-full items-start justify-between gap-2">
+                        <div className="flex w-full items-baseline justify-between gap-2">
                           <p
                             className={cn(
-                              "min-w-0 truncate text-sm font-semibold text-foreground",
+                              "min-w-0 truncate text-base font-semibold text-foreground",
                               column.closed && /lost/i.test(column.label) && "text-destructive",
                               column.closed && !/lost/i.test(column.label) && "text-chart-4",
                             )}
                           >
                             {column.label}
                           </p>
-                          <span className="numeric shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] font-semibold text-muted-foreground">
+                          <span className="numeric shrink-0 text-base font-medium text-muted-foreground">
                             {column.deals.length}
                           </span>
                         </div>
-                        {column.totalAmount > 0 ? (
-                          <div className="mt-1 space-y-0.5 text-[0.6875rem] text-muted-foreground">
-                            <p className="numeric">
-                              Paid {formatMoney(column.totalAmount)}
-                              {column.totalProductionCost > 0
-                                ? ` · cost ${formatMoney(column.totalProductionCost)}`
-                                : ""}
-                            </p>
-                            {column.deals.some((deal) => deal.costsComplete) ? (
-                              <p
-                                className={cn(
-                                  "numeric font-medium",
-                                  column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive",
-                                )}
-                              >
-                                GP {formatMoney(column.totalGrossProfit)}
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
 
-                      <div className="queue-lane-body overflow-y-auto overscroll-contain">
+                      <div className="queue-lane-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {column.deals.length === 0 ? (
                           <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-2 py-6">
-                            <p className="text-center text-xs text-muted-foreground">
+                            <p className="text-center text-sm text-muted-foreground">
                               {draggingDealId ? "Drop here" : "No orders"}
                             </p>
                           </div>
@@ -516,11 +495,26 @@ export default function DealsPage() {
                         )}
                       </div>
 
-                      <div className="shrink-0 border-t border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground">
-                        <div className="flex justify-between gap-2">
-                          <span>Total</span>
-                          <span className="numeric font-semibold text-foreground">{formatMoney(column.totalAmount)}</span>
-                        </div>
+                      <div className="queue-lane-footer shrink-0" data-testid={`footer-stage-${column.id}`}>
+                        <p className="board-figure">
+                          <span>{formatMoney(column.totalAmount)}</span>
+                          <span className="board-figure-label">Paid</span>
+                        </p>
+                        <p className="board-figure">
+                          <span>{formatMoney(column.totalProductionCost)}</span>
+                          <span className="board-figure-label">Production</span>
+                        </p>
+                        {column.deals.some((deal) => deal.costsComplete) ? (
+                          <p
+                            className={cn(
+                              "board-figure",
+                              column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive",
+                            )}
+                          >
+                            <span>{formatMoney(column.totalGrossProfit)}</span>
+                            <span className="board-figure-label">Revenue</span>
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -594,7 +588,7 @@ function DealCard({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "workspace-node group shrink-0 cursor-grab p-2.5 active:cursor-grabbing",
+        "workspace-node group shrink-0 cursor-grab p-3.5 active:cursor-grabbing",
         dragging && "opacity-60",
         moving && "pointer-events-none opacity-70",
       )}
@@ -602,75 +596,105 @@ function DealCard({
       data-testid={`card-deal-${deal.dealId}`}
       title="Drag to another stage to update HubSpot"
     >
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="hs-link block text-sm font-semibold leading-snug"
-        data-testid={`link-deal-title-${deal.dealId}`}
-      >
-        {deal.dealName}
-      </a>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
-        <span
-          className="inline-flex items-center gap-1 font-semibold text-foreground numeric"
-          title="Paid / quoted amount"
-          data-testid={`text-deal-paid-${deal.dealId}`}
+      <div className="flex items-start justify-between gap-2">
+        <p
+          role="link"
+          tabIndex={0}
+          onClick={onOpenOps}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onOpenOps();
+          }}
+          className="board-name min-w-0 flex-1 cursor-pointer truncate hover:underline"
+          data-testid={`link-deal-title-${deal.dealId}`}
         >
-          <CircleDollarSign className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          {formatMoney(deal.amount)}
-        </span>
-        {deal.contactName ? (
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 truncate">
-            <UserRound className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span className="truncate">{deal.contactName}</span>
-          </span>
-        ) : null}
-        {closeLabel ? (
-          <span className="inline-flex items-center gap-1">
-            <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            {closeLabel}
-          </span>
-        ) : null}
+          {deal.dealName}
+        </p>
+        <div onPointerDown={(event) => event.stopPropagation()}>
+          <CardMenu label={`More actions for ${deal.dealName}`}>
+            <DropdownMenuItem onSelect={onOpenOps} data-testid={`button-deal-ops-${deal.dealId}`}>
+              Ops / stage
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onOpenParts} data-testid={`button-deal-parts-${deal.dealId}`}>
+              <Package className="h-3.5 w-3.5" />
+              Parts
+            </DropdownMenuItem>
+            {deal.needsPlates ? (
+              <DropdownMenuItem asChild>
+                <Link href={printsDealHref(deal.dealId)} data-testid={`link-deal-attach-${deal.dealId}`}>
+                  <FileUp className="h-3.5 w-3.5" />
+                  Attach plates
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {deal.needsCosts ? (
+              <DropdownMenuItem asChild>
+                <Link href={queueDealHref(deal.dealId)} data-testid={`link-deal-costs-${deal.dealId}`}>
+                  Enter costs
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {!deal.needsPlates ? (
+              <DropdownMenuItem asChild>
+                <Link href={labelsDealHref(deal.dealId)} data-testid={`link-deal-labels-${deal.dealId}`}>
+                  Labels
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem asChild>
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid={`link-deal-hubspot-${deal.dealId}`}
+              >
+                HubSpot
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </DropdownMenuItem>
+          </CardMenu>
+        </div>
       </div>
 
-      <div
-        className="mt-1.5 grid grid-cols-3 gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1.5 text-[0.6875rem]"
-        data-testid={`panel-deal-economics-${deal.dealId}`}
-      >
-        <div>
-          <p className="text-muted-foreground">Paid</p>
-          <p className="numeric font-semibold text-foreground">{formatMoney(deal.amount)}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Production</p>
-          <p
-            className={cn(
-              "numeric font-semibold",
-              deal.costsComplete ? "text-foreground" : "text-muted-foreground",
-            )}
-            data-testid={`text-deal-production-${deal.dealId}`}
-          >
+      <p className="board-meta truncate">
+        {deal.stage}
+        {closeLabel ? ` · ${closeLabel}` : ""}
+      </p>
+      {deal.contactName ? (
+        <p className="board-meta inline-flex min-w-0 max-w-full items-center gap-1.5">
+          <UserRound className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{deal.contactName}</span>
+        </p>
+      ) : null}
+
+      <div className="mt-2.5 space-y-0.5" data-testid={`panel-deal-economics-${deal.dealId}`}>
+        <p className="board-figure" data-testid={`text-deal-paid-${deal.dealId}`} title="Paid / quoted amount">
+          <span>{formatMoney(deal.amount)}</span>
+          <span className="board-figure-label">Paid</span>
+        </p>
+        <p
+          className={cn("board-figure", deal.costsComplete ? "" : "text-muted-foreground")}
+          data-testid={`text-deal-production-${deal.dealId}`}
+        >
+          <span>
             {deal.costsComplete || (deal.productionCost ?? 0) > 0
               ? formatMoney(deal.productionCost ?? 0)
               : "—"}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Revenue</p>
-          <p
-            className={cn(
-              "numeric font-semibold",
-              !deal.costsComplete && !((deal.productionCost ?? 0) > 0)
-                ? "text-muted-foreground"
-                : (deal.grossProfit ?? 0) >= 0
-                  ? "text-chart-4"
-                  : "text-destructive",
-            )}
-            data-testid={`text-deal-revenue-${deal.dealId}`}
-            title="Gross profit = paid − production costs"
-          >
+          </span>
+          <span className="board-figure-label">Production</span>
+        </p>
+        <p
+          className={cn(
+            "board-figure",
+            !deal.costsComplete && !((deal.productionCost ?? 0) > 0)
+              ? "text-muted-foreground"
+              : (deal.grossProfit ?? 0) >= 0
+                ? "text-chart-4"
+                : "text-destructive",
+          )}
+          data-testid={`text-deal-revenue-${deal.dealId}`}
+          title="Gross profit = paid − production costs"
+        >
+          <span>
             {deal.costsComplete || (deal.productionCost ?? 0) > 0
               ? `${formatMoney(deal.grossProfit ?? 0)}${
                   deal.amount > 0 && deal.costsComplete
@@ -678,100 +702,30 @@ function DealCard({
                     : ""
                 }`
               : "—"}
-          </p>
-        </div>
+          </span>
+          <span className="board-figure-label">Revenue</span>
+        </p>
       </div>
 
-      {(deal.needsPlates || deal.needsCosts || isStale || partsSummary) && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+      {deal.needsPlates || deal.needsCosts || isStale || (partsSummary && partsSummary.total > 0) ? (
+        <div className="mt-2.5">
           {deal.needsPlates ? (
-            <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-primary">
-              Needs plates
-            </span>
-          ) : null}
-          {deal.needsCosts ? (
-            <span className="rounded border border-chart-4/35 bg-chart-4/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-chart-4">
-              Needs costs
-            </span>
-          ) : null}
-          {isStale ? (
-            <span className="rounded border border-destructive/35 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-destructive">
-              Stale
-            </span>
-          ) : null}
-          {partsSummary && partsSummary.total > 0 ? (
-            <span
-              className={cn(
-                "rounded border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
-                partsSummary.remaining === 0
-                  ? "border-chart-4/30 bg-chart-4/10 text-chart-4"
-                  : "border-border bg-muted text-muted-foreground",
-              )}
-              data-testid={`badge-deal-parts-${deal.dealId}`}
-            >
-              {formatPartsBadge(partsSummary)}
+            <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+          ) : deal.needsCosts ? (
+            <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+          ) : isStale ? (
+            <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+          ) : partsSummary && partsSummary.total > 0 ? (
+            <span data-testid={`badge-deal-parts-${deal.dealId}`}>
+              <StatusPill
+                tone={partsSummary.remaining === 0 ? "warn" : "neutral"}
+                icon={Package}
+                label={formatPartsBadge(partsSummary)}
+              />
             </span>
           ) : null}
         </div>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-border/70 pt-1.5">
-        <button
-          type="button"
-          onClick={onOpenOps}
-          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-          data-testid={`button-deal-ops-${deal.dealId}`}
-        >
-          Ops / stage
-        </button>
-        <button
-          type="button"
-          onClick={onOpenParts}
-          className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-          data-testid={`button-deal-parts-${deal.dealId}`}
-        >
-          <Package className="h-3 w-3" />
-          Parts
-        </button>
-        {deal.needsPlates ? (
-          <Link
-            href={printsDealHref(deal.dealId)}
-            className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-            data-testid={`link-deal-attach-${deal.dealId}`}
-          >
-            <FileUp className="h-3 w-3" />
-            Attach plates
-          </Link>
-        ) : null}
-        {deal.needsCosts ? (
-          <Link
-            href={queueDealHref(deal.dealId)}
-            className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-            data-testid={`link-deal-costs-${deal.dealId}`}
-          >
-            Enter costs
-          </Link>
-        ) : null}
-        {!deal.needsPlates ? (
-          <Link
-            href={labelsDealHref(deal.dealId)}
-            className="hs-link inline-flex items-center gap-1 text-xs font-medium"
-            data-testid={`link-deal-labels-${deal.dealId}`}
-          >
-            Labels
-          </Link>
-        ) : null}
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-          data-testid={`link-deal-hubspot-${deal.dealId}`}
-        >
-          HubSpot
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      </div>
+      ) : null}
     </article>
   );
 }

@@ -379,7 +379,7 @@ export function PageHeader({
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground md:whitespace-normal md:text-[0.8125rem]">
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
               {subtitle}
             </p>
           ) : null}

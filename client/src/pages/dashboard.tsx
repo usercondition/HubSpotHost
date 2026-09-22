@@ -24,7 +24,10 @@ import { useToast } from "@/hooks/use-toast";
 import { attentionNextStep, floorFocusMeta, hubspotDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { Panel, StatusPill } from "@/components/primitives";
+import { CardMenu, Panel, StatusPill } from "@/components/primitives";
+import {
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -66,7 +69,7 @@ function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
     <Link
       href="/setup"
       data-testid="panel-system-status"
-      className="inline-flex items-center gap-1.5 rounded-md border border-chart-4/40 bg-chart-4/10 px-2 py-1 text-[0.6875rem] font-medium text-chart-4 hover:bg-chart-4/15"
+      className="inline-flex items-center gap-1.5 rounded-md border border-chart-4/40 bg-chart-4/10 px-2.5 py-1 text-sm font-medium text-chart-4 hover:bg-chart-4/15"
       title={storageWarn || "HubSpot writes or webhook need a quick check"}
     >
       <SlidersHorizontal className="h-3 w-3" />
@@ -99,55 +102,40 @@ function AttentionCard({
 
   return (
     <article
-      className="workspace-node w-full p-3 text-left"
+      className="workspace-node w-full p-3.5 text-left"
       data-tone={tone}
       data-testid={`row-glance-${item.dealId}-${item.issueKey}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight">{item.dealName}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {item.stage} · {item.detail}
-          </p>
+          <Link
+            href={step.href}
+            className="board-name block truncate hover:underline"
+            data-testid={`link-glance-action-${item.dealId}`}
+          >
+            {item.dealName}
+          </Link>
+          <p className="board-meta truncate">{item.stage}</p>
+          <p className="board-meta">{item.detail}</p>
         </div>
-        <StatusPill tone={tone} label={item.issue} />
+        <CardMenu label={`More actions for ${item.dealName}`}>
+          <DropdownMenuItem
+            disabled={dismissPending}
+            onSelect={onDismiss}
+            data-testid={`button-glance-skip-${item.dealId}-${item.issueKey}`}
+          >
+            Skip
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={hubspotDealHref(item.dealId, portalId)} target="_blank" rel="noopener noreferrer">
+              HubSpot
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </DropdownMenuItem>
+        </CardMenu>
       </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <Link
-          href={step.href}
-          className="font-medium text-primary hover:underline"
-          data-testid={`link-glance-action-${item.dealId}`}
-        >
-          {item.issueKey === "no_plates" ? (
-            <span className="inline-flex items-center gap-1">
-              <FileUp className="h-3 w-3" />
-              {step.label}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              <ListOrdered className="h-3 w-3" />
-              {step.label}
-            </span>
-          )}
-        </Link>
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground"
-          disabled={dismissPending}
-          onClick={onDismiss}
-          data-testid={`button-glance-skip-${item.dealId}-${item.issueKey}`}
-        >
-          Skip
-        </button>
-        <a
-          href={hubspotDealHref(item.dealId, portalId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-        >
-          HubSpot
-          <ExternalLink className="h-3 w-3" />
-        </a>
+      <div className="mt-2.5">
+        <StatusPill tone={tone} icon={item.issueKey === "no_plates" ? FileUp : ListOrdered} label={step.label} />
       </div>
     </article>
   );
@@ -171,16 +159,19 @@ function ShopCard({
   tone?: "warn" | "bad" | "good";
 }) {
   return (
-    <article className="workspace-node w-full p-3 text-left" data-tone={tone} data-testid={testId}>
-      <p className="truncate text-sm font-semibold tracking-tight">{title}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
-      <div className="mt-2">
-        <Link href={href} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-          <Icon className="h-3 w-3" />
-          {label}
-        </Link>
-      </div>
-    </article>
+    <Link
+      href={href}
+      className="workspace-node block w-full p-3.5 text-left"
+      data-tone={tone}
+      data-testid={testId}
+    >
+      <span className="board-name block truncate">{title}</span>
+      <span className="board-meta block">{detail}</span>
+      <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+        <Icon className="h-4 w-4" />
+        {label}
+      </span>
+    </Link>
   );
 }
 
@@ -213,89 +204,117 @@ function FlightCard({
 
   return (
     <article
-      className="workspace-node w-full p-3 text-left"
+      className="workspace-node w-full p-3.5 text-left"
       data-tone={tone === "good" ? undefined : tone}
       data-testid={`row-todays-active-deal-${deal.dealId}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight">{deal.dealName}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <Link
+            href={needsPlates ? printsDealHref(deal.dealId) : queueDealHref(deal.dealId)}
+            className="board-name block truncate hover:underline"
+            data-testid={needsPlates ? `link-todays-attach-${deal.dealId}` : `link-todays-ops-${deal.dealId}`}
+          >
+            {deal.dealName}
+          </Link>
+          <p className="board-meta truncate">
             {deal.stage}
-            {deal.amount > 0 ? ` · ${formatMoney(deal.amount)}` : ""}
             {queueItem?.addressSummary ? ` · ${queueItem.addressSummary}` : ""}
           </p>
         </div>
-        <p className="text-sm font-medium">{formatMoney(deal.amount)}</p>
+        <div onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <CardMenu label={`More actions for ${deal.dealName}`}>
+            {needsPlates ? (
+              <DropdownMenuItem asChild>
+                <Link href={queueDealHref(deal.dealId)} data-testid={`link-todays-ops-${deal.dealId}`}>
+                  Open in Queue
+                </Link>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem asChild>
+                <Link href={printsDealHref(deal.dealId)} data-testid={`link-todays-attach-${deal.dealId}`}>
+                  Plates
+                </Link>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem asChild>
+              <a
+                href={hubspotDealHref(deal.dealId, portalId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid={`link-todays-hubspot-${deal.dealId}`}
+              >
+                HubSpot
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </DropdownMenuItem>
+          </CardMenu>
+        </div>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {needsPlates ? <StatusPill tone="warn" icon={FileUp} label="Needs plates" /> : null}
-        {needsCosts ? <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" /> : null}
-        {isStale ? <StatusPill tone="bad" icon={AlertTriangle} label="Stale" /> : null}
-        {queueItem?.readyToPack || queueItem?.bucket === "ship_ready" ? (
-          <StatusPill tone="good" icon={Ship} label="Ready to ship" />
-        ) : null}
-        {addressPill ? (
+      {queueItem ? (
+        <p
+          className={cn(
+            "board-figure mt-2.5",
+            queueItem.shipBy < shipByCalendarDate() && "text-destructive",
+            queueItem.shipBy === shipByCalendarDate() && "text-chart-4",
+          )}
+        >
+          <span>{formatShipByShort(queueItem.shipBy)}</span>
+          <span className="board-figure-label">
+            {queueItem.shipBy < shipByCalendarDate()
+              ? "Overdue"
+              : queueItem.shipBy === shipByCalendarDate()
+                ? "Due today"
+                : "Ship by"}
+            {queueItem.shipBySource === "override" ? " · set" : ""}
+          </span>
+        </p>
+      ) : null}
+      <p className="board-figure">
+        <span>{formatMoney(deal.amount)}</span>
+        <span className="board-figure-label">Paid</span>
+      </p>
+      <div className="mt-2.5">
+        {needsPlates ? (
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+        ) : needsCosts ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+        ) : isStale ? (
+          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+        ) : addressPill && addressPill.tone !== "good" ? (
           <StatusPill
             tone={addressPill.tone}
             icon={MapPin}
             label={addressPill.label}
             testId={`status-address-${deal.dealId}`}
           />
-        ) : null}
-        {queueItem ? (
+        ) : queueItem?.readyToPack || queueItem?.bucket === "ship_ready" ? (
+          <StatusPill tone="good" icon={Ship} label="Ready to ship" />
+        ) : addressPill ? (
           <StatusPill
-            tone={queueItem.shipBy < shipByCalendarDate() ? "bad" : queueItem.shipBy === shipByCalendarDate() ? "warn" : "neutral"}
-            icon={Ship}
-            label={shipByLabel(queueItem.shipBy, shipByCalendarDate(), queueItem.shipBySource)}
+            tone={addressPill.tone}
+            icon={MapPin}
+            label={addressPill.label}
+            testId={`status-address-${deal.dealId}`}
           />
-        ) : null}
-        {!needsPlates && !needsCosts && !isStale && !addressPill ? (
+        ) : (
           <StatusPill tone="good" icon={CheckCircle2} label="On track" />
-        ) : null}
+        )}
       </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <Link
-          href={queueDealHref(deal.dealId)}
-          className="font-medium text-primary hover:underline"
-          data-testid={`link-todays-ops-${deal.dealId}`}
+      {showAddress &&
+      queueItem &&
+      queueItem.addressStatus !== "ready" &&
+      queueItem.addressStatus !== "pickup" &&
+      queueItem.chaseDraft ? (
+        <button
+          type="button"
+          className="mt-2 text-sm font-semibold text-primary hover:underline"
+          data-testid={`button-chase-address-${deal.dealId}`}
+          onClick={() => onCopyChase?.(queueItem.chaseDraft)}
         >
-          Ops
-        </Link>
-        {needsPlates ? (
-          <Link
-            href={printsDealHref(deal.dealId)}
-            className="font-medium text-primary hover:underline"
-            data-testid={`link-todays-attach-${deal.dealId}`}
-          >
-            Plates
-          </Link>
-        ) : null}
-        {showAddress &&
-        queueItem &&
-        queueItem.addressStatus !== "ready" &&
-        queueItem.addressStatus !== "pickup" &&
-        queueItem.chaseDraft ? (
-          <button
-            type="button"
-            className="font-medium text-primary hover:underline"
-            data-testid={`button-chase-address-${deal.dealId}`}
-            onClick={() => onCopyChase?.(queueItem.chaseDraft)}
-          >
-            Copy chase
-          </button>
-        ) : null}
-        <a
-          href={hubspotDealHref(deal.dealId, portalId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          data-testid={`link-todays-hubspot-${deal.dealId}`}
-        >
-          HubSpot
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      </div>
+          Copy chase
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -319,16 +338,16 @@ function FloorColumn({
     <section className="queue-lane min-w-0" data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight">
             {title}{" "}
-            <span className="numeric text-muted-foreground">({count})</span>
+            <span className="numeric font-medium text-muted-foreground">{count}</span>
           </h2>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </div>
       <div className="queue-lane-body">
         {count === 0 ? (
-          <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+          <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm leading-5 text-muted-foreground">
             {empty}
           </p>
         ) : (
@@ -367,12 +386,12 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
     <section className="queue-lane min-w-0" data-testid="panel-floor-ship-calendar">
       <div className="queue-lane-header">
         <div className="min-w-0">
-          <h2 className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight">
+          <h2 className="inline-flex items-center gap-2 text-base font-semibold tracking-tight">
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             Ship calendar{" "}
             <span className="numeric text-muted-foreground">({items.length})</span>
           </h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Los Angeles dates · keep overdue and due-today honest
           </p>
         </div>
@@ -399,8 +418,8 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
         {agenda.overdue.length > 0 ? (
           <div className="ship-cal-overdue" data-testid="panel-ship-cal-overdue">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Overdue</p>
-              <p className="text-xs text-muted-foreground">{agenda.overdue.length} past ship-by</p>
+              <p className="text-sm font-semibold text-destructive">Overdue</p>
+              <p className="text-sm text-muted-foreground">{agenda.overdue.length} past ship-by</p>
             </div>
             <div className="mt-2 flex flex-col gap-1.5">
               {agenda.overdue.map((item) => (
@@ -434,7 +453,7 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
                       <ShipCalendarDeal key={item.dealId} item={item} today={today} />
                     ))}
                     {day.items.length > 4 ? (
-                      <p className="text-[0.6875rem] text-muted-foreground">+{day.items.length - 4} more</p>
+                      <p className="text-sm text-muted-foreground">+{day.items.length - 4} more</p>
                     ) : null}
                   </div>
                 )}
@@ -444,7 +463,7 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
         </div>
 
         {agenda.later.length > 0 ? (
-          <p className="text-xs text-muted-foreground" data-testid="text-ship-cal-later">
+          <p className="text-sm text-muted-foreground" data-testid="text-ship-cal-later">
             +{agenda.later.length} later than this week on{" "}
             <Link href="/queue" className="font-medium text-primary hover:underline">
               Queue
@@ -746,11 +765,11 @@ function TodaysWork() {
       <section className="queue-lane min-w-0" data-testid="panel-todays-active-deals">
         <div className="queue-lane-header">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold tracking-tight">
+            <h2 className="text-base font-semibold tracking-tight">
               Jobs in flight{" "}
-              <span className="numeric text-muted-foreground">({activeDeals.length})</span>
+              <span className="numeric font-medium text-muted-foreground">{activeDeals.length}</span>
             </h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Snapshot of open print jobs — full board is Queue
             </p>
           </div>
@@ -795,7 +814,7 @@ function TodaysWork() {
             </div>
           )}
           {hiddenDealCount > 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground" data-testid="text-floor-more-deals">
+            <p className="mt-2 text-sm text-muted-foreground" data-testid="text-floor-more-deals">
               +{hiddenDealCount} more on{" "}
               <Link href="/queue" className="font-medium text-primary hover:underline">
                 Queue
