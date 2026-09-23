@@ -41,7 +41,7 @@
   --muted-foreground: 215 10% 40%;
   --accent: 158 52% 34%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 48%;
+  --destructive: 358 42% 40%;
   --destructive-foreground: 0 0% 98%;
   --input: 210 12% 72%;
   --ring: 186 72% 32%;
@@ -49,7 +49,7 @@
   --chart-2: 158 52% 34%;
   --chart-3: 215 12% 42%;
   --chart-4: 38 92% 46%;
-  --chart-5: 350 55% 44%;
+  --chart-5: 356 32% 42%;
 
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
@@ -109,7 +109,7 @@
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.07);
 
-  /* Flat black canvas. Teal is the action color; green, amber, and red stay on status. */
+  /* Flat black canvas. Cyan stays the signal. Red is a muted rose so overdue does not shout. */
   --background: 0 0% 0%;
   --foreground: 0 0% 98%;
   --border: 0 0% 16%;
@@ -135,15 +135,15 @@
   --muted-foreground: 0 0% 58%;
   --accent: 158 50% 44%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 55%;
-  --destructive-foreground: 0 0% 98%;
+  --destructive: 358 36% 62%;
+  --destructive-foreground: 0 0% 8%;
   --input: 0 0% 18%;
   --ring: 186 72% 48%;
   --chart-1: 186 72% 48%;
   --chart-2: 158 50% 44%;
   --chart-3: 0 0% 62%;
   --chart-4: 38 92% 52%;
-  --chart-5: 350 55% 58%;
+  --chart-5: 356 28% 66%;
 
   --radius: 0.5rem;
 
