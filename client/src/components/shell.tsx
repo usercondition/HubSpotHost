@@ -275,7 +275,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     className={cn(
                       "ops-rail-link flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm transition-[background-color,color] duration-150 ease-out",
                       active
-                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground [&_svg]:text-primary"
                         : "font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
                     )}
                   >

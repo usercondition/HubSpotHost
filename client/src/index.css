@@ -468,7 +468,9 @@
   }
 
   .workspace-node:hover {
-    border-color: hsl(0 0% 28%);
+    border-top-color: hsl(0 0% 28%);
+    border-right-color: hsl(0 0% 28%);
+    border-bottom-color: hsl(0 0% 28%);
   }
 
   .workspace-node[data-active='true'] {
@@ -477,10 +479,35 @@
   }
 
   .workspace-node[data-tone='warn'],
+  .board-card[data-tone='warn'],
+  .glance-item[data-tone='warn'],
+  .intake-row[data-tone='warn'] {
+    border-left: 3px solid hsl(var(--chart-4));
+    background: hsl(var(--chart-4) / 0.07);
+  }
+
   .workspace-node[data-tone='bad'],
+  .board-card[data-tone='bad'],
+  .glance-item[data-tone='bad'],
+  .intake-row[data-tone='bad'] {
+    border-left: 3px solid hsl(var(--destructive));
+    background: hsl(var(--destructive) / 0.08);
+  }
+
   .workspace-node[data-tone='good'],
-  .workspace-node[data-tone='plates'] {
-    background: hsl(var(--card));
+  .board-card[data-tone='good'],
+  .glance-item[data-tone='good'],
+  .intake-row[data-tone='good'] {
+    border-left: 3px solid hsl(var(--accent));
+    background: hsl(var(--accent) / 0.08);
+  }
+
+  .workspace-node[data-tone='plates'],
+  .board-card[data-tone='plates'],
+  .glance-item[data-tone='plates'],
+  .intake-row[data-tone='plates'] {
+    border-left: 3px solid hsl(var(--primary));
+    background: hsl(var(--primary) / 0.08);
   }
 
   /* Orders board cards share Queue deal-card chrome (workspace-node). */
@@ -498,14 +525,24 @@
   }
 
   .board-card:hover {
-    border-color: hsl(0 0% 28%);
+    border-top-color: hsl(0 0% 28%);
+    border-right-color: hsl(0 0% 28%);
+    border-bottom-color: hsl(0 0% 28%);
   }
 
-  .board-card[data-tone='warn'],
-  .board-card[data-tone='bad'],
-  .board-card[data-tone='good'],
-  .board-card[data-tone='plates'] {
-    background: hsl(var(--card));
+  .queue-lane[data-lane='plates'] { --lane: hsl(var(--primary)); }
+  .queue-lane[data-lane='fly'] { --lane: hsl(210 78% 62%); }
+  .queue-lane[data-lane='warn'] { --lane: hsl(var(--chart-4)); }
+  .queue-lane[data-lane='bad'] { --lane: hsl(var(--destructive)); }
+  .queue-lane[data-lane='good'] { --lane: hsl(var(--accent)); }
+  .queue-lane[data-lane='shop'] { --lane: hsl(262 70% 70%); }
+
+  .queue-lane[data-lane] {
+    border-top: 3px solid var(--lane);
+  }
+
+  .queue-lane[data-lane] > .queue-lane-header .numeric {
+    color: var(--lane);
   }
 
   /* Titled group container — soft charcoal card (settings-adjacent) */

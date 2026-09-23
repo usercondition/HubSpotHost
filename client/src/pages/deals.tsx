@@ -46,6 +46,17 @@ type OptimisticMove = { stageId: string; stageLabel: string };
 
 const DRAG_MIME = "application/x-print-ops-deal";
 
+function stageLane(label: string, closed: boolean): "plates" | "fly" | "warn" | "bad" | "good" | "shop" {
+  const name = label.toLowerCase();
+  if (closed && /lost/.test(name)) return "bad";
+  if (closed) return "good";
+  if (/ship|label|pack|fulfill/.test(name)) return "good";
+  if (/qc|post|cure|wash|process/.test(name)) return "warn";
+  if (/print/.test(name)) return "fly";
+  if (/queue|deposit|new|order|intake/.test(name)) return "plates";
+  return "shop";
+}
+
 /**
  * Orders board — HubSpot Print Orders stages with drag-to-move write-back.
  * Day-to-day production still lives on Queue; this mirrors CRM stages both ways.
@@ -411,6 +422,7 @@ export default function DealsPage() {
                         "queue-lane flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col transition-colors",
                         dropStageId === column.id && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background",
                       )}
+                      data-lane={stageLane(column.label, column.closed)}
                       data-testid={`column-deal-stage-${column.id}`}
                       onDragOver={(event) => {
                         if (!draggingDealId) return;
