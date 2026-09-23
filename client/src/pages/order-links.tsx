@@ -789,7 +789,7 @@ export default function OrderLinks() {
                     return (
                       <li
                         key={link.id}
-                        className="intake-row rounded-md border border-border bg-background/40 p-3"
+                        className="intake-row scan-row rounded-md border border-border bg-background/40"
                         data-tone={
                           link.status === "pending_review"
                             ? "warn"
@@ -804,7 +804,7 @@ export default function OrderLinks() {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-semibold" data-testid={`text-intake-label-${link.id}`}>
+                              <p className="board-name truncate" data-testid={`text-intake-label-${link.id}`}>
                                 {link.internalLabel}
                               </p>
                               <StatusPill
@@ -822,17 +822,19 @@ export default function OrderLinks() {
                                 />
                               )}
                             </div>
-                            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                            <p className="board-meta truncate">
                               {link.confirmedItem || link.itemDescription}
+                              {` · $${link.agreedAmount}`}
                             </p>
                             {lineItemsForIntake(link).length > 1 ? (
                               <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-line-count-${link.id}`}>
                                 {lineItemsForIntake(link).length} HubSpot Print Orders on approve
                               </p>
                             ) : null}
-                            <p className={`numeric mt-1.5 text-xs ${!link.submittedAt && expiryCue(link.expiresAt).urgent ? "text-primary" : "text-muted-foreground"}`}>
-                              ${link.agreedAmount} · created {formatDate(link.createdAt)} ·{" "}
-                              {link.submittedAt ? `submitted ${formatDate(link.submittedAt)}` : expiryCue(link.expiresAt).label}
+                            <p className={cn("board-meta", !link.submittedAt && expiryCue(link.expiresAt).urgent && "text-primary")}>
+                              {link.submittedAt
+                                ? `Submitted ${formatDate(link.submittedAt)}`
+                                : expiryCue(link.expiresAt).label}
                             </p>
                             {link.clientFullName && (
                               <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-intake-client-${link.id}`}>

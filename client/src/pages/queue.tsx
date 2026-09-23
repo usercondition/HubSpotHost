@@ -98,39 +98,13 @@ function QueueCard({
           onSelect();
         }
       }}
-      className={cn("workspace-node w-full cursor-pointer p-3.5 text-left", selected && "ring-0")}
+      className={cn("workspace-node scan-row w-full cursor-pointer text-left", selected && "ring-0")}
       data-active={selected ? "true" : "false"}
       data-tone={tone}
       data-testid={`button-queue-deal-${item.dealId}`}
     >
-      <p className="board-name truncate">{item.dealName}</p>
-      <p className="board-meta truncate">
-        {item.stage}
-        {item.contactName ? ` · ${item.contactName}` : ""}
-      </p>
-      <p
-        className={cn(
-          "board-figure mt-2.5",
-          item.shipBy < shipByCalendarDate() && "text-destructive",
-          item.shipBy === shipByCalendarDate() && "text-chart-4",
-        )}
-      >
-        <span>{formatShipByShort(item.shipBy)}</span>
-        <span className="board-figure-label">
-          {item.shipBy < shipByCalendarDate()
-            ? "Overdue"
-            : item.shipBy === shipByCalendarDate()
-              ? "Due today"
-              : "Ship by"}
-          {item.shipBySource === "override" ? " · set" : ""}
-        </span>
-      </p>
-      <p className="board-figure">
-        <span>{formatMoney(item.amount)}</span>
-        <span className="board-figure-label">Paid</span>
-      </p>
-      {detail ? <p className="board-meta">{detail}</p> : null}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="board-name min-w-0 flex-1 truncate">{item.dealName}</p>
         {item.isStale ? (
           <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
         ) : item.needsReply ? (
@@ -147,6 +121,24 @@ function QueueCard({
           <StatusPill tone="neutral" icon={Package} label="No plates" />
         ) : null}
       </div>
+      <p className="scan-facts text-muted-foreground">
+        <span className="min-w-0 truncate font-medium">{item.contactName || item.stage}</span>
+        <span
+          className={cn(
+            item.shipBy < shipByCalendarDate() && "text-destructive",
+            item.shipBy === shipByCalendarDate() && "text-chart-4",
+          )}
+        >
+          {item.shipBy < shipByCalendarDate()
+            ? `Overdue ${formatShipByShort(item.shipBy)}`
+            : item.shipBy === shipByCalendarDate()
+              ? "Due today"
+              : formatShipByShort(item.shipBy)}
+          {item.shipBySource === "override" ? " · set" : ""}
+        </span>
+        <span className="text-foreground">{formatMoney(item.amount)}</span>
+      </p>
+      {detail ? <p className="board-meta truncate">{detail}</p> : null}
     </article>
   );
 }
