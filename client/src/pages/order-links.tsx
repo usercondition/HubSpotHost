@@ -734,6 +734,16 @@ export default function OrderLinks() {
                           : "border-border text-muted-foreground hover:text-foreground",
                       )}
                     >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "mr-1.5 inline-block h-1.5 w-1.5 rounded-full",
+                          status === "awaiting_client" && "bg-primary",
+                          status === "pending_review" && "bg-chart-4",
+                          status === "created" && "bg-accent",
+                          status === "expired" && "bg-destructive",
+                        )}
+                      />
                       {ORDER_INTAKE_STATUS_LABELS[status]}
                       {counts ? ` (${counts[status]})` : ""}
                     </button>
@@ -779,7 +789,16 @@ export default function OrderLinks() {
                     return (
                       <li
                         key={link.id}
-                        className="rounded-md border border-border bg-background/40 p-3"
+                        className="intake-row rounded-md border border-border bg-background/40 p-3"
+                        data-tone={
+                          link.status === "pending_review"
+                            ? "warn"
+                            : link.status === "created"
+                              ? "good"
+                              : link.status === "expired"
+                                ? "bad"
+                                : "plates"
+                        }
                         data-testid={`row-intake-${link.id}`}
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">

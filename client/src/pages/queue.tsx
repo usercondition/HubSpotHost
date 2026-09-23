@@ -159,6 +159,7 @@ function QueueColumn({
   onSelect,
   empty,
   testId,
+  lane,
 }: {
   title: string;
   subtitle: string;
@@ -167,9 +168,10 @@ function QueueColumn({
   onSelect: (dealId: string) => void;
   empty: string;
   testId: string;
+  lane: "plates" | "fly" | "warn" | "bad" | "good" | "shop";
 }) {
   return (
-    <section className="queue-lane min-w-0" data-testid={testId}>
+    <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight">
@@ -352,6 +354,7 @@ export default function ProductionQueuePage() {
                 onSelect={selectDeal}
                 empty="All open orders already have plates."
                 testId="column-next-print"
+                lane="plates"
               />
               <QueueColumn
                 title="In production"
@@ -361,6 +364,7 @@ export default function ProductionQueuePage() {
                 onSelect={selectDeal}
                 empty="Nothing mid-flight right now."
                 testId="column-in-production"
+                lane="fly"
               />
               <QueueColumn
                 title="Blocked"
@@ -370,6 +374,7 @@ export default function ProductionQueuePage() {
                 onSelect={selectDeal}
                 empty="No QC or assignment blockers."
                 testId="column-blocked"
+                lane="bad"
               />
               <QueueColumn
                 title="Ship ready"
@@ -379,6 +384,7 @@ export default function ProductionQueuePage() {
                 onSelect={selectDeal}
                 empty="No orders near ship-ready yet."
                 testId="column-ship-ready"
+                lane="good"
               />
             </div>
 

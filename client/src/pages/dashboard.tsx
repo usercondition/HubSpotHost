@@ -325,6 +325,7 @@ function FloorColumn({
   count,
   empty,
   testId,
+  lane,
   children,
 }: {
   title: string;
@@ -332,10 +333,11 @@ function FloorColumn({
   count: number;
   empty: string;
   testId: string;
+  lane: "plates" | "fly" | "warn" | "bad" | "good" | "shop";
   children: ReactNode;
 }) {
   return (
-    <section className="queue-lane min-w-0" data-testid={testId}>
+    <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight">
@@ -383,7 +385,11 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
   const pressure = agenda.overdue.length + agenda.dueToday.length;
 
   return (
-    <section className="queue-lane min-w-0" data-testid="panel-floor-ship-calendar">
+    <section
+      className="queue-lane min-w-0"
+      data-lane={pressure > 0 ? "bad" : "good"}
+      data-testid="panel-floor-ship-calendar"
+    >
       <div className="queue-lane-header">
         <div className="min-w-0">
           <h2 className="inline-flex items-center gap-2 text-base font-semibold tracking-tight">
@@ -661,6 +667,7 @@ function TodaysWork() {
           count={plates.length}
           empty="All open print jobs have plates."
           testId="column-floor-plates"
+          lane="plates"
         >
           {plates.map((item) => (
             <AttentionCard
@@ -679,6 +686,7 @@ function TodaysWork() {
           count={costs.length}
           empty="No cost gaps on open orders."
           testId="column-floor-costs"
+          lane="warn"
         >
           {costs.map((item) => (
             <AttentionCard
@@ -697,6 +705,7 @@ function TodaysWork() {
           count={stale.length}
           empty="Nothing going quiet."
           testId="column-floor-stale"
+          lane="bad"
         >
           {stale.map((item) => (
             <AttentionCard
@@ -715,6 +724,7 @@ function TodaysWork() {
           count={shopCount}
           empty="No intake or shop blockers."
           testId="column-floor-shop"
+          lane="shop"
         >
           {pendingReview > 0 ? (
             <ShopCard
