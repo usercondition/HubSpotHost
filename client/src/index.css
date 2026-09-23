@@ -360,6 +360,23 @@
     color: hsl(var(--muted-foreground));
   }
 
+  /* One record, two lines: name and the facts you act on. */
+  .scan-row {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .scan-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.7rem;
+    margin-top: 0.2rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+
   .hs-link {
     color: hsl(var(--primary));
   }
@@ -776,8 +793,8 @@
   .queue-lane-body {
     display: flex;
     flex-direction: column;
-    gap: 0.55rem;
-    padding: 0.7rem;
+    gap: 0.35rem;
+    padding: 0.45rem;
     flex: 1;
   }
 

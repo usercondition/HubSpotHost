@@ -8,7 +8,6 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -600,7 +599,7 @@ function DealCard({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "workspace-node group shrink-0 cursor-grab p-3.5 active:cursor-grabbing",
+        "workspace-node scan-row group shrink-0 cursor-grab active:cursor-grabbing",
         dragging && "opacity-60",
         moving && "pointer-events-none opacity-70",
       )}
@@ -667,24 +666,19 @@ function DealCard({
         </div>
       </div>
 
-      <p className="board-meta truncate">
-        {deal.stage}
-        {closeLabel ? ` · ${closeLabel}` : ""}
+      <p className="scan-facts text-muted-foreground">
+        <span className="min-w-0 truncate font-medium">
+          {deal.contactName || deal.stage}
+          {closeLabel ? ` · ${closeLabel}` : ""}
+        </span>
       </p>
-      {deal.contactName ? (
-        <p className="board-meta inline-flex min-w-0 max-w-full items-center gap-1.5">
-          <UserRound className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{deal.contactName}</span>
-        </p>
-      ) : null}
-
-      <div className="mt-2.5 space-y-0.5" data-testid={`panel-deal-economics-${deal.dealId}`}>
-        <p className="board-figure" data-testid={`text-deal-paid-${deal.dealId}`} title="Paid / quoted amount">
+      <div className="scan-facts" data-testid={`panel-deal-economics-${deal.dealId}`}>
+        <p data-testid={`text-deal-paid-${deal.dealId}`} title="Paid / quoted amount">
           <span>{formatMoney(deal.amount)}</span>
-          <span className="board-figure-label">Paid</span>
+          <span className="board-figure-label"> paid</span>
         </p>
         <p
-          className={cn("board-figure", deal.costsComplete ? "" : "text-muted-foreground")}
+          className={cn(deal.costsComplete ? "" : "text-muted-foreground")}
           data-testid={`text-deal-production-${deal.dealId}`}
         >
           <span>
@@ -692,11 +686,10 @@ function DealCard({
               ? formatMoney(deal.productionCost ?? 0)
               : "—"}
           </span>
-          <span className="board-figure-label">Production</span>
+          <span className="board-figure-label"> cost</span>
         </p>
         <p
           className={cn(
-            "board-figure",
             !deal.costsComplete && !((deal.productionCost ?? 0) > 0)
               ? "text-muted-foreground"
               : (deal.grossProfit ?? 0) >= 0
@@ -715,29 +708,24 @@ function DealCard({
                 }`
               : "—"}
           </span>
-          <span className="board-figure-label">Revenue</span>
+          <span className="board-figure-label"> revenue</span>
         </p>
+        {deal.needsPlates ? (
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+        ) : deal.needsCosts ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+        ) : isStale ? (
+          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+        ) : partsSummary && partsSummary.total > 0 ? (
+          <span data-testid={`badge-deal-parts-${deal.dealId}`}>
+            <StatusPill
+              tone={partsSummary.remaining === 0 ? "warn" : "neutral"}
+              icon={Package}
+              label={formatPartsBadge(partsSummary)}
+            />
+          </span>
+        ) : null}
       </div>
-
-      {deal.needsPlates || deal.needsCosts || isStale || (partsSummary && partsSummary.total > 0) ? (
-        <div className="mt-2.5">
-          {deal.needsPlates ? (
-            <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-          ) : deal.needsCosts ? (
-            <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
-          ) : isStale ? (
-            <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
-          ) : partsSummary && partsSummary.total > 0 ? (
-            <span data-testid={`badge-deal-parts-${deal.dealId}`}>
-              <StatusPill
-                tone={partsSummary.remaining === 0 ? "warn" : "neutral"}
-                icon={Package}
-                label={formatPartsBadge(partsSummary)}
-              />
-            </span>
-          ) : null}
-        </div>
-      ) : null}
     </article>
   );
 }

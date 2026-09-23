@@ -102,22 +102,19 @@ function AttentionCard({
 
   return (
     <article
-      className="workspace-node w-full p-3.5 text-left"
+      className="workspace-node scan-row w-full text-left"
       data-tone={tone}
       data-testid={`row-glance-${item.dealId}-${item.issueKey}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <Link
-            href={step.href}
-            className="board-name block truncate hover:underline"
-            data-testid={`link-glance-action-${item.dealId}`}
-          >
-            {item.dealName}
-          </Link>
-          <p className="board-meta truncate">{item.stage}</p>
-          <p className="board-meta">{item.detail}</p>
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          href={step.href}
+          className="board-name min-w-0 flex-1 truncate hover:underline"
+          data-testid={`link-glance-action-${item.dealId}`}
+        >
+          {item.dealName}
+        </Link>
+        <StatusPill tone={tone} icon={item.issueKey === "no_plates" ? FileUp : ListOrdered} label={step.label} />
         <CardMenu label={`More actions for ${item.dealName}`}>
           <DropdownMenuItem
             disabled={dismissPending}
@@ -134,9 +131,7 @@ function AttentionCard({
           </DropdownMenuItem>
         </CardMenu>
       </div>
-      <div className="mt-2.5">
-        <StatusPill tone={tone} icon={item.issueKey === "no_plates" ? FileUp : ListOrdered} label={step.label} />
-      </div>
+      <p className="board-meta truncate">{item.detail || item.stage}</p>
     </article>
   );
 }
@@ -161,16 +156,18 @@ function ShopCard({
   return (
     <Link
       href={href}
-      className="workspace-node block w-full p-3.5 text-left"
+      className="workspace-node scan-row block w-full text-left"
       data-tone={tone}
       data-testid={testId}
     >
-      <span className="board-name block truncate">{title}</span>
-      <span className="board-meta block">{detail}</span>
-      <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
-        <Icon className="h-4 w-4" />
-        {label}
+      <span className="flex items-center justify-between gap-2">
+        <span className="board-name min-w-0 truncate">{title}</span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary">
+          <Icon className="h-4 w-4" />
+          {label}
+        </span>
       </span>
+      <span className="board-meta block truncate">{detail}</span>
     </Link>
   );
 }
@@ -204,24 +201,43 @@ function FlightCard({
 
   return (
     <article
-      className="workspace-node w-full p-3.5 text-left"
+      className="workspace-node scan-row w-full text-left"
       data-tone={tone === "good" ? undefined : tone}
       data-testid={`row-todays-active-deal-${deal.dealId}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <Link
-            href={needsPlates ? printsDealHref(deal.dealId) : queueDealHref(deal.dealId)}
-            className="board-name block truncate hover:underline"
-            data-testid={needsPlates ? `link-todays-attach-${deal.dealId}` : `link-todays-ops-${deal.dealId}`}
-          >
-            {deal.dealName}
-          </Link>
-          <p className="board-meta truncate">
-            {deal.stage}
-            {queueItem?.addressSummary ? ` · ${queueItem.addressSummary}` : ""}
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          href={needsPlates ? printsDealHref(deal.dealId) : queueDealHref(deal.dealId)}
+          className="board-name min-w-0 flex-1 truncate hover:underline"
+          data-testid={needsPlates ? `link-todays-attach-${deal.dealId}` : `link-todays-ops-${deal.dealId}`}
+        >
+          {deal.dealName}
+        </Link>
+        {needsPlates ? (
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
+        ) : needsCosts ? (
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
+        ) : isStale ? (
+          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+        ) : addressPill && addressPill.tone !== "good" ? (
+          <StatusPill
+            tone={addressPill.tone}
+            icon={MapPin}
+            label={addressPill.label}
+            testId={`status-address-${deal.dealId}`}
+          />
+        ) : queueItem?.readyToPack || queueItem?.bucket === "ship_ready" ? (
+          <StatusPill tone="good" icon={Ship} label="Ready to ship" />
+        ) : addressPill ? (
+          <StatusPill
+            tone={addressPill.tone}
+            icon={MapPin}
+            label={addressPill.label}
+            testId={`status-address-${deal.dealId}`}
+          />
+        ) : (
+          <StatusPill tone="good" icon={CheckCircle2} label="On track" />
+        )}
         <div onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
           <CardMenu label={`More actions for ${deal.dealName}`}>
             {needsPlates ? (
@@ -251,56 +267,25 @@ function FlightCard({
           </CardMenu>
         </div>
       </div>
-      {queueItem ? (
-        <p
-          className={cn(
-            "board-figure mt-2.5",
-            queueItem.shipBy < shipByCalendarDate() && "text-destructive",
-            queueItem.shipBy === shipByCalendarDate() && "text-chart-4",
-          )}
-        >
-          <span>{formatShipByShort(queueItem.shipBy)}</span>
-          <span className="board-figure-label">
+      <p className="scan-facts text-muted-foreground">
+        <span className="min-w-0 truncate font-medium">{deal.stage}</span>
+        {queueItem ? (
+          <span
+            className={cn(
+              queueItem.shipBy < shipByCalendarDate() && "text-destructive",
+              queueItem.shipBy === shipByCalendarDate() && "text-chart-4",
+            )}
+          >
             {queueItem.shipBy < shipByCalendarDate()
-              ? "Overdue"
+              ? `Overdue ${formatShipByShort(queueItem.shipBy)}`
               : queueItem.shipBy === shipByCalendarDate()
                 ? "Due today"
-                : "Ship by"}
+                : formatShipByShort(queueItem.shipBy)}
             {queueItem.shipBySource === "override" ? " · set" : ""}
           </span>
-        </p>
-      ) : null}
-      <p className="board-figure">
-        <span>{formatMoney(deal.amount)}</span>
-        <span className="board-figure-label">Paid</span>
+        ) : null}
+        <span className="text-foreground">{formatMoney(deal.amount)}</span>
       </p>
-      <div className="mt-2.5">
-        {needsPlates ? (
-          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-        ) : needsCosts ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
-        ) : isStale ? (
-          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
-        ) : addressPill && addressPill.tone !== "good" ? (
-          <StatusPill
-            tone={addressPill.tone}
-            icon={MapPin}
-            label={addressPill.label}
-            testId={`status-address-${deal.dealId}`}
-          />
-        ) : queueItem?.readyToPack || queueItem?.bucket === "ship_ready" ? (
-          <StatusPill tone="good" icon={Ship} label="Ready to ship" />
-        ) : addressPill ? (
-          <StatusPill
-            tone={addressPill.tone}
-            icon={MapPin}
-            label={addressPill.label}
-            testId={`status-address-${deal.dealId}`}
-          />
-        ) : (
-          <StatusPill tone="good" icon={CheckCircle2} label="On track" />
-        )}
-      </div>
       {showAddress &&
       queueItem &&
       queueItem.addressStatus !== "ready" &&
