@@ -14,10 +14,10 @@ const TONE_TEXT: Record<Tone, string> = {
 };
 
 const TONE_PILL: Record<Tone, string> = {
-  neutral: "border-border bg-muted/45 text-muted-foreground",
-  good: "border-accent/40 bg-accent/12 text-accent",
-  warn: "border-chart-4/40 bg-chart-4/12 text-chart-4",
-  bad: "border-destructive/40 bg-destructive/12 text-destructive",
+  neutral: "border-transparent bg-transparent text-muted-foreground",
+  good: "border-transparent bg-accent/10 text-accent",
+  warn: "border-transparent bg-chart-4/10 text-chart-4",
+  bad: "border-transparent bg-destructive/10 text-destructive",
 };
 
 export function StatusPill({
