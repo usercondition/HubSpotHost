@@ -6,7 +6,6 @@ import {
   FileUp,
   Loader2,
   MessageCircle,
-  Package,
   PackageCheck,
   RefreshCw,
   Ship,
@@ -115,10 +114,6 @@ function QueueCard({
           <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
         ) : item.bucket === "blocked" ? (
           <StatusPill tone="warn" icon={AlertTriangle} label="Blocked" />
-        ) : item.readyToPack || item.bucket === "ship_ready" ? (
-          <StatusPill tone="good" icon={PackageCheck} label="Ready to ship" />
-        ) : !item.requiresPlates ? (
-          <StatusPill tone="neutral" icon={Package} label="No plates" />
         ) : null}
       </div>
       <p className="scan-facts text-muted-foreground">
@@ -166,11 +161,10 @@ function QueueColumn({
     <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight" title={subtitle}>
             {title}{" "}
             <span className="numeric font-medium text-muted-foreground">{items.length}</span>
           </h2>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </div>
       <div className="queue-lane-body">
@@ -252,7 +246,7 @@ export default function ProductionQueuePage() {
     <div className="mx-auto flex max-w-[100rem] flex-col">
       <PageHeader
         title="Queue"
-        subtitle="Primary production board — next print → ship. Select a card; ops slides in from the right."
+        subtitle=""
         actions={
           isUnlocked ? (
             <Button
@@ -329,13 +323,13 @@ export default function ProductionQueuePage() {
               ) : null}
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              {selectedDealId
-                ? selectedExists
+            {selectedDealId ? (
+              <p className="text-sm text-muted-foreground">
+                {selectedExists
                   ? "Ops open on the right — click outside or press Esc to close."
-                  : "That deal isn’t on the board anymore — pick another card or close ops."
-                : "Select an order for costs, stage, printers, ship checklist, or packing slip."}
-            </p>
+                  : "That deal isn’t on the board anymore — pick another card or close ops."}
+              </p>
+            ) : null}
 
             <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">
               <QueueColumn

@@ -235,9 +235,7 @@ function FlightCard({
             label={addressPill.label}
             testId={`status-address-${deal.dealId}`}
           />
-        ) : (
-          <StatusPill tone="good" icon={CheckCircle2} label="On track" />
-        )}
+        ) : null}
         <div onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
           <CardMenu label={`More actions for ${deal.dealName}`}>
             {needsPlates ? (
@@ -325,11 +323,10 @@ function FloorColumn({
     <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
       <div className="queue-lane-header">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight" title={subtitle}>
             {title}{" "}
             <span className="numeric font-medium text-muted-foreground">{count}</span>
           </h2>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </div>
       <div className="queue-lane-body">
@@ -382,9 +379,6 @@ function ShipCalendar({ items, loading }: { items: ProductionQueueItem[]; loadin
             Ship calendar{" "}
             <span className="numeric text-muted-foreground">({items.length})</span>
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Los Angeles dates · keep overdue and due-today honest
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {pressure > 0 ? (
@@ -845,7 +839,7 @@ export default function Dashboard() {
     <div className="mx-auto flex max-w-[100rem] flex-col" data-testid="page-floor">
       <PageHeader
         title="Floor"
-        subtitle="Attention board — same lane look as Queue. Act here, produce on Queue."
+        subtitle=""
         actions={
           <>
             <SystemStatusPill health={health.data} />

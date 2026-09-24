@@ -364,7 +364,7 @@ export default function OrderLinks() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Paid order intake"
-        subtitle="Create a buyer link, review details, cancel if they bail, then approve into HubSpot. Manual entry is next to Intake in the rail."
+        subtitle=""
         actions={
           <>
             <StatusPill
@@ -783,13 +783,13 @@ export default function OrderLinks() {
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2">
+                <ul className="divide-y divide-border">
                   {queue.data?.links.map((link) => {
                     const Icon = STATUS_ICON[link.status];
                     return (
                       <li
                         key={link.id}
-                        className="intake-row scan-row rounded-md border border-border bg-background/40"
+                        className="intake-row scan-row"
                         data-tone={
                           link.status === "pending_review"
                             ? "warn"
