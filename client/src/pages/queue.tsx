@@ -2,13 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Clock3,
   FileUp,
   Loader2,
   MessageCircle,
   PackageCheck,
   RefreshCw,
-  Ship,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +16,7 @@ import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
-import { Panel, StatCard, StatusPill } from "@/components/primitives";
+import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
@@ -290,13 +288,6 @@ export default function ProductionQueuePage() {
           </Panel>
         ) : (
           <>
-            <div className="metric-strip">
-              <StatCard label="Open orders" value={String(data.summary.openOrders)} hint="Active HubSpot deals" icon={PackageCheck} />
-              <StatCard label="Next print" value={String(data.summary.nextPrint)} hint="Needs plates" icon={FileUp} />
-              <StatCard label="In production" value={String(data.summary.inProduction)} hint="Plates attached" icon={Clock3} />
-              <StatCard label="Blocked" value={String(data.summary.blocked)} hint="Parts / unassigned" icon={AlertTriangle} tone="warn" />
-              <StatCard label="Ship-ready" value={String(data.summary.shipReady)} hint="Checklist progressing" icon={Ship} tone="good" />
-            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
