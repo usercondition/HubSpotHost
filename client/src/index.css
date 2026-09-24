@@ -54,6 +54,7 @@
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --lane-surface: 0 0% 100%;
   --radius: 0.55rem;
   --shadow-2xs: 0 0 0 0 transparent;
   --shadow-xs: 0 1px 2px hsl(215 30% 12% / 0.05);
@@ -145,6 +146,7 @@
   --chart-4: 38 92% 52%;
   --chart-5: 356 28% 66%;
 
+  --lane-surface: 0 0% 9%;
   --radius: 0.5rem;
 
   --shadow-2xs: 0 0 0 0 transparent;
@@ -525,7 +527,7 @@
   .queue-lane[data-lane='shop'] { --lane: hsl(262 70% 70%); }
 
   .queue-lane[data-lane] {
-    border-top: 2px solid var(--lane);
+    border-top: 4px solid var(--lane);
   }
 
   .queue-lane-body > .workspace-node,
@@ -649,8 +651,8 @@
     flex-direction: column;
     min-height: 12rem;
     border-radius: calc(var(--radius) + 4px);
-    border: 1px solid hsl(var(--card-border));
-    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--lane-surface));
     overflow: hidden;
     transition:
       border-color var(--motion-fast) var(--ease-out-soft),
