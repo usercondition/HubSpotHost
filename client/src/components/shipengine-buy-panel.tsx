@@ -159,11 +159,26 @@ type ShipEngineFundedCarrier = {
   balance: number;
 };
 
+/** Pull a readable message out of `400: {"ok":false,"error":"..."}` API failures. */
+function formatShipEngineClientError(raw: string): string {
+  const withoutStatus = raw.replace(/^\d+:\s*/, "").trim();
+  try {
+    const parsed = JSON.parse(withoutStatus) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.trim()) {
+      return parsed.error.trim().slice(0, 240);
+    }
+  } catch {
+    // not JSON
+  }
+  return withoutStatus.slice(0, 240);
+}
+
 type ShipEngineStatus = {
   ok: true;
   configured: boolean;
   hasApiKey: boolean;
   hasShipFrom: boolean;
+  hasShipFromPhone?: boolean;
   testMode: boolean | null;
   shipFrom: {
     name: string;
@@ -173,6 +188,7 @@ type ShipEngineStatus = {
     state: string;
     zip: string;
     country: string;
+    hasPhone?: boolean;
   } | null;
   carriers?: Array<{
     carrierId: string;
@@ -499,7 +515,7 @@ export function ShipEngineBuyPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not get rates",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: formatShipEngineClientError(error.message),
         variant: "destructive",
       });
     },
@@ -575,7 +591,7 @@ export function ShipEngineBuyPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not buy label",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: formatShipEngineClientError(error.message),
         variant: "destructive",
       });
     },
@@ -1108,6 +1124,12 @@ export function ShipEngineBuyPanel({
                 Set ship-from: <code className="text-xs">SHIP_FROM_NAME</code>,{" "}
                 <code className="text-xs">STREET1</code>, <code className="text-xs">CITY</code>,{" "}
                 <code className="text-xs">STATE</code>, <code className="text-xs">ZIP</code>.
+              </li>
+            ) : null}
+            {status?.hasShipFrom && !status?.hasShipFromPhone ? (
+              <li>
+                Set <code className="text-xs">SHIP_FROM_PHONE</code> to your shop phone (required by
+                ShipEngine; client phones are not used).
               </li>
             ) : null}
           </ul>
