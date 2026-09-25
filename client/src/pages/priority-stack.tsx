@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { stackDrawerDealId } from "@/lib/deal-link";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { readHashQueryParam } from "@/lib/workflow";
+import { readHashQueryParam, stripDealIdFromLocation } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
@@ -39,7 +40,18 @@ export default function PriorityStackPage() {
     successDescription: "This week's cash, in the order it leaves the shop.",
   });
   const desktopDrag = useDesktopDrag();
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
+  // Capture before effects run. A tab click only changes the hash, so a stale
+  // `/?dealId=` must be remembered once and then removed from search and hash.
+  const pendingDealId = useRef<string | null | undefined>(undefined);
+  if (pendingDealId.current === undefined) {
+    pendingDealId.current = readHashQueryParam("dealId");
+  }
+  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+
+  useEffect(() => {
+    stripDealIdFromLocation();
+  }, []);
+
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -54,6 +66,14 @@ export default function PriorityStackPage() {
       return (await response.json()) as StackView;
     },
   });
+
+  useEffect(() => {
+    const id = pendingDealId.current;
+    if (!id || !stack.data) return;
+    pendingDealId.current = null;
+    const openId = stackDrawerDealId(id, { rows: stack.data.rows, outTheDoor: stack.data.outTheDoor });
+    if (openId) setSelectedDealId(openId);
+  }, [stack.data]);
 
   async function persistOrder(keys: string[]) {
     const previous = stack.data;

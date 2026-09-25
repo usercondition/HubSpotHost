@@ -16,6 +16,49 @@ export function readHashQueryParam(name: string): string | null {
   return fromSearch != null && fromSearch !== "" ? fromSearch : null;
 }
 
+/** Drop one param from `location.search`, keeping the leading `?` when anything remains. */
+export function searchWithoutParam(search: string, name: string): string {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if (!params.has(name)) {
+    if (!search) return "";
+    return search.startsWith("?") ? search : `?${search}`;
+  }
+  params.delete(name);
+  const next = params.toString();
+  return next ? `?${next}` : "";
+}
+
+/** Drop one param from a hash query (`#/stack?dealId=1` → `#/stack`). */
+export function hashWithoutParam(hash: string, name: string): string {
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex < 0) return hash;
+  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  if (!params.has(name)) return hash;
+  params.delete(name);
+  const rest = params.toString();
+  const path = hash.slice(0, queryIndex);
+  return rest ? `${path}?${rest}` : path;
+}
+
+/**
+ * Remove `dealId` from the pre-hash search and the hash query.
+ * Tab clicks only rewrite the hash, so a leftover `/?dealId=` would reopen forever.
+ */
+export function stripDealIdFromLocation(): void {
+  if (typeof window === "undefined") return;
+  const search = searchWithoutParam(window.location.search, "dealId");
+  const hash = hashWithoutParam(window.location.hash, "dealId");
+  if (search === window.location.search && hash === window.location.hash) return;
+  window.history.replaceState(null, "", `${window.location.pathname}${search}${hash}`);
+}
+
+/** Read a deal deep link once, then drop it from the search and the hash. */
+export function takeDealIdFromLocation(): string | null {
+  const id = readHashQueryParam("dealId");
+  stripDealIdFromLocation();
+  return id;
+}
+
 export function printsDealHref(dealId: string): string {
   return `/prints?dealId=${encodeURIComponent(dealId)}`;
 }

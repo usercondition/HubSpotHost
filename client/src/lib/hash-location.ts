@@ -6,6 +6,7 @@
  * and `?dealId=` deep links then look dead (hash never changes / param missing).
  */
 import { useSyncExternalStore } from "react";
+import { searchWithoutParam } from "@/lib/workflow";
 
 type NavigateOpts = { replace?: boolean; state?: unknown };
 
@@ -44,12 +45,15 @@ export function currentHashPath(): string {
 export function navigateHash(to: string, opts: NavigateOpts = {}) {
   const path = to.startsWith("/") ? to : `/${to}`;
   const nextHash = `#${path}`;
+  // Tab hrefs are bare paths. A stale `/?dealId=` before the hash must not survive the click.
+  const search = searchWithoutParam(window.location.search, "dealId");
+  const searchChanged = search !== window.location.search;
 
-  if (opts.replace) {
+  if (opts.replace || searchChanged) {
     window.history.replaceState(
       opts.state ?? null,
       "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
+      `${window.location.pathname}${search}${nextHash}`,
     );
     // replaceState may not emit hashchange; keep subscribers in sync.
     notify();

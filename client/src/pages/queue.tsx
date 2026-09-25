@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { parkedQueueHref, readHashQueryParam, stackHref } from "@/lib/workflow";
+import { parkedQueueHref, readHashQueryParam, searchWithoutParam, stackHref, stripDealIdFromLocation } from "@/lib/workflow";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -26,15 +26,14 @@ type QueueResponse = ProductionQueueResponse & { ok: true };
 /** Keep `#/queue` vs `#/queue?dealId=` in sync without remounting the page. */
 function replaceQueueHash(dealId: string | null) {
   if (typeof window === "undefined") return;
+  const search = searchWithoutParam(window.location.search, "dealId");
   const nextHash = dealId
     ? `#/queue?dealId=${encodeURIComponent(dealId)}`
     : "#/queue";
-  if (window.location.hash === nextHash) return;
-  window.history.replaceState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${nextHash}`,
-  );
+  const next = `${window.location.pathname}${search}${nextHash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (current === next) return;
+  window.history.replaceState(null, "", next);
 }
 
 function queueBoardDealIds(data: ProductionQueueResponse): Set<string> {
@@ -191,7 +190,12 @@ export default function ProductionQueuePage() {
     successTitle: "Production queue unlocked",
     successDescription: "Next print and in-production jobs. Ready and blocked orders are on the Stack.",
   });
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
+  // Same as Stack: remember a deal link before stripping it from search and hash.
+  const pendingDealId = useRef<string | null | undefined>(undefined);
+  if (pendingDealId.current === undefined) {
+    pendingDealId.current = readHashQueryParam("dealId");
+  }
+  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [focus, setFocus] = useState<"needsReply" | null>(null);
 
   const selectDeal = useCallback((dealId: string | null) => {
@@ -199,10 +203,14 @@ export default function ProductionQueuePage() {
     replaceQueueHash(dealId);
   }, []);
 
+  useEffect(() => {
+    stripDealIdFromLocation();
+  }, []);
+
   // Left-nav → Queue clears `?dealId=` in the hash; keep drawer state in sync without remounting.
   useEffect(() => {
     const syncFromHash = () => {
-      setSelectedDealId(readHashQueryParam("dealId"));
+      if (!readHashQueryParam("dealId")) setSelectedDealId(null);
     };
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
@@ -240,17 +248,26 @@ export default function ProductionQueuePage() {
     window.location.hash = `#${parked}`;
   }, [data, selectedDealId]);
 
-  // Stale deep-links (Completed / left the board) still had ?dealId= and reopened ops.
-  // Only clear once when queue data first arrives — don't yank a deal the user just opened.
-  const clearedStaleHash = useRef(false);
+  // A deal link opens the drawer only when that deal is still on a printer lane.
+  // Closed and parked deals never stay in the URL, so the next tab click cannot reopen them.
   useEffect(() => {
-    if (!data || clearedStaleHash.current) return;
-    clearedStaleHash.current = true;
-    const fromHash = readHashQueryParam("dealId");
-    if (!fromHash) return;
-    if (queueBoardDealIds(data).has(fromHash)) return;
-    selectDeal(null);
-  }, [data, selectDeal]);
+    if (!data) return;
+    const id = pendingDealId.current;
+    if (!id) return;
+    pendingDealId.current = null;
+    const lanes = {
+      nextPrint: data.nextPrint.map((item) => item.dealId),
+      inProduction: data.inProduction.map((item) => item.dealId),
+      shipReady: data.shipReady.map((item) => item.dealId),
+      blocked: data.blocked.map((item) => item.dealId),
+    };
+    const parked = parkedQueueHref(id, lanes);
+    if (parked) {
+      window.location.hash = `#${parked}`;
+      return;
+    }
+    if (queueBoardDealIds(data).has(id)) setSelectedDealId(id);
+  }, [data]);
 
   return (
     <div className="mx-auto flex max-w-[100rem] flex-col">
