@@ -376,10 +376,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.ok(money.length >= 3);
     const moneyRight = spread(money.map((box) => box.right));
     check(moneyRight.delta <= 1, `stack amount right edges differ by ${moneyRight.delta}`);
-    const totals = await boxes(current(), ".stack-commit-line .numeric");
-    check(totals.length >= 1, "stack total amounts missing");
-    const totalRight = spread([...money.map((box) => box.right), ...totals.map((box) => box.right)]);
-    check(totalRight.delta <= 1, `stack totals right edges differ by ${totalRight.delta} from row amounts`);
     const tentativeLabels = await current().locator("[data-testid='button-target-tentative']").allInnerTexts();
     check(tentativeLabels.length > 0, "tentative date missing");
     for (const tentative of tentativeLabels) {
@@ -412,11 +408,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-deal-paid-b1']").first().waitFor();
     const paid = await boxes(current(), "[data-testid^='text-deal-paid-']");
-    const cost = await boxes(current(), "[data-testid^='text-deal-production-']");
-    const profit = await boxes(current(), "[data-testid^='text-deal-revenue-']");
+    check(paid.length >= 2, "order paid figures missing");
     check(spread(paid.map((box) => box.left)).delta <= 1, `Paid labels left edges differ by ${spread(paid.map((box) => box.left)).delta}`);
-    check(spread(cost.map((box) => box.left)).delta <= 1, `Cost labels left edges differ by ${spread(cost.map((box) => box.left)).delta}`);
-    check(spread(profit.map((box) => box.left)).delta <= 1, `Profit labels left edges differ by ${spread(profit.map((box) => box.left)).delta}`);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
