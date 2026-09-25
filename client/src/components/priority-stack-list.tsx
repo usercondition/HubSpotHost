@@ -297,7 +297,46 @@ function DateEditor({
     },
   });
 
-  if (row.kind === "bundle") return <span className="text-sm">{targetLabel(row, today)}</span>;
+  if (row.kind === "bundle") {
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button type="button" className="text-left text-sm" data-testid={`button-target-${row.key}`}>
+            {targetLabel(row, today)}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-3">
+          <label className="text-xs text-muted-foreground" htmlFor={`target-${row.key}`}>
+            Pickup date for every piece
+          </label>
+          <input
+            id={`target-${row.key}`}
+            type="date"
+            defaultValue={row.targetDate}
+            className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            data-testid={`input-target-${row.key}`}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              void (async () => {
+                for (const member of row.members) {
+                  if (!member.dealId) continue;
+                  await apiRequest(
+                    "PATCH",
+                    `/api/deal-ops/${encodeURIComponent(member.dealId)}/ship-by`,
+                    { shipBy: event.target.value, liveWrite: true },
+                    { headers },
+                  );
+                }
+                setOpen(false);
+                void queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+                onSaved();
+              })();
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -335,6 +374,12 @@ export function StackRow({
   headers,
   desktopDrag,
   dragging,
+  selected,
+  expanded,
+  onToggleSelect,
+  onToggleExpand,
+  onUngroup,
+  onDone,
   onOpen,
   onMove,
   onDragStart,
@@ -347,6 +392,12 @@ export function StackRow({
   headers: Record<string, string>;
   desktopDrag: boolean;
   dragging: boolean;
+  selected: boolean;
+  expanded: boolean;
+  onToggleSelect: () => void;
+  onToggleExpand: () => void;
+  onUngroup: () => void;
+  onDone: () => void;
   onOpen: () => void;
   onMove: (direction: -1 | 1 | "top") => void;
   onDragStart: () => void;
@@ -378,11 +429,17 @@ export function StackRow({
         onDropOn();
       }}
     >
-      <span className="stack-rank">{row.rank}</span>
-      <button type="button" className="stack-name min-w-0 truncate text-left text-sm font-medium" onClick={onOpen} data-testid={`button-open-${row.key}`}>
+      <span className="stack-rank flex items-center gap-1">
+        {row.kind === "deal" ? (
+          <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select ${row.name}`} data-testid={`check-select-${row.key}`} />
+        ) : null}
+        {row.rank}
+      </span>
+      <button type="button" className="stack-name min-w-0 truncate text-left text-sm font-medium" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
         {who}
         {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
         {row.kind === "offbook" ? <span className="ml-1 text-xs text-muted-foreground">off-book</span> : null}
+        {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
       </button>
       <div className="stack-facts min-w-0 md:contents">
         <div className="stack-desktop-only min-w-0">
@@ -414,10 +471,25 @@ export function StackRow({
         <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move down" onClick={() => onMove(1)} data-testid={`button-down-${row.key}`}>
           <ArrowDown className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move to top" onClick={() => onMove("top")} data-testid={`button-top-${row.key}`}>
+          <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move to top" onClick={() => onMove("top")} data-testid={`button-top-${row.key}`}>
           <ChevronUp className="h-3.5 w-3.5" />
         </Button>
+        {row.kind === "bundle" ? (
+          <Button type="button" size="sm" variant="ghost" onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</Button>
+        ) : null}
+        {row.kind === "offbook" || !row.shippingRequired ? (
+          <Button type="button" size="sm" variant="ghost" onClick={onDone} data-testid={`button-done-${row.key}`}>
+            {row.shippingRequired ? "Done" : "Picked up"}
+          </Button>
+        ) : null}
       </div>
+      {expanded && row.members.length > 0 ? (
+        <ul className="col-span-full space-y-1 pl-8 text-sm text-muted-foreground" data-testid={`bundle-members-${row.key}`}>
+          {row.members.map((member) => (
+            <li key={member.key}>{member.name}{member.contactName ? ` · ${member.contactName}` : ""} · {member.blocker || member.stage}</li>
+          ))}
+        </ul>
+      ) : null}
     </article>
   );
 }

@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionNextStep, floorFocusMeta, hubspotDealHref, queueDealHref } from "@/lib/workflow";
+import { attentionNextStep, floorFocusMeta, hubspotDealHref, queueDealHref, stackHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { CardMenu, Panel, StatusPill } from "@/components/primitives";
@@ -36,6 +36,7 @@ import {
   shipByCalendarDate,
   shipByHonestyLabel,
 } from "@shared/ship-by";
+import { stackFloorLine } from "@shared/priority-stack";
 import { addressStatusPill } from "@shared/ship-address";
 import type {
   HealthResponse,
@@ -302,6 +303,35 @@ function FloorNeeds({
         )}
       </div>
     </section>
+  );
+}
+
+function StackSummaryStrip({
+  ownerCode,
+  headers,
+  enabled,
+}: {
+  ownerCode: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+}) {
+  const stack = useQuery<{ rows: Parameters<typeof stackFloorLine>[0]["rows"]; totals: { committed: number } }>({
+    queryKey: ["/api/priority-stack", ownerCode],
+    enabled,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/priority-stack", undefined, { headers });
+      return response.json();
+    },
+  });
+  if (!enabled || !stack.data) return null;
+  return (
+    <Link
+      href={stackHref()}
+      className="block truncate rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+      data-testid="link-floor-stack"
+    >
+      {stackFloorLine(stack.data)}
+    </Link>
   );
 }
 
@@ -602,6 +632,7 @@ function TodaysWork() {
         {performance.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
       </div>
 
+      <StackSummaryStrip ownerCode={ownerCode} headers={headers} enabled={isUnlocked} />
       <ShipCalendar items={queueItems} loading={productionQueue.isLoading || productionQueue.isFetching} />
 
       <FloorNeeds

@@ -16,6 +16,8 @@ import {
   rowsWithDividers,
   type StackView,
 } from "@/components/priority-stack-list";
+import { OffbookEntryDialog } from "@/components/offbook-entry-dialog";
+import { StackBundleDialog } from "@/components/stack-bundle-dialog";
 
 function useDesktopDrag(): boolean {
   const [desktop, setDesktop] = useState(false);
@@ -38,6 +40,10 @@ export default function PriorityStackPage() {
   const desktopDrag = useDesktopDrag();
   const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [offbookOpen, setOffbookOpen] = useState(false);
+  const [bundleOpen, setBundleOpen] = useState(false);
 
   const stack = useQuery<StackView>({
     queryKey: ["/api/priority-stack", ownerCode],
@@ -114,6 +120,18 @@ export default function PriorityStackPage() {
               >
                 Reset to auto
               </Button>
+              <Button size="sm" variant="outline" onClick={() => setOffbookOpen(true)} data-testid="button-add-offbook">
+                + Off-book
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={selected.length < 2}
+                onClick={() => setBundleOpen(true)}
+                data-testid="button-bundle-selected"
+              >
+                Bundle…
+              </Button>
               <Button size="sm" variant="outline" onClick={() => stack.refetch()} disabled={stack.isFetching} data-testid="button-refresh-stack">
                 {stack.isFetching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Refresh
@@ -158,6 +176,21 @@ export default function PriorityStackPage() {
                     headers={headers}
                     desktopDrag={desktopDrag}
                     dragging={draggingKey === line.row.key}
+                    selected={line.row.dealId != null && selected.includes(line.row.dealId)}
+                    expanded={expanded === line.row.key}
+                    onToggleSelect={() => {
+                      const id = line.row.dealId;
+                      if (!id) return;
+                      setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+                    }}
+                    onToggleExpand={() => setExpanded((current) => (current === line.row.key ? null : line.row.key))}
+                    onUngroup={() => {
+                      if (!line.row.bundleId) return;
+                      void apiRequest("DELETE", `/api/priority-stack/bundles/${line.row.bundleId}`, undefined, { headers }).then(() => stack.refetch());
+                    }}
+                    onDone={() => {
+                      void apiRequest("POST", "/api/priority-stack/done", { key: line.row.key }, { headers }).then(() => stack.refetch());
+                    }}
                     onOpen={() => setSelectedDealId(line.row.dealId)}
                     onMove={(direction) => move(line.row.key, direction)}
                     onDragStart={() => setDraggingKey(line.row.key)}
@@ -172,6 +205,20 @@ export default function PriorityStackPage() {
               ) : null}
             </div>
             <DealOpsDrawer dealId={selectedDealId} headers={headers} onClose={() => setSelectedDealId(null)} />
+            {offbookOpen ? (
+              <OffbookEntryDialog headers={headers} onClose={() => setOffbookOpen(false)} onSaved={() => void stack.refetch()} />
+            ) : null}
+            {bundleOpen ? (
+              <StackBundleDialog
+                dealIds={selected}
+                headers={headers}
+                onClose={() => setBundleOpen(false)}
+                onSaved={() => {
+                  setSelected([]);
+                  void stack.refetch();
+                }}
+              />
+            ) : null}
           </>
         )}
       </div>
