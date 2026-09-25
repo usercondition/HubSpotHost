@@ -442,14 +442,16 @@ export function PageHeader({
   title,
   subtitle,
   actions,
+  hideActionsOnPhone = false,
 }: {
   title: string;
   subtitle: string;
   actions?: ReactNode;
   eyebrow?: string;
+  hideActionsOnPhone?: boolean;
 }) {
   return (
-    <header className={cn("ops-page-header px-4 pb-2 pt-4 md:px-8 md:pt-8", !actions && "max-md:hidden")}>
+    <header className={cn("ops-page-header px-4 pb-2 pt-4 md:px-8 md:pt-8", (hideActionsOnPhone || !actions) && "max-md:hidden")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-md:hidden">
           <h1 className="ops-page-title" data-testid="text-page-title">
@@ -457,7 +459,9 @@ export function PageHeader({
           </h1>
           {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">{subtitle}</p> : null}
         </div>
-        {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
+        {actions ? (
+          <div className={cn("flex flex-wrap items-center gap-1.5", hideActionsOnPhone && "max-md:hidden")}>{actions}</div>
+        ) : null}
       </div>
     </header>
   );

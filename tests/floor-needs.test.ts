@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildFloorNeeds, fepDuePrinters } from "../client/src/lib/floor-needs";
+import { floorGreeting, pacificDayLabel, stagePresentation } from "../client/src/lib/stage-chip";
 import { formatPacificClock, formatPacificSnapshot, syncPillCopy } from "../client/src/lib/sync-status";
 
 const queueItem = {
@@ -62,6 +63,17 @@ describe("shared needs-you count", () => {
       fepDue: [],
     });
     assert.equal(needs.length, 0);
+  });
+});
+
+describe("floor labels", () => {
+  it("greets in Pacific time and shortens stage chips", () => {
+    assert.equal(floorGreeting(new Date("2026-09-25T19:47:00.000Z")), "Good afternoon");
+    assert.equal(pacificDayLabel(new Date("2026-09-25T19:47:00.000Z")), "Fri Sep 25");
+    assert.equal(stagePresentation("Post-Process / QC").short, "Post / QC");
+    assert.equal(stagePresentation("Ready to Ship").short, "Ready");
+    assert.equal(stagePresentation("Local pickup").short, "Pickup");
+    assert.equal(stagePresentation("Queued to Print").tone, "teal");
   });
 });
 
