@@ -155,18 +155,20 @@ function InlineBlocker({
     },
   });
 
+  const blockerLabel = row.blockerSource === "auto" && row.blocker ? `(auto) ${row.blocker}` : row.blocker || "Add blocker";
   if (!editing) {
     return (
       <button
         type="button"
-        className={cn("min-w-0 truncate text-left text-sm", row.blockerSource === "auto" && "text-muted-foreground")}
+        title={blockerLabel}
+        className={cn("stack-clip text-left text-sm", row.blockerSource === "auto" && "text-muted-foreground")}
         onClick={() => {
           setDraft(row.blockerSource === "manual" ? row.blocker : "");
           setEditing(true);
         }}
         data-testid={`button-blocker-${row.key}`}
       >
-        {row.blockerSource === "auto" && row.blocker ? `(auto) ${row.blocker}` : row.blocker || "Add blocker"}
+        {blockerLabel}
       </button>
     );
   }
@@ -229,14 +231,17 @@ function ChecklistPopover({
           patch: { [step.key]: row.fulfillment?.[step.key] !== true },
         }));
 
-  if (steps.length === 0 || row.kind === "bundle") return <span className="text-sm">{progressLabel(row)}</span>;
+  const progress = progressLabel(row);
+  if (steps.length === 0 || row.kind === "bundle") {
+    return <span className="stack-clip text-sm" title={progress}>{progress}</span>;
+  }
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className="inline-flex items-center gap-1 text-left text-sm" data-testid={`button-checklist-${row.key}`}>
-          <ListChecks className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{progressLabel(row)}</span>
+        <button type="button" title={progress} className="stack-clip text-left text-sm" data-testid={`button-checklist-${row.key}`}>
+          <ListChecks className="mr-1 inline h-3.5 w-3.5 shrink-0 align-text-bottom" />
+          {progress}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-2">
@@ -301,7 +306,7 @@ function DateEditor({
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button type="button" className="text-left text-sm" data-testid={`button-target-${row.key}`}>
+          <button type="button" title={targetLabel(row, today)} className="stack-clip text-left text-sm" data-testid={`button-target-${row.key}`}>
             {targetLabel(row, today)}
           </button>
         </PopoverTrigger>
@@ -343,7 +348,8 @@ function DateEditor({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={cn("text-left text-sm", row.targetDate < today && "text-destructive", row.targetDate === today && "text-chart-4")}
+          title={targetLabel(row, today)}
+          className={cn("stack-clip text-left text-sm", row.targetDate < today && "text-destructive", row.targetDate === today && "text-chart-4")}
           data-testid={`button-target-${row.key}`}
         >
           {targetLabel(row, today)}
@@ -407,6 +413,7 @@ export function StackRow({
 }) {
   const who = row.contactName ? `${row.name} · ${row.contactName}` : row.name;
   return (
+    <>
     <article
       className={cn("stack-row workspace-node", dragging && "opacity-60")}
       data-lane={row.lane}
@@ -429,27 +436,29 @@ export function StackRow({
         onDropOn();
       }}
     >
-      <span className="stack-rank flex items-center gap-1">
+      <span className="stack-check">
         {row.kind === "deal" ? (
           <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select ${row.name}`} data-testid={`check-select-${row.key}`} />
-        ) : null}
-        {row.rank}
+        ) : (
+          <span className="inline-block h-4 w-4" aria-hidden="true" />
+        )}
       </span>
-      <button type="button" className="stack-name min-w-0 truncate text-left text-sm font-medium" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
+      <span className="stack-rank">{row.rank}</span>
+      <button type="button" title={who} className="stack-name stack-clip text-left text-sm font-medium" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
         {who}
         {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
         {row.kind === "offbook" ? <span className="ml-1 text-xs text-muted-foreground">off-book</span> : null}
         {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
       </button>
       <div className="stack-facts min-w-0 md:contents">
-        <div className="stack-desktop-only min-w-0">
+        <div className="stack-stage stack-desktop-only min-w-0">
           <ChecklistPopover row={row} headers={headers} onSaved={onSaved} />
         </div>
-        <div className="min-w-0">
+        <div className="stack-blocker min-w-0">
           <InlineBlocker row={row} headers={headers} onSaved={onSaved} />
-          {row.nextStep ? <p className="truncate text-xs text-muted-foreground">{row.nextStep}</p> : null}
+          {row.nextStep ? <p className="stack-clip text-xs text-muted-foreground" title={row.nextStep}>{row.nextStep}</p> : null}
         </div>
-        <div className="stack-desktop-only">
+        <div className="stack-date stack-desktop-only min-w-0">
           <DateEditor row={row} headers={headers} onSaved={onSaved} today={today} />
         </div>
         <div className="stack-mobile-actions items-center gap-2">
@@ -463,8 +472,8 @@ export function StackRow({
           </Button>
         </div>
       </div>
-      <span className="stack-money text-sm font-medium">{money(row.amount)}</span>
-      <div className="stack-desktop-only flex items-center gap-0.5">
+      <span className="stack-money stack-clip text-sm font-medium">{money(row.amount)}</span>
+      <div className="stack-actions stack-desktop-only flex flex-wrap items-center justify-end gap-0.5">
         <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move up" onClick={() => onMove(-1)} data-testid={`button-up-${row.key}`}>
           <ArrowUp className="h-3.5 w-3.5" />
         </Button>
@@ -483,14 +492,28 @@ export function StackRow({
           </Button>
         ) : null}
       </div>
-      {expanded && row.members.length > 0 ? (
-        <ul className="col-span-full space-y-1 pl-8 text-sm text-muted-foreground" data-testid={`bundle-members-${row.key}`}>
-          {row.members.map((member) => (
-            <li key={member.key}>{member.name}{member.contactName ? ` · ${member.contactName}` : ""} · {member.blocker || member.stage}</li>
-          ))}
-        </ul>
-      ) : null}
     </article>
+    {expanded && row.members.length > 0 ? (
+      <div data-testid={`bundle-members-${row.key}`}>
+        {row.members.map((member) => (
+          <article key={member.key} className="stack-row stack-member" data-lane={member.lane}>
+            <span className="stack-check"><span className="inline-block h-4 w-4" aria-hidden="true" /></span>
+            <span className="stack-rank" />
+            <span className="stack-name stack-clip text-sm" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
+              {member.name}{member.contactName ? ` · ${member.contactName}` : ""}
+            </span>
+            <div className="stack-facts md:contents">
+              <span className="stack-stage stack-clip text-sm" title={member.stage}>{member.stage}</span>
+              <span className="stack-blocker stack-clip text-sm text-muted-foreground" title={member.blocker || member.stage}>{member.blocker || member.stage}</span>
+              <span className="stack-date stack-clip text-sm" title={member.targetDate}>{member.targetDate}</span>
+            </div>
+            <span className="stack-money stack-clip text-sm">{money(member.amount)}</span>
+            <span className="stack-actions" />
+          </article>
+        ))}
+      </div>
+    ) : null}
+    </>
   );
 }
 
