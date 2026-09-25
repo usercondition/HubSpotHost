@@ -155,10 +155,10 @@ export function FloorBoard({
                 return (
                   <Link key={row.key} href="/stack" className="floor-next" data-testid={`row-floor-next-${row.rank}`}>
                     <span className="numeric text-[13px] text-[hsl(var(--text-3))]">{row.rank}</span>
-                    <span className="min-w-0 truncate text-[14px] font-semibold">
+                    <span className="floor-next-name min-w-0 text-[14px] font-semibold">
                       {title}
                       {contact && title.toLowerCase() !== contact.toLowerCase() ? (
-                        <span className="font-normal text-[hsl(var(--text-2))]"> · {contact}</span>
+                        <span className="floor-next-client font-normal text-[hsl(var(--text-2))]"> · {contact}</span>
                       ) : null}
                     </span>
                     <span className={cn("stage-chip", `stage-${stage.tone}`)} title={stage.label}>

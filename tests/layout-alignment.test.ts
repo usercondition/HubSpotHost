@@ -268,7 +268,8 @@ function bodyFor(pathname: string) {
       key: "tentative",
       rank: 2,
       dealId: "c2",
-      name: "Tentative order",
+      name: "Ikarus BA LR KIT - Daniel Ortega",
+      contactName: "Daniel Ortega",
       amount: 1200,
       tier: "committed",
       stage: "Printing",
@@ -527,6 +528,63 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(row.dateRight <= row.amountLeft + 0.5, "up-next date runs into the amount column");
       check(row.chipClip <= 0.5, "up-next chip is clipped");
       check(row.dateClip <= 0.5, "up-next date is clipped");
+    }
+    const readUpNextNames = () =>
+      page.locator("[data-testid='page-transition']").last().locator("[data-testid^='row-floor-next-']").evaluateAll((rows) =>
+        rows
+          .filter((row) => row.getClientRects().length > 0)
+          .map((row) => {
+            const name = row.children[1] as HTMLElement | undefined;
+            const box = name?.getBoundingClientRect();
+            const overflow: string[] = [];
+            if (name && box) {
+              const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+              let node = walker.nextNode();
+              while (node) {
+                const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+                if (text) {
+                  const range = document.createRange();
+                  range.selectNodeContents(node);
+                  for (const rect of range.getClientRects()) {
+                    if (rect.width < 0.5 || rect.height < 0.5) continue;
+                    if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5) {
+                      overflow.push(`${text} ${Math.round(rect.width)}/${Math.round(box.width)}`);
+                    }
+                  }
+                }
+                node = walker.nextNode();
+              }
+            }
+            const client = name?.querySelector(".floor-next-client") as HTMLElement | null;
+            let clientWidth = 0;
+            if (client && box) {
+              const range = document.createRange();
+              range.selectNodeContents(client);
+              for (const rect of range.getClientRects()) {
+                if (rect.width < 0.5 || rect.height < 0.5) continue;
+                clientWidth = Math.max(clientWidth, rect.width);
+                if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) overflow.push(`client ${Math.round(rect.width)}/${Math.round(box.width)}`);
+              }
+            }
+            return {
+              text: (name?.textContent || "").replace(/\s+/g, " ").trim(),
+              overflow,
+              scroll: name?.scrollWidth ?? 0,
+              box: name?.clientWidth ?? 0,
+              client: (client?.textContent || "").replace(/\s+/g, " ").trim(),
+              clientWidth,
+            };
+          }),
+      );
+    const desktopNames = await readUpNextNames();
+    check(
+      desktopNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")),
+      "Ikarus up-next row missing",
+    );
+    for (const row of desktopNames) {
+      check(row.overflow.length === 0, `desktop up-next name clipped: ${row.text} ${row.overflow.join("|")}`);
+      check(row.scroll <= row.box + 0.5, `desktop up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
+      if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `desktop up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
     }
 
     const current = () => page.locator("[data-testid='page-transition']").last();
@@ -794,30 +852,16 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(scroll.width <= scroll.inner + 1, `phone page scrolls horizontally (${scroll.width} > ${scroll.inner})`);
     const chipHeights = await page.locator(".stage-chip").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
     for (const height of chipHeights) check(height <= 28, `stage chip wrapped (${height}px)`);
-    const upNextFit = await page.locator("[data-testid='row-floor-next-1']").first().evaluate((row) => {
-      const name = row.children[1] as HTMLElement | undefined;
-      if (!name) return { text: "", overflow: ["missing name"] };
-      const box = name.getBoundingClientRect();
-      const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
-      const overflow: string[] = [];
-      let node = walker.nextNode();
-      while (node) {
-        const text = node.textContent?.trim() ?? "";
-        if (text) {
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          for (const rect of range.getClientRects()) {
-            if (rect.width < 0.5 || rect.height < 0.5) continue;
-            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.bottom > box.bottom + 0.5) overflow.push(`${text} ${Math.round(rect.width)}/${Math.round(box.width)}`);
-          }
-        }
-        node = walker.nextNode();
-      }
-      return { text: (name.textContent || "").replace(/\s+/g, " ").trim(), overflow };
-    });
-    check(/Cerastus Chassis - Castigator/.test(upNextFit.text), `phone up-next was ${upNextFit.text}`);
-    check(upNextFit.text.split("Ada").length - 1 === 1, `phone up-next repeats the client: ${upNextFit.text}`);
-    check(upNextFit.overflow.length === 0, `phone up-next clipped: ${upNextFit.overflow.join("|")}`);
+    const phoneNames = await readUpNextNames();
+    const phoneFirst = phoneNames.find((row) => /Cerastus Chassis - Castigator/.test(row.text));
+    check(Boolean(phoneFirst), `phone up-next was ${phoneNames.map((row) => row.text).join(" | ")}`);
+    check((phoneFirst?.text.split("Ada").length ?? 1) - 1 === 1, `phone up-next repeats the client: ${phoneFirst?.text}`);
+    check(phoneNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")), "phone Ikarus up-next row missing");
+    for (const row of phoneNames) {
+      check(row.overflow.length === 0, `phone up-next name clipped: ${row.text} ${row.overflow.join("|")}`);
+      check(row.scroll <= row.box + 0.5, `phone up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
+      if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `phone up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
+    }
 
     await page.getByTestId("button-mobile-nav-more").click();
     await page.waitForSelector("[data-testid='panel-mobile-more']");
