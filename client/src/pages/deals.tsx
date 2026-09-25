@@ -25,6 +25,7 @@ import {
 import { CardMenu, Panel, StatusPill } from "@/components/primitives";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { formatMoney, formatLocalDate } from "@/lib/format";
+import { orderTitle } from "@/lib/order-title";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
 
@@ -33,6 +34,15 @@ type BoardDeal = PerformanceResponse["activeDeals"][number] & {
   needsPlates: boolean;
   alerts: PerformanceResponse["attention"];
 };
+
+const LOW_MARGIN_PERCENT = 40;
+
+function profitClass(profit: number, margin: number | null, known: boolean): string {
+  if (!known) return "text-muted-foreground";
+  if (profit < 0) return "text-destructive";
+  if ((margin ?? 0) < LOW_MARGIN_PERCENT) return "text-chart-4";
+  return "profit-pos";
+}
 
 type BoardColumn = PerformanceResponse["pipeline"][number] & {
   deals: BoardDeal[];
@@ -520,15 +530,15 @@ export default function DealsPage() {
 
                       <div className="queue-lane-footer order-figs shrink-0" data-testid={`footer-stage-${column.id}`}>
                         <p>
-                          <span className="numeric">{formatMoney(column.totalAmount)}</span>
+                          <span className="numeric order-fig-value">{formatMoney(column.totalAmount)}</span>
                           <span className="board-figure-label">Paid</span>
                         </p>
                         <p>
-                          <span className="numeric">{formatMoney(column.totalProductionCost)}</span>
+                          <span className="numeric order-fig-value">{formatMoney(column.totalProductionCost)}</span>
                           <span className="board-figure-label">Cost</span>
                         </p>
-                        <p className={column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive"}>
-                          <span className="numeric">{formatMoney(column.totalGrossProfit)}</span>
+                        <p>
+                          <span className={cn("numeric order-fig-value", profitClass(column.totalGrossProfit, column.totalAmount > 0 ? (column.totalGrossProfit / column.totalAmount) * 100 : 0, true))}>{formatMoney(column.totalGrossProfit)}</span>
                           <span className="board-figure-label">Profit</span>
                         </p>
                       </div>
@@ -593,7 +603,19 @@ function OrdersTable({
               <td>{deal.column}</td>
               <td className="numeric">{formatMoney(deal.amount)}</td>
               <td className="numeric">{deal.costsComplete || (deal.productionCost ?? 0) > 0 ? formatMoney(deal.productionCost ?? 0) : "—"}</td>
-              <td className="numeric">{deal.costsComplete || (deal.productionCost ?? 0) > 0 ? formatMoney(deal.grossProfit ?? 0) : "—"}</td>
+              <td
+                className={cn(
+                  "numeric",
+                  profitClass(
+                    deal.grossProfit ?? 0,
+                    deal.marginPercentage,
+                    Boolean(deal.costsComplete || (deal.productionCost ?? 0) > 0),
+                  ),
+                )}
+                data-testid={`text-table-profit-${deal.dealId}`}
+              >
+                {deal.costsComplete || (deal.productionCost ?? 0) > 0 ? formatMoney(deal.grossProfit ?? 0) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -624,6 +646,8 @@ function DealCard({
   onDragEnd: () => void;
 }) {
   const closeLabel = formatLocalDate(deal.closeDate);
+  const title = orderTitle(deal.dealName, deal.contactName);
+  const costsKnown = Boolean(deal.costsComplete || (deal.productionCost ?? 0) > 0);
   const href = hubspotDealHref(deal.dealId, portalId);
   const isStale = deal.alerts.some((item) => item.issueKey === "stale");
   const tone = isStale
@@ -669,7 +693,7 @@ function DealCard({
           className="board-name min-w-0 flex-1 cursor-pointer truncate hover:underline"
           data-testid={`link-deal-title-${deal.dealId}`}
         >
-          {deal.dealName}
+          {title}
         </p>
         <div onPointerDown={(event) => event.stopPropagation()}>
           <CardMenu label={`More actions for ${deal.dealName}`}>
@@ -725,58 +749,47 @@ function DealCard({
       </p>
       <div className="order-figs" data-testid={`panel-deal-economics-${deal.dealId}`}>
         <p data-testid={`text-deal-paid-${deal.dealId}`} title="Paid / quoted amount">
-          <span>{formatMoney(deal.amount)}</span>
+          <span className="order-fig-value">{formatMoney(deal.amount)}</span>
           <span className="board-figure-label"> paid</span>
         </p>
-        <p
-          className={cn(deal.costsComplete ? "" : "text-muted-foreground")}
-          data-testid={`text-deal-production-${deal.dealId}`}
-        >
-          <span>
-            {deal.costsComplete || (deal.productionCost ?? 0) > 0
-              ? formatMoney(deal.productionCost ?? 0)
-              : "—"}
+        <p data-testid={`text-deal-production-${deal.dealId}`}>
+          <span className={cn("order-fig-value", costsKnown ? "" : "text-muted-foreground")}>
+            {costsKnown ? formatMoney(deal.productionCost ?? 0) : "—"}
           </span>
           <span className="board-figure-label"> cost</span>
         </p>
-        <p
-          className={cn(
-            !deal.costsComplete && !((deal.productionCost ?? 0) > 0)
-              ? "text-muted-foreground"
-              : (deal.grossProfit ?? 0) >= 0
-                ? "text-chart-4"
-                : "text-destructive",
-          )}
-          data-testid={`text-deal-revenue-${deal.dealId}`}
-          title="Gross profit = paid − production costs"
-        >
-          <span>
-            {deal.costsComplete || (deal.productionCost ?? 0) > 0
+        <p data-testid={`text-deal-revenue-${deal.dealId}`} title="Gross profit = paid − production costs">
+          <span className={cn("order-fig-value", profitClass(deal.grossProfit ?? 0, deal.marginPercentage, costsKnown))}>
+            {costsKnown
               ? `${formatMoney(deal.grossProfit ?? 0)}${
-                  deal.amount > 0 && deal.costsComplete
-                    ? ` · ${(deal.marginPercentage ?? 0).toFixed(0)}%`
-                    : ""
+                  deal.amount > 0 && deal.costsComplete ? ` · ${(deal.marginPercentage ?? 0).toFixed(0)}%` : ""
                 }`
               : "—"}
           </span>
           <span className="board-figure-label"> profit</span>
         </p>
-        {deal.needsPlates ? (
-          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-        ) : deal.needsCosts ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
-        ) : isStale ? (
-          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
-        ) : partsSummary && partsSummary.total > 0 ? (
-          <span data-testid={`badge-deal-parts-${deal.dealId}`}>
-            <StatusPill
-              tone={partsSummary.remaining === 0 ? "warn" : "neutral"}
-              icon={Package}
-              label={formatPartsBadge(partsSummary)}
-            />
-          </span>
-        ) : null}
       </div>
+      {deal.needsPlates ? (
+        <div className="order-chip">
+          <StatusPill tone="warn" icon={FileUp} label="Needs plates" testId={`chip-deal-${deal.dealId}`} />
+        </div>
+      ) : deal.needsCosts ? (
+        <div className="order-chip">
+          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" testId={`chip-deal-${deal.dealId}`} />
+        </div>
+      ) : isStale ? (
+        <div className="order-chip">
+          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" testId={`chip-deal-${deal.dealId}`} />
+        </div>
+      ) : partsSummary && partsSummary.total > 0 ? (
+        <div className="order-chip" data-testid={`badge-deal-parts-${deal.dealId}`}>
+          <StatusPill
+            tone={partsSummary.remaining === 0 ? "warn" : "neutral"}
+            icon={Package}
+            label={formatPartsBadge(partsSummary)}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }

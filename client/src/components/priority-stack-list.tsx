@@ -7,7 +7,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatMoney } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
+import { shopDateLabel } from "@shared/ship-by";
+import { orderTitle as orderTitleFromName } from "@/lib/order-title";
 import type { FulfillmentChecklistView } from "@shared/schema";
 import type { StackTier } from "@shared/priority-stack";
 import { cn } from "@/lib/utils";
@@ -77,16 +78,7 @@ function money(amount: number | null): string {
 }
 
 function orderTitle(row: Pick<StackRowModel, "name" | "contactName">): string {
-  const name = row.name.trim();
-  const contact = row.contactName?.trim();
-  if (!contact) return name;
-  for (const suffix of [` - ${contact}`, ` – ${contact}`, ` — ${contact}`, ` · ${contact}`]) {
-    if (name.toLowerCase().endsWith(suffix.toLowerCase())) {
-      const trimmed = name.slice(0, -suffix.length).trim();
-      if (trimmed) return trimmed;
-    }
-  }
-  return name;
+  return orderTitleFromName(row.name, row.contactName);
 }
 
 function rowSubtitle(row: Pick<StackRowModel, "contactName" | "shippingRequired">): string {
@@ -99,20 +91,12 @@ export function targetLabel(
   row: Pick<StackRowModel, "targetDate" | "targetSource" | "tentative">,
   today: string,
 ): string {
-  const when =
-    row.targetDate < today
-      ? `Overdue ${formatShipByShort(row.targetDate)}`
-      : row.targetDate === today
-        ? "Due today"
-        : formatShipByShort(row.targetDate);
-  if (row.tentative) return `${when} · tentative`;
-  const honesty =
-    row.targetSource === "override" || row.targetSource === "local"
-      ? " · set"
-      : row.targetSource === "unset"
-        ? " · unset"
-        : " · plan";
-  return `${when}${honesty}`;
+  return shopDateLabel({
+    date: row.targetDate,
+    today,
+    source: row.targetSource,
+    tentative: row.tentative,
+  });
 }
 
 function progressLabel(row: StackRowModel): string {
@@ -281,11 +265,26 @@ function ChecklistPopover({
       <span className="stack-stage-short">{presentation.short}</span>
     </span>
   );
-  if (steps.length === 0 || row.kind === "bundle") {
+  if (row.kind === "bundle") {
+    const ready = row.members.filter((member) => member.fulfillment?.shipReady || member.fulfillment?.packingDone).length;
     return (
       <span className="inline-flex min-w-0 items-center gap-2" title={progress}>
         {chip}
-        {steps.length > 0 ? <span className="numeric stack-prog">{done}/{steps.length}</span> : null}
+        <span className="numeric stack-prog" data-testid={`text-bundle-progress-${row.key}`}>
+          {ready}/{row.members.length}
+        </span>
+      </span>
+    );
+  }
+  const fraction = row.fulfillment
+    ? `${row.fulfillment.completedCount}/${row.fulfillment.totalCount}`
+    : steps.length > 0
+      ? `${done}/${steps.length}`
+      : null;
+  if (!fraction) {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-2" title={progress}>
+        {chip}
       </span>
     );
   }
@@ -295,7 +294,7 @@ function ChecklistPopover({
       <PopoverTrigger asChild>
         <button type="button" title={progress} className="inline-flex min-w-0 items-center gap-2 text-left" data-testid={`button-checklist-${row.key}`}>
           {chip}
-          <span className="numeric stack-prog">{done}/{steps.length}</span>
+          <span className="numeric stack-prog" data-testid={`text-checklist-progress-${row.key}`}>{fraction}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-2">
@@ -514,7 +513,10 @@ export function StackRow({
         </div>
         <div className="stack-blocker min-w-0">
           {row.warning ? <p className="stack-clip text-xs text-destructive" title={row.warning} data-testid={`text-stack-warning-${row.key}`}>{row.warning}</p> : null}
-          <InlineBlocker row={row} headers={headers} onSaved={onSaved} />
+          <div className="stack-blocker-line">
+            <span className="stack-phone-sub stack-clip">{rowSubtitle(row)}</span>
+            <InlineBlocker row={row} headers={headers} onSaved={onSaved} />
+          </div>
           {row.nextStep ? <p className="stack-clip text-xs text-muted-foreground" title={row.nextStep}>{row.nextStep}</p> : null}
         </div>
         <div className="stack-date stack-desktop-only min-w-0">

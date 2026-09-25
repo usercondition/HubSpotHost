@@ -2191,6 +2191,8 @@ export interface ProductionQueueItem {
   shipBy: string;
   /** An Intern-set HubSpot date wins over the documented SLA projection. */
   shipBySource: "override" | "derived";
+  /** Stack marked this date tentative. Wins over set/plan in the shared date label. */
+  tentative: boolean;
   /** Short explanation of the override or feasible production-time projection. */
   shipByReason: string;
   /**

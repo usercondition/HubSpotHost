@@ -6,18 +6,49 @@ import { desc } from "drizzle-orm";
 import {
   hubspotStageLooksShipReady,
   printFileRecords,
+  priorityStackEntries,
+  type FulfillmentChecklistView,
   type PerformanceResponse,
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressIsSatisfied } from "../../shared/ship-address";
 import { fetchDealAssociatedContact } from "./deal-ops";
-import { listFulfillmentChecklists } from "./fulfillment";
+import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
 import { getDb, listOrderLinks } from "./order-links";
 import { ensureDefaultPrinters, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
 import { contactToShipEngineAddress } from "./shipengine";
+
+function blankChecklist(dealId: string): FulfillmentChecklistView {
+  return {
+    dealId,
+    addressVerified: false,
+    costsEntered: false,
+    labelBought: false,
+    trackingPasted: false,
+    packingDone: false,
+    trackingNumber: "",
+    notes: "",
+    completedCount: 0,
+    totalCount: 5,
+    readyPercent: 0,
+    shipReady: false,
+    updatedAt: null,
+  };
+}
+
+/** Same checklist the deal drawer counts: costsEntered follows the cost fields. */
+function checklistForDeal(
+  dealId: string,
+  stored: FulfillmentChecklistView | undefined,
+  costsComplete: boolean | undefined,
+): FulfillmentChecklistView {
+  const checklist = stored ?? blankChecklist(dealId);
+  if (typeof costsComplete !== "boolean") return checklist;
+  return withDerivedCostsEntered(checklist, costsComplete);
+}
 
 /** Map HubSpot deal id → intake shippingRequired (false = pickup). */
 export function intakeShippingRequiredByDealId(): Map<string, boolean> {
@@ -225,6 +256,14 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
 
   const kitByDeal = new Map(listKitSummaries(200).map((kit) => [kit.hubspotDealId, kit]));
   const checklists = listFulfillmentChecklists(printDeals.map((deal) => deal.dealId));
+  const tentativeDeals = new Set(
+    getDb()
+      .select({ dealId: priorityStackEntries.hubspotDealId, tentative: priorityStackEntries.tentative })
+      .from(priorityStackEntries)
+      .all()
+      .filter((row) => row.tentative && row.dealId)
+      .map((row) => String(row.dealId)),
+  );
   const shippingByDeal = intakeShippingRequiredByDealId();
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
@@ -272,21 +311,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
       needsReply: deal.needsReply === true,
-      fulfillment: checklists.get(deal.dealId) ?? {
-        dealId: deal.dealId,
-        addressVerified: false,
-        costsEntered: false,
-        labelBought: false,
-        trackingPasted: false,
-        packingDone: false,
-        trackingNumber: "",
-        notes: "",
-        completedCount: 0,
-        totalCount: 5,
-        readyPercent: 0,
-        shipReady: false,
-        updatedAt: null,
-      },
+      fulfillment: checklistForDeal(deal.dealId, checklists.get(deal.dealId), deal.costsComplete),
     };
     const bucket = classifyBucket(base);
     const shippingRequired =
@@ -315,6 +340,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       bucket,
       readyToPack,
       shippingRequired,
+      tentative: tentativeDeals.has(deal.dealId),
       priorityScore: priorityScore(base),
       // Defaults until attachShipAddressReadiness enriches ship-side rows.
       ...addressDefaults,
