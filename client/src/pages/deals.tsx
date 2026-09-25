@@ -287,6 +287,7 @@ export default function DealsPage() {
                 <Button
                   size="sm"
                   variant="outline"
+                  className="max-md:hidden"
                   onClick={() => performance.refetch()}
                   disabled={performance.isFetching}
                   data-testid="button-refresh-deals"
@@ -690,7 +691,7 @@ function DealCard({
           onKeyDown={(event) => {
             if (event.key === "Enter") onOpenOps();
           }}
-          className="board-name min-w-0 flex-1 cursor-pointer truncate hover:underline"
+          className="board-name order-title min-w-0 flex-1 cursor-pointer hover:underline"
           data-testid={`link-deal-title-${deal.dealId}`}
         >
           {title}
@@ -760,12 +761,11 @@ function DealCard({
         </p>
         <p data-testid={`text-deal-revenue-${deal.dealId}`} title="Gross profit = paid − production costs">
           <span className={cn("order-fig-value", profitClass(deal.grossProfit ?? 0, deal.marginPercentage, costsKnown))}>
-            {costsKnown
-              ? `${formatMoney(deal.grossProfit ?? 0)}${
-                  deal.amount > 0 && deal.costsComplete ? ` · ${(deal.marginPercentage ?? 0).toFixed(0)}%` : ""
-                }`
-              : "—"}
+            {costsKnown ? formatMoney(deal.grossProfit ?? 0) : "—"}
           </span>
+          {costsKnown && deal.amount > 0 && deal.costsComplete ? (
+            <span className="order-fig-pct">{`${(deal.marginPercentage ?? 0).toFixed(0)}%`}</span>
+          ) : null}
           <span className="board-figure-label"> profit</span>
         </p>
       </div>

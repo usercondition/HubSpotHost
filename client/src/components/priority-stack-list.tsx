@@ -87,6 +87,17 @@ function rowSubtitle(row: Pick<StackRowModel, "contactName" | "shippingRequired"
   return who ? `${who} · ${mode}` : mode;
 }
 
+function PhoneSub({ row }: { row: Pick<StackRowModel, "contactName" | "shippingRequired"> }) {
+  const who = row.contactName?.trim();
+  const mode = row.shippingRequired ? "Ships" : "Pickup";
+  return (
+    <span className="stack-phone-sub">
+      {who ? <span className="stack-phone-client">{who}</span> : null}
+      <span className="stack-phone-mode">{who ? ` · ${mode}` : mode}</span>
+    </span>
+  );
+}
+
 export function targetLabel(
   row: Pick<StackRowModel, "targetDate" | "targetSource" | "tentative">,
   today: string,
@@ -514,7 +525,7 @@ export function StackRow({
         <div className="stack-blocker min-w-0">
           {row.warning ? <p className="stack-clip text-xs text-destructive" title={row.warning} data-testid={`text-stack-warning-${row.key}`}>{row.warning}</p> : null}
           <div className="stack-blocker-line">
-            <span className="stack-phone-sub stack-clip">{rowSubtitle(row)}</span>
+            <PhoneSub row={row} />
             <InlineBlocker row={row} headers={headers} onSaved={onSaved} />
           </div>
           {row.nextStep ? <p className="stack-clip text-xs text-muted-foreground" title={row.nextStep}>{row.nextStep}</p> : null}
@@ -564,17 +575,22 @@ export function StackRow({
     {expanded && row.members.length > 0 ? (
       <div data-testid={`bundle-members-${row.key}`}>
         {row.members.map((member) => (
-          <article key={member.key} className="stack-row stack-member" data-lane={member.lane}>
+          <article key={member.key} className="stack-row stack-member" data-lane={member.lane} data-testid={`stack-row-${member.key}`}>
             <span className="stack-rank" />
             <span className="stack-name" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
               <span className="stack-clip text-sm">{orderTitle(member)}</span>
             </span>
             <div className="stack-facts">
-              <span className="stack-stage stack-clip text-sm" title={member.stage}>{member.stage}</span>
-              <span className="stack-blocker stack-clip text-sm text-muted-foreground" title={member.blocker || member.stage}>{member.blocker || member.stage}</span>
+              <span className="stack-stage stack-desktop-only stack-clip text-sm" title={member.stage}>{member.stage}</span>
+              <div className="stack-blocker min-w-0">
+                <div className="stack-blocker-line">
+                  <PhoneSub row={member} />
+                  <span className="stack-clip text-sm text-muted-foreground" title={member.blocker || member.stage}>{member.blocker || member.stage}</span>
+                </div>
+              </div>
               <span
                 className={cn(
-                  "stack-date stack-clip text-sm",
+                  "stack-date stack-desktop-only stack-clip text-sm",
                   member.targetDate < today && "text-destructive",
                   member.targetDate === today && "text-chart-4",
                 )}
@@ -582,6 +598,10 @@ export function StackRow({
               >
                 {targetLabel(member, today)}
               </span>
+              <div className="stack-mobile-actions items-center gap-2">
+                <span className="min-w-0 truncate text-xs text-muted-foreground">{member.stage}</span>
+                <span className="ml-auto shrink-0 whitespace-nowrap text-xs">{targetLabel(member, today)}</span>
+              </div>
             </div>
             <span className="stack-money stack-clip text-sm">{money(member.amount)}</span>
             <span className="stack-actions" />
