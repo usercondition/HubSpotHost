@@ -8,6 +8,7 @@
 import type { CalcResult } from "./calc";
 import fs from "node:fs";
 import path from "node:path";
+import { isHubspotNotFound } from "./hubspot";
 
 export const AUDIT_LIMIT = 100;
 
@@ -40,9 +41,11 @@ export interface AuditEntry {
 }
 
 let nextId = 1;
-const auditFile = process.env.AUDIT_LOG_FILE?.trim()
-  ? path.resolve(process.env.AUDIT_LOG_FILE)
-  : path.resolve(process.cwd(), "data", "audit-log.json");
+
+function auditFilePath(): string {
+  const configured = process.env.AUDIT_LOG_FILE?.trim();
+  return configured ? path.resolve(configured) : path.resolve(process.cwd(), "data", "audit-log.json");
+}
 
 function isAuditEntry(value: unknown): value is AuditEntry {
   if (!value || typeof value !== "object") return false;
@@ -60,7 +63,7 @@ function isAuditEntry(value: unknown): value is AuditEntry {
 
 function loadEntries(): AuditEntry[] {
   try {
-    const raw = fs.readFileSync(auditFile, "utf8");
+    const raw = fs.readFileSync(auditFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isAuditEntry).slice(0, AUDIT_LIMIT);
@@ -76,8 +79,9 @@ if (entries.length > 0) {
 
 function persistEntries(): void {
   try {
-    fs.mkdirSync(path.dirname(auditFile), { recursive: true });
-    fs.writeFileSync(auditFile, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+    const file = auditFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
   } catch {
     // Audit persistence must never prevent a calculation attempt from completing.
     // The in-process log remains available if the local volume is unavailable.
@@ -146,4 +150,18 @@ export function resetAudit(): void {
   entries.length = 0;
   nextId = 1;
   persistEntries();
+}
+
+/**
+ * Drop HubSpot sample-delivery noise for deal 123 only.
+ * Real deal ids are never removed, and a non-404 row for 123 is kept.
+ */
+export function dropNotFoundSampleAudit(dealId = "123"): number {
+  const kept = entries.filter((entry) => !(entry.dealId === dealId && entry.status === "error" && isHubspotNotFound(entry.error)));
+  const removed = entries.length - kept.length;
+  if (removed === 0) return 0;
+  entries.length = 0;
+  entries.push(...kept);
+  persistEntries();
+  return removed;
 }

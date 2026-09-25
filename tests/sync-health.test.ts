@@ -249,7 +249,9 @@ test("failed writes are the latest audit error, and a later success clears them"
       audit({ id: 3, dealId: "62", status: "dry-run", timestamp: "2026-09-25T12:00:00.000Z" }),
     ],
   }));
-  assert.deepEqual(kinds(failed), ["failedWrites"]);
+  assert.deepEqual(kinds(failed), ["failedRecalcs"]);
+  assert.equal(failed.summary.counts.failedRecalcs, 1);
+  assert.equal(failed.summary.counts.failedWrites, 0);
   assert.deepEqual(failed.repairs, [{ dealId: "61", field: "retry", value: "" }]);
 
   const recovered = compareSyncHealth(input({
@@ -260,6 +262,35 @@ test("failed writes are the latest audit error, and a later success clears them"
   }));
   assert.deepEqual(kinds(recovered), []);
   assert.equal(recovered.summary.lastSuccessfulWriteAt, null);
+});
+
+test("a HubSpot 404 is not a failed write and a missing deal is not retried", () => {
+  const missing = compareSyncHealth(input({
+    hubspotById: { "81": remote({ dealId: "81" }) },
+    audit: [
+      audit({ id: 1, dealId: "123", status: "error", error: "HubSpot API 404" }),
+      audit({ id: 2, dealId: "4041", status: "error", error: "HubSpot API 500", timestamp: "2026-09-25T12:00:00.000Z" }),
+    ],
+  }));
+  assert.deepEqual(kinds(missing), []);
+  assert.deepEqual(missing.repairs, []);
+  assert.equal(missing.summary.counts.failedWrites, 0);
+  assert.equal(missing.summary.counts.failedRecalcs, 0);
+  assert.equal(missing.summary.issueCount, 0);
+
+  const present = compareSyncHealth(input({
+    hubspotById: { "81": remote({ dealId: "81" }) },
+    audit: [audit({ id: 3, dealId: "81", status: "error", error: "HubSpot API 500" })],
+  }));
+  assert.deepEqual(kinds(present), ["failedRecalcs"]);
+  assert.deepEqual(present.repairs, [{ dealId: "81", field: "retry", value: "" }]);
+
+  const duringOutage = compareSyncHealth(input({
+    tokenError: "HubSpot API 401",
+    audit: [audit({ id: 4, dealId: "81", status: "error", error: "HubSpot API 500" })],
+  }));
+  assert.equal(duringOutage.summary.status, "error");
+  assert.deepEqual(kinds(duringOutage), ["failedRecalcs", "token"]);
 });
 
 test("webhook silence stays a note and is not an issue, and token errors fail the check", () => {

@@ -5,16 +5,16 @@
 import { shopWeekEnd, shopWeekStart } from "../../shared/priority-stack";
 import { printOrderStageLooksArchived, type HubspotSyncSummary } from "../../shared/schema";
 import { shipByCalendarDate } from "../../shared/ship-by";
-import { listAttempts, type AuditEntry } from "./audit";
+import { dropNotFoundSampleAudit, listAttempts, type AuditEntry } from "./audit";
 import { getConfig, resolveWriteDecision } from "./config";
 import { updateShipByPlan } from "./deal-ops";
-import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError } from "./hubspot";
+import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError, isHubspotNotFound } from "./hubspot";
 import { getDb } from "./order-links";
 import { fulfillmentChecklists } from "../../shared/schema";
 import { lastHubspotWriteSuccessAt } from "./hubspot-write-log";
 import { hubspotWriteCounts, listFailedHubspotWrites, processPendingHubspotWrites, reopenFailedHubspotWrites } from "./hubspot-writes";
 import { listStackState } from "./priority-stack";
-import { failedWebhookCount, listFailedWebhookEvents, processWebhookInbox, reopenFailedWebhookEvents } from "./webhook-inbox";
+import { dropNotFoundWebhookEvents, failedWebhookCount, listFailedWebhookEvents, processWebhookInbox, reopenFailedWebhookEvents } from "./webhook-inbox";
 import { loadProductionQueue } from "./queue-loader";
 import { recalculateDeal } from "./service";
 import { getLatestWebhookDiagnostic, type WebhookDiagnostic } from "./webhook-diagnostics";
@@ -33,6 +33,7 @@ export const SYNC_DRIFT_KINDS = [
   "doneStillOpen",
   "closedNotDone",
   "failedWrites",
+  "failedRecalcs",
   "webhook",
   "token",
 ] as const;
@@ -122,6 +123,7 @@ function emptyCounts(): Record<SyncDriftKind, number> {
     doneStillOpen: 0,
     closedNotDone: 0,
     failedWrites: 0,
+    failedRecalcs: 0,
     webhook: 0,
     token: 0,
   };
@@ -349,16 +351,21 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
     const current = latestByDeal.get(entry.dealId);
     if (!current || entry.timestamp > current.timestamp) latestByDeal.set(entry.dealId, entry);
   }
+  // An empty deal map is "we did not load HubSpot", not "every deal is missing".
+  const trustAbsence = !input.tokenError && Object.keys(hubspot).length > 0;
   for (const entry of latestByDeal.values()) {
     if (entry.status !== "error") continue;
+    const remote = hubspot[entry.dealId];
+    const notFound = isHubspotNotFound(entry.error) || remote?.found === false || (trustAbsence && !remote);
+    if (notFound) continue;
     items.push(item(
-      "failedWrites",
+      "failedRecalcs",
       entry.dealId,
       "audit",
       entry.gate,
       entry.error ?? "error",
       true,
-      "The last HubSpot write for this deal failed. Print Ops can retry that recalculation.",
+      "The last HubSpot recalculation for this deal failed. Print Ops can retry it.",
     ));
     repairs.push({ dealId: entry.dealId, field: "retry", value: "" });
   }
@@ -382,7 +389,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
       issueCount,
       lastSuccessfulReadAt: input.lastSuccessfulReadAt,
       lastSuccessfulWriteAt: input.lastSuccessfulWriteAt,
-      writes: { pending: 0, failed: 0 },
+      writes: liveWriteCounts(),
       lastCheckedAt: now.toISOString(),
       webhook: {
         configured: input.webhookConfigured,
@@ -575,8 +582,8 @@ export async function loadSyncCompareInput(now = new Date()): Promise<SyncCompar
 
 export async function applySyncRepairs(
   repairs: SyncRepair[],
-): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }>> {
-  const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }> = [];
+): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" | "not-found" }>> {
+  const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" | "not-found" }> = [];
   for (const repair of repairs) {
     if (repair.field === "requeue_write") {
       reopenFailedHubspotWrites();
@@ -590,6 +597,13 @@ export async function applySyncRepairs(
       results.push({ dealId: repair.dealId, field: repair.field, wrote: true, dryRun: false });
       continue;
     }
+    if (repair.field === "retry") {
+      const latest = listAttempts().find((entry) => entry.dealId === repair.dealId);
+      if (latest?.status === "error" && isHubspotNotFound(latest.error)) {
+        results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: false, skipped: "not-found" });
+        continue;
+      }
+    }
     const decision = resolveWriteDecision(getConfig(), true);
     if (!decision.write) {
       results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: true });
@@ -599,7 +613,11 @@ export async function applySyncRepairs(
       try {
         const outcome = await recalculateDeal({ dealId: repair.dealId, origin: "manual", requestWantsLiveWrite: true });
         results.push({ dealId: repair.dealId, field: repair.field, wrote: outcome.status === "written", dryRun: outcome.dryRun });
-      } catch {
+      } catch (error) {
+        if (isHubspotNotFound(error instanceof Error ? error.message : "", error instanceof HubSpotError ? error.status : undefined)) {
+          results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: false, skipped: "not-found" });
+          continue;
+        }
         results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: false, skipped: "read-failed" });
       }
       continue;
@@ -666,7 +684,7 @@ export async function runSyncHealthCheck(now = new Date()): Promise<SyncHealthRe
   return running;
 }
 
-function appendDurableFailures(report: SyncHealthReport): void {
+export function appendDurableFailures(report: SyncHealthReport): void {
   for (const row of listFailedHubspotWrites()) {
     report.items.push(item(
       "failedWrites",
@@ -697,6 +715,8 @@ function appendDurableFailures(report: SyncHealthReport): void {
 
 async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
   try {
+    dropNotFoundSampleAudit();
+    dropNotFoundWebhookEvents();
     reopenFailedHubspotWrites();
     reopenFailedWebhookEvents();
     await processPendingHubspotWrites(now);
@@ -731,6 +751,12 @@ async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
       lastSuccessfulWriteAt: latestWriteAt(listAttempts()),
       now,
     });
+    try {
+      appendDurableFailures(report);
+    } catch (appendError) {
+      console.warn(`[sync-health] could not read the write queue: ${appendError instanceof Error ? appendError.message : String(appendError)}`);
+      report.summary.writes = liveWriteCounts();
+    }
     cached = report;
     return report;
   }
@@ -740,7 +766,7 @@ function repairFieldForKind(kind: SyncDriftKind): string {
   if (kind === "tracking") return "tracking";
   if (kind === "shipNotes") return "notes";
   if (kind === "shipBy") return "ship_by";
-  if (kind === "failedWrites") return "retry";
+  if (kind === "failedWrites" || kind === "failedRecalcs") return "retry";
   return "";
 }
 
