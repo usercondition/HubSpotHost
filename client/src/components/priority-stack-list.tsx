@@ -558,7 +558,7 @@ export function rowsWithDividers(rows: StackRowModel[], totals: StackView["total
   const lastStretch = rows.reduce((found, row, index) => (row.tier === "stretch" ? index : found), -1);
   const out: Array<{ type: "row"; row: StackRowModel } | { type: "divider"; label: string; amount: number }> = [];
   rows.forEach((row, index) => {
-    out.push({ type: "row", row });
+    out.push({ type: "row", row: { ...row, rank: index + 1 } });
     if (index === lastCommitted) out.push({ type: "divider", label: "This week", amount: totals.committed });
     if (index === lastStretch) out.push({ type: "divider", label: "Stretch", amount: totals.stretch });
   });
