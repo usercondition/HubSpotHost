@@ -1,0 +1,56 @@
+---
+description: Print Ops and Stack standards for every fix or feature
+alwaysApply: true
+---
+
+# Print Ops and Stack
+
+Apply these on every Print Ops or Stack change. Check layout at 1024px desktop and 390px phone.
+
+## Layout
+- Put every Stack row (normal, bundle, off-book, Out the door) on one shared column grid: number, name/client, status, blocker, date, amount, actions. Start the status, blocker, date, and amount columns at the same x on every row.
+- Use that same grid for bundle rows. Keep the member count ("▸ 3") inside the name column.
+- Number rows 1 to N straight down the list, bundled and unbundled, with no repeats or gaps.
+- Truncate long status or blocker text with an ellipsis inside its column. Do not let it push the next column.
+- Right-align "This week", "Stretch", and "Out the door" totals in the amount column.
+- Put extra row actions in the overflow (…) menu. Keep only up, down, and top on the row.
+- Show the Bundle button only when 2 or more orders are selected. Otherwise show "Select 2+ to bundle".
+- At 390px, do not wrap a header or action row onto a second line. Let tabs scroll sideways. Keep Orders off the phone nav.
+- Size Queue lanes to their content. Do not leave tall empty boxes.
+- Do not show developer text (deep-link hints, route names, raw ids).
+- Do not put a ship calendar on Floor. On Queue, show only Next print and In production.
+
+## Labels, bundles, Picked up, Undo
+- When a label is attached, mark that Stack row done and move it to Out the door, even when HubSpot writes are off.
+- Count money once. A done order leaves open cash and shows in Out the door. Weekly goal = open committed + Out the door.
+- On a reprinted label, keep the first completion date, save the new tracking number and the ShipEngine label id, carrier, and service, and do not send a second shipped email or Marketplace note.
+- When a shipping bundle is finished, mark every member done. On a partial shipping bundle, show "X of N shipped".
+- When a label is attached to a member of a pickup bundle, show a warning on that bundle.
+- "Picked up" moves the linked HubSpot deal(s) to Completed. Never write an off-book order to HubSpot.
+- Undo on an Out the door row clears only the local done mark. Do not revert the HubSpot stage, and say so on the row.
+- Refresh the Stack after a label attaches.
+- In the drawer, same-client orders that were auto-added have checkboxes so they can be unticked before attach.
+- Open ready and blocked orders in the Stack from Floor "Needs you" links, old Queue deep links (redirect those), and Ask Ops. Say "Stack", not "Queue".
+- The Floor "needs you" count equals the Needs you list. The bell and Alerts count match that number.
+
+## HubSpot sync and owner lock
+- Live `/api/health` returns status ok, mode live-write, allowHubspotWrites true, dryRun false, and durable storage.
+- Keep Print Ops and HubSpot in agreement. `hubspotSync.lastCheckedAt` stays under 15 minutes. Ship with failedWrites, missingInOps, orphans, doneStillOpen, and closedNotDone at 0. Explain any other count before shipping.
+- Auto-fill writes only blank HubSpot fields. Never overwrite a non-blank value. List conflicts in sync health; do not auto-fix them.
+- Blank cost fill: labor $0, packaging $0 on free USPS, postage only from a real label.
+- Keep the owner-only Stack locked. `/api/priority-stack` and `/api/sync-health` return 401 without the owner code. Keep `/api/queue` public-safe.
+- `/api/production-queue` still returns ready and blocked orders, because digests, calendar sync, and Ask Ops read it.
+
+## Off-book, sort, dates
+- In the cash line, show off-book orders as "+1 off-book, no amount" (the count grows). Show "—" for the amount and the "off-book" tag.
+- Auto-order the Stack overdue first, then by target date, then by closeness to done, then by amount (higher first). Manual moves stick until "Reset to auto".
+- Out the door row amounts add up exactly to the header Out the door total.
+- Show dates as "Sep 27 · set" or "· plan". Highlight "Due today". Use Pacific time.
+- Screenshots and demos use sample data and say so. Do not invent live numbers.
+
+## Ship process
+- Branch off the latest main. Local tests must pass. This repo has no GitHub CI.
+- Include before and after screenshots of each touched page, desktop and phone.
+- After merge, the Railway deploy shows SUCCESS and the live health check passes.
+- Nothing reaches a customer without a draft and Miguel's OK.
+- Ping Miguel on PR open, merge, and live.
