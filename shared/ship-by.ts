@@ -115,6 +115,34 @@ export function formatShipByWeekday(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
 }
 
+export type ShopDateSource = "override" | "derived" | "local" | "unset";
+
+/**
+ * App-generated ship date. Tentative wins over set/plan.
+ * Caller-typed notes stay untouched — this only labels the date itself.
+ */
+export function shopDateLabel(input: {
+  date: string;
+  today: string;
+  source: ShopDateSource;
+  tentative?: boolean;
+}): string {
+  const when =
+    input.date < input.today
+      ? `Overdue ${formatShipByShort(input.date)}`
+      : input.date === input.today
+        ? "Due today"
+        : formatShipByShort(input.date);
+  if (input.tentative) return `${when} · tentative`;
+  const honesty =
+    input.source === "override" || input.source === "local"
+      ? " · set"
+      : input.source === "unset"
+        ? " · unset"
+        : " · plan";
+  return `${when}${honesty}`;
+}
+
 export function shipByHonestyLabel(
   shipBy: string,
   today: string = shipByCalendarDate(),

@@ -3,6 +3,7 @@
  * plate→printer assignment, and failure log.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -27,7 +28,7 @@ import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow"
 import { StatusPill, WorkspaceSection } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { drawerPanelVariants, drawerScrimVariants } from "@/lib/motion";
+import { drawerScrimVariants, drawerTransition } from "@/lib/motion";
 import { Link } from "wouter";
 import {
   FULFILLMENT_CHECKLIST_KEYS,
@@ -79,12 +80,12 @@ export function DealOpsDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  return (
+  const drawer = (
     <AnimatePresence>
       {open && dealId ? (
         <motion.div
           key="deal-ops-drawer"
-          className="pointer-events-none fixed inset-0 z-40"
+          className="pointer-events-none fixed inset-0 z-[80]"
           data-testid="drawer-deal-ops-root"
           initial="initial"
           animate="enter"
@@ -105,10 +106,18 @@ export function DealOpsDrawer({
             role="dialog"
             aria-modal="true"
             aria-label="Deal ops"
-            className="ops-deal-drawer pointer-events-auto absolute inset-x-0 bottom-0 flex h-[min(85dvh,720px)] w-full flex-col rounded-t-2xl border-t border-border bg-background shadow-2xl md:inset-y-0 md:inset-x-auto md:right-0 md:h-auto md:max-w-2xl md:rounded-none md:border-l md:border-t-0"
+            className="ops-deal-drawer pointer-events-auto absolute inset-x-0 bottom-0 flex h-[min(85dvh,720px)] w-full flex-col rounded-t-2xl border-t border-border bg-background shadow-2xl md:inset-x-auto md:bottom-0 md:right-0 md:top-14 md:h-auto md:max-w-2xl md:rounded-none md:border-l md:border-t-0"
             data-testid="drawer-deal-ops"
             onClick={(event) => event.stopPropagation()}
-            variants={reduceMotion ? undefined : drawerPanelVariants}
+            variants={
+              reduceMotion
+                ? undefined
+                : {
+                    initial: { opacity: 0 },
+                    enter: { opacity: 1, transition: drawerTransition },
+                    exit: { opacity: 0, transition: { duration: 0.2 } },
+                  }
+            }
             initial={reduceMotion ? false : "initial"}
             animate={reduceMotion ? undefined : "enter"}
             exit={reduceMotion ? undefined : "exit"}
@@ -135,6 +144,8 @@ export function DealOpsDrawer({
       ) : null}
     </AnimatePresence>
   );
+  if (typeof document === "undefined") return drawer;
+  return createPortal(drawer, document.body);
 }
 
 export function DealOpsPanel({
@@ -740,6 +751,7 @@ export function DealOpsPanel({
             tone={data.checklist.shipReady ? "good" : "neutral"}
             icon={CheckCircle2}
             label={`${data.checklist.completedCount}/${data.checklist.totalCount} · ${data.checklist.readyPercent}%`}
+            testId="text-drawer-checklist-progress"
           />
         </div>
         <div className="grid gap-2 sm:grid-cols-2">

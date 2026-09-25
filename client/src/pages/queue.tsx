@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
 import { parkedQueueHref, printsDealHref, readHashQueryParam, searchWithoutParam, stackHref, stripDealIdFromLocation } from "@/lib/workflow";
-import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
+import { shipByCalendarDate, shopDateLabel } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
@@ -135,12 +135,12 @@ function QueueCard({
             item.shipBy === shipByCalendarDate() && "text-chart-4",
           )}
         >
-          {item.shipBy < shipByCalendarDate()
-            ? `Overdue ${formatShipByShort(item.shipBy)}`
-            : item.shipBy === shipByCalendarDate()
-              ? "Due today"
-              : formatShipByShort(item.shipBy)}
-          {item.shipBySource === "override" ? " · set" : item.shipBySource === "derived" ? " · plan" : ""}
+          {shopDateLabel({
+            date: item.shipBy,
+            today: shipByCalendarDate(),
+            source: item.shipBySource,
+            tentative: item.tentative,
+          })}
         </span>
         <span className="queue-amount text-foreground">{formatMoney(item.amount)}</span>
       </p>
@@ -292,6 +292,7 @@ export default function ProductionQueuePage() {
             <Button
               size="sm"
               variant="outline"
+              className="max-md:hidden"
               onClick={() => queue.refetch()}
               disabled={queue.isFetching}
               data-testid="button-refresh-queue"

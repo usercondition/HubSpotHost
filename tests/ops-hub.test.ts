@@ -9,7 +9,7 @@ import { buildProductionQueue, deriveShipBy } from "../server/lib/production-que
 import { buildResinReorderSuggestions } from "../server/lib/resin-reorder";
 import { assignPlateToPrinter } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
-import { printFileRecords } from "../shared/schema";
+import { printFileRecords, priorityStackEntries } from "../shared/schema";
 import { updateShipByPlanSchema, type PerformanceResponse, type ResinInventorySnapshot } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -159,6 +159,77 @@ test("production failures persist per deal", async () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.failureType, "qc_reject");
     assert.match(rows[0]!.notes, /Horn/);
+  });
+});
+
+test("queue checklist follows cost fields and tentative follows the stack", async () => {
+  await withTempDb(async () => {
+    const saved = await upsertFulfillmentChecklist("1002", { costsEntered: true, liveWrite: false });
+    assert.ok(!("error" in saved));
+    const stamp = new Date().toISOString();
+    getDb()
+      .insert(priorityStackEntries)
+      .values({
+        kind: "deal",
+        hubspotDealId: "1002",
+        tentative: true,
+        blocker: "",
+        nextStep: "",
+        title: "",
+        contactName: "",
+        amount: "",
+        fulfillmentMode: "ship",
+        stepsJson: "[]",
+        doneAmount: "",
+        doneName: "",
+        createdAt: stamp,
+        updatedAt: stamp,
+      })
+      .run();
+    const snapshot = sampleSnapshot([
+      {
+        dealId: "1001",
+        dealName: "Dragon bust - Ada",
+        stageId: "s1",
+        stage: "Deposit Received",
+        amount: 120,
+        productionCost: 10,
+        grossProfit: 110,
+        marginPercentage: 90,
+        costsComplete: true,
+        hasPlates: false,
+        promptAttachPlates: true,
+        requiresPlates: true,
+        closeDate: "2026-08-10",
+        contactName: "Ada",
+      },
+      {
+        dealId: "1002",
+        dealName: "Kit set - Beau",
+        stageId: "s2",
+        stage: "In Production",
+        amount: 220,
+        productionCost: 0,
+        grossProfit: 220,
+        marginPercentage: 100,
+        costsComplete: false,
+        hasPlates: true,
+        promptAttachPlates: false,
+        requiresPlates: true,
+        closeDate: null,
+        contactName: "Beau",
+      },
+    ]);
+    const queue = buildProductionQueue(snapshot);
+    const items = [...queue.nextPrint, ...queue.inProduction, ...queue.shipReady, ...queue.blocked];
+    const ada = items.find((item) => item.dealId === "1001");
+    const beau = items.find((item) => item.dealId === "1002");
+    assert.equal(ada?.fulfillment.costsEntered, true);
+    assert.equal(ada?.fulfillment.completedCount, 1);
+    assert.equal(ada?.tentative, false);
+    assert.equal(beau?.fulfillment.costsEntered, false);
+    assert.equal(beau?.fulfillment.completedCount, 0);
+    assert.equal(beau?.tentative, true);
   });
 });
 

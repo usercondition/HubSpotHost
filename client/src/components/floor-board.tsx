@@ -6,6 +6,7 @@ import { stagePresentation } from "@/lib/stage-chip";
 import { cn } from "@/lib/utils";
 import { formatShipByShort } from "@shared/ship-by";
 import { targetLabel, type StackView } from "@/components/priority-stack-list";
+import { orderTitle } from "@/lib/order-title";
 import type { PrinterUsageBreakdown, ResinReorderSuggestion } from "@shared/schema";
 
 const ICONS: Record<FloorNeedIcon, typeof FileUp> = {
@@ -149,12 +150,16 @@ export function FloorBoard({
               next.map((row) => {
                 const stage = stagePresentation(row.stage);
                 const date = targetLabel(row, today);
+                const title = orderTitle(row.name, row.contactName);
+                const contact = row.contactName?.trim();
                 return (
                   <Link key={row.key} href="/stack" className="floor-next" data-testid={`row-floor-next-${row.rank}`}>
                     <span className="numeric text-[13px] text-[hsl(var(--text-3))]">{row.rank}</span>
                     <span className="min-w-0 truncate text-[14px] font-semibold">
-                      {row.name}
-                      {row.contactName ? <span className="font-normal text-[hsl(var(--text-2))]"> · {row.contactName}</span> : null}
+                      {title}
+                      {contact && title.toLowerCase() !== contact.toLowerCase() ? (
+                        <span className="font-normal text-[hsl(var(--text-2))]"> · {contact}</span>
+                      ) : null}
                     </span>
                     <span className={cn("stage-chip", `stage-${stage.tone}`)} title={stage.label}>
                       <i />

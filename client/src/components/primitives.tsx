@@ -35,12 +35,12 @@ export function StatusPill({
     <span
       data-testid={testId}
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[0.8125rem] font-semibold",
+        "inline-flex w-max max-w-none shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[0.8125rem] font-semibold",
         TONE_PILL[tone],
       )}
     >
       {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" /> : null}
-      <span className="min-w-0 truncate">{label}</span>
+      <span>{label}</span>
     </span>
   );
 }

@@ -16,7 +16,12 @@ const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
 
-function queueItem(id: string, bucket: string, amount: number) {
+function queueItem(
+  id: string,
+  bucket: string,
+  amount: number,
+  extra: { tentative?: boolean; shipBySource?: "override" | "derived"; shipPlanNote?: string | null } = {},
+) {
   return {
     dealId: id,
     dealName: `Order ${id}`,
@@ -24,7 +29,8 @@ function queueItem(id: string, bucket: string, amount: number) {
     stage: "Printing",
     amount,
     shipBy: "2026-10-02",
-    shipBySource: "derived",
+    shipBySource: extra.shipBySource ?? "derived",
+    tentative: extra.tentative === true,
     shipByReason: "plan",
     addressStatus: "ready",
     addressSummary: "Seattle, WA",
@@ -41,7 +47,7 @@ function queueItem(id: string, bucket: string, amount: number) {
     unassignedPlateCount: 0,
     kitNeeded: 0,
     kitReprint: 0,
-    shipPlanNote: null,
+    shipPlanNote: extra.shipPlanNote ?? null,
     isStale: false,
     costsIncomplete: false,
     needsReply: false,
@@ -65,7 +71,7 @@ function stackRow(partial: Record<string, unknown>) {
     lane: "fly",
     blocker: "",
     blockerSource: "auto",
-    nextStep: "Print",
+    nextStep: "",
     targetDate: "2026-10-02",
     targetSource: "derived",
     tentative: false,
@@ -86,7 +92,8 @@ function deal(id: string, amount: number, cost: number) {
   const profit = amount - cost;
   return {
     dealId: id,
-    dealName: `Board ${id}`,
+    dealName: `Board ${id} - Ada`,
+    promptAttachPlates: id === "b1",
     stageId: "print",
     stage: "Printing",
     amount,
@@ -96,13 +103,83 @@ function deal(id: string, amount: number, cost: number) {
     costsComplete: true,
     hasPlates: true,
     requiresPlates: true,
-    promptAttachPlates: false,
     needsReply: false,
     shipByOverride: null,
     shipPlanNote: null,
     createdAt: "2026-09-01T00:00:00.000Z",
     closeDate: null,
     contactName: "Ada",
+  };
+}
+
+function dealOps(dealId: string) {
+  return {
+    ok: true,
+    dealId,
+    dealName: "Committed order - Ada",
+    stageId: "print",
+    stage: "Ready to Ship",
+    amount: 80,
+    closeDate: null,
+    shipByOverride: null,
+    shipPlanNote: null,
+    costs: {
+      amount: 80,
+      material: "12",
+      labor: "0",
+      packaging: "0",
+      shipping: "8",
+      grossProfit: 60,
+      marginPercentage: 75,
+      costsComplete: true,
+    },
+    checklist: {
+      dealId,
+      addressVerified: false,
+      costsEntered: true,
+      labelBought: false,
+      trackingPasted: false,
+      packingDone: false,
+      trackingNumber: "",
+      notes: "",
+      completedCount: 1,
+      totalCount: 5,
+      readyPercent: 20,
+      shipReady: false,
+      updatedAt: null,
+    },
+    plates: [{ id: 1, fileName: "plate.ctb", printerProfile: "MEGA 8K", assignedPrinterId: null, assignedPrinterName: null, printTimeSeconds: 3600, resinMassG: 40, attachedAt: "2026-09-20T00:00:00.000Z" }],
+    packingSlip: {
+      dealId,
+      dealName: "Committed order - Ada",
+      amount: 80,
+      stage: "Ready to Ship",
+      contact: { id: null, name: "Ada", email: "", phone: "", addressLines: ["1 Main"] },
+      lines: [{ kind: "deal", label: "Committed order", detail: "plate" }],
+      kitSummary: null,
+      plateCount: 1,
+      checklist: {
+        dealId,
+        addressVerified: false,
+        costsEntered: true,
+        labelBought: false,
+        trackingPasted: false,
+        packingDone: false,
+        trackingNumber: "",
+        notes: "",
+        completedCount: 1,
+        totalCount: 5,
+        readyPercent: 20,
+        shipReady: false,
+        updatedAt: null,
+      },
+      generatedAt: "2026-09-25T19:39:00.000Z",
+    },
+    failures: [],
+    stages: [{ id: "print", label: "Printing", closed: false }],
+    printers: [],
+    hubspotPortalId: "1",
+    writeGate: { dryRun: true, allowWrites: false, liveWriteReady: false },
   };
 }
 
@@ -165,13 +242,30 @@ function bodyFor(pathname: string) {
   if (pathname.startsWith("/api/priority-stack")) {
     const committed = stackRow({
       key: "committed",
+      rank: 1,
       dealId: "c1",
-      name: "Committed order",
+      name: "Committed order - Ada",
       amount: 80,
       tier: "committed",
+      fulfillment: {
+        dealId: "c1",
+        addressVerified: false,
+        costsEntered: false,
+        labelBought: false,
+        trackingPasted: false,
+        packingDone: false,
+        trackingNumber: "",
+        notes: "",
+        completedCount: 1,
+        totalCount: 5,
+        readyPercent: 20,
+        shipReady: false,
+        updatedAt: null,
+      },
     });
     const tentative = stackRow({
       key: "tentative",
+      rank: 2,
       dealId: "c2",
       name: "Tentative order",
       amount: 1200,
@@ -181,6 +275,7 @@ function bodyFor(pathname: string) {
     });
     const offbook = stackRow({
       key: "offbook",
+      rank: 3,
       kind: "offbook",
       dealId: null,
       offbookId: 4,
@@ -194,6 +289,7 @@ function bodyFor(pathname: string) {
     });
     const bundle = stackRow({
       key: "bundle",
+      rank: 4,
       kind: "bundle",
       dealId: null,
       bundleId: 9,
@@ -202,7 +298,9 @@ function bodyFor(pathname: string) {
       tier: "stretch",
       shippingRequired: false,
       members: [
-        stackRow({ key: "member", name: "Member", amount: 45, dealId: "m1" }),
+        stackRow({ key: "m1", name: "Member one", amount: 15, dealId: "m1" }),
+        stackRow({ key: "m2", name: "Member two", amount: 15, dealId: "m2" }),
+        stackRow({ key: "m3", name: "Member three", amount: 15, dealId: "m3" }),
       ],
     });
     return {
@@ -225,7 +323,13 @@ function bodyFor(pathname: string) {
   }
   if (pathname.startsWith("/api/production-queue")) {
     const nextPrint = [queueItem("q1", "next_print", 50), queueItem("q2", "next_print", 75)];
-    const inProduction = [queueItem("q3", "in_production", 90)];
+    const inProduction = [
+      queueItem("q3", "in_production", 90, {
+        tentative: true,
+        shipBySource: "override",
+        shipPlanNote: "Sun 9/27 at risk",
+      }),
+    ];
     return {
       ok: true,
       generatedAt: "2026-09-25T19:39:00.000Z",
@@ -250,6 +354,10 @@ function bodyFor(pathname: string) {
         openOrders: 3,
       },
     };
+  }
+  if (pathname.startsWith("/api/deal-ops/")) {
+    const dealId = pathname.split("/").pop() || "c1";
+    return dealOps(dealId);
   }
   if (pathname.startsWith("/api/printers")) return { ok: true, printers: [] };
   if (pathname.startsWith("/api/resin-reorder")) return { buyNow: [], suggestions: [] };
@@ -368,14 +476,84 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const floorText = await page.locator("body").innerText();
     assert.equal(/calendar/i.test(floorText), false);
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(floorText), false);
+    await page.locator("[data-testid='row-floor-next-1']").first().waitFor();
+    const upNext = await page.locator("[data-testid='row-floor-next-1']").first().innerText();
+    check(upNext.split("Ada").length - 1 === 1, `floor up-next repeats the client: ${upNext}`);
+
+    const current = () => page.locator("[data-testid='page-transition']").last();
+    const checkStackGrid = async (label: string) => {
+      await current().locator("[data-testid='button-open-bundle']").first().evaluate((el) => (el as HTMLElement).click());
+      await current().locator("[data-testid='text-bundle-progress-bundle']").first().waitFor({ state: "attached" });
+      const bundleProg = await current().locator("[data-testid='text-bundle-progress-bundle']").evaluateAll((els) =>
+        els.map((el) => {
+          const rect = el.getBoundingClientRect();
+          return `${(el.textContent || "").trim()} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+        }),
+      );
+      check(
+        bundleProg.some((text) => text.startsWith("0/3 ") && !text.includes(" 0x0")),
+        `${label} bundle count was ${bundleProg.join("|")}`,
+      );
+      const fractions = await current().locator("[data-testid='text-checklist-progress-committed']").allInnerTexts();
+      check(fractions.some((text) => text.trim() === "1/5"), `${label} stack checklist was ${fractions.join("|")}`);
+      const money = await boxes(current(), ".stack-row > .stack-money");
+      assert.ok(money.length >= 3, `${label} stack amounts missing`);
+      const moneyRight = spread(money.map((box) => box.right));
+      check(moneyRight.delta <= 0.5, `${label} stack amount right edges differ by ${moneyRight.delta}`);
+      if (label === "desktop") {
+        const templates = await current().locator(".stack-row").evaluateAll((els) => {
+          const visible = els.filter((el) => el.getClientRects().length > 0);
+          return [...new Set(visible.map((el) => getComputedStyle(el).gridTemplateColumns))];
+        });
+        check(templates.length === 1, `${label} stack grids differ: ${templates.join(" | ")}`);
+      }
+    };
+    const checkDrawer = async (label: string) => {
+      await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
+      await page.locator("[data-testid='text-drawer-checklist-progress']").waitFor({ state: "attached" });
+      const drawerCount = await page.locator("[data-testid='text-drawer-checklist-progress']").innerText();
+      check(/1\/5/.test(drawerCount), `${label} drawer checklist was ${drawerCount}`);
+      const hit = await page.evaluate(() => {
+        const buttons = [...document.querySelectorAll("[data-testid='button-close-deal-ops-drawer']")];
+        const boxes = buttons.map((el) => {
+          const rect = el.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          const inside = x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight;
+          const node = inside ? document.elementFromPoint(x, y) : null;
+          const owned = Boolean(node && (node === el || el.contains(node)));
+          return {
+            x: Math.round(x),
+            y: Math.round(y),
+            inside,
+            owned,
+            hit: node?.getAttribute("data-testid") || node?.tagName || "none",
+          };
+        });
+        const visible = boxes.filter((box) => box.inside);
+        if (visible.length === 0) return `no on-screen close ${JSON.stringify(boxes)}`;
+        if (!visible.every((box) => box.owned)) return `miss ${JSON.stringify(visible)}`;
+        return "ok";
+      });
+      check(hit === "ok", `${label} close button is not the element under its center (${hit})`);
+      const order = await page.locator("[data-testid='drawer-deal-ops']").evaluate((drawer) => {
+        const title = drawer.querySelector("h2");
+        const headings = [...drawer.querySelectorAll("h3")];
+        const plates = headings.find((heading) => /Assign plates/.test(heading.textContent || ""));
+        const slip = headings.find((heading) => /Packing slip/.test(heading.textContent || ""));
+        if (!title || !plates || !slip) return false;
+        const titleTop = title.getBoundingClientRect().top;
+        return titleTop < plates.getBoundingClientRect().top && titleTop < slip.getBoundingClientRect().top;
+      });
+      check(order, `${label} drawer title is not above Assign plates and Packing slip`);
+      await page.locator("[data-testid='button-close-deal-ops-drawer']").evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='drawer-deal-ops']").waitFor({ state: "hidden" });
+    };
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
-    const current = () => page.locator("[data-testid='page-transition']").last();
     await current().locator("[data-testid='stack-row-committed']").first().waitFor();
-    const money = await boxes(current(), ".stack-row > .stack-money");
-    assert.ok(money.length >= 3);
-    const moneyRight = spread(money.map((box) => box.right));
-    check(moneyRight.delta <= 1, `stack amount right edges differ by ${moneyRight.delta}`);
+    await checkStackGrid("desktop");
     const tentativeLabels = await current().locator("[data-testid='button-target-tentative']").allInnerTexts();
     check(tentativeLabels.length > 0, "tentative date missing");
     for (const tentative of tentativeLabels) {
@@ -390,30 +568,77 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
     assert.match(cash, /\$1,305/);
+    await checkDrawer("desktop");
 
     await page.goto(`${base}/#/queue`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='column-next-print']").first().waitFor();
     assert.equal(await current().locator("[data-testid='column-in-production']").count(), 1);
     assert.equal(await current().locator("[data-testid='column-ship-ready']").count(), 0);
     assert.equal(await current().locator("[data-testid='column-blocked']").count(), 0);
-    const byLane = await current().locator(".queue-lane").evaluateAll((lanes) =>
-      lanes.map((lane) =>
-        [...lane.querySelectorAll(".scan-facts span:last-child")].map((el) => el.getBoundingClientRect().right),
-      ),
+    const queueLanes = await current().locator(".queue-lane").evaluateAll((lanes) =>
+      lanes.map((lane) => {
+        const header = lane.querySelector(".queue-lane-header .queue-amount");
+        const rows = [...lane.querySelectorAll(".scan-facts .queue-amount")];
+        return {
+          rights: [header, ...rows].filter((el): el is Element => Boolean(el)).map((el) => el.getBoundingClientRect().right),
+          headerColor: header ? getComputedStyle(header).color : "",
+          rowColor: rows[0] ? getComputedStyle(rows[0]).color : "",
+        };
+      }),
     );
-    for (const rights of byLane) {
-      if (rights.length >= 2) check(spread(rights).delta <= 1, `queue amounts differ by ${spread(rights).delta}`);
+    for (const lane of queueLanes) {
+      if (lane.rights.length >= 2) check(spread(lane.rights).delta <= 0.5, `queue amount edges differ by ${spread(lane.rights).delta}`);
+      if (lane.rowColor) check(lane.headerColor === lane.rowColor, `queue total color ${lane.headerColor} vs row ${lane.rowColor}`);
     }
+    const productionText = await current().locator("[data-testid='column-in-production']").first().evaluate((el) => el.textContent || "");
+    check(/Oct 2 · tentative/.test(productionText), `queue tentative label was ${productionText}`);
+    check(!/Oct 2 · set/.test(productionText), `queue tentative label was ${productionText}`);
+    check(/Sun 9\/27 at risk/.test(productionText), "queue note was rewritten");
+    const nextText = await current().locator("[data-testid='column-next-print']").first().evaluate((el) => el.textContent || "");
+    check(/Oct 2 · plan/.test(nextText), `queue plan label was ${nextText}`);
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-deal-paid-b1']").first().waitFor();
-    const paid = await boxes(current(), "[data-testid^='text-deal-paid-']");
-    const cost = await boxes(current(), "[data-testid^='text-deal-production-']");
-    const profit = await boxes(current(), "[data-testid^='text-deal-revenue-']");
-    check(paid.length >= 2, "order paid figures missing");
-    check(spread(paid.map((box) => box.left)).delta <= 1, `Paid labels left edges differ by ${spread(paid.map((box) => box.left)).delta}`);
-    check(spread(cost.map((box) => box.left)).delta <= 1, `Cost labels left edges differ by ${spread(cost.map((box) => box.left)).delta}`);
-    check(spread(profit.map((box) => box.left)).delta <= 1, `Profit labels left edges differ by ${spread(profit.map((box) => box.left)).delta}`);
+    const orderEdges = await current().locator("[data-testid^='column-deal-stage-']").evaluateAll((lanes) =>
+      lanes.map((lane) =>
+        [...lane.querySelectorAll(".order-figs")].map((figs) =>
+          [...figs.querySelectorAll(".order-fig-value")].map((el) => ({
+            right: el.getBoundingClientRect().right,
+            height: el.getBoundingClientRect().height,
+            color: getComputedStyle(el).color,
+          })),
+        ),
+      ),
+    );
+    const printing = orderEdges.find((groups) => groups.length >= 2) ?? [];
+    check(printing.length >= 3, "order figures missing");
+    for (const index of [0, 1, 2]) {
+      const rights = printing.map((group) => group[index]?.right).filter((value): value is number => value != null);
+      check(spread(rights).delta <= 0.5, `order figure column ${index} edges differ by ${spread(rights).delta}`);
+    }
+    const profitFigs = printing.flatMap((group) => (group[2] ? [group[2]] : []));
+    for (const fig of profitFigs) {
+      check(fig.height <= 22, `profit wrapped to ${fig.height}px`);
+      check(fig.color === "rgb(61, 184, 139)", `profit color was ${fig.color}`);
+    }
+    const chip = await current().locator("[data-testid='chip-deal-b1']").first().evaluate((el) => {
+      const label = el.querySelector("span") ?? el;
+      return {
+        text: (label.textContent || "").replace(/\s+/g, " ").trim(),
+        scroll: label.scrollWidth,
+        client: label.clientWidth,
+      };
+    });
+    check(chip.text === "Needs plates", `chip text was ${chip.text}`);
+    check(chip.scroll <= chip.client + 0.5, `chip clipped (${chip.scroll} > ${chip.client})`);
+    const cardTitle = await current().locator("[data-testid='link-deal-title-b1']").first().evaluate((el) => el.textContent || "");
+    check(!cardTitle.includes("Ada"), `order title still includes the client: ${cardTitle}`);
+    const cardText = await current().locator("[data-testid='card-deal-b1']").first().evaluate((el) => el.textContent || "");
+    check(cardText.split("Ada").length - 1 === 1, `order card repeats the client: ${cardText}`);
+    await current().locator("[data-testid='toggle-orders-view']").last().getByRole("button", { name: "Table" }).click();
+    await current().locator("[data-testid='text-table-profit-b1']").first().waitFor();
+    const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
+    check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
@@ -437,6 +662,55 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.waitForSelector("[data-testid='panel-mobile-more']");
     const moreText = await page.locator("[data-testid='panel-mobile-more']").innerText();
     assert.equal(/\bOrders\b/.test(moreText), false);
+    await page.getByTestId("button-mobile-nav-more").click();
+    await page.locator("[data-testid='panel-mobile-more']").waitFor({ state: "hidden" });
+
+    await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stack-row-committed']").first().waitFor();
+    await checkStackGrid("phone");
+    const phoneRows = await current().locator("[data-testid^='stack-row-']").evaluateAll((els) =>
+      els.filter((el) => el.getClientRects().length > 0).map((el) => {
+        const name = el.querySelector(".stack-name");
+        const line = el.querySelector(".stack-blocker-line");
+        const style = name ? getComputedStyle(name) : null;
+        const lineHeight = style ? Number.parseFloat(style.lineHeight) || 20 : 20;
+        return {
+          id: el.getAttribute("data-testid"),
+          height: el.getBoundingClientRect().height,
+          name: name?.getBoundingClientRect().height ?? 0,
+          blocker: line?.getBoundingClientRect().height ?? 0,
+          budget: lineHeight * 3 + 36,
+          nameBudget: lineHeight * 1.45,
+        };
+      }),
+    );
+    check(phoneRows.length >= 3, "phone stack rows missing");
+    for (const row of phoneRows) {
+      check(row.height <= row.budget, `${row.id} is ${row.height}px, over a 3-line budget of ${row.budget}`);
+      check(row.name <= row.nameBudget, `${row.id} name is ${row.name}px`);
+      check(row.blocker <= row.nameBudget + 4, `${row.id} client/blocker line is ${row.blocker}px`);
+    }
+    await checkDrawer("phone");
+
+    await page.goto(`${base}/#/queue`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='column-next-print']").first().waitFor();
+    const phoneQueue = await current().locator(".queue-lane").evaluateAll((lanes) =>
+      lanes.map((lane) => {
+        const header = lane.querySelector(".queue-lane-header .queue-amount");
+        const rows = [...lane.querySelectorAll(".scan-facts .queue-amount")];
+        return [header, ...rows].filter((el): el is Element => Boolean(el)).map((el) => el.getBoundingClientRect().right);
+      }),
+    );
+    for (const rights of phoneQueue) {
+      if (rights.length >= 2) check(spread(rights).delta <= 0.5, `phone queue amount edges differ by ${spread(rights).delta}`);
+    }
+    const phoneRefresh = await page.locator("[data-testid='button-refresh-queue']").evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).display),
+    );
+    check(phoneRefresh.length > 0 && phoneRefresh.every((display) => display === "none"), `phone queue refresh displays: ${phoneRefresh.join(",")}`);
+    await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
+    const phoneProduction = await current().locator("[data-testid='column-in-production']").first().evaluate((el) => el.textContent || "");
+    check(/Oct 2 · tentative/.test(phoneProduction), `phone queue date was ${phoneProduction}`);
 
     check(pageErrors.length === 0, pageErrors.join("\n"));
     assert.deepEqual(failures, []);
