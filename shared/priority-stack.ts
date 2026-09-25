@@ -160,6 +160,30 @@ export function parseStackAmount(value: string | null | undefined): number | nul
   return Number.isFinite(amount) ? roundMoney(amount) : null;
 }
 
+export function stackFloorLine(input: {
+  rows: Array<{
+    tier: StackTier;
+    kind: string;
+    name: string;
+    contactName: string | null;
+    blocker: string;
+    nextStep: string;
+    amount: number | null;
+  }>;
+  totals: { committed: number };
+}): string {
+  const committed = input.rows.filter((row) => row.tier === "committed");
+  const unpriced = committed.filter((row) => row.kind === "offbook" && row.amount == null);
+  const extra = unpriced.map((row) => row.contactName || row.name).filter(Boolean);
+  const money = `$${input.totals.committed.toFixed(2)}`;
+  const cash = extra.length > 0 ? `${money} + ${extra.join(", ")}` : money;
+  const next = input.rows[0];
+  const who = next ? (next.contactName || next.name) : "";
+  const action = next ? (next.nextStep || next.blocker) : "";
+  const tail = who ? ` · next: ${who}${action ? `, ${action}` : ""}` : "";
+  return `${committed.length} this week · ${cash}${tail}`;
+}
+
 export function laneForBucket(bucket: string | null | undefined): StackLane {
   if (bucket === "next_print") return "plates";
   if (bucket === "blocked") return "bad";

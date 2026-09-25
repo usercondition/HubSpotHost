@@ -25,6 +25,7 @@ import {
   rankPriorityStack,
   shopWeekEnd,
   shopWeekStart,
+  stackFloorLine,
   stackTier,
   suggestedBlocker,
 } from "../shared/priority-stack";
@@ -308,6 +309,18 @@ test("suggested blocker uses shop flags and skips address on pickup", () => {
     requiresPlates: false, hasPlates: true, kitReprint: 0, unassignedPlateCount: 0,
     costsIncomplete: false, addressStatus: "missing", needsReply: false, isStale: false, shippingRequired: false,
   }), "");
+});
+
+test("floor strip names this week's cash, an unpriced pickup, and the next action", () => {
+  const line = stackFloorLine({
+    totals: { committed: 274.95 },
+    rows: [
+      { tier: "committed", kind: "deal", name: "Armigers", contactName: "Jose", blocker: "Pack + Pirate Ship label", nextStep: "pack + label", amount: 59.99 },
+      { tier: "committed", kind: "offbook", name: "Friend order", contactName: "Darell", blocker: "Get the list", nextStep: "", amount: null },
+      { tier: "stretch", kind: "deal", name: "Castigator", contactName: "Wayne", blocker: "Chassis", nextStep: "", amount: 134.99 },
+    ],
+  });
+  assert.equal(line, "2 this week · $274.95 + Darell · next: Jose, pack + label");
 });
 
 test("shop week ends on Sunday and LA rollover stays Friday night", () => {
