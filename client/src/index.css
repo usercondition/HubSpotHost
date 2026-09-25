@@ -412,22 +412,35 @@
     color: hsl(var(--primary));
   }
 
-  .nav-count {
-    margin-left: auto;
-    font-size: 11px;
-    font-weight: 500;
-    color: hsl(var(--text-3));
-  }
-
-  .nav-count-hot {
+  /* One fixed count slot on every row so hot pills and plain numbers share a right edge. */
+  .nav-count,
+  .ops-tab-badge {
     display: inline-flex;
-    min-width: 18px;
-    height: 18px;
+    box-sizing: border-box;
+    width: 24px;
+    min-width: 24px;
+    height: 20px;
+    flex: 0 0 24px;
     align-items: center;
     justify-content: center;
     border-radius: 999px;
+    background: transparent;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums lining-nums;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 20px;
+    letter-spacing: 0;
+    color: hsl(var(--text-3));
+  }
+
+  .nav-count {
+    margin-left: auto;
+  }
+
+  .nav-count-hot {
     background: hsl(var(--primary));
-    padding: 0 5px;
     color: hsl(var(--primary-foreground));
     font-weight: 600;
   }
@@ -525,19 +538,8 @@
 
   .ops-tab-badge {
     position: absolute;
-    top: -6px;
-    right: -10px;
-    display: inline-flex;
-    min-width: 16px;
-    height: 16px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: hsl(var(--warn));
-    padding: 0 4px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #1a1200;
+    top: -8px;
+    right: -12px;
   }
 
   .ops-more-sheet {

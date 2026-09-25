@@ -117,7 +117,7 @@ export function FloorBoard({
           <section className="ops-card" data-testid="panel-floor-needs">
             <div className="floor-card-head">
               <h2>
-                Needs you <span className="nav-count-hot numeric">{needs.length}</span>
+                Needs you <span className="nav-count nav-count-hot numeric">{needs.length}</span>
               </h2>
               <span className="hidden text-[12px] text-[hsl(var(--text-3))] md:inline">Overdue first, then by date</span>
             </div>
