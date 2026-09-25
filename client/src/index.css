@@ -546,7 +546,7 @@
       minmax(0, 1.35fr)
       minmax(0, 0.95fr)
       minmax(0, 1.15fr)
-      8.75rem
+      12rem
       4.75rem
       7.5rem;
     column-gap: 0.6rem;
@@ -611,9 +611,16 @@
     .stack-row .stack-name { grid-area: name; }
     .stack-row .stack-money { grid-area: money; justify-self: end; }
     .stack-row > .stack-facts { display: flex; grid-area: facts; flex-direction: column; align-items: stretch; gap: 0.2rem; overflow: hidden; }
-    .stack-row .stack-date { flex: 0 0 auto; overflow: visible; }
-    .stack-row .stack-date .stack-clip { white-space: nowrap; }
+    .stack-row .stack-member .stack-date { width: max-content; max-width: none; overflow: visible; }
     .stack-row .stack-mobile-actions { display: flex; width: 100%; flex-wrap: nowrap; align-items: center; }
+    .stack-row .stack-mobile-actions > [data-testid^="button-checklist-"],
+    .stack-row .stack-mobile-actions > span.stack-clip { min-width: 0; flex: 1 1 auto; }
+    .stack-row .stack-mobile-actions > [data-testid^="button-target-"] {
+      flex: 0 0 auto;
+      width: max-content;
+      min-width: max-content;
+      max-width: none;
+    }
     .stack-row .stack-desktop-only { display: none; }
   }
 
