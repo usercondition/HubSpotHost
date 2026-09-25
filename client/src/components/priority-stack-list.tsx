@@ -93,7 +93,8 @@ function PhoneSub({ row }: { row: Pick<StackRowModel, "contactName" | "shippingR
   return (
     <span className="stack-phone-sub">
       {who ? <span className="stack-phone-client">{who}</span> : null}
-      <span className="stack-phone-mode">{who ? ` · ${mode}` : mode}</span>
+      {who ? <span className="stack-phone-dot">·</span> : null}
+      <span className="stack-phone-mode">{mode}</span>
     </span>
   );
 }

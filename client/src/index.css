@@ -676,7 +676,17 @@
   }
 
   .floor-next {
-    grid-template-columns: 24px minmax(0, 1.4fr) auto minmax(0, 1fr) 72px;
+    grid-template-columns: 24px minmax(0, 1fr) 10.5rem 9.5rem 4.5rem;
+  }
+
+  .floor-next > :nth-child(3),
+  .floor-next > :nth-child(4) {
+    justify-self: start;
+    min-width: 0;
+  }
+
+  .floor-next > :nth-child(5) {
+    justify-self: end;
   }
 
   .floor-meter {
@@ -1249,26 +1259,24 @@
     .stack-name > .stack-sub { display: none; }
     .stack-phone-sub {
       display: flex;
-      flex: 0 1 auto;
+      flex: 0 0 auto;
       align-items: baseline;
-      min-width: 0;
+      gap: 0.35em;
+      min-width: max-content;
       max-width: none;
       overflow: visible;
       font-size: 12px;
       line-height: 16px;
       color: hsl(var(--text-3));
     }
-    .stack-phone-client {
+    .stack-phone-client,
+    .stack-phone-dot,
+    .stack-phone-mode {
       flex: 0 0 auto;
+      min-width: max-content;
       overflow: visible;
       white-space: nowrap;
-    }
-    .stack-phone-mode {
-      flex: 0 1 auto;
-      min-width: 0;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
+      text-overflow: clip;
     }
     .stack-blocker-line {
       width: 100%;
@@ -1375,7 +1383,7 @@
   .order-fig-value {
     font-variant-numeric: tabular-nums lining-nums;
     white-space: nowrap;
-    line-height: 1.25;
+    line-height: 22px;
   }
 
   .order-fig-pct {

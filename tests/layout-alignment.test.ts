@@ -247,6 +247,7 @@ function bodyFor(pathname: string) {
       name: "Cerastus Chassis - Castigator - Ada",
       amount: 80,
       tier: "committed",
+      stage: "Ready to Ship",
       fulfillment: {
         dealId: "c1",
         addressVerified: false,
@@ -270,6 +271,7 @@ function bodyFor(pathname: string) {
       name: "Tentative order",
       amount: 1200,
       tier: "committed",
+      stage: "Printing",
       tentative: true,
       targetDate: "2026-10-02",
     });
@@ -283,6 +285,7 @@ function bodyFor(pathname: string) {
       contactName: null,
       amount: null,
       tier: "committed",
+      stage: "Queued to Print",
       shippingRequired: false,
       lane: "shop",
       steps: [{ label: "Print", done: false }],
@@ -296,10 +299,20 @@ function bodyFor(pathname: string) {
       name: "Saturday pickup",
       amount: 45,
       tier: "stretch",
+      stage: "Post-Process / QC",
       shippingRequired: false,
+      blocker: "Bundle pickup runs long enough to crowd the mode label",
       members: [
         stackRow({ key: "m1", name: "Member one", contactName: "Daniel Ortega", amount: 15, dealId: "m1", blocker: "Failed piece reprint" }),
-        stackRow({ key: "m2", name: "Member two", contactName: "Wayne Hood", amount: 15, dealId: "m2" }),
+        stackRow({
+          key: "m2",
+          name: "Sword Brethren",
+          contactName: "Wayne Hood",
+          amount: 15,
+          dealId: "m2",
+          shippingRequired: false,
+          blocker: "Pickup label must stay whole while this blocker ellipsizes",
+        }),
         stackRow({
           key: "m3",
           name: "Member three",
@@ -486,6 +499,35 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.locator("[data-testid='row-floor-next-1']").first().waitFor();
     const upNext = await page.locator("[data-testid='row-floor-next-1']").first().innerText();
     check(upNext.split("Ada").length - 1 === 1, `floor up-next repeats the client: ${upNext}`);
+    const upNextCols = await page.locator("[data-testid='page-transition']").last().locator("[data-testid^='row-floor-next-']").evaluateAll((rows) =>
+      rows
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) => {
+          const chip = row.children[2] as HTMLElement | undefined;
+          const date = row.children[3] as HTMLElement | undefined;
+          const amount = row.children[4] as HTMLElement | undefined;
+          return {
+            chip: chip?.getBoundingClientRect().left ?? 0,
+            chipRight: chip?.getBoundingClientRect().right ?? 0,
+            date: date?.getBoundingClientRect().left ?? 0,
+            dateRight: date?.getBoundingClientRect().right ?? 0,
+            amount: amount?.getBoundingClientRect().right ?? 0,
+            amountLeft: amount?.getBoundingClientRect().left ?? 0,
+            chipClip: chip ? chip.scrollWidth - chip.clientWidth : 0,
+            dateClip: date ? date.scrollWidth - date.clientWidth : 0,
+          };
+        }),
+    );
+    check(upNextCols.length >= 3, "floor up-next rows missing");
+    check(spread(upNextCols.map((row) => row.chip)).delta <= 0.5, `up-next chip left edges differ by ${spread(upNextCols.map((row) => row.chip)).delta}`);
+    check(spread(upNextCols.map((row) => row.date)).delta <= 0.5, `up-next date left edges differ by ${spread(upNextCols.map((row) => row.date)).delta}`);
+    check(spread(upNextCols.map((row) => row.amount)).delta <= 0.5, `up-next amount right edges differ by ${spread(upNextCols.map((row) => row.amount)).delta}`);
+    for (const row of upNextCols) {
+      check(row.chipRight <= row.date + 0.5, "up-next chip runs into the date column");
+      check(row.dateRight <= row.amountLeft + 0.5, "up-next date runs into the amount column");
+      check(row.chipClip <= 0.5, "up-next chip is clipped");
+      check(row.dateClip <= 0.5, "up-next date is clipped");
+    }
 
     const current = () => page.locator("[data-testid='page-transition']").last();
     const checkStackGrid = async (label: string) => {
@@ -675,10 +717,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       for (const item of items) {
         // Line boxes run about a pixel outside the cell. Horizontal spill is the overlap bug.
         const outside =
-          item.left < item.cellLeft - 0.5 ||
-          item.right > item.cellRight + 0.5 ||
-          item.top < item.cellTop - 2 ||
-          item.bottom > item.cellBottom + 2;
+          item.left < item.cellLeft ||
+          item.right > item.cellRight ||
+          item.top < item.cellTop ||
+          item.bottom > item.cellBottom;
         check(!outside, `figure text "${item.text}" leaves its cell`);
       }
       for (let i = 0; i < items.length; i += 1) {
@@ -836,6 +878,34 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(client.font >= 12 && client.font <= 13, `${client.text} sub font is ${client.font}px`);
       check(client.scroll <= client.client + 0.5, `${client.text} clipped (${client.scroll} > ${client.client})`);
       check(client.left >= client.rowLeft - 0.5 && client.right <= client.rowRight + 0.5, `${client.text} leaves its row`);
+    }
+    const phoneModes = await current().locator(".stack-phone-sub").evaluateAll((els) =>
+      els
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => {
+          const client = el.querySelector(".stack-phone-client");
+          const dot = el.querySelector(".stack-phone-dot");
+          const mode = el.querySelector(".stack-phone-mode") as HTMLElement | null;
+          const clientBox = client?.getBoundingClientRect();
+          const dotBox = dot?.getBoundingClientRect();
+          const modeBox = mode?.getBoundingClientRect();
+          return {
+            client: (client?.textContent || "").trim(),
+            mode: (mode?.textContent || "").trim(),
+            scroll: mode?.scrollWidth ?? 0,
+            clientWidth: mode?.clientWidth ?? 0,
+            beforeDot: clientBox && dotBox ? dotBox.left - clientBox.right : null,
+            afterDot: dotBox && modeBox ? modeBox.left - dotBox.right : null,
+          };
+        }),
+    );
+    check(phoneModes.some((row) => row.mode === "Pickup"), "phone Pickup label missing");
+    check(phoneModes.some((row) => row.mode === "Ships"), "phone Ships label missing");
+    for (const row of phoneModes) {
+      check(row.mode === "Ships" || row.mode === "Pickup", `phone mode was ${row.mode}`);
+      check(row.scroll <= row.clientWidth + 0.5, `${row.client || "row"} ${row.mode} clipped (${row.scroll} > ${row.clientWidth})`);
+      if (row.beforeDot != null) check(row.beforeDot >= 2, `${row.client}· ${row.mode} is missing the space before the dot (${row.beforeDot.toFixed(1)}px)`);
+      if (row.afterDot != null) check(row.afterDot >= 2, `${row.client} ·${row.mode} is missing the space after the dot (${row.afterDot.toFixed(1)}px)`);
     }
     await checkDrawer("phone");
 
