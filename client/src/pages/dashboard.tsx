@@ -480,7 +480,7 @@ function TodaysWork() {
 
   return (
     <div className="space-y-4" data-testid="panel-todays-work">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto" data-testid="row-floor-actions">
         {clearFloor ? (
           <StatusPill tone="good" icon={CheckCircle2} label="Floor clear" testId="status-floor-clear" />
         ) : (
@@ -492,16 +492,16 @@ function TodaysWork() {
           />
         )}
         <HubspotSyncChip />
-        <Button asChild size="sm" variant="outline" data-testid="link-floor-open-queue">
+        <Button asChild size="sm" variant="outline" className="h-8 shrink-0" data-testid="link-floor-open-queue">
           <Link href="/queue">
-            <ListOrdered className="mr-2 h-3.5 w-3.5" />
-            Open Queue
+            <ListOrdered className="h-3.5 w-3.5" />
+            Queue
           </Link>
         </Button>
-        <Button asChild size="sm" variant="ghost" data-testid="link-floor-open-prints">
+        <Button asChild size="sm" variant="ghost" className="h-8 shrink-0" data-testid="link-floor-open-prints">
           <Link href={floorFocusMeta("plates").workspaceHref}>Prints</Link>
         </Button>
-        <Button asChild size="sm" variant="ghost" data-testid="link-floor-open-intake">
+        <Button asChild size="sm" variant="ghost" className="h-8 shrink-0" data-testid="link-floor-open-intake">
           <Link href="/orders">Intake</Link>
         </Button>
         {performance.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}

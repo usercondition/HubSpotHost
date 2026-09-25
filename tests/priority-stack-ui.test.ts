@@ -46,3 +46,42 @@ test("commit line follows the last this-week row and the last stretch row", () =
     ["a", "b", "Stretch", "c", "This week", "d"],
   );
 });
+
+test("stack row numbers run straight down the list when stored ranks repeat", () => {
+  const lines = rowsWithDividers(
+    [
+      row({ key: "a", tier: "committed", rank: 1 }),
+      row({ key: "b", tier: "committed", rank: 2 }),
+      row({ key: "c", tier: "committed", rank: 3 }),
+      row({ key: "d", tier: "committed", rank: 4 }),
+      row({ key: "e", tier: "committed", rank: 5 }),
+      row({ key: "f", tier: "committed", rank: 4 }),
+      row({ key: "g", tier: "stretch", rank: 5 }),
+      row({ key: "h", tier: "later", rank: 6 }),
+      row({ key: "i", tier: "later", rank: 7 }),
+    ],
+    { committed: 20, stretch: 10, later: 5, outTheDoor: 0, offBookUnpriced: 0 },
+  );
+  assert.deepEqual(
+    lines.filter((line) => line.type === "row").map((line) => line.row.rank),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  );
+});
+
+test("a bundled stack still numbers one row at a time", () => {
+  const lines = rowsWithDividers(
+    [1, 2, 3, 4, 5, 6, 7].map((rank) =>
+      row({
+        key: `row-${rank}`,
+        tier: rank <= 4 ? "committed" : rank === 5 ? "stretch" : "later",
+        rank,
+        kind: rank === 3 ? "bundle" : "deal",
+      }),
+    ),
+    { committed: 20, stretch: 10, later: 5, outTheDoor: 0, offBookUnpriced: 0 },
+  );
+  assert.deepEqual(
+    lines.filter((line) => line.type === "row").map((line) => line.row.rank),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+});
