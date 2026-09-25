@@ -530,7 +530,56 @@
   .queue-lane[data-lane='good'],
   .floor-row[data-lane='good'] { --lane: hsl(var(--accent)); }
   .queue-lane[data-lane='shop'],
-  .floor-row[data-lane='shop'] { --lane: hsl(262 70% 70%); }
+  .floor-row[data-lane='shop'],
+  .stack-row[data-lane='shop'] { --lane: hsl(262 70% 70%); }
+
+  .stack-row[data-lane='plates'] { --lane: hsl(var(--primary)); }
+  .stack-row[data-lane='fly'] { --lane: hsl(210 78% 62%); }
+  .stack-row[data-lane='bad'] { --lane: hsl(var(--destructive)); }
+  .stack-row[data-lane='good'] { --lane: hsl(var(--accent)); }
+
+  .stack-row {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1.4fr) minmax(7rem, 0.7fr) minmax(8rem, 1fr) 7.5rem 5.5rem auto;
+    gap: 0.35rem 0.6rem;
+    align-items: center;
+    border-left: 3px solid var(--lane, hsl(var(--border)));
+    padding: 0.55rem 0.65rem;
+  }
+
+  .stack-rank {
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .stack-mobile-actions { display: none; }
+
+  .stack-commit-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-top: 1px dashed hsl(var(--border));
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8125rem;
+    color: hsl(var(--muted-foreground));
+  }
+
+  @media (max-width: 767px) {
+    .stack-row {
+      grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+      grid-template-areas:
+        "rank name money"
+        "rank facts facts";
+    }
+    .stack-row .stack-rank { grid-area: rank; }
+    .stack-row .stack-name { grid-area: name; }
+    .stack-row .stack-money { grid-area: money; justify-self: end; }
+    .stack-row .stack-facts { grid-area: facts; display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; }
+    .stack-row .stack-mobile-actions { display: flex; width: 100%; }
+    .stack-row .stack-desktop-only { display: none; }
+  }
 
   .queue-lane-body > .floor-row[data-lane] {
     border: 0;
