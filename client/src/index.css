@@ -540,11 +540,38 @@
 
   .stack-row {
     display: grid;
-    grid-template-columns: 2.25rem minmax(0, 1.4fr) minmax(7rem, 0.7fr) minmax(8rem, 1fr) 7.5rem 5.5rem auto;
-    gap: 0.35rem 0.6rem;
+    grid-template-columns:
+      1.15rem
+      1.5rem
+      minmax(0, 1.35fr)
+      minmax(0, 0.95fr)
+      minmax(0, 1.15fr)
+      8.75rem
+      4.75rem
+      5.75rem;
+    column-gap: 0.6rem;
     align-items: center;
     border-left: 3px solid var(--lane, hsl(var(--border)));
     padding: 0.55rem 0.65rem;
+  }
+
+  .stack-check,
+  .stack-rank,
+  .stack-name,
+  .stack-stage,
+  .stack-blocker,
+  .stack-date,
+  .stack-money,
+  .stack-actions {
+    min-width: 0;
+  }
+
+  .stack-clip {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .stack-rank {
@@ -573,6 +600,7 @@
         "rank name money"
         "rank facts facts";
     }
+    .stack-row .stack-check { display: none; }
     .stack-row .stack-rank { grid-area: rank; }
     .stack-row .stack-name { grid-area: name; }
     .stack-row .stack-money { grid-area: money; justify-self: end; }
