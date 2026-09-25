@@ -370,10 +370,10 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         mode: "rules",
         reply:
           queue
-            ? `Ship calendar looks clear for ${today} (LA). No overdue, due-today, or next-7-day projected ship-bys on open Print Orders.`
-            : "I don’t have production-queue ship-by dates loaded right now — open Floor to see the calendar.",
+            ? `Ship dates look clear for ${today} (LA). No overdue, due-today, or next-7-day projected ship-bys on open Print Orders.`
+            : "I don’t have ship-by dates loaded right now — open the Stack.",
         actions: [
-          { label: "Open Floor", href: "/" },
+          { label: "Open Stack", href: "/stack" },
           { label: "Open Queue", href: "/queue" },
         ],
         usedFacts,
@@ -387,7 +387,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         lines.push(
           `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
-        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+        actions.push({ label: `Stack · ${deal.dealName.slice(0, 24)}`, href: `/stack?dealId=${encodeURIComponent(deal.dealId)}` });
       }
       lines.push("");
     }
@@ -397,7 +397,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         lines.push(
           `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
-        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+        actions.push({ label: `Stack · ${deal.dealName.slice(0, 24)}`, href: `/stack?dealId=${encodeURIComponent(deal.dealId)}` });
       }
       lines.push("");
     }
@@ -407,12 +407,12 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         lines.push(
           `• ${deal.dealName} — ${shipByHonestyLabel(deal.shipBy!, today, deal.shipBySource)}${deal.shipByReason ? ` · ${deal.shipByReason}` : ""}${deal.amount ? ` · ${money(deal.amount)}` : ""}`,
         );
-        actions.push({ label: `Ops · ${deal.dealName.slice(0, 24)}`, href: queueHref(deal.dealId) });
+        actions.push({ label: `Stack · ${deal.dealName.slice(0, 24)}`, href: `/stack?dealId=${encodeURIComponent(deal.dealId)}` });
       }
     }
     lines.push("");
     lines.push("Override dates (HubSpot print_ship_by) stick; derived dates move with plates/stage.");
-    actions.push({ label: "Floor calendar", href: "/" });
+    actions.push({ label: "Open Stack", href: "/stack" });
     return { ok: true, mode: "rules", reply: lines.join("\n").trim(), actions: actions.slice(0, 6), usedFacts };
   }
 
@@ -469,9 +469,9 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
         reply:
           queue
             ? `Nothing is ship-ready yet. Queue: ${queue.summary.nextPrint} next print · ${queue.summary.inProduction} in production · ${queue.summary.blocked} blocked.`
-            : "No ship-ready orders are flagged right now. Check Queue when packs are ready, then buy or drop a label on Labels.",
+            : "No ship-ready orders are flagged right now. Check the Stack, then buy or drop a label on Labels.",
         actions: [
-          { label: "Open Queue", href: "/queue" },
+          { label: "Open Stack", href: "/stack" },
           { label: "Labels", href: "/labels" },
         ],
         usedFacts,

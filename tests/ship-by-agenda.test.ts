@@ -146,7 +146,8 @@ test("tracker assistant answers due / overdue from shipAgenda", () => {
   assert.match(answer.reply, /Late bust/);
   assert.match(answer.reply, /Due knight/);
   assert.match(answer.reply, /Ship honesty/);
-  assert.ok(answer.actions.some((action) => action.href === "/"));
+  assert.ok(answer.actions.some((action) => action.href === "/stack"));
+  assert.ok(answer.actions.some((action) => action.href.includes("/stack?dealId=late")));
 });
 
 test("tracker briefing elevates overdue ship-bys", () => {

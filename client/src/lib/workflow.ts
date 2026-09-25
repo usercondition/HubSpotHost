@@ -34,6 +34,25 @@ export function stackHref(dealId?: string | null): string {
   return id ? `/stack?dealId=${encodeURIComponent(id)}` : "/stack";
 }
 
+/** Ship-ready and blocked orders live on the Stack. Printer lanes stay on Queue. */
+export function floorWorkHref(dealId: string, bucket: string): string {
+  if (bucket === "ship_ready" || bucket === "blocked") return stackHref(dealId);
+  return queueDealHref(dealId);
+}
+
+/**
+ * Deep link that landed on Queue for a deal the printer lanes no longer show.
+ * Returns a Stack href, or null when the deal is still a printer card (or unknown).
+ */
+export function parkedQueueHref(
+  dealId: string,
+  lanes: { nextPrint: string[]; inProduction: string[]; shipReady: string[]; blocked: string[] },
+): string | null {
+  if (lanes.nextPrint.includes(dealId) || lanes.inProduction.includes(dealId)) return null;
+  if (lanes.shipReady.includes(dealId) || lanes.blocked.includes(dealId)) return stackHref(dealId);
+  return null;
+}
+
 export function labelsDealHref(dealId?: string | null): string {
   const id = String(dealId ?? "").trim();
   return id ? `/labels?dealId=${encodeURIComponent(id)}` : "/labels";
