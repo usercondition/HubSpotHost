@@ -23,7 +23,6 @@ import {
   fetchPrintOrderPipelineStages,
   hubspotRequest,
   HubSpotError,
-  invalidatePrintOrderDealsCache,
   ensurePrintFileDealProperties,
   PRINT_ORDERS_PIPELINE,
 } from "./hubspot";
@@ -305,11 +304,11 @@ export async function updateShipByPlan(
   try {
     if (decision.write) {
       await ensurePrintFileDealProperties();
-      await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ properties }),
-      });
-      invalidatePrintOrderDealsCache();
+      const { submitHubspotWrite } = await import("./hubspot-writes");
+      const queued = await submitHubspotWrite(id, properties);
+      if (!queued.wrote && !queued.pending) {
+        return { ok: false, error: queued.error || "Could not update ship-by plan.", status: 502 };
+      }
     }
     return {
       ok: true,
@@ -343,6 +342,7 @@ export async function updateDealCosts(
     if (trimmed === "") return;
     const n = Number(trimmed.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(n) || n < 0) return;
+    if (key === "print_actual_shipping_cost" && n === 0) return;
     properties[key] = String(n);
   };
   assign("print_material_cost", input.material);
@@ -351,16 +351,16 @@ export async function updateDealCosts(
   assign("print_actual_shipping_cost", input.shipping);
 
   if (Object.keys(properties).length === 0) {
-    return { ok: false, error: "Enter at least one cost field.", status: 400 };
+    return { ok: false, error: "Enter at least one cost field. Postage is saved only from a real label.", status: 400 };
   }
 
   try {
     if (decision.write) {
-      await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ properties }),
-      });
-      invalidatePrintOrderDealsCache();
+      const { submitHubspotWrite } = await import("./hubspot-writes");
+      const queued = await submitHubspotWrite(id, properties);
+      if (!queued.wrote && !queued.pending) {
+        return { ok: false, error: queued.error || "Could not update deal costs.", status: 502 };
+      }
       const recalc = await recalculateDeal({
         dealId: id,
         origin: "manual",
@@ -427,7 +427,7 @@ export async function seedPrintDealCosts(
         : "";
     const postage = String(input.postage ?? "").trim();
     const postageAmount = Number(postage.replace(/[$,\s]/g, ""));
-    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount >= 0;
+    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount > 0;
 
     const defaults: UpdateDealCostsInput = {
       material: isBlank(props.print_material_cost) ? materialEstimate : "",
@@ -467,16 +467,14 @@ export async function advanceDealStage(
 
   try {
     if (decision.write) {
-      await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          properties: {
-            pipeline: PRINT_ORDERS_PIPELINE,
-            dealstage: target.id,
-          },
-        }),
+      const { submitHubspotWrite } = await import("./hubspot-writes");
+      const queued = await submitHubspotWrite(id, {
+        pipeline: PRINT_ORDERS_PIPELINE,
+        dealstage: target.id,
       });
-      invalidatePrintOrderDealsCache();
+      if (!queued.wrote && !queued.pending) {
+        return { ok: false, error: queued.error || "Could not advance deal stage.", status: 502 };
+      }
     }
     return {
       ok: true,

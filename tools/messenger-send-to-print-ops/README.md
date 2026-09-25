@@ -6,7 +6,7 @@ who to reply to, who’s waiting on payment, who’s ready to book, what to do n
 ## Live install
 
 1. After deploy, download:
-   `https://print-orders-margin.pplx.app/port/5000/downloads/messenger-send-to-print-ops-v1.zip`
+   `https://hubspothost-production.up.railway.app/downloads/messenger-send-to-print-ops-v1.zip`
    (also linked from **Brief** and **Manual** in the app)
 2. Unzip → in Comet, open `chrome://extensions` → Developer mode → **Load unpacked**
 3. Options: Railway URL (prefilled) + owner access code → Save

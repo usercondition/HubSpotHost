@@ -41,20 +41,34 @@ export function syncIssueLabel(count: number): string {
   return `HubSpot sync: ${count} ${count === 1 ? "issue" : "issues"}`;
 }
 
+export function syncChipLabel(summary: HubspotSyncSummary | undefined): string {
+  const issues = summary?.issueCount ?? 0;
+  const pending = summary?.writes?.pending ?? 0;
+  const failed = summary?.writes?.failed ?? 0;
+  const parts: string[] = [];
+  if (issues > 0) parts.push(`${issues} ${issues === 1 ? "issue" : "issues"}`);
+  if (pending > 0) parts.push(`${pending} pending`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  return parts.length > 0 ? `HubSpot sync: ${parts.join(" · ")}` : "HubSpot sync";
+}
+
 export function HubspotSyncChip() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const count = health.data?.hubspotSync?.issueCount ?? 0;
-  if (count < 1) return null;
+  const summary = health.data?.hubspotSync;
+  const count = summary?.issueCount ?? 0;
+  const pending = summary?.writes?.pending ?? 0;
+  const failed = summary?.writes?.failed ?? 0;
+  if (count < 1 && pending < 1 && failed < 1) return null;
   return (
     <HubspotSyncDialog
       trigger={
         <button
           type="button"
-          className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-transparent bg-chart-4/10 px-2 py-1 text-[0.8125rem] font-semibold text-chart-4"
+          className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border border-transparent bg-chart-4/10 px-2 py-1 text-[0.8125rem] font-semibold text-chart-4"
           data-testid="button-hubspot-sync"
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          {syncIssueLabel(count)}
+          {syncChipLabel(summary)}
         </button>
       }
     />

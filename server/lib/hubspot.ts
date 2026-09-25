@@ -203,11 +203,22 @@ export function boolPropertyNeedsOptionRepair(property: {
 
 export class HubSpotError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  retryAfterMs: number | null;
+  constructor(message: string, status: number, retryAfterMs: number | null = null) {
     super(message);
     this.name = "HubSpotError";
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+  const when = Date.parse(header);
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, when - Date.now());
 }
 
 function authHeaders(token: string): Record<string, string> {
@@ -249,7 +260,14 @@ export async function hubspotRequest(
       throw new HubSpotError(
         `HubSpot API ${res.status}${detail ? `: ${detail}` : ""}`,
         res.status,
+        retryAfterMs(res.headers.get("retry-after")),
       );
+    }
+    const method = init.method.toUpperCase();
+    const isSearch = path.includes("/search");
+    if (method !== "GET" && method !== "HEAD" && !isSearch) {
+      const { recordHubspotWriteSuccess } = await import("./hubspot-write-log");
+      recordHubspotWriteSuccess();
     }
     return text ? JSON.parse(text) : {};
   } catch (err) {
@@ -520,10 +538,10 @@ export async function fetchPrintOrderDeals(options?: {
     printOrderDealsCache &&
     now - printOrderDealsCache.fetchedAt < PRINT_ORDER_DEALS_CACHE_MS
   ) {
-    return printOrderDealsCache.value;
+    return overlayLocalTruth(printOrderDealsCache.value);
   }
   if (!options?.bypassCache && printOrderDealsInflight) {
-    return printOrderDealsInflight;
+    return printOrderDealsInflight.then((deals) => overlayLocalTruth(deals));
   }
 
   const pending = searchPrintOrderDeals()
@@ -535,7 +553,16 @@ export async function fetchPrintOrderDeals(options?: {
       if (printOrderDealsInflight === pending) printOrderDealsInflight = null;
     });
   printOrderDealsInflight = pending;
-  return pending;
+  return overlayLocalTruth(await pending);
+}
+
+async function overlayLocalTruth(deals: HubSpotDealRecord[]): Promise<HubSpotDealRecord[]> {
+  try {
+    const { overlayPendingHubspotWrites } = await import("./hubspot-writes");
+    return overlayPendingHubspotWrites(deals);
+  } catch {
+    return deals;
+  }
 }
 
 let cachedPortalId: { value: string; fetchedAt: number } | null = null;

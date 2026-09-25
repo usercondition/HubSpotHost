@@ -125,7 +125,7 @@ This works well for a single service and keeps the current SQLite queue across r
 
 ### Background shipment jobs
 
-With `REDIS_URL`, Print Ops uses BullMQ for shipped-email and Marketplace/OfferUp ship-note jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback.
+With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp ship-note, HubSpot webhook, and outbound HubSpot write jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. Webhook batches are stored in SQLite and acked before processing. Ship-by, stage, cost, and pickup writes stay in SQLite until HubSpot accepts them, and retries honor Retry-After. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback. The 15-minute sync check remains the backstop.
 
 ### Durable production direction
 
@@ -190,7 +190,7 @@ Copy `.env.example` and keep `.env` out of source control.
 | `HUBSPOT_ACCESS_TOKEN` | Fallback | Private-app token if the custom credential variable is not injected. |
 | `HUBSPOT_WEBHOOK_SECRET` | Recommended | Private-app client secret used to validate webhook signatures. |
 | `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
-| `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://print-orders-margin.pplx.app/port/5000`. |
+| `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://hubspothost-production.up.railway.app`. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
 | `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Required in any live deployment | SHA-256 hash of the owner access code used by both intake routes and all Order links owner APIs. The server never stores the plain code and the app fails closed when this is absent. |
@@ -205,16 +205,19 @@ The service needs a publicly reachable HTTPS URL before HubSpot can call it. A p
 
 1. Deploy the service to a public HTTPS host and note:
    ```text
-   https://YOUR-HOST/api/webhooks/hubspot
+   https://hubspothost-production.up.railway.app/api/webhooks/hubspot
    ```
 2. In HubSpot, open **Development** > **Legacy apps** > your standalone private app.
 3. Open **Webhooks**, choose **Edit webhooks**, and set the Target URL to the endpoint above.
-4. Create five **Deals** > **Property changed** subscriptions, one for each source field:
-   - `amount`
-   - `print_material_cost`
-   - `print_labor_cost`
-   - `print_packaging_cost`
-   - `print_actual_shipping_cost`
+4. Create these **Deals** subscriptions. The handler ignores anything else, including the profit output fields:
+   - Property changed: `amount`
+   - Property changed: `print_material_cost`
+   - Property changed: `print_labor_cost`
+   - Property changed: `print_packaging_cost`
+   - Property changed: `print_actual_shipping_cost`
+   - Property changed: `dealstage`
+   - `deal.creation`
+   - `deal.deletion`
 5. Save with **Commit changes**. HubSpot lets you use **View details** > **Test** on the subscription to deliver a sample event.
 6. In the private app’s **Auth** tab, store the client secret in the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable, or inject it through the secure credential mapped to `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN`. Never put it in browser code or source control.
 7. Use a non-customer test deal to send a manual dry run. Confirm the audit row and figures.

@@ -8,9 +8,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import express from "express";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerRoutes } from "../server/routes";
 import { computeV1Signature, computeV3Signature } from "../server/lib/signature";
 import { resetAudit } from "../server/lib/audit";
+import { resetOrderLinkStore } from "../server/lib/order-links";
+import { webhookProcessingSettled } from "../server/lib/webhook-inbox";
 
 interface MockCall {
   method: string;
@@ -25,6 +30,8 @@ let app: http.Server;
 let appBase = "";
 const initialNodeEnv = process.env.NODE_ENV;
 const initialInternalAdmin = process.env.ENABLE_INTERNAL_ADMIN;
+const initialDb = process.env.ORDER_LINKS_DB_FILE;
+const dbDir = mkdtempSync(join(tmpdir(), "webhook-integration-"));
 
 const DEAL_PROPS: Record<string, string> = {
   amount: "150",
@@ -64,6 +71,8 @@ before(async () => {
   delete process.env.HUBSPOT_WEBHOOK_SECRET;
   process.env.DRY_RUN = "true";
   process.env.ALLOW_HUBSPOT_WRITES = "false";
+  process.env.ORDER_LINKS_DB_FILE = join(dbDir, "test.db");
+  resetOrderLinkStore();
 
   const expressApp = express();
   expressApp.use(
@@ -87,6 +96,10 @@ after(() => {
   else process.env.NODE_ENV = initialNodeEnv;
   if (initialInternalAdmin === undefined) delete process.env.ENABLE_INTERNAL_ADMIN;
   else process.env.ENABLE_INTERNAL_ADMIN = initialInternalAdmin;
+  if (initialDb === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+  else process.env.ORDER_LINKS_DB_FILE = initialDb;
+  resetOrderLinkStore();
+  rmSync(dbDir, { recursive: true, force: true });
 });
 
 function reset() {
@@ -147,12 +160,14 @@ test("webhook batch de-duplicates deals and skips output events", async () => {
     body: JSON.stringify(payload),
   });
   const body = await res.json();
+  assert.equal(body.queued, true);
   assert.equal(body.deals, 1);
   assert.equal(body.matched, 2);
   assert.equal(body.ignoredOutputEvents, 1);
   assert.equal(body.ignoredOther, 1);
-  assert.equal(body.dryRun, 1);
+  await webhookProcessingSettled();
   assert.equal(mockCalls.filter((c) => c.method === "GET").length, 1);
+  assert.equal(mockCalls.filter((c) => c.method === "PATCH").length, 0);
 });
 
 test("verified webhook writes automatically once its server gates are opened", async () => {
@@ -169,7 +184,9 @@ test("verified webhook writes automatically once its server gates are opened", a
       body: JSON.stringify(payload),
     });
     const body = await res.json();
-    assert.equal(body.written, 1);
+    assert.equal(body.queued, true);
+    assert.equal(res.status, 200);
+    await webhookProcessingSettled();
     assert.equal(mockCalls.filter((c) => c.method === "PATCH").length, 1);
   } finally {
     process.env.DRY_RUN = "true";
@@ -199,6 +216,7 @@ test("webhook rejects a bad v1 signature and accepts a good one", async () => {
     });
     assert.equal(good.status, 200);
     assert.equal((await good.json()).deals, 1);
+    await webhookProcessingSettled();
   } finally {
     delete process.env.HUBSPOT_WEBHOOK_SECRET;
   }
