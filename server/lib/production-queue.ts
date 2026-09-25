@@ -101,7 +101,7 @@ function durationHours(seconds: number): string {
   return `${Number.isInteger(hours) ? hours.toFixed(0) : hours}h`;
 }
 
-function isPostProcessStage(stage: string | null | undefined): boolean {
+export function isPostProcessStage(stage: string | null | undefined): boolean {
   return /\b(post[\s-]?process(?:ing)?|wash(?:ing)?|cur(?:e|ing)|qc|quality control|inspection)\b/i.test(stage ?? "");
 }
 

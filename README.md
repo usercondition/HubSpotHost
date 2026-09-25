@@ -37,6 +37,10 @@ The service starts in safe mode:
 
 Do not enable both live-write environment settings until a test deal produces the expected dry-run values.
 
+## Priority Stack
+
+`#/stack` ranks what goes out the door this week. Blocker text, manual order, pickup bundles, and off-book orders (a friend pickup that is not a HubSpot deal) live in the same SQLite file as fulfillment checklists. Deal target dates stay on the HubSpot `print_ship_by` field. The blocker is not stored in `print_ship_notes`, which is the ship plan.
+
 ## Client order links (primary intake)
 
 **Order links** is the main way a paid Marketplace order enters the system. Nothing reaches HubSpot until you approve it.

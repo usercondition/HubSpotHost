@@ -352,6 +352,45 @@ CREATE TABLE IF NOT EXISTS kits (
 CREATE INDEX IF NOT EXISTS kits_updated_at_idx ON kits (updated_at DESC);
 `;
 
+const CREATE_PRIORITY_STACK_SQL = `
+CREATE TABLE IF NOT EXISTS priority_stack_bundles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  fulfillment_mode TEXT NOT NULL DEFAULT 'pickup',
+  manual_rank INTEGER,
+  blocker TEXT NOT NULL DEFAULT '',
+  next_step TEXT NOT NULL DEFAULT '',
+  tier_override TEXT,
+  done_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS priority_stack_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  hubspot_deal_id TEXT UNIQUE,
+  bundle_id INTEGER,
+  manual_rank INTEGER,
+  blocker TEXT NOT NULL DEFAULT '',
+  next_step TEXT NOT NULL DEFAULT '',
+  tier_override TEXT,
+  tentative INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL DEFAULT '',
+  contact_name TEXT NOT NULL DEFAULT '',
+  amount TEXT NOT NULL DEFAULT '',
+  target_date TEXT,
+  fulfillment_mode TEXT NOT NULL DEFAULT 'ship',
+  steps_json TEXT NOT NULL DEFAULT '[]',
+  done_at TEXT,
+  done_amount TEXT NOT NULL DEFAULT '',
+  done_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS priority_stack_entries_bundle_idx ON priority_stack_entries (bundle_id);
+`;
+
 const CREATE_FULFILLMENT_CHECKLISTS_SQL = `
 CREATE TABLE IF NOT EXISTS fulfillment_checklists (
   hubspot_deal_id TEXT PRIMARY KEY,
@@ -512,6 +551,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   sqlite.exec(CREATE_KITS_SQL);
   sqlite.exec(CREATE_FULFILLMENT_CHECKLISTS_SQL);
+  sqlite.exec(CREATE_PRIORITY_STACK_SQL);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);

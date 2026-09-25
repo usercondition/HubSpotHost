@@ -1889,6 +1889,115 @@ export const fulfillmentChecklists = sqliteTable("fulfillment_checklists", {
 
 export type FulfillmentChecklist = typeof fulfillmentChecklists.$inferSelect;
 
+/** Shop-floor pickup/ship groups. Rank and blocker stay local; member dates stay in HubSpot. */
+export const priorityStackBundles = sqliteTable("priority_stack_bundles", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  label: text("label").notNull(),
+  fulfillmentMode: text("fulfillment_mode").notNull().default("pickup"),
+  manualRank: integer("manual_rank"),
+  blocker: text("blocker").notNull().default(""),
+  nextStep: text("next_step").notNull().default(""),
+  tierOverride: text("tier_override"),
+  doneAt: text("done_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PriorityStackBundleRow = typeof priorityStackBundles.$inferSelect;
+
+/**
+ * Per-deal stack overrides and off-book orders.
+ * Blocker text is local only — it must not reuse fulfillment notes / print_ship_notes.
+ */
+export const priorityStackEntries = sqliteTable("priority_stack_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kind: text("kind").notNull(),
+  hubspotDealId: text("hubspot_deal_id"),
+  bundleId: integer("bundle_id"),
+  manualRank: integer("manual_rank"),
+  blocker: text("blocker").notNull().default(""),
+  nextStep: text("next_step").notNull().default(""),
+  tierOverride: text("tier_override"),
+  tentative: integer("tentative", { mode: "boolean" }).notNull().default(false),
+  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+  title: text("title").notNull().default(""),
+  contactName: text("contact_name").notNull().default(""),
+  amount: text("amount").notNull().default(""),
+  targetDate: text("target_date"),
+  fulfillmentMode: text("fulfillment_mode").notNull().default("ship"),
+  stepsJson: text("steps_json").notNull().default("[]"),
+  doneAt: text("done_at"),
+  doneAmount: text("done_amount").notNull().default(""),
+  doneName: text("done_name").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PriorityStackEntryRow = typeof priorityStackEntries.$inferSelect;
+
+const stackTierSchema = z.enum(["committed", "stretch", "later"]);
+const stackBlocker = z.string().trim().max(500, "Blocker must be 500 characters or fewer");
+const stackDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date");
+const stackDealId = z.string().trim().regex(/^[0-9]{1,20}$/, "Select a valid Print Order");
+export const stackKeySchema = z
+  .string()
+  .trim()
+  .regex(/^(deal:[0-9]{1,20}|offbook:[1-9][0-9]*|bundle:[1-9][0-9]*)$/, "Unknown stack key");
+
+export const updateStackEntrySchema = z
+  .object({
+    blocker: stackBlocker.optional(),
+    nextStep: stackBlocker.optional(),
+    tier: stackTierSchema.nullable().optional(),
+    tentative: z.boolean().optional(),
+    hidden: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+export const stackOrderSchema = z.object({
+  keys: z.array(stackKeySchema).min(1, "Give the stack an order").max(200),
+});
+
+export const createStackBundleSchema = z.object({
+  label: z.string().trim().min(1, "Name the bundle").max(120),
+  mode: z.enum(["pickup", "ship"]).default("pickup"),
+  dealIds: z.array(stackDealId).min(2, "A bundle needs at least two orders").max(20),
+});
+
+export const updateStackBundleSchema = z
+  .object({
+    label: z.string().trim().min(1).max(120).optional(),
+    mode: z.enum(["pickup", "ship"]).optional(),
+    blocker: stackBlocker.optional(),
+    nextStep: stackBlocker.optional(),
+    tier: stackTierSchema.nullable().optional(),
+    addDealIds: z.array(stackDealId).max(20).optional(),
+    removeDealIds: z.array(stackDealId).max(20).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Nothing to update");
+
+const offbookStepSchema = z.object({
+  label: z.string().trim().min(1).max(80),
+  done: z.boolean(),
+});
+
+export const offbookEntrySchema = z.object({
+  title: z.string().trim().min(1, "Name the order").max(160),
+  contactName: z.string().trim().max(120).default(""),
+  mode: z.enum(["pickup", "ship"]).default("pickup"),
+  targetDate: stackDate.nullable().optional(),
+  amount: z.string().trim().max(20).default(""),
+  blocker: stackBlocker.default(""),
+  nextStep: stackBlocker.default(""),
+  tentative: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  steps: z.array(offbookStepSchema).max(12).optional(),
+});
+
+export const stackDoneSchema = z.object({
+  key: stackKeySchema,
+});
+
 export const PRODUCTION_FAILURE_TYPES = [
   "print_fail",
   "support_fail",
