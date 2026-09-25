@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   FileUp,
   Loader2,
   MessageCircle,
-  PackageCheck,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { queueDealHref, readHashQueryParam, stackHref } from "@/lib/workflow";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -192,7 +192,7 @@ export default function ProductionQueuePage() {
     successDescription: "Next print, in-production jobs, and ship-ready checklists.",
   });
   const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
-  const [focus, setFocus] = useState<"needsReply" | "readyToPack" | null>(null);
+  const [focus, setFocus] = useState<"needsReply" | null>(null);
 
   const selectDeal = useCallback((dealId: string | null) => {
     setSelectedDealId(dealId);
@@ -298,15 +298,6 @@ export default function ProductionQueuePage() {
                 <MessageCircle className="mr-2 h-3.5 w-3.5" />
                 Needs reply ({data.summary.needsReply})
               </Button>
-              <Button
-                size="sm"
-                variant={focus === "readyToPack" ? "default" : "outline"}
-                onClick={() => setFocus((current) => (current === "readyToPack" ? null : "readyToPack"))}
-                data-testid="button-filter-ready-to-pack"
-              >
-                <PackageCheck className="mr-2 h-3.5 w-3.5" />
-                Ready to pack / ship ({data.summary.readyToPack})
-              </Button>
               {focus ? (
                 <Button size="sm" variant="ghost" onClick={() => setFocus(null)}>
                   Clear filter
@@ -322,7 +313,15 @@ export default function ProductionQueuePage() {
               </p>
             ) : null}
 
-            <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">
+            <p className="text-sm text-muted-foreground" data-testid="text-queue-stack-link">
+              Ready to ship ({data.shipReady.length}) and blocked ({data.blocked.length}) orders are on the{" "}
+              <Link href={stackHref()} className="font-medium text-primary hover:underline" data-testid="link-queue-stack">
+                Stack
+              </Link>
+              .
+            </p>
+
+            <div className="grid gap-6 lg:grid-cols-2">
               <QueueColumn
                 title="Next print"
                 subtitle="Open orders still missing plate data"
@@ -342,26 +341,6 @@ export default function ProductionQueuePage() {
                 empty="Nothing mid-flight right now."
                 testId="column-in-production"
                 lane="fly"
-              />
-              <QueueColumn
-                title="Blocked"
-                subtitle="Needs parts QC or printer assignment"
-                items={focusedItems(data.blocked)}
-                selectedId={selectedDealId}
-                onSelect={selectDeal}
-                empty="No QC or assignment blockers."
-                testId="column-blocked"
-                lane="bad"
-              />
-              <QueueColumn
-                title="Ship ready"
-                subtitle="Checklist mostly done — buy label & pack"
-                items={focusedItems(data.shipReady)}
-                selectedId={selectedDealId}
-                onSelect={selectDeal}
-                empty="No orders near ship-ready yet."
-                testId="column-ship-ready"
-                lane="good"
               />
             </div>
 
