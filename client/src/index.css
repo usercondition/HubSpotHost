@@ -1275,6 +1275,32 @@
     color: var(--lane);
   }
 
+  .queue-lane .scan-facts {
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+
+  .queue-amount {
+    width: 5.5rem;
+    flex: none;
+    margin-left: auto;
+    text-align: right;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  .queue-printer {
+    display: inline-flex;
+    height: 20px;
+    flex: none;
+    align-items: center;
+    border: 1px solid hsl(var(--line));
+    border-radius: 4px;
+    background: hsl(var(--raised));
+    padding: 0 6px;
+    font-size: 11px;
+    color: hsl(var(--text-2));
+  }
+
   /* Titled group container — soft charcoal card (settings-adjacent) */
   .workspace-section {
     border-radius: calc(var(--radius) + 4px);

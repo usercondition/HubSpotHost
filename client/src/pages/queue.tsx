@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { parkedQueueHref, readHashQueryParam, searchWithoutParam, stackHref, stripDealIdFromLocation } from "@/lib/workflow";
+import { parkedQueueHref, printsDealHref, readHashQueryParam, searchWithoutParam, stackHref, stripDealIdFromLocation } from "@/lib/workflow";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -101,18 +101,32 @@ function QueueCard({
     >
       <div className="flex items-center justify-between gap-2">
         <p className="board-name min-w-0 flex-1 truncate">{item.dealName}</p>
-        {item.isStale ? (
-          <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
-        ) : item.needsReply ? (
-          <StatusPill tone="warn" icon={MessageCircle} label="Needs reply" />
-        ) : needsPlates ? (
-          <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
-        ) : item.costsIncomplete ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label="Needs costs" />
-        ) : item.bucket === "blocked" ? (
-          <StatusPill tone="warn" icon={AlertTriangle} label="Blocked" />
-        ) : null}
+        <span className="flex shrink-0 items-center gap-2">
+          {needsPlates ? (
+            <Link
+              href={printsDealHref(item.dealId)}
+              className="text-xs font-semibold text-primary"
+              data-testid={`link-queue-plates-${item.dealId}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              Attach plates
+            </Link>
+          ) : null}
+          {item.isStale ? (
+            <StatusPill tone="bad" icon={AlertTriangle} label="Stale" />
+          ) : item.needsReply ? (
+            <StatusPill tone="warn" icon={MessageCircle} label="Needs reply" />
+          ) : null}
+        </span>
       </div>
+      <p className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
+        {item.assignedPrinterNames.map((name) => (
+          <span key={name} className="queue-printer">{name}</span>
+        ))}
+        <span className="truncate">
+          {item.plateCount > 0 ? `${item.plateCount} plate${item.plateCount === 1 ? "" : "s"} · ${hoursLabel(item.totalPrintTimeSeconds)}` : item.stage}
+        </span>
+      </p>
       <p className="scan-facts text-muted-foreground">
         <span className="min-w-0 truncate font-medium">{item.contactName || item.stage}</span>
         <span
@@ -126,11 +140,11 @@ function QueueCard({
             : item.shipBy === shipByCalendarDate()
               ? "Due today"
               : formatShipByShort(item.shipBy)}
-          {item.shipBySource === "override" ? " · set" : ""}
+          {item.shipBySource === "override" ? " · set" : item.shipBySource === "derived" ? " · plan" : ""}
         </span>
-        <span className="text-foreground">{formatMoney(item.amount)}</span>
+        <span className="queue-amount text-foreground">{formatMoney(item.amount)}</span>
       </p>
-      {detail ? <p className="board-meta truncate">{detail}</p> : null}
+      {item.shipPlanNote ? <p className="board-meta truncate">{item.shipPlanNote}</p> : detail ? <p className="board-meta truncate">{detail}</p> : null}
     </article>
   );
 }
@@ -154,15 +168,19 @@ function QueueColumn({
   testId: string;
   lane: "plates" | "fly" | "warn" | "bad" | "good" | "shop";
 }) {
+  const hours = items.reduce((sum, item) => sum + (item.totalPrintTimeSeconds > 0 ? item.totalPrintTimeSeconds : 0), 0);
+  const dollars = items.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
   return (
     <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
-      <div className="queue-lane-header">
+      <div className="queue-lane-header flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight" title={subtitle}>
             {title}{" "}
             <span className="numeric font-medium text-muted-foreground">{items.length}</span>
           </h2>
+          <p className="text-xs text-muted-foreground">{hours > 0 ? hoursLabel(hours) : "0h"} of plates</p>
         </div>
+        <span className="queue-amount numeric text-sm">{formatMoney(dollars)}</span>
       </div>
       <div className="queue-lane-body">
         {items.length === 0 ? (
@@ -230,11 +248,6 @@ export default function ProductionQueuePage() {
     (items: ProductionQueueItem[]) => (focus ? items.filter((item) => item[focus]) : items),
     [focus],
   );
-
-  const selectedExists = useMemo(() => {
-    if (!data || !selectedDealId) return false;
-    return queueBoardDealIds(data).has(selectedDealId);
-  }, [data, selectedDealId]);
 
   useEffect(() => {
     if (!data || !selectedDealId) return;
@@ -333,14 +346,6 @@ export default function ProductionQueuePage() {
                 </Button>
               ) : null}
             </div>
-
-            {selectedDealId ? (
-              <p className="text-sm text-muted-foreground">
-                {selectedExists
-                  ? "Ops open on the right — click outside or press Esc to close."
-                  : "That deal isn’t on the board anymore — pick another card or close ops."}
-              </p>
-            ) : null}
 
             <p className="text-sm text-muted-foreground" data-testid="text-queue-stack-link">
               Ready to ship ({data.shipReady.length}) and blocked ({data.blocked.length}) orders are on the{" "}
