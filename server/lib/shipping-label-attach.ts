@@ -20,7 +20,10 @@ import {
   enqueueMarketplaceShipNoteJob,
   enqueueShipmentEmailJob,
 } from "./print-ops-jobs";
+import { markStackDone } from "./priority-stack";
+import { loadProductionQueue } from "./queue-loader";
 import type { BuyerEmailSend } from "./shipment-notification-jobs";
+import type { ProductionQueueItem } from "../../shared/schema";
 
 export type LabelStageMove = {
   dealId: string;
@@ -76,8 +79,14 @@ export type AttachShippingLabelResult =
     }
   | { ok: false; error: string; attachedDealIds: string[]; failedDealId: string };
 
+function normalizeTracking(value: string | null | undefined): string {
+  return (value ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+}
+
 export async function attachShippingLabelToDeals(
-  input: AttachShippingLabelInput,
+  input: AttachShippingLabelInput & {
+    shipengine?: { labelId?: string; carrier?: string; service?: string };
+  },
 ): Promise<AttachShippingLabelResult> {
   const notesBase = input.notes.trim();
   const dealIds = input.dealIds;
@@ -127,13 +136,25 @@ export async function attachShippingLabelToDeals(
   }
 
   const attachedDealIds: string[] = [];
+  const reprintDealIds = new Set<string>();
   let primaryChecklist: ReturnType<typeof getFulfillmentChecklist> | null = null;
   let primaryHubspot: HubSpotShippingSync | null = null;
   let costs: Awaited<ReturnType<typeof updateDealCosts>> | null = null;
   const postage = input.postageUsd.replace(/[$,\s]/g, "").trim();
+  let queueItems: ProductionQueueItem[] = [];
+  try {
+    const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: false });
+    queueItems = [...queue.nextPrint, ...queue.inProduction, ...queue.blocked, ...queue.shipReady];
+  } catch {
+    queueItems = [];
+  }
 
   for (let index = 0; index < toAttach.length; index += 1) {
     const dealId = toAttach[index]!;
+    const previous = getFulfillmentChecklist(dealId);
+    const previousTracking = normalizeTracking(previous.trackingNumber);
+    const nextTracking = normalizeTracking(input.trackingNumber);
+    if (previousTracking && previousTracking !== nextTracking) reprintDealIds.add(dealId);
     const fulfillment = await upsertFulfillmentChecklist(dealId, {
       trackingNumber: input.trackingNumber,
       trackingPasted: true,
@@ -142,6 +163,9 @@ export async function attachShippingLabelToDeals(
       costsEntered: postage !== "" ? true : undefined,
       notes: sharedNote,
       liveWrite: input.liveWrite !== false,
+      shipengineLabelId: input.shipengine?.labelId,
+      shipengineCarrier: input.shipengine?.carrier,
+      shipengineService: input.shipengine?.service,
     });
     if ("error" in fulfillment) {
       return {
@@ -164,6 +188,7 @@ export async function attachShippingLabelToDeals(
     if (index === 0) {
       costs = seeded;
     }
+    markStackDone(`deal:${dealId}`, queueItems);
   }
 
   const stageMoves: LabelStageMove[] = [];
@@ -202,13 +227,14 @@ export async function attachShippingLabelToDeals(
     }
   }
 
-  const primaryDealId = attachedDealIds[0]!;
+  const notifyDealId = attachedDealIds.find((dealId) => !reprintDealIds.has(dealId)) ?? null;
+  const primaryDealId = notifyDealId ?? attachedDealIds[0]!;
   const contact = await fetchDealAssociatedContact(primaryDealId);
   const postageAmount = Number(postage);
   const marketplaceDispatch =
-    contact.name && Number.isFinite(postageAmount) && postage !== ""
+    notifyDealId && contact.name && Number.isFinite(postageAmount) && postage !== ""
       ? await enqueueMarketplaceShipNoteJob({
-          dealId: primaryDealId,
+          dealId: notifyDealId,
           trackingNumber: input.trackingNumber,
           to: contact.name,
           text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
@@ -216,20 +242,22 @@ export async function attachShippingLabelToDeals(
         })
       : null;
 
-  const buyerEmailDispatch = await enqueueShipmentEmailJob({
-    dealId: primaryDealId,
-    trackingNumber: input.trackingNumber,
-    notes: sharedNote,
-  });
+  const buyerEmailDispatch = notifyDealId
+    ? await enqueueShipmentEmailJob({
+        dealId: notifyDealId,
+        trackingNumber: input.trackingNumber,
+        notes: sharedNote,
+      })
+    : null;
   const buyerEmail =
-    buyerEmailDispatch.result ??
+    buyerEmailDispatch?.result ??
     ({
       attempted: false,
       sent: false,
       skipped: false,
       to: contact.email || null,
       id: null,
-      reason: "Shipped email queued",
+      reason: notifyDealId ? "Shipped email queued" : "Reprint keeps the first completion",
       error: null,
     } satisfies BuyerEmailSend);
 

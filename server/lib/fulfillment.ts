@@ -246,7 +246,11 @@ export async function syncDealShippingToHubSpot(
 
 export async function upsertFulfillmentChecklist(
   dealId: string,
-  input: UpdateFulfillmentChecklistInput,
+  input: UpdateFulfillmentChecklistInput & {
+    shipengineLabelId?: string;
+    shipengineCarrier?: string;
+    shipengineService?: string;
+  },
 ): Promise<
   | { checklist: FulfillmentChecklistView; hubspot: HubSpotShippingSync | null }
   | { error: string }
@@ -264,6 +268,9 @@ export async function upsertFulfillmentChecklist(
     packingDone: input.packingDone ?? existing?.packingDone ?? false,
     trackingNumber: input.trackingNumber ?? existing?.trackingNumber ?? "",
     notes: input.notes ?? existing?.notes ?? "",
+    shipengineLabelId: input.shipengineLabelId ?? existing?.shipengineLabelId ?? "",
+    shipengineCarrier: input.shipengineCarrier ?? existing?.shipengineCarrier ?? "",
+    shipengineService: input.shipengineService ?? existing?.shipengineService ?? "",
   };
 
   // Saving a tracking number implies the checklist flag.

@@ -166,6 +166,13 @@ export function DealOpsPanel({
   const [shipBy, setShipBy] = useState("");
   const [shipPlanNote, setShipPlanNote] = useState("");
   const [failureType, setFailureType] = useState<ProductionFailureType>("qc_reject");
+  const [pendingLabel, setPendingLabel] = useState<{
+    trackingNumber: string;
+    notes: string;
+    postageUsd: string;
+    companions: Array<{ dealId: string; dealName: string; score: number }>;
+    selected: string[];
+  } | null>(null);
   const [failureNotes, setFailureNotes] = useState("");
   const [failureResin, setFailureResin] = useState("");
   const labelFileRef = useRef<HTMLInputElement>(null);
@@ -332,10 +339,19 @@ export function DealOpsPanel({
         throw new Error("Could not read a tracking number from that PDF — confirm on Labels.");
       }
       // This deal always; plus any same-client companions (OCR fuzzy or HubSpot identity).
-      const companionIds = parsed.matches
+      const companions = parsed.matches
         .filter((row) => row.dealId !== dealId && row.score >= 70)
-        .map((row) => row.dealId);
-      const dealIds = Array.from(new Set([dealId, ...companionIds]));
+        .map((row) => ({ dealId: row.dealId, dealName: row.dealName, score: row.score }));
+      if (companions.length > 0) {
+        return {
+          pending: true as const,
+          trackingNumber,
+          notes: parsed.suggestedNotes || "",
+          postageUsd: parsed.fields.postageUsd || "",
+          companions,
+        };
+      }
+      const dealIds = [dealId];
       const attachResponse = await apiRequest(
         "POST",
         "/api/shipping-labels/attach",
@@ -368,6 +384,7 @@ export function DealOpsPanel({
         throw new Error(attached.error || "Could not attach tracking");
       }
       return {
+        pending: false as const,
         trackingNumber,
         dealIds: attached.attachedDealIds?.length ? attached.attachedDealIds : dealIds,
         recipientName: parsed.fields.recipientName,
@@ -375,6 +392,17 @@ export function DealOpsPanel({
       };
     },
     onSuccess: (data) => {
+      if (data.pending) {
+        setPendingLabel({
+          trackingNumber: data.trackingNumber,
+          notes: data.notes,
+          postageUsd: data.postageUsd,
+          companions: data.companions,
+          selected: data.companions.map((row) => row.dealId),
+        });
+        return;
+      }
+      setPendingLabel(null);
       setTracking(data.trackingNumber);
       invalidateOps(dealId);
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
@@ -398,6 +426,44 @@ export function DealOpsPanel({
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
         variant: "destructive",
       });
+    },
+  });
+
+  const confirmPendingLabel = useMutation({
+    mutationFn: async () => {
+      if (!pendingLabel) throw new Error("Nothing to attach");
+      const dealIds = [dealId, ...pendingLabel.selected];
+      const attachResponse = await apiRequest(
+        "POST",
+        "/api/shipping-labels/attach",
+        {
+          dealIds,
+          trackingNumber: pendingLabel.trackingNumber,
+          notes: pendingLabel.notes,
+          postageUsd: pendingLabel.postageUsd,
+          packingDone: true,
+          labelBought: true,
+          markComplete: true,
+          messageChannel: "marketplace",
+          liveWrite: true,
+        },
+        { headers },
+      );
+      const attached = (await attachResponse.json()) as { ok: boolean; error?: string; attachedDealIds?: string[] };
+      if (!attached.ok) throw new Error(attached.error || "Could not attach tracking");
+      return { trackingNumber: pendingLabel.trackingNumber, count: attached.attachedDealIds?.length ?? dealIds.length };
+    },
+    onSuccess: (data) => {
+      setPendingLabel(null);
+      setTracking(data.trackingNumber);
+      invalidateOps(dealId);
+      toast({
+        title: data.count > 1 ? `Tracking on ${data.count} orders` : "Label attached",
+        description: `${data.trackingNumber} saved.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Could not attach label PDF", description: error.message.replace(/^\d+:\s*/, "").slice(0, 240), variant: "destructive" });
     },
   });
 
@@ -746,6 +812,34 @@ export function DealOpsPanel({
             )}
             Upload label PDF
           </Button>
+          {pendingLabel ? (
+            <div className="w-full space-y-1" data-testid="panel-label-companions">
+              <p className="text-xs text-muted-foreground">Same-client orders auto-added. Untick any that are not in this box.</p>
+              {pendingLabel.companions.map((row) => (
+                <label key={row.dealId} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={pendingLabel.selected.includes(row.dealId)}
+                    data-testid={`checkbox-label-companion-${row.dealId}`}
+                    onChange={() => {
+                      setPendingLabel((current) => {
+                        if (!current) return current;
+                        const selected = current.selected.includes(row.dealId)
+                          ? current.selected.filter((id) => id !== row.dealId)
+                          : [...current.selected, row.dealId];
+                        return { ...current, selected };
+                      });
+                    }}
+                  />
+                  <span className="min-w-0 truncate">{row.dealName}</span>
+                  <span className="text-xs text-muted-foreground">score {row.score}</span>
+                </label>
+              ))}
+              <Button type="button" size="sm" disabled={confirmPendingLabel.isPending} onClick={() => confirmPendingLabel.mutate()} data-testid="button-confirm-label-companions">
+                Attach tracking
+              </Button>
+            </div>
+          ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
           Upload reads the PDF (OCR if needed), saves tracking on this order, and onto every other open/recent order for the same HubSpot client when they share a box.

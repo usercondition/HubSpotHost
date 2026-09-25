@@ -228,6 +228,7 @@ import {
   assignPlateToPrinter,
   buildDealOpsDetail,
   fetchDealAssociatedContact,
+  resolveCompletedPrintOrderStage,
   seedPrintDealCosts,
   updateDealCosts,
   updateShipByPlan,
@@ -248,6 +249,7 @@ import {
   deleteOffbook,
   listStackState,
   markStackDone,
+  pickupDealIdsForStackDone,
   pruneStackEntries,
   resetStackOrder,
   setStackOrder,
@@ -1321,6 +1323,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const items = [...queue.nextPrint, ...queue.inProduction, ...queue.blocked, ...queue.shipReady];
       const ok = markStackDone(parsed.data.key, items);
       if (!ok) return res.status(404).json({ ok: false, error: "That stack row is gone." });
+      const pickupIds = pickupDealIdsForStackDone(parsed.data.key, items);
+      if (pickupIds.length > 0) {
+        const completed = await resolveCompletedPrintOrderStage();
+        if (completed) {
+          for (const dealId of pickupIds) {
+            await advanceDealStage(dealId, { stageId: completed.id, liveWrite: true });
+          }
+        }
+      }
       return res.json({ ok: true });
     } catch (error) {
       return res.status(error instanceof HubSpotError ? error.status : 500).json({
@@ -1828,6 +1839,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         labelBought: true,
         messageChannel: parsed.data.messageChannel,
         liveWrite: parsed.data.liveWrite,
+        shipengine: {
+          labelId: purchase.labelId,
+          carrier: purchase.carrierCode,
+          service: purchase.serviceCode,
+        },
       });
       if (!attached.ok) {
         return res.status(400).json({

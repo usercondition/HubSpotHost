@@ -1883,6 +1883,9 @@ export const fulfillmentChecklists = sqliteTable("fulfillment_checklists", {
   packingDone: integer("packing_done", { mode: "boolean" }).notNull().default(false),
   trackingNumber: text("tracking_number").notNull().default(""),
   notes: text("notes").notNull().default(""),
+  shipengineLabelId: text("shipengine_label_id").notNull().default(""),
+  shipengineCarrier: text("shipengine_carrier").notNull().default(""),
+  shipengineService: text("shipengine_service").notNull().default(""),
   updatedAt: text("updated_at").notNull(),
   createdAt: text("created_at").notNull(),
 });

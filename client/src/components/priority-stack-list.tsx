@@ -43,6 +43,7 @@ export interface StackRowModel {
   fulfillment: FulfillmentChecklistView | null;
   steps: StackStep[];
   members: StackRowModel[];
+  warning?: string;
 }
 
 export interface StackView {
@@ -92,6 +93,8 @@ function targetLabel(row: StackRowModel, today: string): string {
 
 function progressLabel(row: StackRowModel): string {
   if (row.kind === "bundle") {
+    const shipped = row.members.filter((member) => member.doneAt).length;
+    if (row.shippingRequired && shipped > 0) return `${shipped} of ${row.members.length} shipped`;
     const ready = row.members.filter((member) => member.fulfillment?.shipReady || member.fulfillment?.packingDone).length;
     return `${ready}/${row.members.length} ready`;
   }
@@ -112,7 +115,7 @@ export function StackTotalsBar({ view }: { view: StackView }) {
     view.totals.offBookUnpriced > 0
       ? ` (+${view.totals.offBookUnpriced} off-book, no amount)`
       : "";
-  const goal = view.totals.committed;
+  const goal = Math.round((view.totals.committed + view.totals.outTheDoor) * 100) / 100;
   return (
     <p className="scan-facts text-sm" data-testid="stack-totals">
       <span>
@@ -465,6 +468,7 @@ export function StackRow({
           <ChecklistPopover row={row} headers={headers} onSaved={onSaved} />
         </div>
         <div className="stack-blocker min-w-0">
+          {row.warning ? <p className="stack-clip text-xs text-destructive" title={row.warning} data-testid={`text-stack-warning-${row.key}`}>{row.warning}</p> : null}
           <InlineBlocker row={row} headers={headers} onSaved={onSaved} />
           {row.nextStep ? <p className="stack-clip text-xs text-muted-foreground" title={row.nextStep}>{row.nextStep}</p> : null}
         </div>

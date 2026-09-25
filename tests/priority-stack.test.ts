@@ -6,6 +6,7 @@ import express from "express";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { upsertFulfillmentChecklist } from "../server/lib/fulfillment";
 import { resetOrderLinkStore } from "../server/lib/order-links";
 import {
   buildPriorityStack,
@@ -14,6 +15,7 @@ import {
   deleteBundle,
   listStackState,
   markStackDone,
+  pickupDealIdsForStackDone,
   resetStackOrder,
   setStackOrder,
   updateBundle,
@@ -379,6 +381,49 @@ test("schemas reject a long blocker, a bad deal id, a bad date, and an unknown k
     { key: "b", name: "B", targetDate: "2026-09-25", readiness: 1, amount: 1, priorityScore: 1, manualRank: null },
   ) < 0, true);
 });
+
+test("done bundle counts every member and a partial shipping bundle stays open", () =>
+  withTempDb(() => {
+    const items = [
+      deal({ dealId: "11", dealName: "Simon A", amount: 34.99, shipBy: "2026-09-27", stage: "Printing", bucket: "in_production" }),
+      deal({ dealId: "12", dealName: "Simon B", amount: 74.99, shipBy: "2026-09-27", stage: "Printing", bucket: "in_production" }),
+      deal({ dealId: "13", dealName: "Simon C", amount: 24.99, shipBy: "2026-09-27", stage: "Printing", bucket: "in_production" }),
+    ];
+    const bundle = createBundle({ label: "Simon ship", mode: "ship", dealIds: ["11", "12", "13"] });
+    markStackDone("deal:11", items, NOW);
+    const partial = buildPriorityStack(queue(items), listStackState(), { now: NOW });
+    const row = partial.rows.find((entry) => entry.bundleId === bundle.id);
+    assert.equal(row?.amount, 99.98);
+    assert.equal(row?.members.filter((member) => member.doneAt).length, 1);
+    assert.equal(partial.totals.outTheDoor, 34.99);
+    assert.equal(partial.outTheDoor.length, 1);
+    markStackDone(`bundle:${bundle.id}`, items, NOW);
+    const done = buildPriorityStack(queue(items), listStackState(), { now: NOW });
+    assert.equal(done.rows.some((entry) => entry.bundleId === bundle.id), false);
+    assert.equal(done.totals.outTheDoor, 134.97);
+    assert.equal(done.outTheDoor.length, 3);
+    const first = listStackState().entries.find((entry) => entry.hubspotDealId === "11")?.doneAt;
+    markStackDone("deal:11", items, new Date("2026-09-26T17:00:00.000Z"));
+    assert.equal(listStackState().entries.find((entry) => entry.hubspotDealId === "11")?.doneAt, first);
+  }));
+
+test("a label on a pickup bundle member warns and Picked up targets HubSpot deals", () =>
+  withTempDb(async () => {
+    const items = [
+      deal({ dealId: "21", dealName: "Jose", amount: 59.99, shipBy: "2026-09-25", stage: "Ready to Ship", bucket: "ship_ready", shippingRequired: false }),
+      deal({ dealId: "22", dealName: "Pal", amount: 20, shipBy: "2026-09-27", stage: "Ready to Ship", bucket: "ship_ready", shippingRequired: false }),
+    ];
+    const bundle = createBundle({ label: "Local", mode: "pickup", dealIds: ["21", "22"] });
+    await upsertFulfillmentChecklist("21", { trackingNumber: "1Z999", labelBought: true, liveWrite: false });
+    markStackDone("deal:21", items, NOW);
+    const view = buildPriorityStack(queue(items), listStackState(), { now: NOW });
+    const row = view.rows.find((entry) => entry.key === `bundle:${bundle.id}`);
+    assert.equal(row?.warning, "Label attached on a pickup bundle");
+    assert.equal(view.totals.outTheDoor, 59.99);
+    assert.deepEqual(pickupDealIdsForStackDone("deal:21", items), ["21"]);
+    assert.deepEqual(pickupDealIdsForStackDone(`bundle:${bundle.id}`, items).sort(), ["21", "22"]);
+    assert.deepEqual(pickupDealIdsForStackDone("deal:11", [deal({ dealId: "11", dealName: "Ship", amount: 10, shipBy: "2026-09-27", stage: "Printing", bucket: "in_production" })]), []);
+  }));
 
 test("priority stack routes do not PATCH HubSpot", async () => {
   const dir = mkdtempSync(join(tmpdir(), "priority-stack-http-"));
