@@ -211,11 +211,15 @@ function RefreshButton({ testId }: { testId: string }) {
 }
 
 function NavCount({ value, hot, testId }: { value: number | null; hot?: boolean; testId?: string }) {
-  if (value == null) return null;
-  const emphasize = Boolean(hot && value > 0);
+  const emphasize = Boolean(hot && value != null && value > 0);
   return (
-    <span className={cn("nav-count numeric", emphasize && "nav-count-hot")} data-testid={testId}>
-      {value}
+    <span
+      className={cn("nav-count numeric", emphasize && "nav-count-hot")}
+      data-testid={testId}
+      data-count-slot="nav"
+      aria-hidden={value == null ? true : undefined}
+    >
+      {value == null ? "" : value}
     </span>
   );
 }
@@ -288,7 +292,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
                     <span className="truncate">{item.label}</span>
-                    {count ? <NavCount {...count} /> : null}
+                    <NavCount
+                      value={count?.value ?? null}
+                      hot={count?.hot}
+                      testId={count?.testId ?? `badge-nav-${item.label.toLowerCase()}`}
+                    />
                   </Link>
                 );
               })}
@@ -400,7 +408,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <nav aria-label="Mobile navigation" className="ops-tabbar grid md:hidden">
           {PHONE_TABS.map((item) => {
             const active = pathOnly === item.href;
-            const count = item.href === "/" ? shop.needsYou : null;
+            const count = countFor(item.href);
+            const badge = count?.value != null && count.value > 0 ? count.value : null;
+            const phoneTestId =
+              item.href === "/" ? "badge-phone-floor" : item.href === "/stack" ? "badge-phone-stack" : item.href === "/queue" ? "badge-phone-queue" : null;
             return (
               <Link
                 key={item.href}
@@ -411,9 +422,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <span className="relative">
                   <item.icon className="h-5 w-5" />
-                  {count != null && count > 0 ? (
-                    <span className="ops-tab-badge numeric" data-testid="badge-phone-floor">
-                      {count > 9 ? "9+" : count}
+                  {badge != null && phoneTestId ? (
+                    <span
+                      className={cn("ops-tab-badge numeric", count?.hot && "nav-count-hot")}
+                      data-testid={phoneTestId}
+                      data-count-slot="phone"
+                    >
+                      {badge > 9 ? "9+" : badge}
                     </span>
                   ) : null}
                 </span>
