@@ -548,11 +548,15 @@
       minmax(0, 1.15fr)
       8.75rem
       4.75rem
-      5.75rem;
+      7.5rem;
     column-gap: 0.6rem;
     align-items: center;
     border-left: 3px solid var(--lane, hsl(var(--border)));
     padding: 0.55rem 0.65rem;
+  }
+
+  .stack-row > .stack-facts {
+    display: contents;
   }
 
   .stack-check,
@@ -564,6 +568,7 @@
   .stack-money,
   .stack-actions {
     min-width: 0;
+    overflow: hidden;
   }
 
   .stack-clip {
@@ -588,9 +593,10 @@
     justify-content: space-between;
     gap: 0.75rem;
     border-top: 1px dashed hsl(var(--border));
-    padding: 0.35rem 0.75rem;
-    font-size: 0.8125rem;
-    color: hsl(var(--muted-foreground));
+    padding: 0.45rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: hsl(var(--foreground));
   }
 
   @media (max-width: 767px) {
@@ -604,8 +610,10 @@
     .stack-row .stack-rank { grid-area: rank; }
     .stack-row .stack-name { grid-area: name; }
     .stack-row .stack-money { grid-area: money; justify-self: end; }
-    .stack-row .stack-facts { grid-area: facts; display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; }
-    .stack-row .stack-mobile-actions { display: flex; width: 100%; }
+    .stack-row > .stack-facts { display: flex; grid-area: facts; flex-direction: column; align-items: stretch; gap: 0.2rem; overflow: hidden; }
+    .stack-row .stack-date { flex: 0 0 auto; overflow: visible; }
+    .stack-row .stack-date .stack-clip { white-space: nowrap; }
+    .stack-row .stack-mobile-actions { display: flex; width: 100%; flex-wrap: nowrap; align-items: center; }
     .stack-row .stack-desktop-only { display: none; }
   }
 
@@ -744,7 +752,7 @@
   .queue-lane {
     display: flex;
     flex-direction: column;
-    min-height: 12rem;
+    min-height: 0;
     border-radius: calc(var(--radius) + 4px);
     border: 1px solid hsl(var(--border));
     background: hsl(var(--lane-surface));
@@ -888,7 +896,7 @@
     flex-direction: column;
     gap: 0;
     padding: 0.15rem 0 0.35rem;
-    flex: 1;
+    flex: none;
   }
 
   .queue-lane-body > .workspace-node {

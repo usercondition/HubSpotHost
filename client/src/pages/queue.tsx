@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { queueDealHref, readHashQueryParam, stackHref } from "@/lib/workflow";
+import { readHashQueryParam, stackHref } from "@/lib/workflow";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -371,10 +371,6 @@ export default function ProductionQueuePage() {
               </Panel>
             ) : null}
 
-            <p className="text-sm text-muted-foreground">
-              Deep-link any deal with{" "}
-              <code className="rounded bg-muted px-1 py-0.5">{queueDealHref("DEAL_ID")}</code>
-            </p>
           </>
         )}
       </div>

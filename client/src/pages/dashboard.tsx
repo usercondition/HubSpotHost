@@ -483,7 +483,7 @@ function TodaysWork() {
           <StatusPill
             tone={overdueCount > 0 ? "bad" : "warn"}
             icon={AlertTriangle}
-            label={`${attention.length + pendingReview + shipPressure} open`}
+            label={floorNeeds.length === 1 ? "1 needs you" : `${floorNeeds.length} need you`}
             testId="status-floor-pressure"
           />
         )}

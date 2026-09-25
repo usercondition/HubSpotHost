@@ -109,7 +109,7 @@ export default function PriorityStackPage() {
         subtitle=""
         actions={
           isUnlocked ? (
-            <div className="flex gap-2">
+            <div className="flex w-full min-w-0 flex-wrap justify-end gap-1.5 sm:w-auto">
               <Button
                 size="sm"
                 variant="outline"
@@ -123,15 +123,15 @@ export default function PriorityStackPage() {
               <Button size="sm" variant="outline" onClick={() => setOffbookOpen(true)} data-testid="button-add-offbook">
                 + Off-book
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={selected.length < 2}
-                onClick={() => setBundleOpen(true)}
-                data-testid="button-bundle-selected"
-              >
-                Bundle…
-              </Button>
+              {selected.length >= 2 ? (
+                <Button size="sm" variant="outline" onClick={() => setBundleOpen(true)} data-testid="button-bundle-selected">
+                  Bundle…
+                </Button>
+              ) : (
+                <span className="hidden self-center text-xs text-muted-foreground sm:inline" data-testid="text-bundle-hint">
+                  Select 2+ to bundle
+                </span>
+              )}
               <Button size="sm" variant="outline" onClick={() => stack.refetch()} disabled={stack.isFetching} data-testid="button-refresh-stack">
                 {stack.isFetching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Refresh

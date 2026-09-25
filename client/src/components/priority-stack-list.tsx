@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronUp, ListChecks } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronUp, ListChecks, MoreHorizontal } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatMoney } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -90,6 +91,10 @@ function targetLabel(row: StackRowModel, today: string): string {
 }
 
 function progressLabel(row: StackRowModel): string {
+  if (row.kind === "bundle") {
+    const ready = row.members.filter((member) => member.fulfillment?.shipReady || member.fulfillment?.packingDone).length;
+    return `${ready}/${row.members.length} ready`;
+  }
   if (row.kind === "offbook") {
     if (row.steps.length === 0) return row.stage;
     const done = row.steps.filter((step) => step.done).length;
@@ -233,7 +238,12 @@ function ChecklistPopover({
 
   const progress = progressLabel(row);
   if (steps.length === 0 || row.kind === "bundle") {
-    return <span className="stack-clip text-sm" title={progress}>{progress}</span>;
+    return (
+      <span className="stack-clip text-sm" title={progress}>
+        <ListChecks className="mr-1 inline h-3.5 w-3.5 shrink-0 align-text-bottom" />
+        {progress}
+      </span>
+    );
   }
 
   return (
@@ -438,9 +448,9 @@ export function StackRow({
     >
       <span className="stack-check">
         {row.kind === "deal" ? (
-          <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select ${row.name}`} data-testid={`check-select-${row.key}`} />
+          <input type="checkbox" className="h-4 w-4" checked={selected} onChange={onToggleSelect} aria-label={`Select ${row.name}`} data-testid={`check-select-${row.key}`} />
         ) : (
-          <span className="inline-block h-4 w-4" aria-hidden="true" />
+          <input type="checkbox" className="h-4 w-4" disabled aria-hidden="true" tabIndex={-1} />
         )}
       </span>
       <span className="stack-rank">{row.rank}</span>
@@ -450,7 +460,7 @@ export function StackRow({
         {row.kind === "offbook" ? <span className="ml-1 text-xs text-muted-foreground">off-book</span> : null}
         {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
       </button>
-      <div className="stack-facts min-w-0 md:contents">
+      <div className="stack-facts min-w-0">
         <div className="stack-stage stack-desktop-only min-w-0">
           <ChecklistPopover row={row} headers={headers} onSaved={onSaved} />
         </div>
@@ -473,7 +483,7 @@ export function StackRow({
         </div>
       </div>
       <span className="stack-money stack-clip text-sm font-medium">{money(row.amount)}</span>
-      <div className="stack-actions stack-desktop-only flex flex-wrap items-center justify-end gap-0.5">
+      <div className="stack-actions stack-desktop-only flex items-center justify-end gap-0.5">
         <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move up" onClick={() => onMove(-1)} data-testid={`button-up-${row.key}`}>
           <ArrowUp className="h-3.5 w-3.5" />
         </Button>
@@ -483,13 +493,23 @@ export function StackRow({
           <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move to top" onClick={() => onMove("top")} data-testid={`button-top-${row.key}`}>
           <ChevronUp className="h-3.5 w-3.5" />
         </Button>
-        {row.kind === "bundle" ? (
-          <Button type="button" size="sm" variant="ghost" onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</Button>
-        ) : null}
-        {row.kind === "offbook" || !row.shippingRequired ? (
-          <Button type="button" size="sm" variant="ghost" onClick={onDone} data-testid={`button-done-${row.key}`}>
-            {row.shippingRequired ? "Done" : "Picked up"}
-          </Button>
+        {row.kind !== "bundle" && row.kind !== "offbook" && row.shippingRequired ? <span className="inline-block h-7 w-7" /> : null}
+        {row.kind === "bundle" || row.kind === "offbook" || !row.shippingRequired ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="More" data-testid={`button-more-${row.key}`}>
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {row.kind === "bundle" ? (
+                <DropdownMenuItem onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onClick={onDone} data-testid={`button-done-${row.key}`}>
+                {row.shippingRequired ? "Done" : "Picked up"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
       </div>
     </article>
@@ -502,7 +522,7 @@ export function StackRow({
             <span className="stack-name stack-clip text-sm" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
               {member.name}{member.contactName ? ` · ${member.contactName}` : ""}
             </span>
-            <div className="stack-facts md:contents">
+            <div className="stack-facts">
               <span className="stack-stage stack-clip text-sm" title={member.stage}>{member.stage}</span>
               <span className="stack-blocker stack-clip text-sm text-muted-foreground" title={member.blocker || member.stage}>{member.blocker || member.stage}</span>
               <span className="stack-date stack-clip text-sm" title={member.targetDate}>{member.targetDate}</span>
@@ -535,8 +555,8 @@ export function rowsWithDividers(rows: StackRowModel[], totals: StackView["total
   const out: Array<{ type: "row"; row: StackRowModel } | { type: "divider"; label: string; amount: number }> = [];
   rows.forEach((row, index) => {
     out.push({ type: "row", row });
-    if (index === lastCommitted) out.push({ type: "divider", label: "this week", amount: totals.committed });
-    if (index === lastStretch) out.push({ type: "divider", label: "stretch", amount: totals.stretch });
+    if (index === lastCommitted) out.push({ type: "divider", label: "This week", amount: totals.committed });
+    if (index === lastStretch) out.push({ type: "divider", label: "Stretch", amount: totals.stretch });
   });
   return out;
 }
