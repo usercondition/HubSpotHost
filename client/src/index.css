@@ -1288,6 +1288,46 @@
     font-variant-numeric: tabular-nums lining-nums;
   }
 
+  .order-figs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 8px;
+    margin-top: 6px;
+  }
+
+  .order-figs > p {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    margin: 0;
+  }
+
+  .order-figs .board-figure-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .order-table {
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .order-table th,
+  .order-table td {
+    border-bottom: 1px solid hsl(var(--line));
+    padding: 8px 10px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .order-table th:nth-child(n + 3),
+  .order-table td:nth-child(n + 3) {
+    text-align: right;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
   .queue-printer {
     display: inline-flex;
     height: 20px;
