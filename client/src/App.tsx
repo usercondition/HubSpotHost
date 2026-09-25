@@ -20,6 +20,7 @@ import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
 import ShippingLabelsPage from "@/pages/shipping-labels";
 import ProductionQueuePage from "@/pages/queue";
+import PriorityStackPage from "@/pages/priority-stack";
 import ClientsPage from "@/pages/clients";
 import ClientOrder from "@/pages/client-order";
 import FloorFocusPage from "@/pages/floor-focus";
@@ -32,6 +33,7 @@ function ShellRoutes() {
       <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/stack" component={PriorityStackPage} />
           <Route path="/focus/:kind" component={FloorFocusPage} />
           <Route path="/focus" component={FloorFocusPage} />
           <Route path="/queue" component={ProductionQueuePage} />

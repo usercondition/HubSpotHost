@@ -44,6 +44,7 @@ type DealOpsResponse = DealOpsDetail & { ok: true };
 
 function invalidateOps(dealId?: string) {
   queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/priority-stack"] });
   queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
   queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
   if (dealId) {

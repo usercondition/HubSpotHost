@@ -11,6 +11,7 @@ import {
   FileUp,
   Lock,
   Moon,
+  ListChecks,
   ListOrdered,
   LayoutDashboard,
   Printer,
@@ -129,6 +130,7 @@ const NAV: Array<{
 }> = [
   // Run = in-flight work. Queue is the production board; Orders lives under Office.
   { href: "/", label: "Floor", title: "Today’s floor board", icon: LayoutDashboard, testId: "link-nav-home", group: "Run" },
+  { href: "/stack", label: "Stack", title: "This week's priority stack", icon: ListChecks, testId: "link-nav-stack", group: "Run" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run" },
@@ -189,6 +191,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
       void queryClient.invalidateQueries({
         queryKey: ["/api/production-queue"],
+        refetchType: "active",
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["/api/priority-stack"],
         refetchType: "active",
       });
     }, 120);
