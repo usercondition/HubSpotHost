@@ -793,7 +793,12 @@
     }
 
     .floor-next > :nth-child(1) { grid-area: rank; }
-    .floor-next > :nth-child(2) { grid-area: name; }
+    .floor-next > :nth-child(2) {
+      grid-area: name;
+      overflow: visible;
+      white-space: normal;
+      text-overflow: unset;
+    }
     .floor-next > :nth-child(3) { grid-area: chip; }
     .floor-next > :nth-child(4) { grid-area: date; }
     .floor-next > :nth-child(5) { grid-area: amount; justify-self: end; }
@@ -823,6 +828,16 @@
 
   .board-name:hover {
     color: hsl(var(--primary));
+  }
+
+  .order-title {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    text-overflow: unset;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .board-meta {
@@ -1233,13 +1248,39 @@
     .stack-commit-line .stack-money { grid-area: money; }
     .stack-name > .stack-sub { display: none; }
     .stack-phone-sub {
-      display: block;
-      flex: 0 1 46%;
-      max-width: 46%;
+      display: flex;
+      flex: 0 1 auto;
+      align-items: baseline;
+      min-width: 0;
+      max-width: none;
+      overflow: visible;
+      font-size: 12px;
+      line-height: 16px;
+      color: hsl(var(--text-3));
     }
+    .stack-phone-client {
+      flex: 0 0 auto;
+      overflow: visible;
+      white-space: nowrap;
+    }
+    .stack-phone-mode {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .stack-blocker-line {
+      width: 100%;
+      overflow: visible;
+    }
+    .stack-row .stack-blocker { overflow: visible; }
     .stack-blocker-line > :last-child {
       flex: 1 1 auto;
       min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
     .stack-commit-line .stack-actions { display: none; }
     .stack-row > .stack-facts { display: flex; grid-area: facts; flex-direction: column; align-items: stretch; gap: 0.2rem; overflow: hidden; }
@@ -1335,6 +1376,14 @@
     font-variant-numeric: tabular-nums lining-nums;
     white-space: nowrap;
     line-height: 1.25;
+  }
+
+  .order-fig-pct {
+    font-size: 10px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums lining-nums;
+    white-space: nowrap;
+    color: hsl(var(--text-3));
   }
 
   .profit-pos {

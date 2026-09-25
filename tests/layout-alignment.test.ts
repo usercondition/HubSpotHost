@@ -24,7 +24,7 @@ function queueItem(
 ) {
   return {
     dealId: id,
-    dealName: `Order ${id}`,
+    dealName: `Order ${id} - Ada`,
     stageId: "print",
     stage: "Printing",
     amount,
@@ -92,7 +92,7 @@ function deal(id: string, amount: number, cost: number) {
   const profit = amount - cost;
   return {
     dealId: id,
-    dealName: `Board ${id} - Ada`,
+    dealName: id === "b2" ? "Cerastus Chassis - Castigator - Ada" : `Board ${id} - Ada`,
     promptAttachPlates: id === "b1",
     stageId: "print",
     stage: "Printing",
@@ -234,7 +234,7 @@ function bodyFor(pathname: string) {
           severity: "warn",
         },
       ],
-      activeDeals: [deal("b1", 120, 40), deal("b2", 80, 30)],
+      activeDeals: [deal("b1", 129.99, 0), deal("b2", 80, 30)],
       closedDeals: [],
       hubspotPortalId: "1",
     };
@@ -244,7 +244,7 @@ function bodyFor(pathname: string) {
       key: "committed",
       rank: 1,
       dealId: "c1",
-      name: "Committed order - Ada",
+      name: "Cerastus Chassis - Castigator - Ada",
       amount: 80,
       tier: "committed",
       fulfillment: {
@@ -298,9 +298,16 @@ function bodyFor(pathname: string) {
       tier: "stretch",
       shippingRequired: false,
       members: [
-        stackRow({ key: "m1", name: "Member one", amount: 15, dealId: "m1" }),
-        stackRow({ key: "m2", name: "Member two", amount: 15, dealId: "m2" }),
-        stackRow({ key: "m3", name: "Member three", amount: 15, dealId: "m3" }),
+        stackRow({ key: "m1", name: "Member one", contactName: "Daniel Ortega", amount: 15, dealId: "m1", blocker: "Failed piece reprint" }),
+        stackRow({ key: "m2", name: "Member two", contactName: "Wayne Hood", amount: 15, dealId: "m2" }),
+        stackRow({
+          key: "m3",
+          name: "Member three",
+          contactName: "Glenn Casey Chandler",
+          amount: 15,
+          dealId: "m3",
+          blocker: "All bits plus Iron Warriors bits waiting on a reprint",
+        }),
       ],
     });
     return {
@@ -596,6 +603,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(/Sun 9\/27 at risk/.test(productionText), "queue note was rewritten");
     const nextText = await current().locator("[data-testid='column-next-print']").first().evaluate((el) => el.textContent || "");
     check(/Oct 2 · plan/.test(nextText), `queue plan label was ${nextText}`);
+    const queueTitle = await current().locator("[data-testid='button-queue-deal-q1'] .board-name").first().evaluate((el) => (el.textContent || "").trim());
+    check(queueTitle === "Order q1", `queue title still includes the client: ${queueTitle}`);
+    const queueCard = await current().locator("[data-testid='button-queue-deal-q1']").first().evaluate((el) => el.textContent || "");
+    check(queueCard.split("Ada").length - 1 === 1, `queue card repeats the client: ${queueCard}`);
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-deal-paid-b1']").first().waitFor();
@@ -621,6 +632,66 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(fig.height <= 22, `profit wrapped to ${fig.height}px`);
       check(fig.color === "rgb(61, 184, 139)", `profit color was ${fig.color}`);
     }
+    const figureText = await current().locator(".order-figs").evaluateAll((groups) =>
+      groups
+        .filter((figs) => figs.getClientRects().length > 0)
+        .map((figs) => {
+          const cells = [...figs.querySelectorAll(":scope > p")];
+          const items: Array<{ text: string; left: number; right: number; top: number; bottom: number; cellLeft: number; cellRight: number; cellTop: number; cellBottom: number }> = [];
+          for (const cell of cells) {
+            const box = cell.getBoundingClientRect();
+            const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+            let node = walker.nextNode();
+            while (node) {
+              const text = node.textContent?.trim() ?? "";
+              if (text) {
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                for (const rect of range.getClientRects()) {
+                  if (rect.width >= 0.5 && rect.height >= 0.5) {
+                    items.push({
+                      text,
+                      left: rect.left,
+                      right: rect.right,
+                      top: rect.top,
+                      bottom: rect.bottom,
+                      cellLeft: box.left,
+                      cellRight: box.right,
+                      cellTop: box.top,
+                      cellBottom: box.bottom,
+                    });
+                  }
+                }
+              }
+              node = walker.nextNode();
+            }
+          }
+          return items;
+        }),
+    );
+    check(figureText.length >= 3, "order figure text missing");
+    for (const items of figureText) {
+      check(items.length >= 3, "order figure text nodes missing");
+      for (const item of items) {
+        // Line boxes run about a pixel outside the cell. Horizontal spill is the overlap bug.
+        const outside =
+          item.left < item.cellLeft - 0.5 ||
+          item.right > item.cellRight + 0.5 ||
+          item.top < item.cellTop - 2 ||
+          item.bottom > item.cellBottom + 2;
+        check(!outside, `figure text "${item.text}" leaves its cell`);
+      }
+      for (let i = 0; i < items.length; i += 1) {
+        for (let j = i + 1; j < items.length; j += 1) {
+          const overlapW = Math.min(items[i].right, items[j].right) - Math.max(items[i].left, items[j].left);
+          const overlapH = Math.min(items[i].bottom, items[j].bottom) - Math.max(items[i].top, items[j].top);
+          check(overlapW <= 1 || overlapH <= 2, `figure text "${items[i].text}" overlaps "${items[j].text}"`);
+        }
+      }
+    }
+    const profitText = await current().locator("[data-testid='text-deal-revenue-b1']").first().evaluate((el) => el.textContent || "");
+    check(/\$129\.99/.test(profitText) && /100%/.test(profitText), `profit cell was ${profitText}`);
+    check(!/\$129\.99\s*·\s*100%/.test(profitText), `profit percent is still on the money line: ${profitText}`);
     const chip = await current().locator("[data-testid='chip-deal-b1']").first().evaluate((el) => {
       const label = el.querySelector("span") ?? el;
       return {
@@ -635,6 +706,30 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(!cardTitle.includes("Ada"), `order title still includes the client: ${cardTitle}`);
     const cardText = await current().locator("[data-testid='card-deal-b1']").first().evaluate((el) => el.textContent || "");
     check(cardText.split("Ada").length - 1 === 1, `order card repeats the client: ${cardText}`);
+    const longTitle = await current().locator("[data-testid='link-deal-title-b2']").first().evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const overflow: string[] = [];
+      let lines = 0;
+      let node = walker.nextNode();
+      while (node) {
+        const text = node.textContent?.trim() ?? "";
+        if (text) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            if (rect.width < 0.5 || rect.height < 0.5) continue;
+            lines += 1;
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.bottom > box.bottom + 0.5) overflow.push(text);
+          }
+        }
+        node = walker.nextNode();
+      }
+      return { text: (el.textContent || "").trim(), lines, overflow };
+    });
+    check(longTitle.text === "Cerastus Chassis - Castigator", `order title was ${longTitle.text}`);
+    check(longTitle.lines >= 1 && longTitle.lines <= 2, `order title used ${longTitle.lines} lines`);
+    check(longTitle.overflow.length === 0, `order title clipped: ${longTitle.overflow.join("|")}`);
     await current().locator("[data-testid='toggle-orders-view']").last().getByRole("button", { name: "Table" }).click();
     await current().locator("[data-testid='text-table-profit-b1']").first().waitFor();
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
@@ -657,6 +752,30 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(scroll.width <= scroll.inner + 1, `phone page scrolls horizontally (${scroll.width} > ${scroll.inner})`);
     const chipHeights = await page.locator(".stage-chip").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
     for (const height of chipHeights) check(height <= 28, `stage chip wrapped (${height}px)`);
+    const upNextFit = await page.locator("[data-testid='row-floor-next-1']").first().evaluate((row) => {
+      const name = row.children[1] as HTMLElement | undefined;
+      if (!name) return { text: "", overflow: ["missing name"] };
+      const box = name.getBoundingClientRect();
+      const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+      const overflow: string[] = [];
+      let node = walker.nextNode();
+      while (node) {
+        const text = node.textContent?.trim() ?? "";
+        if (text) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            if (rect.width < 0.5 || rect.height < 0.5) continue;
+            if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.bottom > box.bottom + 0.5) overflow.push(`${text} ${Math.round(rect.width)}/${Math.round(box.width)}`);
+          }
+        }
+        node = walker.nextNode();
+      }
+      return { text: (name.textContent || "").replace(/\s+/g, " ").trim(), overflow };
+    });
+    check(/Cerastus Chassis - Castigator/.test(upNextFit.text), `phone up-next was ${upNextFit.text}`);
+    check(upNextFit.text.split("Ada").length - 1 === 1, `phone up-next repeats the client: ${upNextFit.text}`);
+    check(upNextFit.overflow.length === 0, `phone up-next clipped: ${upNextFit.overflow.join("|")}`);
 
     await page.getByTestId("button-mobile-nav-more").click();
     await page.waitForSelector("[data-testid='panel-mobile-more']");
@@ -685,10 +804,38 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }),
     );
     check(phoneRows.length >= 3, "phone stack rows missing");
+    check(phoneRows.some((row) => row.id === "stack-row-m3"), "expanded bundle member missing from the phone gate");
     for (const row of phoneRows) {
       check(row.height <= row.budget, `${row.id} is ${row.height}px, over a 3-line budget of ${row.budget}`);
       check(row.name <= row.nameBudget, `${row.id} name is ${row.name}px`);
       check(row.blocker <= row.nameBudget + 4, `${row.id} client/blocker line is ${row.blocker}px`);
+    }
+    const phoneClients = await current().locator(".stack-phone-client").evaluateAll((els) =>
+      els
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => {
+          const sub = el.closest(".stack-phone-sub");
+          const row = el.closest(".stack-row");
+          const box = el.getBoundingClientRect();
+          const rowBox = row?.getBoundingClientRect();
+          const font = sub ? Number.parseFloat(getComputedStyle(sub).fontSize) : 0;
+          return {
+            text: (el.textContent || "").trim(),
+            scroll: el.scrollWidth,
+            client: el.clientWidth,
+            font,
+            left: box.left,
+            right: box.right,
+            rowLeft: rowBox?.left ?? 0,
+            rowRight: rowBox?.right ?? 0,
+          };
+        }),
+    );
+    check(phoneClients.some((client) => client.text === "Glenn Casey Chandler"), "long phone client missing");
+    for (const client of phoneClients) {
+      check(client.font >= 12 && client.font <= 13, `${client.text} sub font is ${client.font}px`);
+      check(client.scroll <= client.client + 0.5, `${client.text} clipped (${client.scroll} > ${client.client})`);
+      check(client.left >= client.rowLeft - 0.5 && client.right <= client.rowRight + 0.5, `${client.text} leaves its row`);
     }
     await checkDrawer("phone");
 
@@ -711,6 +858,20 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
     const phoneProduction = await current().locator("[data-testid='column-in-production']").first().evaluate((el) => el.textContent || "");
     check(/Oct 2 · tentative/.test(phoneProduction), `phone queue date was ${phoneProduction}`);
+    const phoneQueueTitle = await current().locator("[data-testid='button-queue-deal-q1'] .board-name").first().evaluate((el) => (el.textContent || "").trim());
+    check(phoneQueueTitle === "Order q1", `phone queue title still includes the client: ${phoneQueueTitle}`);
+
+    await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='text-orders-phone']").first().waitFor();
+    const dealRefresh = await page.locator("[data-testid='button-refresh-deals']").evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).display),
+    );
+    check(dealRefresh.length > 0 && dealRefresh.every((display) => display === "none"), `phone orders refresh displays: ${dealRefresh.join(",")}`);
+    const dealHubspot = await page.locator("[data-testid='button-open-hubspot-deals']").evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).display),
+    );
+    check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
+    await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
 
     check(pageErrors.length === 0, pageErrors.join("\n"));
     assert.deepEqual(failures, []);

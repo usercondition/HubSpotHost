@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
+import { orderTitle } from "@/lib/order-title";
 import { cn } from "@/lib/utils";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
@@ -100,7 +101,7 @@ function QueueCard({
       data-testid={`button-queue-deal-${item.dealId}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="board-name min-w-0 flex-1 truncate">{item.dealName}</p>
+        <p className="board-name min-w-0 flex-1 truncate">{orderTitle(item.dealName, item.contactName)}</p>
         <span className="flex shrink-0 items-center gap-2">
           {needsPlates ? (
             <Link
