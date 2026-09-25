@@ -43,6 +43,6 @@ test("commit line follows the last this-week row and the last stretch row", () =
   );
   assert.deepEqual(
     lines.map((line) => (line.type === "row" ? line.row.key : line.label)),
-    ["a", "b", "stretch", "c", "this week", "d"],
+    ["a", "b", "Stretch", "c", "This week", "d"],
   );
 });

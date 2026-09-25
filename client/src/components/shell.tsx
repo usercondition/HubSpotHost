@@ -327,7 +327,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="ops-stage relative flex min-h-0 min-w-0 flex-1 flex-col">
         <nav
           aria-label="Mobile navigation"
-          className="relative z-[1] flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 md:hidden"
+          className="relative z-[1] flex gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:thin] md:hidden"
         >
           {mobileNav.map((item) => {
             const active = pathOnly === item.href;
@@ -338,7 +338,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 title={item.title}
                 data-testid={item.testId}
                 className={cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium transition-[background-color,color] duration-150 ease-out",
+                  "flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[0.7rem] font-medium transition-[background-color,color] duration-150 ease-out",
                   active
                     ? "bg-primary text-primary-foreground"
                     : "bg-card/70 text-muted-foreground hover:text-foreground",
@@ -353,7 +353,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={() => setMobileMoreOpen((open) => !open)}
             className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.75rem] font-medium",
+              "flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[0.7rem] font-medium",
               mobileMoreOpen || moreNav.some((item) => item.href === pathOnly)
                 ? "bg-muted text-foreground"
                 : "bg-card/70 text-muted-foreground hover:text-foreground",
