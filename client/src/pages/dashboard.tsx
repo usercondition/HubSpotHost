@@ -184,7 +184,7 @@ function StackSummaryStrip({
   headers: Record<string, string>;
   enabled: boolean;
 }) {
-  const stack = useQuery<{ rows: Parameters<typeof stackFloorLine>[0]["rows"]; totals: { committed: number } }>({
+  const stack = useQuery<{ rows: Parameters<typeof stackFloorLine>[0]["rows"]; totals: { committed: number; outTheDoor?: number } }>({
     queryKey: ["/api/priority-stack", ownerCode],
     enabled,
     queryFn: async () => {

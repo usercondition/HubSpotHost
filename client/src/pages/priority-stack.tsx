@@ -206,11 +206,14 @@ export default function PriorityStackPage() {
               ) : null}
             </div>
             {data.outTheDoor.length > 0 ? (
-              <section className="overflow-hidden rounded-lg border border-border" data-testid="stack-out-the-door">
-                <div className="stack-commit-line">
+              <details className="overflow-hidden rounded-lg border border-border" data-testid="stack-out-the-door">
+                <summary className="stack-commit-line cursor-pointer">
                   <span>Out the door</span>
                   <span className="numeric">{formatMoney(data.totals.outTheDoor)}</span>
-                </div>
+                </summary>
+                <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                  Undo only clears the local done mark. HubSpot stage is not reverted.
+                </p>
                 {data.outTheDoor.map((row) => (
                   <div
                     key={row.key}
@@ -220,9 +223,20 @@ export default function PriorityStackPage() {
                     <span className="min-w-0 truncate">{row.contactName || row.name}</span>
                     <span className="shrink-0 text-muted-foreground">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
                     <span className="numeric shrink-0">{row.amount == null ? "—" : formatMoney(row.amount)}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      data-testid={`button-undo-done-${row.key}`}
+                      onClick={() => {
+                        void apiRequest("DELETE", "/api/priority-stack/done", { key: row.key }, { headers }).then(() => stack.refetch());
+                      }}
+                    >
+                      Undo
+                    </Button>
                   </div>
                 ))}
-              </section>
+              </details>
             ) : null}
             <DealOpsDrawer dealId={selectedDealId} headers={headers} onClose={() => setSelectedDealId(null)} />
             {offbookOpen ? (

@@ -528,6 +528,7 @@ export function ShipEngineBuyPanel({
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/priority-stack"] });
       queryClient.invalidateQueries({ queryKey: ["/api/deal-ops"] });
       queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/shipengine/status"] });
 

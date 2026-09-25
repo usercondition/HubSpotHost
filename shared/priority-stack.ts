@@ -170,18 +170,20 @@ export function stackFloorLine(input: {
     nextStep: string;
     amount: number | null;
   }>;
-  totals: { committed: number };
+  totals: { committed: number; outTheDoor?: number };
 }): string {
   const committed = input.rows.filter((row) => row.tier === "committed");
   const unpriced = committed.filter((row) => row.kind === "offbook" && row.amount == null);
   const extra = unpriced.map((row) => row.contactName || row.name).filter(Boolean);
   const money = `$${input.totals.committed.toFixed(2)}`;
   const cash = extra.length > 0 ? `${money} + ${extra.join(", ")}` : money;
+  const outTheDoor = input.totals.outTheDoor ?? 0;
+  const shipped = outTheDoor > 0 ? ` · out $${outTheDoor.toFixed(2)}` : "";
   const next = input.rows[0];
   const who = next ? (next.contactName || next.name) : "";
   const action = next ? (next.nextStep || next.blocker) : "";
   const tail = who ? ` · next: ${who}${action ? `, ${action}` : ""}` : "";
-  return `${committed.length} this week · ${cash}${tail}`;
+  return `${committed.length} this week · ${cash}${shipped}${tail}`;
 }
 
 export function laneForBucket(bucket: string | null | undefined): StackLane {

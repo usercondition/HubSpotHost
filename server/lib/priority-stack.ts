@@ -18,6 +18,7 @@ import {
   type StackTier,
 } from "../../shared/priority-stack";
 import { addShipByCalendarDays, shipByCalendarDate } from "../../shared/ship-by";
+import { getFulfillmentChecklist } from "./fulfillment";
 import {
   priorityStackBundles,
   priorityStackEntries,
@@ -63,6 +64,7 @@ export interface PriorityStackRow {
   item: ProductionQueueItem | null;
   doneAt: string | null;
   doneAmount: number | null;
+  warning: string;
 }
 
 export interface PriorityStackView {
@@ -395,49 +397,121 @@ export function deleteOffbook(id: number): boolean {
   return true;
 }
 
+function stampDealDone(dealId: string, queue: ProductionQueueItem[], now: Date): void {
+  const database = getDb();
+  const stamp = now.toISOString();
+  const item = queue.find((row) => row.dealId === dealId);
+  const entry = upsertDealStackEntry(dealId, {});
+  if (entry.doneAt) {
+    database
+      .update(priorityStackEntries)
+      .set({
+        doneAmount: entry.doneAmount || (item ? String(item.amount) : ""),
+        doneName: entry.doneName || item?.dealName || entry.title,
+        updatedAt: stamp,
+      })
+      .where(eq(priorityStackEntries.id, entry.id))
+      .run();
+    return;
+  }
+  database
+    .update(priorityStackEntries)
+    .set({
+      doneAt: stamp,
+      doneAmount: item ? String(item.amount) : entry.doneAmount,
+      doneName: item?.dealName ?? entry.doneName,
+      updatedAt: stamp,
+    })
+    .where(eq(priorityStackEntries.id, entry.id))
+    .run();
+}
+
+function completeBundleIfReady(bundleId: number, now: Date): void {
+  const database = getDb();
+  const bundle = database.select().from(priorityStackBundles).where(eq(priorityStackBundles.id, bundleId)).get();
+  if (!bundle || bundle.doneAt) return;
+  const members = database
+    .select()
+    .from(priorityStackEntries)
+    .where(and(eq(priorityStackEntries.bundleId, bundleId), eq(priorityStackEntries.kind, "deal")))
+    .all();
+  if (members.length === 0 || members.some((member) => !member.doneAt)) return;
+  database
+    .update(priorityStackBundles)
+    .set({ doneAt: now.toISOString(), updatedAt: now.toISOString() })
+    .where(eq(priorityStackBundles.id, bundleId))
+    .run();
+}
+
 export function markStackDone(key: string, queue: ProductionQueueItem[], now = new Date()): boolean {
   const database = getDb();
   const stamp = now.toISOString();
   if (key.startsWith("deal:")) {
     const dealId = key.slice(5);
-    const item = queue.find((row) => row.dealId === dealId);
-    const entry = upsertDealStackEntry(dealId, {});
-    database
-      .update(priorityStackEntries)
-      .set({
-        doneAt: stamp,
-        doneAmount: item ? String(item.amount) : entry.doneAmount,
-        doneName: item?.dealName ?? entry.doneName,
-        updatedAt: stamp,
-      })
-      .where(eq(priorityStackEntries.id, entry.id))
-      .run();
+    stampDealDone(dealId, queue, now);
+    const entry = database.select().from(priorityStackEntries).where(eq(priorityStackEntries.hubspotDealId, dealId)).get();
+    if (entry?.bundleId) completeBundleIfReady(entry.bundleId, now);
     return true;
   }
   if (key.startsWith("offbook:")) {
     const id = Number(key.slice(8));
     const existing = database.select().from(priorityStackEntries).where(eq(priorityStackEntries.id, id)).get();
     if (!existing || existing.kind !== "offbook") return false;
-    database
-      .update(priorityStackEntries)
-      .set({
-        doneAt: stamp,
-        doneAmount: existing.amount,
-        doneName: existing.title,
-        updatedAt: stamp,
-      })
-      .where(eq(priorityStackEntries.id, id))
-      .run();
+    if (!existing.doneAt) {
+      database
+        .update(priorityStackEntries)
+        .set({
+          doneAt: stamp,
+          doneAmount: existing.amount,
+          doneName: existing.title,
+          updatedAt: stamp,
+        })
+        .where(eq(priorityStackEntries.id, id))
+        .run();
+    }
     return true;
   }
   if (key.startsWith("bundle:")) {
     const id = Number(key.slice(7));
     const existing = database.select().from(priorityStackBundles).where(eq(priorityStackBundles.id, id)).get();
     if (!existing) return false;
-    database.update(priorityStackBundles).set({ doneAt: stamp, updatedAt: stamp }).where(eq(priorityStackBundles.id, id)).run();
+    const members = database
+      .select()
+      .from(priorityStackEntries)
+      .where(and(eq(priorityStackEntries.bundleId, id), eq(priorityStackEntries.kind, "deal")))
+      .all();
+    for (const member of members) {
+      if (member.hubspotDealId) stampDealDone(member.hubspotDealId, queue, now);
+    }
+    if (!existing.doneAt) {
+      database.update(priorityStackBundles).set({ doneAt: stamp, updatedAt: stamp }).where(eq(priorityStackBundles.id, id)).run();
+    }
     return true;
   }
   return false;
+}
+
+/** HubSpot deals a Picked up action should close. Shipping labels close through attach. */
+export function pickupDealIdsForStackDone(key: string, queue: ProductionQueueItem[]): string[] {
+  const database = getDb();
+  if (key.startsWith("deal:")) {
+    const dealId = key.slice(5);
+    const item = queue.find((row) => row.dealId === dealId);
+    return item && !item.shippingRequired ? [dealId] : [];
+  }
+  if (key.startsWith("bundle:")) {
+    const id = Number(key.slice(7));
+    const bundle = database.select().from(priorityStackBundles).where(eq(priorityStackBundles.id, id)).get();
+    if (!bundle || bundle.fulfillmentMode !== "pickup") return [];
+    return database
+      .select()
+      .from(priorityStackEntries)
+      .where(and(eq(priorityStackEntries.bundleId, id), eq(priorityStackEntries.kind, "deal")))
+      .all()
+      .map((entry) => entry.hubspotDealId)
+      .filter((dealId): dealId is string => Boolean(dealId));
+  }
+  return [];
 }
 
 export function undoStackDone(key: string): boolean {
@@ -542,7 +616,6 @@ export function buildPriorityStack(
       hiddenCount += 1;
       continue;
     }
-    if (entry?.doneAt && doneThisWeek(entry.doneAt, now)) continue;
     const blocker = dealBlocker(item, entry);
     const row: PriorityStackRow & { manualRank: number | null; readiness: number; priorityScore: number } = {
       key: `deal:${item.dealId}`,
@@ -573,29 +646,78 @@ export function buildPriorityStack(
       item,
       doneAt: entry?.doneAt ?? null,
       doneAmount: parseStackAmount(entry?.doneAmount),
+      warning: "",
       manualRank: entry?.bundleId ? null : (entry?.manualRank ?? null),
       readiness: readinessRank(item),
       priorityScore: item.priorityScore,
     };
+    const done = Boolean(entry?.doneAt && doneThisWeek(entry.doneAt, now));
     if (entry?.bundleId) {
       const list = memberRows.get(entry.bundleId) ?? [];
       list.push(row);
       memberRows.set(entry.bundleId, list);
-    } else {
+    } else if (!done) {
       loose.push(row);
     }
   }
 
+  for (const entry of state.entries) {
+    if (entry.kind !== "deal" || !entry.bundleId || !entry.hubspotDealId) continue;
+    if (!entry.doneAt || !doneThisWeek(entry.doneAt, now)) continue;
+    const list = memberRows.get(entry.bundleId) ?? [];
+    if (list.some((member) => member.dealId === entry.hubspotDealId)) continue;
+    list.push({
+      key: `deal:${entry.hubspotDealId}`,
+      kind: "deal",
+      rank: 0,
+      manual: false,
+      isNew: false,
+      name: entry.doneName || entry.title || entry.hubspotDealId,
+      contactName: entry.contactName || null,
+      stage: "Done",
+      bucket: "ship_ready",
+      lane: "good",
+      blocker: "",
+      blockerSource: "manual",
+      nextStep: "",
+      targetDate: today,
+      targetSource: "local",
+      tentative: false,
+      amount: parseStackAmount(entry.doneAmount),
+      tier: "committed",
+      shippingRequired: true,
+      dealId: entry.hubspotDealId,
+      offbookId: null,
+      bundleId: entry.bundleId,
+      fulfillment: null,
+      steps: [],
+      members: [],
+      item: null,
+      doneAt: entry.doneAt,
+      doneAmount: parseStackAmount(entry.doneAmount),
+      warning: "",
+    });
+    memberRows.set(entry.bundleId, list);
+  }
+
   for (const bundle of state.bundles) {
     const members = memberRows.get(bundle.id) ?? [];
-    if (members.length === 0) continue;
+    const openMembers = members.filter((member) => !member.doneAt);
+    if (members.length === 0 || openMembers.length === 0) continue;
     if (bundle.doneAt && doneThisWeek(bundle.doneAt, now)) continue;
-    const targetDate = members.reduce((latest, member) => (member.targetDate > latest ? member.targetDate : latest), members[0].targetDate);
+    const targetDate = openMembers.reduce((latest, member) => (member.targetDate > latest ? member.targetDate : latest), openMembers[0].targetDate);
     const memberReadiness = (member: PriorityStackRow) =>
       readinessRank(member.item ?? { bucket: member.bucket, stage: member.stage });
-    const leastReady = members.slice().sort((a, b) => memberReadiness(a) - memberReadiness(b))[0];
+    const leastReady = openMembers.slice().sort((a, b) => memberReadiness(a) - memberReadiness(b))[0];
     const readiness = memberReadiness(leastReady);
-    const amount = roundMoney(members.reduce((sum, member) => sum + (member.amount ?? 0), 0));
+    const amount = roundMoney(openMembers.reduce((sum, member) => sum + (member.amount ?? 0), 0));
+    const labeledPickup =
+      bundle.fulfillmentMode === "pickup" &&
+      members.some((member) => {
+        if (!member.dealId) return false;
+        const checklist = getFulfillmentChecklist(member.dealId);
+        return checklist.labelBought || checklist.trackingNumber.trim().length > 0;
+      });
     const manual = bundle.blocker.trim();
     loose.push({
       key: `bundle:${bundle.id}`,
@@ -626,6 +748,7 @@ export function buildPriorityStack(
       item: null,
       doneAt: bundle.doneAt,
       doneAmount: amount,
+      warning: labeledPickup ? "Label attached on a pickup bundle" : "",
       manualRank: bundle.manualRank,
       readiness,
       priorityScore: Math.max(...members.map((member) => member.item?.priorityScore ?? 0)),
@@ -672,6 +795,7 @@ export function buildPriorityStack(
       item: null,
       doneAt: entry.doneAt,
       doneAmount: parseStackAmount(entry.doneAmount),
+      warning: "",
       manualRank: entry.manualRank,
       readiness: allDone ? 4 : 2,
       priorityScore: 0,
@@ -720,6 +844,7 @@ export function buildPriorityStack(
       item: null,
       doneAt: entry.doneAt,
       doneAmount: parseStackAmount(entry.doneAmount),
+      warning: "",
     });
   }
 

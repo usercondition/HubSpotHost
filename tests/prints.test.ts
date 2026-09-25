@@ -13,6 +13,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import express from "express";
+import { eq } from "drizzle-orm";
+import { fulfillmentChecklists, priorityStackEntries } from "../shared/schema";
 
 const dbFile = path.join(os.tmpdir(), `print-files-test-${crypto.randomUUID()}.db`);
 const OWNER_CODE = "print-owner-code";
@@ -502,7 +504,14 @@ test("label attach seeds known postage without replacing existing costs", async 
   }
 });
 
+function clearDealShipState(dealId: string) {
+  const database = store.getDb();
+  database.delete(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, dealId)).run();
+  database.delete(priorityStackEntries).where(eq(priorityStackEntries.hubspotDealId, dealId)).run();
+}
+
 test("priced label attach queues one idempotent owner-only Marketplace shipment notice", async () => {
+  clearDealShipState("701");
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";
@@ -552,6 +561,7 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
 });
 
 test("priced OfferUp label attach queues tracking-only notice on OfferUp", async () => {
+  clearDealShipState("701");
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";

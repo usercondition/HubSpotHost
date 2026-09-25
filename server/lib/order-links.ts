@@ -401,6 +401,9 @@ CREATE TABLE IF NOT EXISTS fulfillment_checklists (
   packing_done INTEGER NOT NULL DEFAULT 0,
   tracking_number TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  shipengine_label_id TEXT NOT NULL DEFAULT '',
+  shipengine_carrier TEXT NOT NULL DEFAULT '',
+  shipengine_service TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -480,6 +483,22 @@ const SUPPLY_PURCHASE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["line_items_json", "TEXT NOT NULL DEFAULT '[]'"],
 ];
 
+const FULFILLMENT_COLUMN_MIGRATIONS: Array<[string, string]> = [
+  ["shipengine_label_id", "TEXT NOT NULL DEFAULT ''"],
+  ["shipengine_carrier", "TEXT NOT NULL DEFAULT ''"],
+  ["shipengine_service", "TEXT NOT NULL DEFAULT ''"],
+];
+
+function ensureFulfillmentColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (sqlite.prepare("PRAGMA table_info(fulfillment_checklists)").all() as Array<{ name: string }>).map((row) => row.name),
+  );
+  for (const [name, type] of FULFILLMENT_COLUMN_MIGRATIONS) {
+    if (existing.has(name)) continue;
+    sqlite.exec(`ALTER TABLE fulfillment_checklists ADD COLUMN ${name} ${type}`);
+  }
+}
+
 function ensureSupplyPurchaseColumns(sqlite: Database.Database): void {
   const existing = new Set(
     (
@@ -556,6 +575,7 @@ export function getDb(): BetterSQLite3Database {
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
+  ensureFulfillmentColumns(sqlite);
   db = drizzle(sqlite);
   return db;
 }
