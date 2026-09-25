@@ -13,7 +13,6 @@ import {
   resolveWriteDecision,
 } from "./lib/config";
 import { AUDIT_LIMIT, auditCount, listAttempts } from "./lib/audit";
-import { summarizeEvents } from "./lib/events";
 import { recalculateDeal } from "./lib/service";
 import {
   buildRequestUri,
@@ -133,7 +132,8 @@ import {
   setActiveResinBottle,
   upsertResinProduct,
 } from "./lib/resin-inventory";
-import { getLatestWebhookDiagnostic, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
+import { getLatestWebhookDiagnostic, publicBaseHostMatches, recordWebhookDiagnostic } from "./lib/webhook-diagnostics";
+import { acceptWebhookBatch, scheduleWebhookProcessing } from "./lib/webhook-inbox";
 import {
   analyzeMarketplaceConversation,
   type PaidOrderDraft,
@@ -851,7 +851,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Local / flagged mock Messenger page for extension V1 testing.
   registerMessengerScanTestUi(app);
 
-  app.get("/api/health", (_req: Request, res: Response) => {
+  app.get("/api/health", (req: Request, res: Response) => {
     const config = getConfig();
     const decision = resolveWriteDecision(config, true);
     res.json({
@@ -885,6 +885,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           : "not-configured",
         supportedVersions: ["v1", "v3"],
         path: WEBHOOK_PATH,
+        publicBaseHostMatches: publicBaseHostMatches(
+          (req.headers["x-forwarded-host"] as string | undefined) || req.get("host") || "",
+        ),
         latestDelivery: getLatestWebhookDiagnostic(),
       },
       admin: {
@@ -3624,39 +3627,33 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       });
     }
 
-    const summary = summarizeEvents(req.body);
+    const wantsLiveWrite = webhookWantsLiveWrite(req);
+    const accepted = acceptWebhookBatch(req.body, wantsLiveWrite);
     recordWebhookDiagnostic({
       result: "accepted",
       version: verification.version,
+      eventCount: accepted.received,
       reason: verification.valid
         ? verification.reason
         : "secure callback token valid; signature mismatch bypassed for private-app delivery",
     });
-    const wantsLiveWrite = webhookWantsLiveWrite(req);
-
-    const results = [];
-    for (const dealId of summary.dealIds) {
-      results.push(
-        await recalculateDeal({ dealId, origin: "webhook", requestWantsLiveWrite: wantsLiveWrite }),
-      );
-    }
+    scheduleWebhookProcessing();
 
     res.json({
       ok: true,
+      queued: true,
       signature: verification.valid
         ? verification.enforced
           ? verification.reason
           : "verification not configured"
         : "secure callback token valid",
-      received: summary.received,
-      matched: summary.matched,
-      ignoredOutputEvents: summary.ignoredOutputEvents,
-      ignoredOther: summary.ignoredOther,
-      deals: summary.dealIds.length,
-      written: results.filter((r) => r.status === "written").length,
-      dryRun: results.filter((r) => r.status === "dry-run").length,
-      errors: results.filter((r) => r.status === "error").length,
-      results,
+      received: accepted.received,
+      matched: accepted.matched,
+      ignoredOutputEvents: accepted.ignoredOutputEvents,
+      ignoredOther: accepted.ignoredOther,
+      deals: accepted.deals,
+      duplicates: accepted.duplicates,
+      stored: accepted.stored,
     });
   });
 

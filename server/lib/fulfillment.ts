@@ -11,7 +11,7 @@ import {
   type UpdateFulfillmentChecklistInput,
 } from "../../shared/schema";
 import { getConfig, resolveWriteDecision } from "./config";
-import { ensurePrintFileDealProperties, hubspotRequest, HubSpotError, invalidatePrintOrderDealsCache } from "./hubspot";
+import { ensurePrintFileDealProperties, HubSpotError } from "./hubspot";
 import { getDb } from "./order-links";
 
 function nowIso(): string {
@@ -231,57 +231,20 @@ export async function syncDealShippingToHubSpot(
     print_ship_notes: fields.notes.slice(0, 2_000),
   };
 
+  const writable: Record<string, string> = {};
+  if (properties.print_tracking_number.trim()) writable.print_tracking_number = properties.print_tracking_number;
+  if (properties.print_ship_notes.trim()) writable.print_ship_notes = properties.print_ship_notes;
   if (!decision.write) {
     return { attempted: true, dryRun: true, gate: decision.reason, wrote: false };
   }
+  if (Object.keys(writable).length === 0) {
+    return { attempted: false, dryRun: false, gate: "blank values are not written over HubSpot", wrote: false };
+  }
 
   await ensurePrintFileDealProperties();
-  await hubspotRequest(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ properties }),
-  });
-  invalidatePrintOrderDealsCache();
-  return { attempted: true, dryRun: false, gate: decision.reason, wrote: true };
-}
-
-/**
- * Copy HubSpot ship notes into the local checklist only when Print Ops is blank.
- * Does not write HubSpot, and does not replace a note that is already saved.
- */
-export function fillBlankLocalShipNotes(dealId: string, notes: string): { wrote: boolean; skipped?: "local-not-blank" | "empty" } {
-  const id = dealId.trim();
-  const value = notes.trim().slice(0, 2_000);
-  if (!/^[0-9]{1,20}$/.test(id) || !value) return { wrote: false, skipped: "empty" };
-  const existing = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, id)).get();
-  if (existing && String(existing.notes ?? "").trim()) return { wrote: false, skipped: "local-not-blank" };
-  const now = nowIso();
-  if (!existing) {
-    getDb()
-      .insert(fulfillmentChecklists)
-      .values({
-        hubspotDealId: id,
-        addressVerified: false,
-        costsEntered: false,
-        labelBought: false,
-        trackingPasted: false,
-        packingDone: false,
-        trackingNumber: "",
-        notes: value,
-        shipengineLabelId: "",
-        shipengineCarrier: "",
-        shipengineService: "",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-    return { wrote: true };
-  }
-  getDb()
-    .update(fulfillmentChecklists)
-    .set({ notes: value, updatedAt: now })
-    .where(eq(fulfillmentChecklists.hubspotDealId, id))
-    .run();
-  return { wrote: true };
+  const { submitHubspotWrite } = await import("./hubspot-writes");
+  const queued = await submitHubspotWrite(dealId, writable);
+  return { attempted: true, dryRun: false, gate: decision.reason, wrote: queued.wrote };
 }
 
 export async function upsertFulfillmentChecklist(

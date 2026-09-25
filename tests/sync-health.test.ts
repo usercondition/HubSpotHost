@@ -185,14 +185,14 @@ test("cost and amount mismatches are reported and never repaired", () => {
   assert.equal(report.items.every((item) => item.repairable === false), true);
 });
 
-test("a blank Print Ops ship note is filled from HubSpot and is not an issue", () => {
+test("a blank checklist note against HubSpot ship notes is not drift and is not copied", () => {
   const copied = compareSyncHealth(input({
     hubspotById: { "91": remote({ dealId: "91", shipNotes: "pickup after 5" }) },
     localDeals: [local({ dealId: "91", shipNotes: "  " })],
   }));
   assert.deepEqual(kinds(copied), []);
   assert.equal(copied.summary.counts.shipNotes, 0);
-  assert.deepEqual(copied.repairs, [{ dealId: "91", field: "local_notes", value: "pickup after 5" }]);
+  assert.deepEqual(copied.repairs, []);
 
   const kept = compareSyncHealth(input({
     hubspotById: { "91": remote({ dealId: "91", shipNotes: "hubspot note" }) },
@@ -210,6 +210,12 @@ test("$0 actual shipping against a blank HubSpot cost is not drift", () => {
   assert.deepEqual(kinds(quiet), []);
   assert.equal(quiet.summary.counts.costs, 0);
   assert.deepEqual(quiet.repairs, []);
+
+  const auditedBlank = compareSyncHealth(input({
+    hubspotById: { "94": remote({ dealId: "94", material: "", labor: "", packaging: "" }) },
+    localDeals: [local({ dealId: "94", material: "0", labor: "0.00", packaging: "0" })],
+  }));
+  assert.deepEqual(kinds(auditedBlank), []);
 
   const postage = compareSyncHealth(input({
     hubspotById: { "93": remote({ dealId: "93", shipping: "" }) },
@@ -269,15 +275,16 @@ test("webhook silence stays a note and is not an issue, and token errors fail th
   assert.equal(silent.summary.issueCount, 0);
   assert.equal(silent.summary.status, "ok");
   assert.equal(silent.summary.webhook.arriving, false);
-  assert.match(silent.summary.webhook.note, /none have arrived/);
+  assert.match(silent.summary.webhook.note, /No HubSpot delivery has been recorded/);
 
   const fresh = compareSyncHealth(input({
     webhookConfigured: true,
-    webhook: { receivedAt: NOW.toISOString(), result: "accepted", version: "v3", reason: "ok" },
+    webhook: { receivedAt: NOW.toISOString(), result: "accepted", version: "v3", reason: "ok", eventCount: 1 },
   }));
   assert.deepEqual(kinds(fresh), []);
   assert.equal(fresh.summary.webhook.arriving, true);
   assert.equal(fresh.summary.webhook.lastDeliveryAt, NOW.toISOString());
+  assert.match(fresh.summary.webhook.note, /Last HubSpot delivery: 2026-09-25T18:00:00.000Z/);
 
   const token = compareSyncHealth(input({ tokenError: "HubSpot API 401" }));
   assert.equal(token.summary.status, "error");
@@ -285,7 +292,7 @@ test("webhook silence stays a note and is not an issue, and token errors fail th
   assert.equal(JSON.stringify(token.summary).includes("Customer"), false);
 });
 
-test("local ship-note fill writes a blank checklist and does not call HubSpot", async () => {
+test("ship-note drift does not copy HubSpot text into the checklist notes field", async () => {
   const dir = mkdtempSync(join(tmpdir(), "sync-notes-"));
   const previous = {
     db: process.env.ORDER_LINKS_DB_FILE,
@@ -308,16 +315,14 @@ test("local ship-note fill writes a blank checklist and does not call HubSpot", 
   process.env.ALLOW_HUBSPOT_WRITES = "false";
   resetOrderLinkStore();
   try {
-    const filled = await applySyncRepairs([{ dealId: "91001", field: "local_notes", value: "pickup after 5" }]);
-    assert.deepEqual(filled, [{ dealId: "91001", field: "local_notes", wrote: true, dryRun: false }]);
+    const report = compareSyncHealth(input({
+      hubspotById: { "91001": remote({ dealId: "91001", shipNotes: "pickup after 5" }) },
+      localDeals: [local({ dealId: "91001", shipNotes: "" })],
+    }));
+    assert.deepEqual(report.repairs, []);
+    await applySyncRepairs(report.repairs);
     const stored = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, "91001")).get();
-    assert.equal(stored?.notes, "pickup after 5");
-
-    const kept = await applySyncRepairs([{ dealId: "91001", field: "local_notes", value: "a different note" }]);
-    assert.equal(kept[0]?.wrote, false);
-    assert.equal(kept[0]?.skipped, "local-not-blank");
-    const again = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, "91001")).get();
-    assert.equal(again?.notes, "pickup after 5");
+    assert.equal(stored, undefined);
     assert.equal(calls.length, 0);
   } finally {
     if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
@@ -477,6 +482,7 @@ test("public health summary has counts and timestamps and hides deal detail", as
       "lastSuccessfulWriteAt",
       "status",
       "webhook",
+      "writes",
     ]);
 
     const detail = await fetch(`${base}/api/sync-health`, { headers: { "x-paid-order-access-code": "sync-test" } });

@@ -15,6 +15,8 @@ export interface RecalcOutcome {
   marginPercentage?: number;
   costTotal?: number;
   error?: string;
+  retryAfterMs?: number | null;
+  retryable?: boolean;
 }
 
 export async function recalculateDeal(params: {
@@ -87,6 +89,8 @@ export async function recalculateDeal(params: {
       dryRun: !decision.write,
       gate: decision.reason,
       error: truncateError(message),
+      retryAfterMs: err instanceof HubSpotError ? err.retryAfterMs : null,
+      retryable: err instanceof HubSpotError ? err.status === 429 || err.status >= 500 || err.status === 408 : true,
     };
   }
 }

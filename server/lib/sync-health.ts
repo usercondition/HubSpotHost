@@ -11,8 +11,10 @@ import { updateShipByPlan } from "./deal-ops";
 import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError } from "./hubspot";
 import { getDb } from "./order-links";
 import { fulfillmentChecklists } from "../../shared/schema";
-import { fillBlankLocalShipNotes } from "./fulfillment";
+import { lastHubspotWriteSuccessAt } from "./hubspot-write-log";
+import { hubspotWriteCounts, listFailedHubspotWrites, processPendingHubspotWrites, reopenFailedHubspotWrites } from "./hubspot-writes";
 import { listStackState } from "./priority-stack";
+import { failedWebhookCount, listFailedWebhookEvents, processWebhookInbox, reopenFailedWebhookEvents } from "./webhook-inbox";
 import { loadProductionQueue } from "./queue-loader";
 import { recalculateDeal } from "./service";
 import { getLatestWebhookDiagnostic, type WebhookDiagnostic } from "./webhook-diagnostics";
@@ -49,7 +51,7 @@ export interface SyncDriftItem {
 
 export interface SyncRepair {
   dealId: string;
-  field: "tracking" | "notes" | "ship_by" | "retry" | "local_notes";
+  field: "tracking" | "notes" | "ship_by" | "retry" | "requeue_write" | "requeue_webhook";
   value: string;
 }
 
@@ -182,17 +184,18 @@ function webhookNote(configured: boolean, latest: WebhookDiagnostic | null, now:
   if (!latest) {
     return {
       arriving: false,
-      note: "Webhooks are configured, but none have arrived since this server started.",
+      note: "No HubSpot delivery has been recorded.",
     };
   }
   const age = now.getTime() - new Date(latest.receivedAt).getTime();
+  const when = `Last HubSpot delivery: ${latest.receivedAt}.`;
   if (!Number.isFinite(age) || age > WEBHOOK_FRESH_MS) {
     return {
       arriving: false,
-      note: "Webhooks are configured, but the last delivery is more than a day old.",
+      note: `${when} That is more than a day old.`,
     };
   }
-  return { arriving: true, note: "HubSpot webhooks are arriving." };
+  return { arriving: true, note: when };
 }
 
 export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
@@ -283,7 +286,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
         items.push(item("shipNotes", local.dealId, "print_ship_notes", local.shipNotes, "", true, "HubSpot ship notes are blank. Print Ops can push the local notes."));
         repairs.push({ dealId: local.dealId, field: "notes", value: local.shipNotes });
       } else if (blank(local.shipNotes) && !blank(remote.shipNotes)) {
-        repairs.push({ dealId: local.dealId, field: "local_notes", value: remote.shipNotes.trim() });
+        // Checklist notes are a different field. Print Ops already shows HubSpot print_ship_notes.
       } else if (!sameText(local.shipNotes, remote.shipNotes)) {
         items.push(item("shipNotes", local.dealId, "print_ship_notes", local.shipNotes, remote.shipNotes, false, "Ship notes differ. HubSpot’s value is left as-is."));
       }
@@ -311,8 +314,8 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
     ];
     for (const [field, localValue, remoteValue] of costPairs) {
       if (localValue == null || blank(localValue)) continue;
-      // Postage stays blank in HubSpot until a real label. A $0 Print Ops default is not drift, and is not written back.
-      if (field === "print_actual_shipping_cost" && blank(remoteValue) && zeroMoney(localValue)) continue;
+      // The audit log stores a blank HubSpot cost as 0. Blank vs $0 is in sync, and $0 postage is never written back.
+      if (blank(remoteValue) && zeroMoney(localValue)) continue;
       if (blank(remoteValue) || !sameMoney(localValue, remoteValue)) {
         items.push(item(
           "costs",
@@ -379,6 +382,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
       issueCount,
       lastSuccessfulReadAt: input.lastSuccessfulReadAt,
       lastSuccessfulWriteAt: input.lastSuccessfulWriteAt,
+      writes: { pending: 0, failed: 0 },
       lastCheckedAt: now.toISOString(),
       webhook: {
         configured: input.webhookConfigured,
@@ -417,6 +421,7 @@ export function placeholderSyncSummary(now = new Date()): HubspotSyncSummary {
     lastSuccessfulReadAt: null,
     lastSuccessfulWriteAt: null,
     lastCheckedAt: null,
+    writes: liveWriteCounts(),
     webhook: {
       configured: config.webhookSecretConfigured,
       arriving: webhook.arriving,
@@ -436,7 +441,18 @@ function latestWriteAt(audit: AuditEntry[]): string | null {
     if (entry.status !== "written") continue;
     if (!latest || entry.timestamp > latest) latest = entry.timestamp;
   }
+  const persisted = lastHubspotWriteSuccessAt();
+  if (persisted && (!latest || persisted > latest)) return persisted;
   return latest;
+}
+
+function liveWriteCounts(): { pending: number; failed: number } {
+  try {
+    const writes = hubspotWriteCounts();
+    return { pending: writes.pending, failed: writes.failed + failedWebhookCount() };
+  } catch {
+    return { pending: 0, failed: 0 };
+  }
 }
 
 function stageClosed(metadata: { isClosed?: string | boolean } | undefined, label: string, props: Record<string, string | null>): boolean {
@@ -514,7 +530,7 @@ export async function loadSyncCompareInput(now = new Date()): Promise<SyncCompar
       bundleMember: bundleIds.has(dealId),
       amount: null,
       tracking: checklist?.trackingNumber ?? "",
-      shipNotes: checklist?.notes ?? "",
+      shipNotes: hubspotById[dealId]?.shipNotes ?? "",
       shipBy: null,
       shipBySource: null,
       material: costs ? String(costs.material) : null,
@@ -562,19 +578,16 @@ export async function applySyncRepairs(
 ): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }>> {
   const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }> = [];
   for (const repair of repairs) {
-    if (repair.field === "local_notes") {
-      try {
-        const filled = fillBlankLocalShipNotes(repair.dealId, repair.value);
-        results.push({
-          dealId: repair.dealId,
-          field: repair.field,
-          wrote: filled.wrote,
-          dryRun: false,
-          ...(filled.skipped === "local-not-blank" ? { skipped: "local-not-blank" as const } : {}),
-        });
-      } catch {
-        results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: false, skipped: "read-failed" });
-      }
+    if (repair.field === "requeue_write") {
+      reopenFailedHubspotWrites();
+      await processPendingHubspotWrites();
+      results.push({ dealId: repair.dealId, field: repair.field, wrote: true, dryRun: false });
+      continue;
+    }
+    if (repair.field === "requeue_webhook") {
+      reopenFailedWebhookEvents();
+      await processWebhookInbox();
+      results.push({ dealId: repair.dealId, field: repair.field, wrote: true, dryRun: false });
       continue;
     }
     const decision = resolveWriteDecision(getConfig(), true);
@@ -653,8 +666,41 @@ export async function runSyncHealthCheck(now = new Date()): Promise<SyncHealthRe
   return running;
 }
 
+function appendDurableFailures(report: SyncHealthReport): void {
+  for (const row of listFailedHubspotWrites()) {
+    report.items.push(item(
+      "failedWrites",
+      row.dealId,
+      "hubspot_write",
+      null,
+      row.lastError,
+      true,
+      "A HubSpot write is still failing. Print Ops is keeping the local value and will retry it.",
+    ));
+    report.repairs.push({ dealId: row.dealId, field: "requeue_write", value: row.dealId });
+  }
+  for (const row of listFailedWebhookEvents()) {
+    report.items.push(item(
+      "failedWrites",
+      row.dealId,
+      "webhook",
+      null,
+      row.lastError,
+      true,
+      "A HubSpot webhook failed repeatedly. Print Ops kept the event and will retry it.",
+    ));
+    report.repairs.push({ dealId: row.dealId ?? row.eventId, field: "requeue_webhook", value: row.eventId });
+  }
+  recount(report);
+  report.summary.writes = liveWriteCounts();
+}
+
 async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
   try {
+    reopenFailedHubspotWrites();
+    reopenFailedWebhookEvents();
+    await processPendingHubspotWrites(now);
+    await processWebhookInbox(now);
     const input = await loadSyncCompareInput(now);
     const report = compareSyncHealth(input);
     if (report.repairs.length > 0) {
@@ -663,23 +709,12 @@ async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
         const fixed = new Set(applied.filter((row) => row.wrote).map((row) => `${row.dealId}:${row.field}`));
         report.items = report.items.filter((row) => !fixed.has(`${row.dealId}:${repairFieldForKind(row.kind)}`));
         report.repairs = report.repairs.filter((row) => !fixed.has(`${row.dealId}:${row.field}`));
-        for (const row of applied) {
-          if (row.field !== "local_notes" || row.skipped !== "read-failed") continue;
-          report.items.push(item(
-            "shipNotes",
-            row.dealId,
-            "print_ship_notes",
-            "",
-            null,
-            true,
-            "HubSpot has ship notes and Print Ops is blank. Copying them into Print Ops failed.",
-          ));
-        }
         recount(report);
       } catch (error) {
         console.warn(`[sync-health] repair pass failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    appendDurableFailures(report);
     cached = report;
     return report;
   } catch (error) {

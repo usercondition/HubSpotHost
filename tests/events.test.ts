@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readDealId, readPropertyName, summarizeEvents } from "../server/lib/events";
+import { HUBSPOT_WEBHOOK_SUBSCRIPTIONS, readDealId, readPropertyName, summarizeEvents } from "../server/lib/events";
 
 test("accepts an array payload and matches input property changes", () => {
   const s = summarizeEvents([
@@ -48,12 +48,38 @@ test("ignores output property events so writes cannot loop", () => {
 test("ignores non-deal objects and unrelated properties", () => {
   const s = summarizeEvents([
     { objectId: 7, objectTypeId: "0-1", propertyName: "amount" },
-    { objectId: 8, objectTypeId: "0-3", propertyName: "dealstage" },
+    { objectId: 8, objectTypeId: "0-3", propertyName: "dealname" },
     { objectId: 8, objectTypeId: "0-3" },
     "nonsense",
   ]);
   assert.deepEqual(s.dealIds, []);
+  assert.equal(s.cacheBust, false);
   assert.equal(s.ignoredOther, 4);
+});
+
+test("creation, deletion, and dealstage bust the cache and do not recalculate", () => {
+  const s = summarizeEvents([
+    { objectId: 8, objectTypeId: "0-3", subscriptionType: "deal.propertyChange", propertyName: "dealstage" },
+    { objectId: 9, subscriptionType: "deal.creation" },
+    { objectId: 10, subscriptionType: "deal.deletion" },
+  ]);
+  assert.equal(s.cacheBust, true);
+  assert.equal(s.lifecycle, 3);
+  assert.deepEqual(s.dealIds, []);
+  assert.equal(s.matched, 0);
+});
+
+test("the subscription list is the handler's exact setup list", () => {
+  assert.deepEqual(HUBSPOT_WEBHOOK_SUBSCRIPTIONS, [
+    "deal.propertyChange: amount",
+    "deal.propertyChange: print_material_cost",
+    "deal.propertyChange: print_labor_cost",
+    "deal.propertyChange: print_packaging_cost",
+    "deal.propertyChange: print_actual_shipping_cost",
+    "deal.propertyChange: dealstage",
+    "deal.creation",
+    "deal.deletion",
+  ]);
 });
 
 test("recognizes deals via objectType, subscriptionType or dealId", () => {

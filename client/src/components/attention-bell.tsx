@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bell, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { AttentionAlertCard } from "@/components/attention-alert-card";
-import { HubspotSyncDialog, syncIssueLabel } from "@/components/hubspot-sync-chip";
+import { HubspotSyncDialog, syncChipLabel } from "@/components/hubspot-sync-chip";
 import { useToast } from "@/hooks/use-toast";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -15,6 +15,9 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
 
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
   const syncCount = health.data?.hubspotSync?.issueCount ?? 0;
+  const syncPending = health.data?.hubspotSync?.writes?.pending ?? 0;
+  const syncFailed = health.data?.hubspotSync?.writes?.failed ?? 0;
+  const syncVisible = syncCount > 0 || syncPending > 0 || syncFailed > 0;
   const webhook = health.data?.hubspotSync?.webhook;
   const webhookQuietNote = webhook && webhook.configured && webhook.arriving === false ? webhook.note : "";
 
@@ -55,7 +58,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
 
   if (!isUnlocked) return null;
 
-  const count = (performance.data?.summary.attentionCount ?? 0) + (syncCount > 0 ? 1 : 0);
+  const count = (performance.data?.summary.attentionCount ?? 0) + (syncVisible ? 1 : 0);
   const items = performance.data?.attention ?? [];
   const portalId = performance.data?.hubspotPortalId;
 
@@ -112,7 +115,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
           </p>
         ) : null}
 
-        {syncCount > 0 ? (
+        {syncVisible ? (
           <HubspotSyncDialog
             trigger={
               <button
@@ -120,7 +123,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
                 className="w-full rounded-md bg-chart-4/10 px-3 py-2 text-left"
                 data-testid="row-attention-bell-hubspot-sync"
               >
-                <p className="text-sm font-semibold text-chart-4">{syncIssueLabel(syncCount)}</p>
+                <p className="text-sm font-semibold text-chart-4">{syncChipLabel(health.data?.hubspotSync)}</p>
                 <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                   {health.data?.hubspotSync?.webhook.note || "Open the list of drifted deals."}
                 </p>
@@ -134,7 +137,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Loading alerts…
           </div>
-        ) : items.length === 0 && syncCount === 0 ? (
+        ) : items.length === 0 && !syncVisible ? (
           <div className="rounded-md bg-muted/45 p-3" data-testid="empty-attention-bell">
             <p className="text-sm font-medium">You’re clear</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">

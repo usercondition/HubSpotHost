@@ -83,6 +83,10 @@ export interface HubspotSyncSummary {
   lastSuccessfulReadAt: string | null;
   lastSuccessfulWriteAt: string | null;
   lastCheckedAt: string | null;
+  writes: {
+    pending: number;
+    failed: number;
+  };
   webhook: {
     configured: boolean;
     arriving: boolean;
@@ -123,11 +127,13 @@ export interface HealthResponse {
     callbackToken?: "configured" | "not-configured";
     supportedVersions: string[];
     path: string;
+    publicBaseHostMatches: boolean | null;
     latestDelivery: {
       receivedAt: string;
       result: "accepted" | "rejected";
       version: "v1" | "v3" | null;
       reason: string;
+      eventCount: number;
     } | null;
   };
   admin: {

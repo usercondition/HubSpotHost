@@ -409,6 +409,43 @@ CREATE TABLE IF NOT EXISTS fulfillment_checklists (
 );
 `;
 
+const CREATE_SYNC_DURABILITY_SQL = `
+CREATE TABLE IF NOT EXISTS webhook_events (
+  event_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  live_write INTEGER NOT NULL DEFAULT 1,
+  last_error TEXT,
+  not_before TEXT,
+  received_at TEXT NOT NULL,
+  processed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS webhook_delivery_log (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  received_at TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  result TEXT NOT NULL,
+  version TEXT,
+  reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_hubspot_writes (
+  deal_id TEXT PRIMARY KEY,
+  fields_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  retryable INTEGER NOT NULL DEFAULT 1,
+  last_error TEXT,
+  not_before TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hubspot_write_log (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  succeeded_at TEXT NOT NULL
+);
+`;
+
 const CREATE_PRODUCTION_FAILURES_SQL = `
 CREATE TABLE IF NOT EXISTS production_failures (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -512,6 +549,7 @@ function ensureSupplyPurchaseColumns(sqlite: Database.Database): void {
 }
 
 let db: BetterSQLite3Database | null = null;
+let sqliteConn: Database.Database | null = null;
 
 function databaseFile(): string {
   const configured = process.env.ORDER_LINKS_DB_FILE?.trim();
@@ -572,16 +610,27 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_FULFILLMENT_CHECKLISTS_SQL);
   sqlite.exec(CREATE_PRIORITY_STACK_SQL);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
+  sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
   ensureFulfillmentColumns(sqlite);
+  sqliteConn = sqlite;
   db = drizzle(sqlite);
   return db;
 }
 
+/** Raw handle for sync durability tables. Opens the same file as getDb. */
+export function getSqlite(): Database.Database {
+  if (!sqliteConn) getDb();
+  if (!sqliteConn) throw new Error("SQLite did not open");
+  return sqliteConn;
+}
+
 /** Test helper: drop the cached handle so a new DB file can be used. */
 export function resetOrderLinkStore(): void {
+  sqliteConn?.close();
+  sqliteConn = null;
   db = null;
 }
 

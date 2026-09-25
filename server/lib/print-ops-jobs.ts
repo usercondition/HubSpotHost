@@ -25,8 +25,10 @@ const RETRY_OPTIONS = {
 };
 
 type SyncHealthJob = { kind: "sync-health" };
-type PrintOpsJobName = "shipment-email" | "marketplace-ship-note" | "sync-health";
-type PrintOpsJobData = ShipmentEmailJob | MarketplaceShipNoteJob | SyncHealthJob;
+type WebhookInboxJob = { kind: "webhook-inbox" };
+type HubspotWriteJob = { kind: "hubspot-writes" };
+type PrintOpsJobName = "shipment-email" | "marketplace-ship-note" | "sync-health" | "webhook-inbox" | "hubspot-writes";
+type PrintOpsJobData = ShipmentEmailJob | MarketplaceShipNoteJob | SyncHealthJob | WebhookInboxJob | HubspotWriteJob;
 
 let queue: Queue<PrintOpsJobData, unknown, PrintOpsJobName> | null = null;
 let worker: Worker<PrintOpsJobData, unknown, PrintOpsJobName> | null = null;
@@ -79,12 +81,78 @@ async function processJob(job: Job<PrintOpsJobData, unknown, PrintOpsJobName>): 
     const { runSyncHealthCheck } = await import("./sync-health");
     return runSyncHealthCheck();
   }
+  if (job.name === "webhook-inbox") {
+    const { processWebhookInbox } = await import("./webhook-inbox");
+    return processWebhookInbox();
+  }
+  if (job.name === "hubspot-writes") {
+    const { processPendingHubspotWrites } = await import("./hubspot-writes");
+    return processPendingHubspotWrites();
+  }
   throw new Error(`Unknown print-ops job ${job.name}`);
 }
 
 const SYNC_HEALTH_EVERY_MS = 15 * 60 * 1000;
 
 /** Repeat the HubSpot sync check on the existing Redis worker. No-op without REDIS_URL. */
+/** One-off sync check. Without Redis it runs in the background and does not block the caller. */
+export function enqueueSyncHealthSoon(): void {
+  if (process.env.NODE_ENV === "test") return;
+  if (!redisUrl()) {
+    void import("./sync-health").then((mod) => mod.runSyncHealthCheck()).catch((error) => {
+      console.warn(`[print-ops-jobs] sync check failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return;
+  }
+  if (!queue) startPrintOpsJobWorker();
+  void queue?.add("sync-health", { kind: "sync-health" }, {
+    ...RETRY_OPTIONS,
+    jobId: `sync-health-${Date.now()}`,
+  }).catch((error) => {
+    console.warn(`[print-ops-jobs] could not enqueue sync check: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+export async function enqueueWebhookInboxJob(): Promise<void> {
+  if (!redisUrl()) {
+    const { processWebhookInbox } = await import("./webhook-inbox");
+    await processWebhookInbox();
+    return;
+  }
+  if (!queue) startPrintOpsJobWorker();
+  if (!queue) throw new Error("Print Ops Redis queue did not initialize");
+  await queue.add("webhook-inbox", { kind: "webhook-inbox" }, {
+    ...RETRY_OPTIONS,
+    jobId: `webhook-inbox-${Date.now()}`,
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/already exists|jobid/i.test(message)) throw error;
+  });
+}
+
+export function enqueueHubspotWriteJob(retryAfterMs: number | null): void {
+  const delay = retryAfterMs != null && retryAfterMs > 0 ? retryAfterMs : undefined;
+  if (!redisUrl()) {
+    if (process.env.NODE_ENV === "test") return;
+    const wait = delay ?? 10_000;
+    const timer = setTimeout(() => {
+      void import("./hubspot-writes").then((mod) => mod.processPendingHubspotWrites()).catch((error) => {
+        console.warn(`[print-ops-jobs] HubSpot write retry failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, wait);
+    timer.unref?.();
+    return;
+  }
+  if (!queue) startPrintOpsJobWorker();
+  void queue?.add("hubspot-writes", { kind: "hubspot-writes" }, {
+    ...RETRY_OPTIONS,
+    delay,
+    jobId: `hubspot-writes-${Date.now()}`,
+  }).catch((error) => {
+    console.warn(`[print-ops-jobs] could not enqueue HubSpot write: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
 export async function scheduleSyncHealthJob(): Promise<void> {
   if (!redisUrl()) return;
   if (!queue) startPrintOpsJobWorker();

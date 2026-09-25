@@ -11,13 +11,32 @@ import { INPUT_PROPERTIES, OUTPUT_PROPERTIES } from "./config";
 const INPUT_SET = new Set<string>(INPUT_PROPERTIES);
 const OUTPUT_SET = new Set<string>(OUTPUT_PROPERTIES);
 
+/**
+ * Subscriptions this handler acts on. Anything else is stored and ignored.
+ * Output profit fields are omitted on purpose so a write cannot loop.
+ */
+export const HUBSPOT_WEBHOOK_SUBSCRIPTIONS = [
+  "deal.propertyChange: amount",
+  "deal.propertyChange: print_material_cost",
+  "deal.propertyChange: print_labor_cost",
+  "deal.propertyChange: print_packaging_cost",
+  "deal.propertyChange: print_actual_shipping_cost",
+  "deal.propertyChange: dealstage",
+  "deal.creation",
+  "deal.deletion",
+] as const;
+
 export interface EventSummary {
   /** De-duplicated deal ids that need recalculation. */
   dealIds: string[];
+  /** Deal created, deleted, or moved to another stage. Bust the deals cache. */
+  cacheBust: boolean;
   /** Total event objects inspected. */
   received: number;
   /** Events that matched a deal + input property change. */
   matched: number;
+  /** Creation, deletion, and dealstage changes. */
+  lifecycle: number;
   /** Events ignored because they referenced an output property. */
   ignoredOutputEvents: number;
   /** Events ignored for any other reason (wrong object, other property, no id). */
@@ -83,11 +102,18 @@ export function isDealEvent(event: Record<string, unknown>): boolean {
   return false;
 }
 
+function readSubscription(event: Record<string, unknown>): string {
+  const raw = event.subscriptionType ?? event.subscription_type;
+  return typeof raw === "string" ? raw.trim().toLowerCase() : "";
+}
+
 export function summarizeEvents(payload: unknown): EventSummary {
   const events = asArray(payload);
   const dealIds: string[] = [];
   const seen = new Set<string>();
   let matched = 0;
+  let lifecycle = 0;
+  let cacheBust = false;
   let ignoredOutputEvents = 0;
   let ignoredOther = 0;
 
@@ -98,9 +124,19 @@ export function summarizeEvents(payload: unknown): EventSummary {
     }
     const event = raw as Record<string, unknown>;
     const property = readPropertyName(event);
+    const subscription = readSubscription(event);
 
     if (property && OUTPUT_SET.has(property)) {
       ignoredOutputEvents += 1;
+      continue;
+    }
+    if (
+      subscription === "deal.creation" ||
+      subscription === "deal.deletion" ||
+      (property === "dealstage" && isDealEvent(event))
+    ) {
+      lifecycle += 1;
+      cacheBust = true;
       continue;
     }
     if (!isDealEvent(event) || !property || !INPUT_SET.has(property)) {
@@ -121,8 +157,10 @@ export function summarizeEvents(payload: unknown): EventSummary {
 
   return {
     dealIds,
+    cacheBust,
     received: events.length,
     matched,
+    lifecycle,
     ignoredOutputEvents,
     ignoredOther,
   };
