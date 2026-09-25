@@ -84,7 +84,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
               className={
                 rail
                   ? "ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-chart-4/20 px-1.5 text-xs font-semibold text-chart-4"
-                  : "status-alert absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold"
+                  : "numeric absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[hsl(var(--warn))] px-1 text-[10px] font-semibold text-[#1a1200]"
               }
               data-testid="badge-attention-count"
             >

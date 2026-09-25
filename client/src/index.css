@@ -608,6 +608,195 @@
     box-shadow: 0 1px 0 hsl(0 0% 100% / 0.03) inset, 0 1px 2px hsl(0 0% 0% / 0.4);
   }
 
+  .floor-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 4px 16px 24px;
+  }
+
+  .floor-kpis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .floor-kpi {
+    padding: 14px 14px 12px;
+  }
+
+  .floor-kpi.is-warn {
+    border-color: hsl(var(--warn) / 0.45);
+    box-shadow: inset 0 0 0 1px hsl(var(--warn) / 0.18);
+  }
+
+  .floor-columns {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .floor-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .floor-card-head {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+  }
+
+  .floor-card-head h2 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 24px;
+  }
+
+  .floor-need,
+  .floor-next,
+  .floor-meter,
+  .floor-kv {
+    display: grid;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid hsl(var(--line));
+    padding: 12px 16px;
+  }
+
+  .floor-need {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+
+  .floor-next {
+    grid-template-columns: 24px minmax(0, 1.4fr) auto minmax(0, 1fr) 72px;
+  }
+
+  .floor-meter {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 48px;
+  }
+
+  .floor-kv {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .floor-ico {
+    display: inline-flex;
+    height: 36px;
+    width: 36px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: hsl(var(--primary) / 0.13);
+    color: hsl(var(--primary));
+  }
+
+  .floor-ico.is-shop {
+    background: hsl(var(--shop) / 0.16);
+    color: hsl(var(--shop));
+  }
+
+  .floor-action {
+    height: 28px;
+    align-items: center;
+    border-radius: 6px;
+    border: 1px solid hsl(var(--line-2));
+    background: hsl(var(--surface));
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .floor-bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: hsl(var(--line));
+  }
+
+  .floor-bar i {
+    display: block;
+    height: 100%;
+    background: hsl(var(--good));
+  }
+
+  .floor-bar.is-mid i {
+    background: hsl(var(--warn));
+  }
+
+  .floor-bar.is-over i {
+    background: hsl(var(--bad));
+  }
+
+  .stage-chip {
+    display: inline-flex;
+    height: 22px;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    border-radius: 6px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .stage-chip i {
+    height: 6px;
+    width: 6px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .stage-teal { background: hsl(var(--primary) / 0.13); color: hsl(var(--primary)); }
+  .stage-fly { background: hsl(var(--fly) / 0.13); color: hsl(var(--fly)); }
+  .stage-warn { background: hsl(var(--warn) / 0.13); color: hsl(var(--warn)); }
+  .stage-good { background: hsl(var(--good) / 0.13); color: hsl(var(--good)); }
+  .stage-shop { background: hsl(var(--shop) / 0.13); color: hsl(var(--shop)); }
+  .stage-bad { background: hsl(var(--bad) / 0.13); color: hsl(var(--bad)); }
+  .stage-neutral { background: hsl(var(--raised)); color: hsl(var(--text-2)); }
+
+  @media (min-width: 768px) {
+    .floor-page {
+      gap: 24px;
+      padding: 4px 32px 48px;
+    }
+
+    .floor-kpis {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .floor-columns {
+      grid-template-columns: 1.75fr 1fr;
+      gap: 24px;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .ops-card {
+      border-radius: 10px;
+    }
+
+    .floor-next {
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      grid-template-areas:
+        "rank name amount"
+        "rank chip date";
+    }
+
+    .floor-next > :nth-child(1) { grid-area: rank; }
+    .floor-next > :nth-child(2) { grid-area: name; }
+    .floor-next > :nth-child(3) { grid-area: chip; }
+    .floor-next > :nth-child(4) { grid-area: date; }
+    .floor-next > :nth-child(5) { grid-area: amount; justify-self: end; }
+  }
+
   .ops-stage {
     isolation: isolate;
   }
