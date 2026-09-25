@@ -323,6 +323,17 @@ test("floor strip names this week's cash, an unpriced pickup, and the next actio
   assert.equal(line, "2 this week · $274.95 + Darell · next: Jose, pack + label");
 });
 
+test("ship-ready and blocked deals stay on the stack when Queue hides those lanes", () => {
+  const items = [
+    deal({ dealId: "1", dealName: "Next", amount: 10, shipBy: "2026-09-27", stage: "Queued", bucket: "next_print" }),
+    deal({ dealId: "2", dealName: "Printing", amount: 10, shipBy: "2026-09-27", stage: "Printing", bucket: "in_production" }),
+    deal({ dealId: "3", dealName: "Blocked", amount: 10, shipBy: "2026-09-27", stage: "Printing", bucket: "blocked" }),
+    deal({ dealId: "4", dealName: "Ready", amount: 10, shipBy: "2026-09-27", stage: "Ready to Ship", bucket: "ship_ready" }),
+  ];
+  const view = buildPriorityStack(queue(items), { entries: [], bundles: [] }, { now: NOW });
+  assert.deepEqual(view.rows.map((row) => row.dealId).sort(), ["1", "2", "3", "4"]);
+});
+
 test("shop week ends on Sunday and LA rollover stays Friday night", () => {
   assert.equal(shopWeekEnd(new Date("2026-09-27T17:00:00.000Z")), "2026-09-27");
   assert.equal(shopWeekStart(new Date("2026-09-27T17:00:00.000Z")), "2026-09-21");
