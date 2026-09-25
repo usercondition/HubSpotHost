@@ -24,8 +24,9 @@ const RETRY_OPTIONS = {
   removeOnFail: 1_000,
 };
 
-type PrintOpsJobName = "shipment-email" | "marketplace-ship-note";
-type PrintOpsJobData = ShipmentEmailJob | MarketplaceShipNoteJob;
+type SyncHealthJob = { kind: "sync-health" };
+type PrintOpsJobName = "shipment-email" | "marketplace-ship-note" | "sync-health";
+type PrintOpsJobData = ShipmentEmailJob | MarketplaceShipNoteJob | SyncHealthJob;
 
 let queue: Queue<PrintOpsJobData, unknown, PrintOpsJobName> | null = null;
 let worker: Worker<PrintOpsJobData, unknown, PrintOpsJobName> | null = null;
@@ -73,7 +74,24 @@ function queueJobId(name: PrintOpsJobName, key: string): string {
 
 async function processJob(job: Job<PrintOpsJobData, unknown, PrintOpsJobName>): Promise<unknown> {
   if (job.name === "shipment-email") return runShipmentEmailJob(job.data as ShipmentEmailJob);
-  return runMarketplaceShipNoteJob(job.data as MarketplaceShipNoteJob);
+  if (job.name === "marketplace-ship-note") return runMarketplaceShipNoteJob(job.data as MarketplaceShipNoteJob);
+  if (job.name === "sync-health") {
+    const { runSyncHealthCheck } = await import("./sync-health");
+    return runSyncHealthCheck();
+  }
+  throw new Error(`Unknown print-ops job ${job.name}`);
+}
+
+const SYNC_HEALTH_EVERY_MS = 15 * 60 * 1000;
+
+/** Repeat the HubSpot sync check on the existing Redis worker. No-op without REDIS_URL. */
+export async function scheduleSyncHealthJob(): Promise<void> {
+  if (!redisUrl()) return;
+  if (!queue) startPrintOpsJobWorker();
+  if (!queue) throw new Error("Print Ops Redis queue did not initialize");
+  await queue.add("sync-health", { kind: "sync-health" }, {
+    repeat: { every: SYNC_HEALTH_EVERY_MS, key: "sync-health" },
+  });
 }
 
 export function startPrintOpsJobWorker(): void {

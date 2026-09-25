@@ -1,0 +1,397 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import http from "node:http";
+import express from "express";
+import type { AuditEntry } from "../server/lib/audit";
+import { registerRoutes } from "../server/routes";
+import {
+  applySyncRepairs,
+  clearCachedSyncHealthForTest,
+  compareSyncHealth,
+  setCachedSyncHealth,
+  type SyncCompareInput,
+  type SyncHealthReport,
+  type SyncHubspotDeal,
+  type SyncLocalDeal,
+} from "../server/lib/sync-health";
+
+const NOW = new Date("2026-09-25T18:00:00.000Z");
+
+function remote(partial: Partial<SyncHubspotDeal> & Pick<SyncHubspotDeal, "dealId">): SyncHubspotDeal {
+  return {
+    found: true,
+    stage: "Printing",
+    closed: false,
+    closedWon: false,
+    amount: "40.00",
+    tracking: "",
+    shipNotes: "",
+    shipBy: "",
+    material: "",
+    labor: "",
+    packaging: "",
+    shipping: "",
+    ...partial,
+  };
+}
+
+function local(partial: Partial<SyncLocalDeal> & Pick<SyncLocalDeal, "dealId">): SyncLocalDeal {
+  return {
+    inQueue: true,
+    inStack: true,
+    bundleMember: false,
+    amount: "40.00",
+    tracking: "",
+    shipNotes: "",
+    shipBy: null,
+    shipBySource: "derived",
+    material: null,
+    labor: null,
+    packaging: null,
+    shipping: null,
+    doneAt: null,
+    ...partial,
+  };
+}
+
+function audit(partial: Partial<AuditEntry> & Pick<AuditEntry, "dealId" | "status">): AuditEntry {
+  return {
+    id: 1,
+    timestamp: "2026-09-25T12:00:00.000Z",
+    origin: "manual",
+    dryRun: false,
+    gate: "live write permitted",
+    inputs: { amount: 40, material: 4, labor: 6, packaging: 1, shipping: 8, costTotal: 19 },
+    outputs: null,
+    ...partial,
+  };
+}
+
+function input(partial: Partial<SyncCompareInput> = {}): SyncCompareInput {
+  return {
+    openDealIds: [],
+    hubspotById: {},
+    localDeals: [],
+    audit: [],
+    webhookConfigured: false,
+    webhook: null,
+    tokenError: null,
+    lastSuccessfulReadAt: NOW.toISOString(),
+    lastSuccessfulWriteAt: null,
+    now: NOW,
+    ...partial,
+  };
+}
+
+function kinds(report: SyncHealthReport): string[] {
+  return report.items.map((item) => item.kind);
+}
+
+test("missing open HubSpot deals are not on the Queue or Stack", () => {
+  const report = compareSyncHealth(input({
+    openDealIds: ["11", "12"],
+    hubspotById: {
+      "11": remote({ dealId: "11" }),
+      "12": remote({ dealId: "12" }),
+    },
+    localDeals: [local({ dealId: "12" })],
+  }));
+  assert.deepEqual(kinds(report), ["missingInOps"]);
+  assert.equal(report.items[0].dealId, "11");
+  assert.equal(report.repairs.length, 0);
+  assert.equal(report.summary.counts.missingInOps, 1);
+  assert.equal(report.summary.status, "warn");
+});
+
+test("orphans are closed, deleted, or missing HubSpot deals, and off-book rows are ignored", () => {
+  const report = compareSyncHealth(input({
+    hubspotById: {
+      "21": remote({ dealId: "21", closed: true, closedWon: false, stage: "Closed Lost" }),
+    },
+    localDeals: [
+      local({ dealId: "21" }),
+      local({ dealId: "22", inQueue: true, inStack: false }),
+      local({ dealId: "23", inQueue: false, inStack: false }),
+    ],
+  }));
+  assert.deepEqual(kinds(report), ["orphans", "orphans"]);
+  assert.equal(report.items[0].hubspot, "Closed Lost");
+  assert.equal(report.items[1].hubspot, "not found");
+  assert.equal(report.items.some((item) => item.dealId === "23"), false);
+});
+
+test("tracking, ship notes, and ship-by push only when HubSpot is blank", () => {
+  const blankHubspot = compareSyncHealth(input({
+    hubspotById: {
+      "31": remote({ dealId: "31" }),
+    },
+    localDeals: [local({
+      dealId: "31",
+      tracking: "1ZLOCAL",
+      shipNotes: "leave at side door",
+      shipBy: "2026-09-27",
+      shipBySource: "override",
+      bundleMember: true,
+    })],
+  }));
+  assert.deepEqual(blankHubspot.repairs.map((repair) => repair.field), ["tracking", "notes", "ship_by"]);
+  assert.equal(blankHubspot.items.find((item) => item.kind === "shipBy")?.suggestedFix.includes("Bundle member"), true);
+
+  const conflict = compareSyncHealth(input({
+    hubspotById: {
+      "31": remote({
+        dealId: "31",
+        tracking: "1ZHUB",
+        shipNotes: "hubspot note",
+        shipBy: "2026-09-28",
+      }),
+    },
+    localDeals: [local({
+      dealId: "31",
+      tracking: "1ZLOCAL",
+      shipNotes: "leave at side door",
+      shipBy: "2026-09-27",
+      shipBySource: "override",
+    })],
+  }));
+  assert.deepEqual(kinds(conflict), ["tracking", "shipNotes", "shipBy"]);
+  assert.deepEqual(conflict.repairs, []);
+  assert.equal(conflict.items.every((item) => item.repairable === false), true);
+});
+
+test("cost and amount mismatches are reported and never repaired", () => {
+  const report = compareSyncHealth(input({
+    hubspotById: {
+      "41": remote({ dealId: "41", amount: "55.00", shipping: "", material: "9.00" }),
+    },
+    localDeals: [local({
+      dealId: "41",
+      amount: "40.00",
+      material: "4",
+      labor: null,
+      packaging: null,
+      shipping: "8.50",
+    })],
+  }));
+  assert.deepEqual(kinds(report), ["costs", "costs", "amount"]);
+  assert.deepEqual(report.repairs, []);
+  assert.equal(report.items.every((item) => item.repairable === false), true);
+});
+
+test("Stack done still open in HubSpot, and Closed Won not done this week", () => {
+  const report = compareSyncHealth(input({
+    hubspotById: {
+      "51": remote({ dealId: "51", stage: "Ready to Ship" }),
+      "52": remote({ dealId: "52", stage: "Completed", closed: true, closedWon: true }),
+    },
+    localDeals: [
+      local({ dealId: "51", doneAt: "2026-09-25T16:00:00.000Z" }),
+      local({ dealId: "52", doneAt: "2026-08-01T16:00:00.000Z" }),
+    ],
+  }));
+  assert.deepEqual(kinds(report), ["doneStillOpen", "closedNotDone"]);
+  assert.deepEqual(report.repairs, []);
+});
+
+test("failed writes are the latest audit error, and a later success clears them", () => {
+  const failed = compareSyncHealth(input({
+    audit: [
+      audit({ id: 1, dealId: "61", status: "written", timestamp: "2026-09-24T12:00:00.000Z" }),
+      audit({ id: 2, dealId: "61", status: "error", timestamp: "2026-09-25T12:00:00.000Z", error: "HubSpot API 500" }),
+      audit({ id: 3, dealId: "62", status: "dry-run", timestamp: "2026-09-25T12:00:00.000Z" }),
+    ],
+  }));
+  assert.deepEqual(kinds(failed), ["failedWrites"]);
+  assert.deepEqual(failed.repairs, [{ dealId: "61", field: "retry", value: "" }]);
+
+  const recovered = compareSyncHealth(input({
+    audit: [
+      audit({ id: 1, dealId: "61", status: "error", timestamp: "2026-09-24T12:00:00.000Z", error: "old" }),
+      audit({ id: 2, dealId: "61", status: "written", timestamp: "2026-09-25T12:00:00.000Z" }),
+    ],
+  }));
+  assert.deepEqual(kinds(recovered), []);
+  assert.equal(recovered.summary.lastSuccessfulWriteAt, null);
+});
+
+test("webhook silence is an issue only when webhooks are configured, and token errors fail the check", () => {
+  const unconfigured = compareSyncHealth(input({ webhookConfigured: false, webhook: null }));
+  assert.deepEqual(kinds(unconfigured), []);
+  assert.equal(unconfigured.summary.status, "ok");
+  assert.match(unconfigured.summary.webhook.note, /not configured/);
+
+  const silent = compareSyncHealth(input({ webhookConfigured: true, webhook: null }));
+  assert.deepEqual(kinds(silent), ["webhook"]);
+  assert.equal(silent.summary.counts.webhook, 1);
+  assert.equal(silent.summary.webhook.arriving, false);
+
+  const fresh = compareSyncHealth(input({
+    webhookConfigured: true,
+    webhook: { receivedAt: NOW.toISOString(), result: "accepted", version: "v3", reason: "ok" },
+  }));
+  assert.deepEqual(kinds(fresh), []);
+  assert.equal(fresh.summary.webhook.arriving, true);
+  assert.equal(fresh.summary.webhook.lastDeliveryAt, NOW.toISOString());
+
+  const token = compareSyncHealth(input({ tokenError: "HubSpot API 401" }));
+  assert.equal(token.summary.status, "error");
+  assert.equal(token.summary.counts.token, 1);
+  assert.equal(JSON.stringify(token.summary).includes("Customer"), false);
+});
+
+test("auto-repair never overwrites a non-blank HubSpot value and stays quiet in dry run", async () => {
+  const previous = {
+    dry: process.env.DRY_RUN,
+    writes: process.env.ALLOW_HUBSPOT_WRITES,
+    base: process.env.HUBSPOT_API_BASE,
+    token: process.env.HUBSPOT_ACCESS_TOKEN,
+  };
+  const calls: Array<{ method: string; url: string; body: string }> = [];
+  const properties: Record<string, string> = {
+    print_tracking_number: "1ZHUB",
+    print_ship_notes: "already noted",
+    print_ship_by: "2026-09-28",
+  };
+  const mock = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      calls.push({ method: req.method || "", url: req.url || "", body });
+      res.setHeader("content-type", "application/json");
+      if ((req.url || "").includes("/crm/v3/properties/deals") && req.method === "GET") {
+        res.end(JSON.stringify({ results: Object.keys(properties).map((name) => ({ name, type: "string" })) }));
+        return;
+      }
+      const match = (req.url || "").match(/properties=([^&]+)/);
+      const property = match ? decodeURIComponent(match[1]) : "";
+      if (req.method === "GET") {
+        res.end(JSON.stringify({ properties: { [property]: properties[property] ?? "" } }));
+        return;
+      }
+      if (req.method === "PATCH" && (req.url || "").includes("/objects/deals/")) {
+        const parsed = JSON.parse(body) as { properties?: Record<string, string> };
+        Object.assign(properties, parsed.properties ?? {});
+      }
+      res.end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => mock.listen(0, "127.0.0.1", () => resolve()));
+  const port = (mock.address() as { port: number }).port;
+  process.env.HUBSPOT_API_BASE = `http://127.0.0.1:${port}`;
+  process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+  try {
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "false";
+    const dry = await applySyncRepairs([
+      { dealId: "71", field: "tracking", value: "1ZLOCAL" },
+      { dealId: "71", field: "notes", value: "local note" },
+      { dealId: "71", field: "ship_by", value: "2026-09-27" },
+    ]);
+    assert.equal(dry.every((row) => row.wrote === false && row.dryRun === true), true);
+    assert.equal(calls.length, 0);
+
+    process.env.DRY_RUN = "false";
+    process.env.ALLOW_HUBSPOT_WRITES = "true";
+    const kept = await applySyncRepairs([
+      { dealId: "71", field: "tracking", value: "1ZLOCAL" },
+      { dealId: "71", field: "notes", value: "local note" },
+      { dealId: "71", field: "ship_by", value: "2026-09-27" },
+    ]);
+    assert.equal(kept.every((row) => row.wrote === false && row.skipped === "hubspot-not-blank"), true);
+    assert.equal(calls.some((call) => call.method === "PATCH"), false);
+    assert.equal(properties.print_tracking_number, "1ZHUB");
+
+    properties.print_tracking_number = "";
+    properties.print_ship_notes = "";
+    properties.print_ship_by = "";
+    calls.length = 0;
+    const filled = await applySyncRepairs([
+      { dealId: "71", field: "tracking", value: "1ZLOCAL" },
+      { dealId: "71", field: "notes", value: "local note" },
+      { dealId: "71", field: "ship_by", value: "2026-09-27" },
+    ]);
+    assert.deepEqual(filled.map((row) => row.wrote), [true, true, true]);
+    const dealPatches = calls.filter((call) => call.method === "PATCH" && call.url.includes("/objects/deals/"));
+    const patched = dealPatches.map((call) => JSON.parse(call.body).properties);
+    assert.equal(patched.some((row) => row.print_tracking_number === "1ZLOCAL"), true);
+    assert.equal(patched.some((row) => row.print_ship_notes === "local note"), true);
+    assert.equal(patched.some((row) => row.print_ship_by === "2026-09-27"), true);
+    assert.equal(patched.some((row) => row.print_tracking_number === "" || row.print_ship_notes === ""), false);
+  } finally {
+    if (previous.dry === undefined) delete process.env.DRY_RUN;
+    else process.env.DRY_RUN = previous.dry;
+    if (previous.writes === undefined) delete process.env.ALLOW_HUBSPOT_WRITES;
+    else process.env.ALLOW_HUBSPOT_WRITES = previous.writes;
+    if (previous.base === undefined) delete process.env.HUBSPOT_API_BASE;
+    else process.env.HUBSPOT_API_BASE = previous.base;
+    if (previous.token === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+    else process.env.HUBSPOT_ACCESS_TOKEN = previous.token;
+    await new Promise<void>((resolve) => mock.close(() => resolve()));
+  }
+});
+
+test("public health summary has counts and timestamps and hides deal detail", async () => {
+  clearCachedSyncHealthForTest();
+  const previous = process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
+  process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = crypto.createHash("sha256").update("sync-test", "utf8").digest("hex");
+  const app = express();
+  app.use(express.json());
+  const server = http.createServer(app);
+  await registerRoutes(server, app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const port = (server.address() as { port: number }).port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const cold = await fetch(`${base}/api/health`);
+    const coldBody = await cold.json();
+    assert.equal(coldBody.hubspotSync.lastCheckedAt, null);
+    assert.equal(coldBody.hubspotSync.issueCount, 0);
+    assert.equal(typeof coldBody.hubspotSync.counts.missingInOps, "number");
+    assert.equal(typeof coldBody.hubspotSync.webhook.note, "string");
+    assert.match(coldBody.hubspotSync.webhook.note, /Sync check has not run yet/);
+
+    const locked = await fetch(`${base}/api/sync-health`);
+    assert.equal(locked.status, 401);
+
+    const report = compareSyncHealth(input({
+      openDealIds: ["81"],
+      hubspotById: { "81": remote({ dealId: "81", amount: "59.99", tracking: "" }) },
+      localDeals: [],
+    }));
+    report.items[0].suggestedFix = "Customer Alice paid 59.99";
+    setCachedSyncHealth(report);
+
+    const health = await fetch(`${base}/api/health`);
+    const healthBody = await health.json();
+    const serialized = JSON.stringify(healthBody.hubspotSync);
+    assert.equal(healthBody.hubspotSync.status, "warn");
+    assert.equal(healthBody.hubspotSync.issueCount, 1);
+    assert.equal(healthBody.hubspotSync.counts.missingInOps, 1);
+    assert.equal(healthBody.hubspotSync.lastCheckedAt, NOW.toISOString());
+    assert.equal(serialized.includes("Alice"), false);
+    assert.equal(serialized.includes("59.99"), false);
+    assert.equal(serialized.includes("81"), false);
+    assert.deepEqual(Object.keys(healthBody.hubspotSync).sort(), [
+      "counts",
+      "issueCount",
+      "lastCheckedAt",
+      "lastSuccessfulReadAt",
+      "lastSuccessfulWriteAt",
+      "status",
+      "webhook",
+    ]);
+
+    const detail = await fetch(`${base}/api/sync-health`, { headers: { "x-paid-order-access-code": "sync-test" } });
+    const detailBody = await detail.json();
+    assert.equal(detail.status, 200);
+    assert.equal(detailBody.items[0].dealId, "81");
+    assert.match(detailBody.items[0].suggestedFix, /Alice/);
+  } finally {
+    clearCachedSyncHealthForTest();
+    if (previous === undefined) delete process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
+    else process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = previous;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

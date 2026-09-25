@@ -20,6 +20,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { attentionNextStep, floorFocusMeta, floorWorkHref, hubspotDealHref, stackHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
+import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
 import { CardMenu, Panel, StatusPill } from "@/components/primitives";
 import {
@@ -279,14 +280,17 @@ function TodaysWork() {
 
   if (!isUnlocked) {
     return (
-      <OwnerUnlockPanel
-        title="Unlock the floor"
-        description="See what needs plates, costs, or review — then jump into Queue."
-        buttonLabel="Unlock the floor"
-        testIdPrefix="dashboard"
-        pending={unlockMutation.isPending}
-        onUnlock={(code) => unlockMutation.mutate(code)}
-      />
+      <div className="space-y-4">
+        <HubspotSyncChip />
+        <OwnerUnlockPanel
+          title="Unlock the floor"
+          description="See what needs plates, costs, or review — then jump into Queue."
+          buttonLabel="Unlock the floor"
+          testIdPrefix="dashboard"
+          pending={unlockMutation.isPending}
+          onUnlock={(code) => unlockMutation.mutate(code)}
+        />
+      </div>
     );
   }
 
@@ -487,6 +491,7 @@ function TodaysWork() {
             testId="status-floor-pressure"
           />
         )}
+        <HubspotSyncChip />
         <Button asChild size="sm" variant="outline" data-testid="link-floor-open-queue">
           <Link href="/queue">
             <ListOrdered className="mr-2 h-3.5 w-3.5" />

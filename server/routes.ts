@@ -54,6 +54,7 @@ import {
   sendHealthNudge,
   startHealthNudgeScheduler,
 } from "./lib/health-nudge";
+import { getCachedSyncHealth, placeholderSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
@@ -926,8 +927,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         outputs: [...OUTPUT_PROPERTIES],
       },
       audit: { retained: auditCount(), limit: AUDIT_LIMIT },
+      hubspotSync: getCachedSyncHealth()?.summary ?? placeholderSyncSummary(),
       serverTime: new Date().toISOString(),
     });
+  });
+
+  app.get("/api/sync-health", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const report = getCachedSyncHealth() ?? (await runSyncHealthCheck());
+      res.json(report);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync check failed";
+      res.status(502).json({ ok: false, error: message });
+    }
   });
 
   /** Cheap shared unlock probe for every Daily Work page. */

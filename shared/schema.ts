@@ -63,6 +63,34 @@ export interface AuditEntry {
   error?: string;
 }
 
+export interface HubspotSyncSummary {
+  status: "ok" | "warn" | "error";
+  counts: {
+    missingInOps: number;
+    orphans: number;
+    tracking: number;
+    shipNotes: number;
+    shipBy: number;
+    costs: number;
+    amount: number;
+    doneStillOpen: number;
+    closedNotDone: number;
+    failedWrites: number;
+    webhook: number;
+    token: number;
+  };
+  issueCount: number;
+  lastSuccessfulReadAt: string | null;
+  lastSuccessfulWriteAt: string | null;
+  lastCheckedAt: string | null;
+  webhook: {
+    configured: boolean;
+    arriving: boolean;
+    lastDeliveryAt: string | null;
+    note: string;
+  };
+}
+
 export interface HealthResponse {
   status: "ok";
   mode: "dry-run" | "live-write";
@@ -115,6 +143,7 @@ export interface HealthResponse {
     retained: number;
     limit: number;
   };
+  hubspotSync?: HubspotSyncSummary;
   ownerDigest?: {
     telegramConfigured: boolean;
     cronSecretConfigured: boolean;
