@@ -11,7 +11,7 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
-import { labelsDealHref, queueDealHref, readHashQueryParam } from "@/lib/workflow";
+import { floorWorkHref, labelsDealHref, readHashQueryParam } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
 import {
   buyerTrackingEmailSubject,
@@ -527,7 +527,7 @@ export default function ShippingLabelsPage() {
                 data-testid="panel-labels-prefill"
               >
                 <div className="min-w-0">
-                  <p className="rule-label mb-0.5">From Queue</p>
+                  <p className="rule-label mb-0.5">This order</p>
                   <p className="truncate text-sm font-semibold text-foreground" data-testid="text-labels-prefill-name">
                     {prefillDealLabel}
                   </p>
@@ -539,9 +539,9 @@ export default function ShippingLabelsPage() {
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   <Button asChild size="sm" variant="outline" data-testid="button-labels-open-queue">
-                    <Link href={queueDealHref(prefillDealId)}>
+                    <Link href={floorWorkHref(prefillDealId, prefillDeal?.bucket ?? "ship_ready")}>
                       <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-                      Queue
+                      {prefillDeal?.bucket === "next_print" || prefillDeal?.bucket === "in_production" ? "Queue" : "Stack"}
                     </Link>
                   </Button>
                   <Button
@@ -634,8 +634,8 @@ export default function ShippingLabelsPage() {
                     </Button>
                     {attachedDraft.dealIds.slice(0, 3).map((id) => (
                       <Button key={id} asChild size="sm" variant="outline">
-                        <Link href={queueDealHref(id)}>
-                          {attachedDraft.dealIds.length > 1 ? `Queue · ${id.slice(-4)}` : "Open in Queue"}
+                        <Link href={floorWorkHref(id, "ship_ready")}>
+                          {attachedDraft.dealIds.length > 1 ? `Stack · ${id.slice(-4)}` : "Open on Stack"}
                         </Link>
                       </Button>
                     ))}
@@ -826,7 +826,7 @@ export default function ShippingLabelsPage() {
                         .slice(0, 3)
                         .map((id) => (
                           <Button key={id} asChild size="sm" variant="outline">
-                            <Link href={queueDealHref(id)}>Queue · {id.slice(-4)}</Link>
+                            <Link href={floorWorkHref(id, "ship_ready")}>Stack · {id.slice(-4)}</Link>
                           </Button>
                         ))}
                       <Button size="sm" variant="ghost" onClick={clearConfirmPanel}>
@@ -1109,7 +1109,7 @@ export default function ShippingLabelsPage() {
                   </Button>
                   {primaryDealId ? (
                     <Button asChild size="sm" variant="outline">
-                      <Link href={queueDealHref(primaryDealId)}>Open in Queue</Link>
+                      <Link href={floorWorkHref(primaryDealId, "ship_ready")}>Open on Stack</Link>
                     </Button>
                   ) : null}
                   <Button size="sm" variant="ghost" onClick={clearConfirmPanel}>

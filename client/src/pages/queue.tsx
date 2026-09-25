@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
-import { readHashQueryParam, stackHref } from "@/lib/workflow";
+import { parkedQueueHref, readHashQueryParam, stackHref } from "@/lib/workflow";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
@@ -189,7 +189,7 @@ export default function ProductionQueuePage() {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Production queue unlocked",
-    successDescription: "Next print, in-production jobs, and ship-ready checklists.",
+    successDescription: "Next print and in-production jobs. Ready and blocked orders are on the Stack.",
   });
   const [selectedDealId, setSelectedDealId] = useState<string | null>(() => readHashQueryParam("dealId"));
   const [focus, setFocus] = useState<"needsReply" | null>(null);
@@ -226,6 +226,18 @@ export default function ProductionQueuePage() {
   const selectedExists = useMemo(() => {
     if (!data || !selectedDealId) return false;
     return queueBoardDealIds(data).has(selectedDealId);
+  }, [data, selectedDealId]);
+
+  useEffect(() => {
+    if (!data || !selectedDealId) return;
+    const parked = parkedQueueHref(selectedDealId, {
+      nextPrint: data.nextPrint.map((item) => item.dealId),
+      inProduction: data.inProduction.map((item) => item.dealId),
+      shipReady: data.shipReady.map((item) => item.dealId),
+      blocked: data.blocked.map((item) => item.dealId),
+    });
+    if (!parked) return;
+    window.location.hash = `#${parked}`;
   }, [data, selectedDealId]);
 
   // Stale deep-links (Completed / left the board) still had ?dealId= and reopened ops.
@@ -272,8 +284,8 @@ export default function ProductionQueuePage() {
             onUnlock={(code) => unlock.mutate(code)}
           />
         ) : queue.isLoading ? (
-          <div className="grid gap-3 md:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, index) => (
               <Skeleton key={index} className="h-28 rounded-lg" />
             ))}
           </div>

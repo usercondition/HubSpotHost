@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   attentionNextStep,
   floorFocusHref,
+  floorWorkHref,
+  parkedQueueHref,
   floorFocusMeta,
   hubspotContactHref,
   hubspotDealHref,
@@ -29,6 +31,27 @@ test("HubSpot contact deep links use object type 0-1", () => {
     "https://app.hubspot.com/contacts/12345/record/0-1/51",
   );
   assert.equal(hubspotContactHref("51", null), "https://app.hubspot.com/");
+});
+
+test("ship-ready and blocked floor rows open the Stack, printer rows open Queue", () => {
+  assert.equal(floorWorkHref("4", "ship_ready"), "/stack?dealId=4");
+  assert.equal(floorWorkHref("3", "blocked"), "/stack?dealId=3");
+  assert.equal(floorWorkHref("1", "next_print"), "/queue?dealId=1");
+  assert.equal(floorWorkHref("2", "in_production"), "/queue?dealId=2");
+});
+
+test("Queue deep links for removed lanes open the Stack", () => {
+  const lanes = {
+    nextPrint: ["1"],
+    inProduction: ["2"],
+    shipReady: ["4"],
+    blocked: ["3"],
+  };
+  assert.equal(parkedQueueHref("4", lanes), "/stack?dealId=4");
+  assert.equal(parkedQueueHref("3", lanes), "/stack?dealId=3");
+  assert.equal(parkedQueueHref("1", lanes), null);
+  assert.equal(parkedQueueHref("2", lanes), null);
+  assert.equal(parkedQueueHref("missing", lanes), null);
 });
 
 test("attention next steps route plates to Prints and costs to Queue ops", () => {

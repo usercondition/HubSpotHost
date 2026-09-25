@@ -33,7 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
-import { queueDealHref } from "@/lib/workflow";
+import { floorWorkHref } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
 import {
   filterShopShippingRates,
@@ -999,7 +999,7 @@ export function ShipEngineBuyPanel({
               </Button>
               {hasActiveDeal ? (
                 <Button asChild size="default" variant="outline">
-                  <Link href={queueDealHref(dealId)}>Open in Queue</Link>
+                  <Link href={floorWorkHref(dealId, "ship_ready")}>Open on Stack</Link>
                 </Button>
               ) : null}
             </div>

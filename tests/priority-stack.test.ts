@@ -363,6 +363,8 @@ test("store upsert, reorder, bundle, off-book, and done snapshot", () =>
     assert.ok(done?.doneAt);
     const view = buildPriorityStack(queue([]), listStackState(), { now: NOW });
     assert.equal(view.outTheDoor.length, 1);
+    assert.equal(view.outTheDoor[0]?.shippingRequired, false);
+    assert.equal(view.totals.outTheDoor, view.outTheDoor[0]?.amount ?? 0);
     assert.equal(view.rows.some((row) => row.offbookId === off.id), false);
   }));
 

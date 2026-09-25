@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionNextStep, floorFocusMeta, hubspotDealHref, queueDealHref, stackHref } from "@/lib/workflow";
+import { attentionNextStep, floorFocusMeta, floorWorkHref, hubspotDealHref, stackHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { CardMenu, Panel, StatusPill } from "@/components/primitives";
@@ -431,7 +431,7 @@ function TodaysWork() {
         name: item.dealName,
         problem: "Waiting on a reply",
         money: formatMoney(item.amount),
-        href: queueDealHref(item.dealId),
+        href: floorWorkHref(item.dealId, item.bucket),
         pill: "Needs reply",
         testId: `row-floor-reply-${item.dealId}`,
         dealId: item.dealId,
@@ -456,7 +456,7 @@ function TodaysWork() {
         name: item.dealName,
         problem: address.label,
         money: formatMoney(item.amount),
-        href: queueDealHref(item.dealId),
+        href: floorWorkHref(item.dealId, item.bucket),
         pill: address.label,
         testId: `row-floor-address-${item.dealId}`,
         dealId: item.dealId,

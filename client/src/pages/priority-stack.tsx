@@ -9,6 +9,7 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel } from "@/components/primitives";
+import { formatMoney } from "@/lib/format";
 import {
   StackCommitLine,
   StackRow,
@@ -204,6 +205,25 @@ export default function PriorityStackPage() {
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing open on the stack.</p>
               ) : null}
             </div>
+            {data.outTheDoor.length > 0 ? (
+              <section className="overflow-hidden rounded-lg border border-border" data-testid="stack-out-the-door">
+                <div className="stack-commit-line">
+                  <span>Out the door</span>
+                  <span className="numeric">{formatMoney(data.totals.outTheDoor)}</span>
+                </div>
+                {data.outTheDoor.map((row) => (
+                  <div
+                    key={row.key}
+                    className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm"
+                    data-testid={`stack-done-${row.key}`}
+                  >
+                    <span className="min-w-0 truncate">{row.contactName || row.name}</span>
+                    <span className="shrink-0 text-muted-foreground">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
+                    <span className="numeric shrink-0">{row.amount == null ? "—" : formatMoney(row.amount)}</span>
+                  </div>
+                ))}
+              </section>
+            ) : null}
             <DealOpsDrawer dealId={selectedDealId} headers={headers} onClose={() => setSelectedDealId(null)} />
             {offbookOpen ? (
               <OffbookEntryDialog headers={headers} onClose={() => setOffbookOpen(false)} onSaved={() => void stack.refetch()} />
