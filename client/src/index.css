@@ -679,6 +679,17 @@
     grid-template-columns: 24px minmax(0, 1fr) 10.5rem 9.5rem 4.5rem;
   }
 
+  .floor-next-name {
+    min-width: 0;
+    overflow: visible;
+    white-space: normal;
+    text-overflow: unset;
+  }
+
+  .floor-next-client {
+    white-space: nowrap;
+  }
+
   .floor-next > :nth-child(3),
   .floor-next > :nth-child(4) {
     justify-self: start;
