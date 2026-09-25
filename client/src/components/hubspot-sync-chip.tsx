@@ -33,6 +33,7 @@ const KIND_LABEL: Record<string, string> = {
   doneStillOpen: "Done, still open in HubSpot",
   closedNotDone: "Closed in HubSpot",
   failedWrites: "Failed write",
+  failedRecalcs: "Recalculation failed",
   webhook: "Webhooks",
   token: "HubSpot connection",
 };

@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { summarizeEvents } from "./events";
+import { isHubspotNotFound } from "./hubspot";
 import { getSqlite } from "./order-links";
 
 const MAX_ATTEMPTS = 5;
@@ -98,6 +99,17 @@ function markDone(eventId: string): void {
     .run(new Date().toISOString(), eventId);
 }
 
+/** A missing deal is finished. The reason stays on the row and it is never retried. */
+function markDropped(eventId: string, reason: string): void {
+  getSqlite()
+    .prepare(
+      `UPDATE webhook_events
+       SET status = 'dropped', last_error = ?, processed_at = ?, not_before = NULL
+       WHERE event_id = ?`,
+    )
+    .run(reason.slice(0, 500), new Date().toISOString(), eventId);
+}
+
 function markRetry(eventId: string, attempts: number, message: string, retryAfterMs: number | null, retryable: boolean): void {
   const failed = !retryable || attempts >= MAX_ATTEMPTS;
   const notBefore = failed ? null : new Date(Date.now() + (retryAfterMs ?? Math.min(10_000 * 2 ** Math.max(0, attempts - 1), 15 * 60 * 1000))).toISOString();
@@ -178,10 +190,15 @@ export async function processWebhookInbox(now = new Date()): Promise<{ processed
         requestWantsLiveWrite: liveWrite,
       });
       if (outcome.status === "error") {
+        const message = outcome.error || "Recalculation failed";
+        if (isHubspotNotFound(message)) {
+          for (const row of group) markDropped(row.event_id, message);
+          continue;
+        }
         const retryAfterMs = outcome.retryAfterMs ?? null;
         const retryable = outcome.retryable !== false;
         for (const row of group) {
-          markRetry(row.event_id, row.attempts + 1, outcome.error || "Recalculation failed", retryAfterMs, retryable);
+          markRetry(row.event_id, row.attempts + 1, message, retryAfterMs, retryable);
           if (!retryable || row.attempts + 1 >= MAX_ATTEMPTS) failed += 1;
         }
         continue;
@@ -189,9 +206,14 @@ export async function processWebhookInbox(now = new Date()): Promise<{ processed
       for (const row of group) markDone(row.event_id);
       processed += group.length;
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Webhook processing failed";
+      const status = error instanceof HubSpotError ? error.status : undefined;
+      if (isHubspotNotFound(message, status)) {
+        for (const row of group) markDropped(row.event_id, message);
+        continue;
+      }
       const retryAfterMs = error instanceof HubSpotError ? error.retryAfterMs : null;
       const retryable = !(error instanceof HubSpotError) || error.status >= 500 || error.status === 429;
-      const message = error instanceof Error ? error.message : "Webhook processing failed";
       for (const row of group) {
         markRetry(row.event_id, row.attempts + 1, message, retryAfterMs, retryable);
         if (!retryable || row.attempts + 1 >= MAX_ATTEMPTS) failed += 1;
@@ -239,8 +261,29 @@ export function failedWebhookCount(): number {
   return row.n;
 }
 
+/** Turn already-failed 404 deliveries into dropped rows before a retry pass. */
+export function dropNotFoundWebhookEvents(): number {
+  const rows = getSqlite()
+    .prepare(`SELECT event_id, last_error FROM webhook_events WHERE status IN ('failed', 'pending')`)
+    .all() as Array<{ event_id: string; last_error: string | null }>;
+  let dropped = 0;
+  for (const row of rows) {
+    if (!isHubspotNotFound(row.last_error)) continue;
+    markDropped(row.event_id, row.last_error || "HubSpot API 404: deal not found");
+    dropped += 1;
+  }
+  return dropped;
+}
+
 export function reopenFailedWebhookEvents(): void {
   getSqlite()
-    .prepare(`UPDATE webhook_events SET status = 'pending', attempts = 0, not_before = NULL WHERE status = 'failed'`)
+    .prepare(
+      `UPDATE webhook_events
+       SET status = 'pending', attempts = 0, not_before = NULL
+       WHERE status = 'failed'
+         AND IFNULL(last_error, '') NOT LIKE '%404%'
+         AND lower(IFNULL(last_error, '')) NOT LIKE '%deal not found%'
+         AND lower(IFNULL(last_error, '')) NOT LIKE '%resource not found%'`,
+    )
     .run();
 }

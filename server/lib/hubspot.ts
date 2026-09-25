@@ -201,6 +201,13 @@ export function boolPropertyNeedsOptionRepair(property: {
   return !(values.includes("true") && values.includes("false"));
 }
 
+/** A missing deal (HTTP 404) is final. Other statuses keep their own retry rules. */
+export function isHubspotNotFound(error: string | null | undefined, status?: number): boolean {
+  if (status === 404) return true;
+  const text = String(error ?? "");
+  return /\b404\b/.test(text) || /deal not found/i.test(text) || /resource not found/i.test(text);
+}
+
 export class HubSpotError extends Error {
   status: number;
   retryAfterMs: number | null;

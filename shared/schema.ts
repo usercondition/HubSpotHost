@@ -76,6 +76,8 @@ export interface HubspotSyncSummary {
     doneStillOpen: number;
     closedNotDone: number;
     failedWrites: number;
+    /** Audit-log recalculations that are still worth retrying. A 404 is not counted. */
+    failedRecalcs: number;
     webhook: number;
     token: number;
   };
