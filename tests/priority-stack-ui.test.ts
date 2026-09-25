@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rowsWithDividers, type StackRowModel } from "../client/src/components/priority-stack-list";
+import { rowsWithDividers, targetLabel, type StackRowModel } from "../client/src/components/priority-stack-list";
 
 function row(partial: Partial<StackRowModel> & Pick<StackRowModel, "key" | "tier">): StackRowModel {
   return {
@@ -84,4 +84,37 @@ test("a bundled stack still numbers one row at a time", () => {
     lines.filter((line) => line.type === "row").map((line) => line.row.rank),
     [1, 2, 3, 4, 5, 6, 7],
   );
+});
+
+test("a tentative date is spelled out and set or plan stays for the rest", () => {
+  const today = "2026-09-25";
+  assert.equal(
+    targetLabel(row({ key: "tent", tier: "committed", targetDate: "2026-10-02", targetSource: "local", tentative: true }), today),
+    "Oct 2 · tentative",
+  );
+  assert.equal(
+    targetLabel(row({ key: "due", tier: "committed", targetDate: today, targetSource: "override", tentative: true }), today),
+    "Due today · tentative",
+  );
+  assert.equal(
+    targetLabel(row({ key: "late", tier: "committed", targetDate: "2026-09-20", targetSource: "derived", tentative: true }), today),
+    "Overdue Sep 20 · tentative",
+  );
+  assert.equal(
+    targetLabel(row({ key: "set", tier: "committed", targetDate: "2026-09-27", targetSource: "override", tentative: false }), today),
+    "Sep 27 · set",
+  );
+  assert.equal(
+    targetLabel(row({ key: "plan", tier: "committed", targetDate: "2026-09-28", targetSource: "derived", tentative: false }), today),
+    "Sep 28 · plan",
+  );
+  assert.equal(
+    targetLabel(row({ key: "unset", tier: "committed", targetDate: "2026-09-27", targetSource: "unset", tentative: false }), today),
+    "Sep 27 · unset",
+  );
+  assert.equal(
+    targetLabel(row({ key: "unset-tent", tier: "committed", targetDate: "2026-10-02", targetSource: "unset", tentative: true }), today),
+    "Oct 2 · tentative",
+  );
+  assert.equal(targetLabel(row({ key: "tent", tier: "committed", tentative: true }), today).includes("~"), false);
 });

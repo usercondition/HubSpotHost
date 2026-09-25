@@ -75,20 +75,24 @@ function money(amount: number | null): string {
   return amount == null ? "—" : formatMoney(amount);
 }
 
-function targetLabel(row: StackRowModel, today: string): string {
+export function targetLabel(
+  row: Pick<StackRowModel, "targetDate" | "targetSource" | "tentative">,
+  today: string,
+): string {
   const when =
     row.targetDate < today
       ? `Overdue ${formatShipByShort(row.targetDate)}`
       : row.targetDate === today
         ? "Due today"
         : formatShipByShort(row.targetDate);
+  if (row.tentative) return `${when} · tentative`;
   const honesty =
     row.targetSource === "override" || row.targetSource === "local"
       ? " · set"
       : row.targetSource === "unset"
         ? " · unset"
         : " · plan";
-  return `${row.tentative ? "~" : ""}${when}${honesty}`;
+  return `${when}${honesty}`;
 }
 
 function progressLabel(row: StackRowModel): string {
@@ -529,7 +533,16 @@ export function StackRow({
             <div className="stack-facts">
               <span className="stack-stage stack-clip text-sm" title={member.stage}>{member.stage}</span>
               <span className="stack-blocker stack-clip text-sm text-muted-foreground" title={member.blocker || member.stage}>{member.blocker || member.stage}</span>
-              <span className="stack-date stack-clip text-sm" title={member.targetDate}>{member.targetDate}</span>
+              <span
+                className={cn(
+                  "stack-date stack-clip text-sm",
+                  member.targetDate < today && "text-destructive",
+                  member.targetDate === today && "text-chart-4",
+                )}
+                title={targetLabel(member, today)}
+              >
+                {targetLabel(member, today)}
+              </span>
             </div>
             <span className="stack-money stack-clip text-sm">{money(member.amount)}</span>
             <span className="stack-actions" />
