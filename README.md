@@ -89,8 +89,8 @@ For the initial single-service setup:
    PAID_ORDER_INTAKE_ACCESS_CODE_HASH=<SHA-256 hash of your owner code>
    HUBSPOT_API_BASE=https://api.hubapi.com
    HUBSPOT_ACCESS_TOKEN=<HubSpot private-app token>
-   HUBSPOT_WEBHOOK_SECRET=<HubSpot private-app client secret>
-   PUBLIC_BASE_URL=https://<your-railway-domain>
+   HUBSPOT_WEBHOOK_SECRET=<Perplexity Print CRM client secret>
+   PUBLIC_BASE_URL=https://hubspothost-production.up.railway.app
    REDIS_URL=${{Redis.REDIS_URL}}
    ```
 
@@ -119,13 +119,13 @@ For the initial single-service setup:
    After deploy, unlock the Command center and use **Send briefing** / **Send health nudge** on the tracker panel to verify. With schedules enabled, morning digests and mid-day health nudges send automatically. Ship-by Google Calendar sync runs on its own interval (or `POST /api/cron/shipby-gcal`) and skips when Google credentials are unset.
 
 4. Keep `ENABLE_INTERNAL_ADMIN` unset. It deliberately leaves manual recalculation and local audit endpoints unavailable to public visitors.
-5. Add the Railway HTTPS URL plus `/api/webhooks/hubspot` as the HubSpot webhook target, then send a dry-run test before relying on automatic updates.
+5. The HubSpot webhook target for the private app **Perplexity Print CRM** is exactly `https://hubspothost-production.up.railway.app/api/webhooks/hubspot` (no query key). `HUBSPOT_WEBHOOK_SECRET` is that app's client secret. Leave `HUBSPOT_CALLBACK_TOKEN_SHA256` unset; the callback-token fallback is not used.
 
 This works well for a single service and keeps the current SQLite queue across routine deployments when the `/data` volume is mounted. Railway Volumes are persistent but a service with a volume cannot scale through replicas and has a brief deployment interruption, so the longer-term production design is to migrate the intake queue and customer records to Railway PostgreSQL.
 
 ### Background shipment jobs
 
-With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp ship-note, HubSpot webhook, and outbound HubSpot write jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. Webhook batches are stored in SQLite and acked before processing. Ship-by, stage, cost, and pickup writes stay in SQLite until HubSpot accepts them, and retries honor Retry-After. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback. The 15-minute sync check remains the backstop.
+With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp ship-note, HubSpot webhook, and outbound HubSpot write jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. Webhook batches are stored in SQLite and acked before processing. The latest delivery (time, event count, result) is one SQLite row on the `/data` volume, so a deploy does not clear it. `/api/health` reports `webhook.publicBaseHostMatches`: whether `PUBLIC_BASE_URL`'s host matches the live request host. It does not print either host. Ship-by, stage, cost, and pickup writes stay in SQLite until HubSpot accepts them, and retries honor Retry-After. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback. The 15-minute sync check remains the backstop.
 
 ### Durable production direction
 
@@ -188,27 +188,30 @@ Copy `.env.example` and keep `.env` out of source control.
 | `CUSTOM_CRED_API_HUBAPI_COM_TOKEN` | Preferred | Injected HubSpot private-app token. |
 | `HUBSPOT_API_BASE` | Fallback | API base URL if the custom credential variables are not injected. |
 | `HUBSPOT_ACCESS_TOKEN` | Fallback | Private-app token if the custom credential variable is not injected. |
-| `HUBSPOT_WEBHOOK_SECRET` | Recommended | Private-app client secret used to validate webhook signatures. |
-| `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN` | Preferred in this deployment | Securely injected private-app client secret used to validate webhook signatures. |
-| `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin when a reverse proxy changes the public host used for v3 signature validation. For this deployment, use `https://hubspothost-production.up.railway.app`. |
+| `HUBSPOT_WEBHOOK_SECRET` | Required in production | Client secret of the HubSpot private app **Perplexity Print CRM**. Used to validate webhook signatures. Set this on Railway; do not commit the value. |
+| `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN` | Optional | Alternate injection of the same client secret. Production uses `HUBSPOT_WEBHOOK_SECRET`. |
+| `PUBLIC_BASE_URL` | Required behind a proxy | Exact public HTTPS origin used for v3 signature validation. This deployment is `https://hubspothost-production.up.railway.app`. Health reports whether that host matches the live request host and does not print the host. |
 | `DRY_RUN` | Required for activation | Keep `true` during tests; set `false` only when ready to write. |
 | `ALLOW_HUBSPOT_WRITES` | Required for activation | Keep `false` during tests; set `true` only with `DRY_RUN=false`. |
 | `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` | Required in any live deployment | SHA-256 hash of the owner access code used by both intake routes and all Order links owner APIs. The server never stores the plain code and the app fails closed when this is absent. |
-| `HUBSPOT_CALLBACK_TOKEN_SHA256` | Optional | SHA-256 hash of a high-entropy URL callback token when using that optional webhook fallback. If omitted, unsigned webhook deliveries are rejected; HubSpot signature validation remains available through the webhook secret. |
+| `HUBSPOT_CALLBACK_TOKEN_SHA256` | Not used | Leave unset. The live target has no `?key=` query, and production does not use the callback-token fallback. Signatures are checked with `HUBSPOT_WEBHOOK_SECRET`. |
 | `ENABLE_INTERNAL_ADMIN` | Local development only | Set to `true` only alongside `NODE_ENV=development` or `NODE_ENV=test` to enable manual recalculation and local audit endpoints. These endpoints stay disabled otherwise. |
 | `ORDER_LINKS_DB_FILE` | Optional | Path to the SQLite file holding order links. Defaults to `data.db` in the working directory. |
 | `AUDIT_LOG_FILE` | Optional | Override the local audit path. |
 
 ## HubSpot private-app webhook setup
 
-The service needs a publicly reachable HTTPS URL before HubSpot can call it. A preview/control panel is useful for testing, but it is not a production webhook endpoint.
+The live private app is **Perplexity Print CRM**. Its Target URL is exactly:
 
-1. Deploy the service to a public HTTPS host and note:
-   ```text
-   https://hubspothost-production.up.railway.app/api/webhooks/hubspot
-   ```
-2. In HubSpot, open **Development** > **Legacy apps** > your standalone private app.
-3. Open **Webhooks**, choose **Edit webhooks**, and set the Target URL to the endpoint above.
+```text
+https://hubspothost-production.up.railway.app/api/webhooks/hubspot
+```
+
+There is no query key. `HUBSPOT_WEBHOOK_SECRET` on Railway is that app's client secret. `HUBSPOT_CALLBACK_TOKEN_SHA256` stays unset; the callback-token fallback is not used. The last accepted or rejected delivery is stored in SQLite (`webhook_delivery_log` on the `/data` volume) so a redeploy does not wipe it. `/api/health` `webhook.publicBaseHostMatches` is true when `PUBLIC_BASE_URL`'s host matches the live host. The response does not include either host.
+
+1. Confirm the service is deployed at the Railway URL above.
+2. In HubSpot, open **Development** > **Legacy apps** > **Perplexity Print CRM**.
+3. Open **Webhooks**, choose **Edit webhooks**, and set the Target URL to the endpoint above. Do not append `?key=`.
 4. Create these **Deals** subscriptions. The handler ignores anything else, including the profit output fields:
    - Property changed: `amount`
    - Property changed: `print_material_cost`
@@ -219,7 +222,7 @@ The service needs a publicly reachable HTTPS URL before HubSpot can call it. A p
    - `deal.creation`
    - `deal.deletion`
 5. Save with **Commit changes**. HubSpot lets you use **View details** > **Test** on the subscription to deliver a sample event.
-6. In the private app’s **Auth** tab, store the client secret in the host’s protected `HUBSPOT_WEBHOOK_SECRET` environment variable, or inject it through the secure credential mapped to `CUSTOM_CRED_HUBSPOT_WEBHOOK_CLIENT_SECRET_LOCAL_TOKEN`. Never put it in browser code or source control.
+6. In the private app’s **Auth** tab, copy the client secret into Railway `HUBSPOT_WEBHOOK_SECRET`. Never put it in browser code or source control. Do not set `HUBSPOT_CALLBACK_TOKEN_SHA256`.
 7. Use a non-customer test deal to send a manual dry run. Confirm the audit row and figures.
 8. Enable updates only after that test:
    ```text
