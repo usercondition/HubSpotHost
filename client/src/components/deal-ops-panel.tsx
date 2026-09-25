@@ -105,7 +105,7 @@ export function DealOpsDrawer({
             role="dialog"
             aria-modal="true"
             aria-label="Deal ops"
-            className="pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-2xl md:max-w-2xl"
+            className="ops-deal-drawer pointer-events-auto absolute inset-x-0 bottom-0 flex h-[min(85dvh,720px)] w-full flex-col rounded-t-2xl border-t border-border bg-background shadow-2xl md:inset-y-0 md:inset-x-auto md:right-0 md:h-auto md:max-w-2xl md:rounded-none md:border-l md:border-t-0"
             data-testid="drawer-deal-ops"
             onClick={(event) => event.stopPropagation()}
             variants={reduceMotion ? undefined : drawerPanelVariants}
@@ -567,7 +567,8 @@ export function DealOpsPanel({
       )}
       data-testid="panel-deal-ops"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="ops-deal-sections">
+      <div className="deal-head flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           {!flush ? <p className="rule-label">Deal ops</p> : null}
           <h2 className="truncate text-lg font-semibold tracking-tight">{data.dealName}</h2>
@@ -577,17 +578,17 @@ export function DealOpsPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm">
+            <Link href={labelsDealHref(dealId)} data-testid="link-deal-ops-labels">
+              <Ship className="mr-2 h-3.5 w-3.5" />
+              Labels
+            </Link>
+          </Button>
           <Button asChild size="sm" variant="outline">
             <a href={hubspotDealHref(dealId, data.hubspotPortalId)} target="_blank" rel="noopener noreferrer">
               HubSpot
               <ExternalLink className="ml-2 h-3.5 w-3.5" />
             </a>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <Link href={labelsDealHref(dealId)} data-testid="link-deal-ops-labels">
-              <Ship className="mr-2 h-3.5 w-3.5" />
-              Labels
-            </Link>
           </Button>
           {data.plates.length === 0 ? (
             <Button asChild size="sm" variant="outline">
@@ -604,7 +605,7 @@ export function DealOpsPanel({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="deal-grid grid gap-4 lg:grid-cols-2">
         <div className="space-y-3 rounded-md border border-border/80 p-3">
           <div className="flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-primary" />
@@ -732,7 +733,7 @@ export function DealOpsPanel({
         </div>
       </div>
 
-      <div className="space-y-3 rounded-md border border-border/80 p-3">
+      <div className="deal-check space-y-3 rounded-md border border-border/80 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Ship-ready checklist</h3>
           <StatusPill
@@ -743,19 +744,25 @@ export function DealOpsPanel({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {FULFILLMENT_CHECKLIST_KEYS.map((key) => {
-            const checked = data.checklist[key];
+            const fromCosts = key === "costsEntered";
+            const checked = fromCosts ? data.costs.costsComplete : data.checklist[key];
             return (
               <label
                 key={key}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                  "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                  fromCosts ? "cursor-default" : "cursor-pointer",
                   checked ? "border-primary/40 bg-primary/5" : "border-border",
                 )}
               >
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={(event) => toggleChecklist.mutate({ [key]: event.target.checked })}
+                  disabled={fromCosts}
+                  onChange={(event) => {
+                    if (fromCosts) return;
+                    toggleChecklist.mutate({ [key]: event.target.checked });
+                  }}
                   data-testid={`check-fulfillment-${key}`}
                 />
                 {FULFILLMENT_CHECKLIST_LABELS[key]}
@@ -957,6 +964,7 @@ export function DealOpsPanel({
             </ul>
           ) : null}
         </div>
+      </div>
       </div>
     </section>
   );

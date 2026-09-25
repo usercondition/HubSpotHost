@@ -475,7 +475,7 @@ export function PageHeader({
           {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">{subtitle}</p> : null}
         </div>
         {actions ? (
-          <div className={cn("flex flex-wrap items-center gap-1.5", hideActionsOnPhone && "max-md:hidden")}>{actions}</div>
+          <div className={cn("flex min-w-0 max-w-full flex-wrap items-center gap-1.5", hideActionsOnPhone && "max-md:hidden")}>{actions}</div>
         ) : null}
       </div>
     </header>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronUp, ListChecks, MoreHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronUp, MoreHorizontal } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,6 +11,7 @@ import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import type { FulfillmentChecklistView } from "@shared/schema";
 import type { StackTier } from "@shared/priority-stack";
 import { cn } from "@/lib/utils";
+import { stagePresentation } from "@/lib/stage-chip";
 
 export interface StackStep {
   label: string;
@@ -75,6 +76,25 @@ function money(amount: number | null): string {
   return amount == null ? "—" : formatMoney(amount);
 }
 
+function orderTitle(row: Pick<StackRowModel, "name" | "contactName">): string {
+  const name = row.name.trim();
+  const contact = row.contactName?.trim();
+  if (!contact) return name;
+  for (const suffix of [` - ${contact}`, ` – ${contact}`, ` — ${contact}`, ` · ${contact}`]) {
+    if (name.toLowerCase().endsWith(suffix.toLowerCase())) {
+      const trimmed = name.slice(0, -suffix.length).trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return name;
+}
+
+function rowSubtitle(row: Pick<StackRowModel, "contactName" | "shippingRequired">): string {
+  const who = row.contactName?.trim();
+  const mode = row.shippingRequired ? "Ships" : "Pickup";
+  return who ? `${who} · ${mode}` : mode;
+}
+
 export function targetLabel(
   row: Pick<StackRowModel, "targetDate" | "targetSource" | "tentative">,
   today: string,
@@ -115,24 +135,31 @@ function progressLabel(row: StackRowModel): string {
 }
 
 export function StackTotalsBar({ view }: { view: StackView }) {
-  const offBook =
-    view.totals.offBookUnpriced > 0
-      ? ` (+${view.totals.offBookUnpriced} off-book, no amount)`
-      : "";
   const goal = Math.round((view.totals.committed + view.totals.outTheDoor) * 100) / 100;
+  const offBook =
+    view.totals.offBookUnpriced > 0 ? `+${view.totals.offBookUnpriced} off-book, no amount` : "";
   return (
-    <p className="scan-facts text-sm" data-testid="stack-totals">
-      <span>
-        Cash this week <span className="text-foreground">{money(view.totals.committed)}</span>
-        {offBook}
-      </span>
-      <span>
-        Stretch <span className="text-foreground">{money(view.totals.stretch)}</span>
-      </span>
-      <span>
-        Out the door <span className="text-foreground">{money(view.totals.outTheDoor)} / {money(goal)}</span>
-      </span>
-    </p>
+    <div className="stack-kpis" data-testid="stack-totals">
+      <article>
+        <p className="stack-kpi-label">Cash this week</p>
+        <p className="stack-kpi-value numeric">{money(view.totals.committed)}</p>
+        {offBook ? <p className="stack-kpi-note">{offBook}</p> : null}
+      </article>
+      <article>
+        <p className="stack-kpi-label">Out the door</p>
+        <p className="stack-kpi-value numeric">
+          {money(view.totals.outTheDoor)} <small>/ {money(goal)}</small>
+        </p>
+      </article>
+      <article>
+        <p className="stack-kpi-label">Stretch</p>
+        <p className="stack-kpi-value numeric">{money(view.totals.stretch)}</p>
+      </article>
+      <article>
+        <p className="stack-kpi-label">Later</p>
+        <p className="stack-kpi-value numeric">{money(view.totals.later)}</p>
+      </article>
+    </div>
   );
 }
 
@@ -167,7 +194,7 @@ function InlineBlocker({
     },
   });
 
-  const blockerLabel = row.blockerSource === "auto" && row.blocker ? `(auto) ${row.blocker}` : row.blocker || "Add blocker";
+  const blockerLabel = row.blocker || "Add blocker";
   if (!editing) {
     return (
       <button
@@ -180,6 +207,7 @@ function InlineBlocker({
         }}
         data-testid={`button-blocker-${row.key}`}
       >
+        {row.blockerSource === "auto" && row.blocker ? <span className="stack-auto">auto</span> : null}
         {blockerLabel}
       </button>
     );
@@ -244,11 +272,20 @@ function ChecklistPopover({
         }));
 
   const progress = progressLabel(row);
+  const presentation = stagePresentation(row.stage || row.name);
+  const done = steps.filter((step) => step.done).length;
+  const chip = (
+    <span className={cn("stage-chip", `stage-${presentation.tone}`)} title={presentation.label}>
+      <i />
+      <span className="stack-stage-full">{presentation.label}</span>
+      <span className="stack-stage-short">{presentation.short}</span>
+    </span>
+  );
   if (steps.length === 0 || row.kind === "bundle") {
     return (
-      <span className="stack-clip text-sm" title={progress}>
-        <ListChecks className="mr-1 inline h-3.5 w-3.5 shrink-0 align-text-bottom" />
-        {progress}
+      <span className="inline-flex min-w-0 items-center gap-2" title={progress}>
+        {chip}
+        {steps.length > 0 ? <span className="numeric stack-prog">{done}/{steps.length}</span> : null}
       </span>
     );
   }
@@ -256,9 +293,9 @@ function ChecklistPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" title={progress} className="stack-clip text-left text-sm" data-testid={`button-checklist-${row.key}`}>
-          <ListChecks className="mr-1 inline h-3.5 w-3.5 shrink-0 align-text-bottom" />
-          {progress}
+        <button type="button" title={progress} className="inline-flex min-w-0 items-center gap-2 text-left" data-testid={`button-checklist-${row.key}`}>
+          {chip}
+          <span className="numeric stack-prog">{done}/{steps.length}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-2">
@@ -429,6 +466,7 @@ export function StackRow({
   onSaved: () => void;
 }) {
   const who = row.contactName ? `${row.name} · ${row.contactName}` : row.name;
+  const title = orderTitle(row);
   return (
     <>
     <article
@@ -453,19 +491,22 @@ export function StackRow({
         onDropOn();
       }}
     >
-      <span className="stack-check">
+      <span className="stack-rank">
         {row.kind === "deal" ? (
           <input type="checkbox" className="h-4 w-4" checked={selected} onChange={onToggleSelect} aria-label={`Select ${row.name}`} data-testid={`check-select-${row.key}`} />
         ) : (
           <input type="checkbox" className="h-4 w-4" disabled aria-hidden="true" tabIndex={-1} />
         )}
+        <span>{row.rank}</span>
       </span>
-      <span className="stack-rank">{row.rank}</span>
-      <button type="button" title={who} className="stack-name stack-clip text-left text-sm font-medium" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
-        {who}
-        {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
-        {row.kind === "offbook" ? <span className="ml-1 text-xs text-muted-foreground">off-book</span> : null}
-        {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
+      <button type="button" title={who} className="stack-name text-left" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
+        <span className="stack-clip text-sm font-medium">
+          {title}
+          {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
+          {row.kind === "offbook" ? <span className="stack-auto">off-book</span> : null}
+          {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
+        </span>
+        <span className="stack-clip stack-sub">{rowSubtitle(row)}</span>
       </button>
       <div className="stack-facts min-w-0">
         <div className="stack-stage stack-desktop-only min-w-0">
@@ -501,34 +542,30 @@ export function StackRow({
           <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Move to top" onClick={() => onMove("top")} data-testid={`button-top-${row.key}`}>
           <ChevronUp className="h-3.5 w-3.5" />
         </Button>
-        {row.kind !== "bundle" && row.kind !== "offbook" && row.shippingRequired ? <span className="inline-block h-7 w-7" /> : null}
-        {row.kind === "bundle" || row.kind === "offbook" || !row.shippingRequired ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="More" data-testid={`button-more-${row.key}`}>
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {row.kind === "bundle" ? (
-                <DropdownMenuItem onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem onClick={onDone} data-testid={`button-done-${row.key}`}>
-                {row.shippingRequired ? "Done" : "Picked up"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="More" data-testid={`button-more-${row.key}`}>
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {row.kind === "bundle" ? (
+              <DropdownMenuItem onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onClick={onDone} data-testid={`button-done-${row.key}`}>
+              {row.shippingRequired ? "Done" : "Picked up"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </article>
     {expanded && row.members.length > 0 ? (
       <div data-testid={`bundle-members-${row.key}`}>
         {row.members.map((member) => (
           <article key={member.key} className="stack-row stack-member" data-lane={member.lane}>
-            <span className="stack-check"><span className="inline-block h-4 w-4" aria-hidden="true" /></span>
             <span className="stack-rank" />
-            <span className="stack-name stack-clip text-sm" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
-              {member.name}{member.contactName ? ` · ${member.contactName}` : ""}
+            <span className="stack-name" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
+              <span className="stack-clip text-sm">{orderTitle(member)}</span>
             </span>
             <div className="stack-facts">
               <span className="stack-stage stack-clip text-sm" title={member.stage}>{member.stage}</span>
@@ -556,9 +593,24 @@ export function StackRow({
 
 export function StackCommitLine({ label, amount }: { label: string; amount: number }) {
   return (
-    <div className="stack-commit-line" data-testid={`stack-divider-${label}`}>
-      <span>{label}</span>
-      <span className="numeric">{money(amount)}</span>
+    <div className="stack-row stack-commit-line" data-testid={`stack-divider-${label}`}>
+      <span className="stack-commit-label">{label}</span>
+      <span className="stack-money numeric">{money(amount)}</span>
+      <span className="stack-actions" aria-hidden="true" />
+    </div>
+  );
+}
+
+export function StackColumnHead() {
+  return (
+    <div className="stack-row stack-head" aria-hidden="true">
+      <span>#</span>
+      <span>Order</span>
+      <span>Status</span>
+      <span>Blocker</span>
+      <span>Target</span>
+      <span>Amount</span>
+      <span />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   dealCostsCompleteFromFields,
   dealCostsIncomplete,
 } from "../shared/deal-costs";
+import { withDerivedCostsEntered } from "../server/lib/fulfillment";
 
 test("plated print deals require material, labor, and packaging but not shipping before a label", () => {
   assert.equal(
@@ -107,6 +108,30 @@ test("ops complete flag requires seeded absorbed labor and free packaging", () =
     ),
     true,
   );
+});
+
+test("checklist actual-costs flag follows the cost fields", () => {
+  const view = withDerivedCostsEntered(
+    {
+      dealId: "armigers",
+      addressVerified: true,
+      costsEntered: true,
+      labelBought: false,
+      trackingPasted: false,
+      packingDone: true,
+      trackingNumber: "",
+      notes: "",
+      completedCount: 3,
+      totalCount: 5,
+      readyPercent: 60,
+      shipReady: false,
+      updatedAt: null,
+    },
+    false,
+  );
+  assert.equal(view.costsEntered, false);
+  assert.equal(view.completedCount, 2);
+  assert.equal(view.shipReady, false);
 });
 
 test("Print Ops cost UI defaults labor and free USPS packaging to zero", () => {
