@@ -408,8 +408,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-deal-paid-b1']").first().waitFor();
     const paid = await boxes(current(), "[data-testid^='text-deal-paid-']");
+    const cost = await boxes(current(), "[data-testid^='text-deal-production-']");
+    const profit = await boxes(current(), "[data-testid^='text-deal-revenue-']");
     check(paid.length >= 2, "order paid figures missing");
     check(spread(paid.map((box) => box.left)).delta <= 1, `Paid labels left edges differ by ${spread(paid.map((box) => box.left)).delta}`);
+    check(spread(cost.map((box) => box.left)).delta <= 1, `Cost labels left edges differ by ${spread(cost.map((box) => box.left)).delta}`);
+    check(spread(profit.map((box) => box.left)).delta <= 1, `Profit labels left edges differ by ${spread(profit.map((box) => box.left)).delta}`);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });

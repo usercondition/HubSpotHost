@@ -74,6 +74,8 @@ export default function DealsPage() {
   const [optimisticMoves, setOptimisticMoves] = useState<Record<string, OptimisticMove>>({});
   const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
   const [dropStageId, setDropStageId] = useState<string | null>(null);
+  const [ordersView, setOrdersView] = useState<"board" | "table">("board");
+  const [tableSort, setTableSort] = useState<"stage" | "profit">("profit");
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -330,6 +332,12 @@ export default function DealsPage() {
             data-testid="panel-deals-board"
             aria-label="Print Orders pipeline board"
           >
+            <p className="px-4 py-6 text-sm text-muted-foreground md:hidden" data-testid="text-orders-phone">
+              Orders is a desktop view. Open the{" "}
+              <Link href="/stack" className="font-medium text-primary">Stack</Link>
+              {" "}for the jobs in front of you.
+            </p>
+            <div className="hidden min-h-0 flex-1 flex-col overflow-hidden md:flex">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2.5 md:px-4">
               <div className="min-w-0">
                 <p className="text-sm font-semibold tracking-tight">Print Orders</p>
@@ -376,6 +384,10 @@ export default function DealsPage() {
                     {showEmptyStages ? "Hide empty stages" : `Show empty (${emptyColumnCount})`}
                   </Button>
                 ) : null}
+                <div className="inline-flex rounded-md border border-border p-0.5" data-testid="toggle-orders-view">
+                  <button type="button" className={cn("rounded px-2 py-1 text-xs", ordersView === "board" && "bg-muted font-semibold")} onClick={() => setOrdersView("board")}>Board</button>
+                  <button type="button" className={cn("rounded px-2 py-1 text-xs", ordersView === "table" && "bg-muted font-semibold")} onClick={() => setOrdersView("table")}>Table</button>
+                </div>
                 {closedColumnCount > 0 || (snapshot.closedDeals?.length ?? 0) > 0 ? (
                   <Button
                     type="button"
@@ -400,7 +412,10 @@ export default function DealsPage() {
               </p>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-x-auto overscroll-contain bg-muted/40 p-3 md:p-4">
+            {ordersView === "table" ? (
+              <OrdersTable columns={columns} sort={tableSort} onSort={setTableSort} />
+            ) : null}
+            <div className={cn("min-h-0 flex-1 overflow-x-auto overscroll-contain bg-muted/40 p-3 md:p-4", ordersView === "table" && "hidden")}>
               {columns.length === 0 ? (
                 <div className="flex h-full min-h-[12rem] items-center justify-center rounded-md border border-dashed border-border bg-card/40 px-4">
                   <p className="text-center text-sm text-muted-foreground">
@@ -503,31 +518,25 @@ export default function DealsPage() {
                         )}
                       </div>
 
-                      <div className="queue-lane-footer shrink-0" data-testid={`footer-stage-${column.id}`}>
-                        <p className="board-figure">
-                          <span>{formatMoney(column.totalAmount)}</span>
+                      <div className="queue-lane-footer order-figs shrink-0" data-testid={`footer-stage-${column.id}`}>
+                        <p>
+                          <span className="numeric">{formatMoney(column.totalAmount)}</span>
                           <span className="board-figure-label">Paid</span>
                         </p>
-                        <p className="board-figure">
-                          <span>{formatMoney(column.totalProductionCost)}</span>
-                          <span className="board-figure-label">Production</span>
+                        <p>
+                          <span className="numeric">{formatMoney(column.totalProductionCost)}</span>
+                          <span className="board-figure-label">Cost</span>
                         </p>
-                        {column.deals.some((deal) => deal.costsComplete) ? (
-                          <p
-                            className={cn(
-                              "board-figure",
-                              column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive",
-                            )}
-                          >
-                            <span>{formatMoney(column.totalGrossProfit)}</span>
-                            <span className="board-figure-label">Revenue</span>
-                          </p>
-                        ) : null}
+                        <p className={column.totalGrossProfit >= 0 ? "text-chart-4" : "text-destructive"}>
+                          <span className="numeric">{formatMoney(column.totalGrossProfit)}</span>
+                          <span className="board-figure-label">Profit</span>
+                        </p>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
             </div>
           </section>
         )}
@@ -544,6 +553,51 @@ export default function DealsPage() {
         }}
         headers={headers}
       />
+    </div>
+  );
+}
+
+function OrdersTable({
+  columns,
+  sort,
+  onSort,
+}: {
+  columns: BoardColumn[];
+  sort: "stage" | "profit";
+  onSort: (sort: "stage" | "profit") => void;
+}) {
+  const rows = columns.flatMap((column) => column.deals.map((deal) => ({ ...deal, column: column.label })));
+  rows.sort((a, b) =>
+    sort === "profit" ? (b.grossProfit ?? 0) - (a.grossProfit ?? 0) : a.column.localeCompare(b.column),
+  );
+  return (
+    <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="panel-orders-table">
+      <table className="order-table w-full">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>
+              <button type="button" onClick={() => onSort("stage")}>Stage</button>
+            </th>
+            <th>Paid</th>
+            <th>Cost</th>
+            <th>
+              <button type="button" onClick={() => onSort("profit")}>Profit</button>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((deal) => (
+            <tr key={deal.dealId}>
+              <td className="truncate">{deal.dealName}</td>
+              <td>{deal.column}</td>
+              <td className="numeric">{formatMoney(deal.amount)}</td>
+              <td className="numeric">{deal.costsComplete || (deal.productionCost ?? 0) > 0 ? formatMoney(deal.productionCost ?? 0) : "—"}</td>
+              <td className="numeric">{deal.costsComplete || (deal.productionCost ?? 0) > 0 ? formatMoney(deal.grossProfit ?? 0) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -669,7 +723,7 @@ function DealCard({
           {closeLabel ? ` · ${closeLabel}` : ""}
         </span>
       </p>
-      <div className="scan-facts" data-testid={`panel-deal-economics-${deal.dealId}`}>
+      <div className="order-figs" data-testid={`panel-deal-economics-${deal.dealId}`}>
         <p data-testid={`text-deal-paid-${deal.dealId}`} title="Paid / quoted amount">
           <span>{formatMoney(deal.amount)}</span>
           <span className="board-figure-label"> paid</span>
@@ -705,7 +759,7 @@ function DealCard({
                 }`
               : "—"}
           </span>
-          <span className="board-figure-label"> revenue</span>
+          <span className="board-figure-label"> profit</span>
         </p>
         {deal.needsPlates ? (
           <StatusPill tone="warn" icon={FileUp} label="Needs plates" />
