@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AttentionAlertCard } from "@/components/attention-alert-card";
 import { HubspotSyncDialog, syncChipLabel } from "@/components/hubspot-sync-chip";
 import { useToast } from "@/hooks/use-toast";
+import { useShopCounts } from "@/hooks/use-shop-counts";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { HealthResponse, PerformanceResponse } from "@shared/schema";
@@ -14,6 +15,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
 
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
+  const shop = useShopCounts();
   const syncCount = health.data?.hubspotSync?.issueCount ?? 0;
   const syncPending = health.data?.hubspotSync?.writes?.pending ?? 0;
   const syncFailed = health.data?.hubspotSync?.writes?.failed ?? 0;
@@ -58,7 +60,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
 
   if (!isUnlocked) return null;
 
-  const count = (performance.data?.summary.attentionCount ?? 0) + (syncVisible ? 1 : 0);
+  const count = shop.needsYou ?? 0;
   const items = performance.data?.attention ?? [];
   const portalId = performance.data?.hubspotPortalId;
 
@@ -101,7 +103,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
           <div>
             <p className="text-sm font-semibold">Alerts</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Open Print Orders that need plates, costs, or a margin check.
+              Same count as Needs you on Floor.
             </p>
           </div>
           <Link href="/" className="text-xs font-medium text-primary hover:underline" data-testid="link-attention-bell-all">
@@ -137,7 +139,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Loading alerts…
           </div>
-        ) : items.length === 0 && !syncVisible ? (
+        ) : shop.needs.length === 0 && !syncVisible ? (
           <div className="rounded-md bg-muted/45 p-3" data-testid="empty-attention-bell">
             <p className="text-sm font-medium">You’re clear</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -146,17 +148,33 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
           </div>
         ) : (
           <div className="max-h-[22rem] space-y-2 overflow-y-auto pr-0.5">
-            {items.map((item) => (
-              <AttentionAlertCard
-                key={`${item.dealId}-${item.issueKey}`}
-                item={item}
-                portalId={portalId}
-                dense
-                dismissPending={dismiss.isPending}
-                onDismiss={() => dismiss.mutate({ dealId: item.dealId, issueKey: item.issueKey })}
-                testId={`row-attention-bell-${item.dealId}-${item.issueKey}`}
-              />
-            ))}
+            {shop.needs.map((need) => {
+              const item = items.find((entry) => entry.dealId === need.dealId && entry.issueKey === need.issueKey);
+              if (item) {
+                return (
+                  <AttentionAlertCard
+                    key={need.key}
+                    item={item}
+                    portalId={portalId}
+                    dense
+                    dismissPending={dismiss.isPending}
+                    onDismiss={() => dismiss.mutate({ dealId: item.dealId, issueKey: item.issueKey })}
+                    testId={`row-attention-bell-${item.dealId}-${item.issueKey}`}
+                  />
+                );
+              }
+              return (
+                <Link
+                  key={need.key}
+                  href={need.href}
+                  className="block rounded-md bg-muted/45 px-3 py-2"
+                  data-testid={need.testId}
+                >
+                  <p className="text-sm font-medium">{need.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{need.problem}</p>
+                </Link>
+              );
+            })}
           </div>
         )}
       </PopoverContent>

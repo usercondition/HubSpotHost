@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionNextStep, floorFocusMeta, floorWorkHref, hubspotDealHref, stackHref } from "@/lib/workflow";
+import { floorFocusMeta, hubspotDealHref, stackHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
@@ -26,11 +26,10 @@ import { CardMenu, Panel, StatusPill } from "@/components/primitives";
 import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { formatMoney } from "@/lib/format";
+import { buildFloorNeeds, fepDuePrinters, type FloorNeed, type FloorNeedIcon } from "@/lib/floor-needs";
 import { cn } from "@/lib/utils";
 import { formatShipByShort, shipByCalendarDate } from "@shared/ship-by";
 import { stackFloorLine } from "@shared/priority-stack";
-import { addressStatusPill } from "@shared/ship-address";
 import type {
   HealthResponse,
   PerformanceResponse,
@@ -63,32 +62,14 @@ function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
   );
 }
 
-type FloorLane = "plates" | "warn" | "bad" | "shop";
-
-type FloorNeed = {
-  key: string;
-  lane: FloorLane;
-  rank: number;
-  shipBy: string;
-  name: string;
-  problem: string;
-  money: string;
-  href: string;
-  pill: string;
-  testId: string;
-  dealId?: string;
-  issueKey?: string;
-  chaseDraft?: string;
-  icon: typeof FileUp;
+const FLOOR_ICONS: Record<FloorNeedIcon, typeof FileUp> = {
+  file: FileUp,
+  alert: AlertTriangle,
+  link: Link2,
+  beaker: Beaker,
+  printer: Printer,
+  pin: MapPin,
 };
-
-function issueLane(issueKey: string): FloorLane {
-  if (issueKey === "no_plates") return "plates";
-  if (issueKey === "stale") return "bad";
-  return "warn";
-}
-
-const LANE_RANK: Record<FloorLane, number> = { bad: 0, plates: 1, warn: 2, shop: 3 };
 
 function FloorNeeds({
   needs,
@@ -119,7 +100,7 @@ function FloorNeeds({
           </p>
         ) : (
           needs.map((need) => {
-            const Icon = need.icon;
+            const Icon = FLOOR_ICONS[need.icon];
             const tone = need.lane === "bad" ? "bad" : need.lane === "shop" ? "warn" : need.lane === "plates" ? "warn" : "warn";
             return (
               <article key={need.key} className="floor-row workspace-node scan-row" data-lane={need.lane} data-testid={need.testId}>
@@ -325,7 +306,6 @@ function TodaysWork() {
         ...productionQueue.data.shipReady,
       ]
     : [];
-  const queueByDealId = new Map(queueItems.map((item) => [item.dealId, item]));
   const today = shipByCalendarDate();
   const overdueCount = queueItems.filter((item) => item.shipBy < today).length;
   const dueTodayCount = queueItems.filter((item) => item.shipBy === today).length;
@@ -333,146 +313,18 @@ function TodaysWork() {
   const pendingReview = snapshot.intake.pendingReview;
   const awaitingClient = snapshot.intake.awaitingClient;
   const buyNow = resinReorder.data?.buyNow ?? [];
-  const fepDue =
-    printers.data?.printers.filter((printer) => {
-      if (printer.status !== "active") return false;
-      const hours = printer.fepHoursUsedPercent ?? 0;
-      const layers = printer.fepLayersUsedPercent ?? 0;
-      return Math.max(hours, layers) >= 85;
-    }) ?? [];
+  const fepDue = fepDuePrinters(printers.data?.printers ?? []);
 
-  const dealById = new Map((snapshot.activeDeals ?? []).map((deal) => [deal.dealId, deal]));
-  const floorNeeds: FloorNeed[] = [];
-  for (const item of attention) {
-    const step = attentionNextStep({ dealId: item.dealId, issue: item.issue, portalId });
-    const queueItem = queueByDealId.get(item.dealId);
-    const deal = dealById.get(item.dealId);
-    const lane = issueLane(item.issueKey);
-    floorNeeds.push({
-      key: `${item.dealId}-${item.issueKey}`,
-      lane,
-      rank: LANE_RANK[lane],
-      shipBy: queueItem?.shipBy ?? "",
-      name: item.dealName,
-      problem: item.detail || item.issue,
-      money: deal ? formatMoney(deal.amount) : "",
-      href: step.href,
-      pill: step.label,
-      testId: `row-glance-${item.dealId}-${item.issueKey}`,
-      dealId: item.dealId,
-      issueKey: item.issueKey,
-      icon: item.issueKey === "no_plates" ? FileUp : AlertTriangle,
-    });
-  }
-  if (pendingReview > 0) {
-    floorNeeds.push({
-      key: "intake-review",
-      lane: "shop",
-      rank: LANE_RANK.shop,
-      shipBy: "",
-      name: `${pendingReview} intake waiting`,
-      problem: "Approve or cancel paid order forms",
-      money: "",
-      href: "/orders",
-      pill: "Open Intake",
-      testId: "row-glance-intake-review",
-      icon: Link2,
-    });
-  }
-  if (awaitingClient > 0) {
-    floorNeeds.push({
-      key: "awaiting-client",
-      lane: "shop",
-      rank: LANE_RANK.shop,
-      shipBy: "",
-      name: `${awaitingClient} buyer link${awaitingClient === 1 ? "" : "s"} open`,
-      problem: "Still awaiting client details",
-      money: "",
-      href: floorFocusMeta("buyer").workspaceHref,
-      pill: "Open Intake",
-      testId: "row-glance-awaiting-client",
-      icon: Link2,
-    });
-  }
-  if (buyNow.length > 0) {
-    floorNeeds.push({
-      key: "resin",
-      lane: "shop",
-      rank: LANE_RANK.shop,
-      shipBy: "",
-      name: `Buy resin · ${buyNow.length}`,
-      problem: `${buyNow[0]?.name}${buyNow.length > 1 ? ` +${buyNow.length - 1}` : ""}`,
-      money: "",
-      href: "/resin",
-      pill: "Resin stock",
-      testId: "row-glance-resin-buy",
-      icon: Beaker,
-    });
-  }
-  if (fepDue.length > 0) {
-    floorNeeds.push({
-      key: "fep",
-      lane: "shop",
-      rank: LANE_RANK.shop,
-      shipBy: "",
-      name: `FEP due · ${fepDue.length}`,
-      problem: fepDue.map((printer) => printer.name).slice(0, 2).join(", "),
-      money: "",
-      href: "/printers",
-      pill: "Printers",
-      testId: "row-glance-fep-due",
-      icon: Printer,
-    });
-  }
-  const seenDeals = new Set(floorNeeds.map((need) => need.dealId).filter(Boolean));
-  for (const item of queueItems) {
-    if (item.needsReply && !seenDeals.has(item.dealId)) {
-      floorNeeds.push({
-        key: `${item.dealId}-reply`,
-        lane: "warn",
-        rank: LANE_RANK.warn,
-        shipBy: item.shipBy,
-        name: item.dealName,
-        problem: "Waiting on a reply",
-        money: formatMoney(item.amount),
-        href: floorWorkHref(item.dealId, item.bucket),
-        pill: "Needs reply",
-        testId: `row-floor-reply-${item.dealId}`,
-        dealId: item.dealId,
-        icon: AlertTriangle,
-      });
-      seenDeals.add(item.dealId);
-    }
-    const nearShip = item.bucket === "ship_ready" || item.readyToPack || item.fulfillment.readyPercent >= 80;
-    const address = addressStatusPill(item.addressStatus);
-    if (
-      nearShip &&
-      item.addressStatus !== "ready" &&
-      item.addressStatus !== "pickup" &&
-      address.tone !== "good" &&
-      !floorNeeds.some((need) => need.dealId === item.dealId && need.key.endsWith("-address"))
-    ) {
-      floorNeeds.push({
-        key: `${item.dealId}-address`,
-        lane: "warn",
-        rank: LANE_RANK.warn,
-        shipBy: item.shipBy,
-        name: item.dealName,
-        problem: address.label,
-        money: formatMoney(item.amount),
-        href: floorWorkHref(item.dealId, item.bucket),
-        pill: address.label,
-        testId: `row-floor-address-${item.dealId}`,
-        dealId: item.dealId,
-        chaseDraft: item.chaseDraft || undefined,
-        icon: MapPin,
-      });
-    }
-  }
-  floorNeeds.sort((a, b) => {
-    const aOver = a.shipBy && a.shipBy < today ? 0 : 1;
-    const bOver = b.shipBy && b.shipBy < today ? 0 : 1;
-    return aOver - bOver || a.rank - b.rank || (a.shipBy || "9999").localeCompare(b.shipBy || "9999") || a.name.localeCompare(b.name);
+  const floorNeeds = buildFloorNeeds({
+    today,
+    portalId,
+    attention,
+    deals: snapshot.activeDeals ?? [],
+    queue: queueItems,
+    pendingReview,
+    awaitingClient,
+    resinBuyNow: buyNow,
+    fepDue,
   });
 
   const shipPressure = overdueCount + dueTodayCount;
