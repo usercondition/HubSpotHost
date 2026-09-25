@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import express from "express";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import type { AuditEntry } from "../server/lib/audit";
+import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { registerRoutes } from "../server/routes";
+import { fulfillmentChecklists } from "../shared/schema";
 import {
   applySyncRepairs,
   clearCachedSyncHealthForTest,
@@ -179,6 +185,41 @@ test("cost and amount mismatches are reported and never repaired", () => {
   assert.equal(report.items.every((item) => item.repairable === false), true);
 });
 
+test("a blank Print Ops ship note is filled from HubSpot and is not an issue", () => {
+  const copied = compareSyncHealth(input({
+    hubspotById: { "91": remote({ dealId: "91", shipNotes: "pickup after 5" }) },
+    localDeals: [local({ dealId: "91", shipNotes: "  " })],
+  }));
+  assert.deepEqual(kinds(copied), []);
+  assert.equal(copied.summary.counts.shipNotes, 0);
+  assert.deepEqual(copied.repairs, [{ dealId: "91", field: "local_notes", value: "pickup after 5" }]);
+
+  const kept = compareSyncHealth(input({
+    hubspotById: { "91": remote({ dealId: "91", shipNotes: "hubspot note" }) },
+    localDeals: [local({ dealId: "91", shipNotes: "leave at side door" })],
+  }));
+  assert.deepEqual(kinds(kept), ["shipNotes"]);
+  assert.equal(kept.repairs.some((repair) => repair.field === "local_notes"), false);
+});
+
+test("$0 actual shipping against a blank HubSpot cost is not drift", () => {
+  const quiet = compareSyncHealth(input({
+    hubspotById: { "92": remote({ dealId: "92", shipping: "" }) },
+    localDeals: [local({ dealId: "92", shipping: "0.00" })],
+  }));
+  assert.deepEqual(kinds(quiet), []);
+  assert.equal(quiet.summary.counts.costs, 0);
+  assert.deepEqual(quiet.repairs, []);
+
+  const postage = compareSyncHealth(input({
+    hubspotById: { "93": remote({ dealId: "93", shipping: "" }) },
+    localDeals: [local({ dealId: "93", shipping: "8.50" })],
+  }));
+  assert.deepEqual(kinds(postage), ["costs"]);
+  assert.equal(postage.items[0]?.field, "print_actual_shipping_cost");
+  assert.deepEqual(postage.repairs, []);
+});
+
 test("Stack done still open in HubSpot, and Closed Won not done this week", () => {
   const report = compareSyncHealth(input({
     hubspotById: {
@@ -215,16 +256,20 @@ test("failed writes are the latest audit error, and a later success clears them"
   assert.equal(recovered.summary.lastSuccessfulWriteAt, null);
 });
 
-test("webhook silence is an issue only when webhooks are configured, and token errors fail the check", () => {
+test("webhook silence stays a note and is not an issue, and token errors fail the check", () => {
   const unconfigured = compareSyncHealth(input({ webhookConfigured: false, webhook: null }));
   assert.deepEqual(kinds(unconfigured), []);
   assert.equal(unconfigured.summary.status, "ok");
+  assert.equal(unconfigured.summary.counts.webhook, 0);
   assert.match(unconfigured.summary.webhook.note, /not configured/);
 
   const silent = compareSyncHealth(input({ webhookConfigured: true, webhook: null }));
-  assert.deepEqual(kinds(silent), ["webhook"]);
-  assert.equal(silent.summary.counts.webhook, 1);
+  assert.deepEqual(kinds(silent), []);
+  assert.equal(silent.summary.counts.webhook, 0);
+  assert.equal(silent.summary.issueCount, 0);
+  assert.equal(silent.summary.status, "ok");
   assert.equal(silent.summary.webhook.arriving, false);
+  assert.match(silent.summary.webhook.note, /none have arrived/);
 
   const fresh = compareSyncHealth(input({
     webhookConfigured: true,
@@ -238,6 +283,57 @@ test("webhook silence is an issue only when webhooks are configured, and token e
   assert.equal(token.summary.status, "error");
   assert.equal(token.summary.counts.token, 1);
   assert.equal(JSON.stringify(token.summary).includes("Customer"), false);
+});
+
+test("local ship-note fill writes a blank checklist and does not call HubSpot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sync-notes-"));
+  const previous = {
+    db: process.env.ORDER_LINKS_DB_FILE,
+    dry: process.env.DRY_RUN,
+    writes: process.env.ALLOW_HUBSPOT_WRITES,
+    base: process.env.HUBSPOT_API_BASE,
+    token: process.env.HUBSPOT_ACCESS_TOKEN,
+  };
+  const calls: string[] = [];
+  const mock = http.createServer((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => mock.listen(0, "127.0.0.1", () => resolve()));
+  const port = (mock.address() as { port: number }).port;
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "notes.db");
+  process.env.HUBSPOT_API_BASE = `http://127.0.0.1:${port}`;
+  process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+  process.env.DRY_RUN = "true";
+  process.env.ALLOW_HUBSPOT_WRITES = "false";
+  resetOrderLinkStore();
+  try {
+    const filled = await applySyncRepairs([{ dealId: "91001", field: "local_notes", value: "pickup after 5" }]);
+    assert.deepEqual(filled, [{ dealId: "91001", field: "local_notes", wrote: true, dryRun: false }]);
+    const stored = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, "91001")).get();
+    assert.equal(stored?.notes, "pickup after 5");
+
+    const kept = await applySyncRepairs([{ dealId: "91001", field: "local_notes", value: "a different note" }]);
+    assert.equal(kept[0]?.wrote, false);
+    assert.equal(kept[0]?.skipped, "local-not-blank");
+    const again = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, "91001")).get();
+    assert.equal(again?.notes, "pickup after 5");
+    assert.equal(calls.length, 0);
+  } finally {
+    if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previous.db;
+    if (previous.dry === undefined) delete process.env.DRY_RUN;
+    else process.env.DRY_RUN = previous.dry;
+    if (previous.writes === undefined) delete process.env.ALLOW_HUBSPOT_WRITES;
+    else process.env.ALLOW_HUBSPOT_WRITES = previous.writes;
+    if (previous.base === undefined) delete process.env.HUBSPOT_API_BASE;
+    else process.env.HUBSPOT_API_BASE = previous.base;
+    if (previous.token === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+    else process.env.HUBSPOT_ACCESS_TOKEN = previous.token;
+    resetOrderLinkStore();
+    await new Promise<void>((resolve) => mock.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("auto-repair never overwrites a non-blank HubSpot value and stays quiet in dry run", async () => {

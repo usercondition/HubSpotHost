@@ -244,6 +244,46 @@ export async function syncDealShippingToHubSpot(
   return { attempted: true, dryRun: false, gate: decision.reason, wrote: true };
 }
 
+/**
+ * Copy HubSpot ship notes into the local checklist only when Print Ops is blank.
+ * Does not write HubSpot, and does not replace a note that is already saved.
+ */
+export function fillBlankLocalShipNotes(dealId: string, notes: string): { wrote: boolean; skipped?: "local-not-blank" | "empty" } {
+  const id = dealId.trim();
+  const value = notes.trim().slice(0, 2_000);
+  if (!/^[0-9]{1,20}$/.test(id) || !value) return { wrote: false, skipped: "empty" };
+  const existing = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, id)).get();
+  if (existing && String(existing.notes ?? "").trim()) return { wrote: false, skipped: "local-not-blank" };
+  const now = nowIso();
+  if (!existing) {
+    getDb()
+      .insert(fulfillmentChecklists)
+      .values({
+        hubspotDealId: id,
+        addressVerified: false,
+        costsEntered: false,
+        labelBought: false,
+        trackingPasted: false,
+        packingDone: false,
+        trackingNumber: "",
+        notes: value,
+        shipengineLabelId: "",
+        shipengineCarrier: "",
+        shipengineService: "",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    return { wrote: true };
+  }
+  getDb()
+    .update(fulfillmentChecklists)
+    .set({ notes: value, updatedAt: now })
+    .where(eq(fulfillmentChecklists.hubspotDealId, id))
+    .run();
+  return { wrote: true };
+}
+
 export async function upsertFulfillmentChecklist(
   dealId: string,
   input: UpdateFulfillmentChecklistInput & {
