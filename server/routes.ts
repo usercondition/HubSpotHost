@@ -204,6 +204,12 @@ import {
   upsertResinProfileSchema,
   reviewEditSchema,
   upsertKitSchema,
+  updateStackEntrySchema,
+  stackOrderSchema,
+  createStackBundleSchema,
+  updateStackBundleSchema,
+  offbookEntrySchema,
+  stackDoneSchema,
   intakeLineExtendedAmount,
   lineItemsForIntake,
   normalizeOrderLineKind,
@@ -233,7 +239,23 @@ import {
   upsertFulfillmentChecklist,
   listExistingTrackingAttachments,
 } from "./lib/fulfillment";
-import { buildProductionQueue, attachShipAddressReadiness } from "./lib/production-queue";
+import { loadProductionQueue, loadShopBoards } from "./lib/queue-loader";
+import {
+  buildPriorityStack,
+  createBundle,
+  createOffbook,
+  deleteBundle,
+  deleteOffbook,
+  listStackState,
+  markStackDone,
+  pruneStackEntries,
+  resetStackOrder,
+  setStackOrder,
+  undoStackDone,
+  updateBundle,
+  updateOffbook,
+  upsertDealStackEntry,
+} from "./lib/priority-stack";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -542,22 +564,7 @@ function rejectUnsecuredOwnerDigestCron(req: Request, res: Response): boolean {
 }
 
 async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
-  const [deals, stages, hubspotPortalId] = await Promise.all([
-    fetchPrintOrderDeals(),
-    fetchPrintOrderPipelineStages(),
-    fetchHubSpotPortalId(),
-  ]);
-  refreshPrintFileStagesFromHubSpot(deals, stages);
-  const snapshot = buildPerformanceSnapshot({
-    deals,
-    stages,
-    intakeCounts: orderLinkCounts(),
-    supplySpend: buildSupplySpendSummary(),
-    attachedPrintDealIds: attachedPrintFileDealIds(),
-    shippingLabelDealIds: attachedShippingLabelDealIds(),
-    hubspotPortalId,
-    dismissedAttentionKeys: activeAttentionOverrideKeys(),
-  });
+  const { snapshot, queue: productionQueue } = await loadShopBoards({ enrichAddresses: true, refreshStages: true });
   const awaitingLinks = listOrderLinks("awaiting_client").map((link) => ({
     id: link.id,
     internalLabel: link.internalLabel,
@@ -574,9 +581,7 @@ async function loadTrackerAssistantContext(): Promise<TrackerAssistantContext> {
     clientFullName: link.clientFullName,
     status: link.status,
   }));
-  const queue = buildTrackerAssistantQueue(
-    await attachShipAddressReadiness(buildProductionQueue(snapshot)),
-  );
+  const queue = buildTrackerAssistantQueue(productionQueue);
   return { snapshot, awaitingLinks, pendingLinks, queue };
 }
 
@@ -1180,29 +1185,157 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/production-queue", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     try {
-      const [deals, stages, portalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      const attachedIds = attachedPrintFileDealIds();
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        attachedPrintDealIds: attachedIds,
-        shippingLabelDealIds: attachedShippingLabelDealIds(),
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        dismissedAttentionKeys: activeAttentionOverrideKeys(),
-        hubspotPortalId: portalId,
-      }) as PerformanceResponse;
-      return res.json({ ok: true, ...(await attachShipAddressReadiness(buildProductionQueue(snapshot))) });
+      const queue = await loadProductionQueue({ enrichAddresses: true, refreshStages: false });
+      return res.json({ ok: true, ...queue });
     } catch (error) {
       return res.status(error instanceof HubSpotError ? error.status : 500).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not build production queue",
       });
     }
+  });
+
+  function validDealId(value: string): boolean {
+    return /^[0-9]{1,20}$/.test(value);
+  }
+
+  app.get("/api/priority-stack", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const queue = await loadProductionQueue({ enrichAddresses: true, refreshStages: false });
+      const openIds = new Set(
+        [...queue.nextPrint, ...queue.inProduction, ...queue.blocked, ...queue.shipReady].map((item) => item.dealId),
+      );
+      pruneStackEntries(openIds);
+      const view = buildPriorityStack(queue, listStackState());
+      return res.json(view);
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not build the priority stack",
+      });
+    }
+  });
+
+  app.patch("/api/priority-stack/deals/:dealId", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String(req.params.dealId || "").trim();
+    if (!validDealId(dealId)) return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    const parsed = updateStackEntrySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const entry = upsertDealStackEntry(dealId, {
+      blocker: parsed.data.blocker,
+      nextStep: parsed.data.nextStep,
+      tier: parsed.data.tier,
+      tentative: parsed.data.tentative,
+      hidden: parsed.data.hidden,
+    });
+    return res.json({ ok: true, entry });
+  });
+
+  app.put("/api/priority-stack/order", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = stackOrderSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    setStackOrder(parsed.data.keys);
+    return res.json({ ok: true });
+  });
+
+  app.delete("/api/priority-stack/order", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    resetStackOrder();
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/priority-stack/bundles", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = createStackBundleSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const bundle = createBundle(parsed.data);
+    return res.status(201).json({ ok: true, bundle });
+  });
+
+  app.patch("/api/priority-stack/bundles/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Unknown bundle." });
+    const parsed = updateStackBundleSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const bundle = updateBundle(id, parsed.data);
+    if (!bundle) return res.status(404).json({ ok: false, error: "That bundle is gone." });
+    return res.json({ ok: true, bundle });
+  });
+
+  app.delete("/api/priority-stack/bundles/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Unknown bundle." });
+    if (!deleteBundle(id)) return res.status(404).json({ ok: false, error: "That bundle is gone." });
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/priority-stack/offbook", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = offbookEntrySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const entry = createOffbook(parsed.data);
+    return res.status(201).json({ ok: true, entry });
+  });
+
+  app.patch("/api/priority-stack/offbook/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Unknown off-book order." });
+    const parsed = offbookEntrySchema.partial().safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const entry = updateOffbook(id, {
+      title: parsed.data.title,
+      contactName: parsed.data.contactName,
+      mode: parsed.data.mode,
+      targetDate: parsed.data.targetDate,
+      amount: parsed.data.amount,
+      blocker: parsed.data.blocker,
+      nextStep: parsed.data.nextStep,
+      tentative: parsed.data.tentative,
+      hidden: parsed.data.hidden,
+      steps: parsed.data.steps,
+    });
+    if (!entry) return res.status(404).json({ ok: false, error: "That off-book order is gone." });
+    return res.json({ ok: true, entry });
+  });
+
+  app.delete("/api/priority-stack/offbook/:id", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Unknown off-book order." });
+    if (!deleteOffbook(id)) return res.status(404).json({ ok: false, error: "That off-book order is gone." });
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/priority-stack/done", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = stackDoneSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    try {
+      const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: false });
+      const items = [...queue.nextPrint, ...queue.inProduction, ...queue.blocked, ...queue.shipReady];
+      const ok = markStackDone(parsed.data.key, items);
+      if (!ok) return res.status(404).json({ ok: false, error: "That stack row is gone." });
+      return res.json({ ok: true });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not mark that row done",
+      });
+    }
+  });
+
+  app.delete("/api/priority-stack/done", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = stackDoneSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    if (!undoStackDone(parsed.data.key)) return res.status(404).json({ ok: false, error: "That stack row is gone." });
+    return res.json({ ok: true });
   });
 
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
@@ -2206,23 +2339,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/shipby-gcal/sync", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     try {
-      const [deals, stages, portalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        attachedPrintDealIds: attachedPrintFileDealIds(),
-        shippingLabelDealIds: attachedShippingLabelDealIds(),
-        hubspotPortalId: portalId,
-        dismissedAttentionKeys: activeAttentionOverrideKeys(),
-      });
-      const queue = buildProductionQueue(snapshot);
+      const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
       return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
     } catch (error) {
@@ -2241,23 +2358,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/cron/shipby-gcal", async (req: Request, res: Response) => {
     if (rejectUnsecuredOwnerDigestCron(req, res)) return;
     try {
-      const [deals, stages, portalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        attachedPrintDealIds: attachedPrintFileDealIds(),
-        shippingLabelDealIds: attachedShippingLabelDealIds(),
-        hubspotPortalId: portalId,
-        dismissedAttentionKeys: activeAttentionOverrideKeys(),
-      });
-      const queue = buildProductionQueue(snapshot);
+      const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
       return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
     } catch (error) {
@@ -2278,25 +2379,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   });
 
   startShipByGcalScheduler(
-    async () => {
-      const [deals, stages, portalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        attachedPrintDealIds: attachedPrintFileDealIds(),
-        shippingLabelDealIds: attachedShippingLabelDealIds(),
-        hubspotPortalId: portalId,
-        dismissedAttentionKeys: activeAttentionOverrideKeys(),
-      });
-      return buildProductionQueue(snapshot);
-    },
+    () => loadProductionQueue({ enrichAddresses: false, refreshStages: true }),
     process.env,
     (message) => {
       console.log(`${new Date().toISOString()} [shipby-gcal] ${message}`);
