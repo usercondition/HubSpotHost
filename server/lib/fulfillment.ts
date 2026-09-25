@@ -76,6 +76,30 @@ export function toChecklistView(
   };
 }
 
+/** Checklist "Actual costs entered" follows the cost fields, not a separate checkbox. */
+export function withDerivedCostsEntered(
+  checklist: FulfillmentChecklistView,
+  costsComplete: boolean,
+): FulfillmentChecklistView {
+  const flags = [
+    checklist.addressVerified,
+    costsComplete,
+    checklist.labelBought,
+    checklist.trackingPasted,
+    checklist.packingDone,
+  ];
+  const completedCount = flags.filter(Boolean).length;
+  const totalCount = flags.length;
+  return {
+    ...checklist,
+    costsEntered: costsComplete,
+    completedCount,
+    totalCount,
+    readyPercent: Math.round((completedCount / totalCount) * 100),
+    shipReady: completedCount === totalCount,
+  };
+}
+
 export function getFulfillmentChecklist(dealId: string): FulfillmentChecklistView {
   const id = dealId.trim();
   if (!id) return emptyChecklist("");

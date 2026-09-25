@@ -16,7 +16,7 @@ import {
 } from "../../shared/schema";
 import { calculateProfit } from "./calc";
 import { getConfig, resolveWriteDecision } from "./config";
-import { getFulfillmentChecklist } from "./fulfillment";
+import { getFulfillmentChecklist, withDerivedCostsEntered } from "./fulfillment";
 import { listFailuresForDeal } from "./failures";
 import {
   fetchHubSpotPortalId,
@@ -505,7 +505,7 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
     const props = deal.properties;
     const stageId = String(props.dealstage ?? "");
     const stageLabel = stages.find((stage) => stage.id === stageId)?.label || stageId || "Unknown";
-    const checklist = getFulfillmentChecklist(id);
+    const storedChecklist = getFulfillmentChecklist(id);
     const fleet = ensureDefaultPrinters();
     const profileMaps = listPrinterProfileMaps();
     const plates = getDb()
@@ -516,8 +516,9 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
       .all();
     const costs = costsFromProperties(props, {
       hasPlates: plates.length > 0,
-      shippingRequired: Boolean(checklist.trackingNumber.trim() || String(props.print_tracking_number ?? "").trim()),
+      shippingRequired: Boolean(storedChecklist.trackingNumber.trim() || String(props.print_tracking_number ?? "").trim()),
     });
+    const checklist = withDerivedCostsEntered(storedChecklist, costs.costsComplete);
 
     const plateViews = plates.map((plate) => {
       const assignedId = resolvePrinterIdForRecord(plate, fleet, profileMaps);

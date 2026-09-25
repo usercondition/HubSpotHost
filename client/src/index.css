@@ -1025,21 +1025,71 @@
   .stack-row[data-lane='bad'] { --lane: hsl(var(--destructive)); }
   .stack-row[data-lane='good'] { --lane: hsl(var(--accent)); }
 
+  .stack-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .stack-kpis article {
+    min-width: 0;
+    border: 1px solid hsl(var(--line));
+    border-radius: 12px;
+    background: hsl(var(--surface));
+    padding: 14px 16px;
+  }
+
+  .stack-kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: hsl(var(--text-3));
+  }
+
+  .stack-kpi-value {
+    margin-top: 6px;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: hsl(var(--foreground));
+  }
+
+  .stack-kpi-value small {
+    font-size: 13px;
+    font-weight: 500;
+    color: hsl(var(--text-3));
+  }
+
+  .stack-kpi-note {
+    margin-top: 4px;
+    font-size: 12px;
+    color: hsl(var(--text-3));
+  }
+
   .stack-row {
     display: grid;
-    grid-template-columns:
-      1.15rem
-      1.5rem
-      minmax(0, 1.35fr)
-      minmax(0, 0.95fr)
-      minmax(0, 1.15fr)
-      12rem
-      4.75rem
-      7.5rem;
-    column-gap: 0.6rem;
+    grid-template-columns: 52px minmax(0, 2.2fr) 212px minmax(0, 1.5fr) 150px 92px 128px;
+    column-gap: 16px;
     align-items: center;
-    border-left: 3px solid var(--lane, hsl(var(--border)));
-    padding: 0.55rem 0.65rem;
+    min-height: 60px;
+    border-left: 3px solid var(--lane, transparent);
+    padding: 0 12px 0 16px;
+  }
+
+  .stack-head {
+    min-height: 36px;
+    border-left-color: transparent;
+    color: hsl(var(--text-3));
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .stack-head > :nth-child(6) {
+    text-align: right;
   }
 
   .stack-row > .stack-facts {
@@ -1067,36 +1117,104 @@
   }
 
   .stack-rank {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-variant-numeric: tabular-nums;
     font-weight: 650;
     color: hsl(var(--muted-foreground));
   }
 
-  .stack-mobile-actions { display: none; }
-
-  .stack-commit-line {
+  .stack-name {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
-    border-top: 1px dashed hsl(var(--border));
-    padding: 0.45rem 0.75rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: hsl(var(--foreground));
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
   }
 
+  .stack-sub {
+    font-size: 12px;
+    color: hsl(var(--text-3));
+  }
+
+  .stack-auto {
+    margin-left: 6px;
+    border-radius: 999px;
+    background: hsl(var(--hover));
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+    color: hsl(var(--text-2));
+  }
+
+  .stack-prog {
+    flex: none;
+    font-size: 11px;
+    color: hsl(var(--text-3));
+  }
+
+  .stack-stage-short { display: none; }
+
+  .stack-money {
+    text-align: right;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  .stack-commit-label {
+    grid-column: 1 / 6;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .stack-commit-line {
+    min-height: 44px;
+    border-left-color: transparent;
+    border-top: 1px dashed hsl(var(--line-2));
+    background: hsl(var(--bg));
+  }
+
+  .ops-deal-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ops-deal-sections > .deal-head { order: 1; }
+  .ops-deal-sections > .deal-check { order: 2; }
+  .ops-deal-sections > .deal-grid { order: 3; }
+
+  .stack-mobile-actions { display: none; }
+
   @media (max-width: 767px) {
+    .stack-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stack-head { display: none; }
+    .stack-stage-full { display: none; }
+    .stack-stage-short { display: inline; }
     .stack-row {
-      grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
       grid-template-areas:
         "rank name money"
         "rank facts facts";
+      min-height: 0;
+      padding: 10px 4px 10px 12px;
     }
-    .stack-row .stack-check { display: none; }
     .stack-row .stack-rank { grid-area: rank; }
+    .stack-row .stack-rank input { display: none; }
     .stack-row .stack-name { grid-area: name; }
     .stack-row .stack-money { grid-area: money; justify-self: end; }
+    .stack-commit-line {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: none;
+    }
+    .stack-commit-line .stack-commit-label { grid-column: auto; grid-area: auto; }
+    .stack-commit-line .stack-money { grid-area: auto; }
+    .stack-commit-line .stack-actions { display: none; }
     .stack-row > .stack-facts { display: flex; grid-area: facts; flex-direction: column; align-items: stretch; gap: 0.2rem; overflow: hidden; }
     .stack-row .stack-member .stack-date { width: max-content; max-width: none; overflow: visible; }
     .stack-row .stack-mobile-actions { display: flex; width: 100%; flex-wrap: nowrap; align-items: center; }

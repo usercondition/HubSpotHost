@@ -12,6 +12,7 @@ import { DealOpsDrawer } from "@/components/deal-ops-panel";
 import { Panel } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import {
+  StackColumnHead,
   StackCommitLine,
   StackRow,
   StackTotalsBar,
@@ -130,10 +131,11 @@ export default function PriorityStackPage() {
         subtitle=""
         actions={
           isUnlocked ? (
-            <div className="flex w-full min-w-0 flex-wrap justify-end gap-1.5 sm:w-auto">
+            <div className="flex w-full min-w-0 max-w-full flex-nowrap items-center justify-end gap-1.5 overflow-x-auto sm:w-auto">
               <Button
                 size="sm"
                 variant="outline"
+                className="max-md:hidden"
                 onClick={() => {
                   void apiRequest("DELETE", "/api/priority-stack/order", undefined, { headers }).then(() => stack.refetch());
                 }}
@@ -149,11 +151,11 @@ export default function PriorityStackPage() {
                   Bundle…
                 </Button>
               ) : (
-                <span className="hidden self-center text-xs text-muted-foreground sm:inline" data-testid="text-bundle-hint">
+                <span className="self-center text-xs text-muted-foreground" data-testid="text-bundle-hint">
                   Select 2+ to bundle
                 </span>
               )}
-              <Button size="sm" variant="outline" onClick={() => stack.refetch()} disabled={stack.isFetching} data-testid="button-refresh-stack">
+              <Button size="sm" variant="outline" className="max-md:hidden" onClick={() => stack.refetch()} disabled={stack.isFetching} data-testid="button-refresh-stack">
                 {stack.isFetching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}
                 Refresh
               </Button>
@@ -186,6 +188,7 @@ export default function PriorityStackPage() {
           <>
             <StackTotalsBar view={data} />
             <div className="overflow-hidden rounded-lg border border-border" data-testid="stack-list">
+              <StackColumnHead />
               {lines.map((line) =>
                 line.type === "divider" ? (
                   <StackCommitLine key={line.label} label={line.label} amount={line.amount} />
@@ -225,39 +228,43 @@ export default function PriorityStackPage() {
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing open on the stack.</p>
               ) : null}
             </div>
-            {data.outTheDoor.length > 0 ? (
-              <details className="overflow-hidden rounded-lg border border-border" data-testid="stack-out-the-door">
-                <summary className="stack-commit-line cursor-pointer">
-                  <span>Out the door</span>
-                  <span className="numeric">{formatMoney(data.totals.outTheDoor)}</span>
-                </summary>
-                <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-                  Undo only clears the local done mark. HubSpot stage is not reverted.
-                </p>
-                {data.outTheDoor.map((row) => (
-                  <div
-                    key={row.key}
-                    className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm"
-                    data-testid={`stack-done-${row.key}`}
-                  >
-                    <span className="min-w-0 truncate">{row.contactName || row.name}</span>
-                    <span className="shrink-0 text-muted-foreground">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
-                    <span className="numeric shrink-0">{row.amount == null ? "—" : formatMoney(row.amount)}</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      data-testid={`button-undo-done-${row.key}`}
-                      onClick={() => {
-                        void apiRequest("DELETE", "/api/priority-stack/done", { key: row.key }, { headers }).then(() => stack.refetch());
-                      }}
-                    >
-                      Undo
-                    </Button>
+            <section className="overflow-hidden rounded-lg border border-border" data-testid="stack-out-the-door">
+              <p className="border-b border-border px-4 py-2 text-sm font-medium">
+                Out the door
+                <span className="ml-2 text-xs font-normal text-muted-foreground">Undo clears only the local done mark, not the HubSpot stage</span>
+              </p>
+              {data.outTheDoor.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-muted-foreground">Nothing out the door yet this week.</p>
+              ) : (
+                data.outTheDoor.map((row) => (
+                  <div key={row.key} className="stack-row" data-lane="good" data-testid={`stack-done-${row.key}`}>
+                    <span className="stack-rank" />
+                    <span className="stack-name">
+                      <span className="stack-clip text-sm font-medium">{row.name}</span>
+                      {row.contactName ? <span className="stack-clip stack-sub">{row.contactName}</span> : null}
+                    </span>
+                    <span className="stack-stage stack-clip text-sm">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
+                    <span className="stack-blocker" />
+                    <span className="stack-date" />
+                    <span className="stack-money numeric text-sm">{row.amount == null ? "—" : formatMoney(row.amount)}</span>
+                    <span className="stack-actions flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        data-testid={`button-undo-done-${row.key}`}
+                        onClick={() => {
+                          void apiRequest("DELETE", "/api/priority-stack/done", { key: row.key }, { headers }).then(() => stack.refetch());
+                        }}
+                      >
+                        Undo
+                      </Button>
+                    </span>
                   </div>
-                ))}
-              </details>
-            ) : null}
+                ))
+              )}
+              <StackCommitLine label="Out the door" amount={data.totals.outTheDoor} />
+            </section>
             <DealOpsDrawer dealId={selectedDealId} headers={headers} onClose={() => setSelectedDealId(null)} />
             {offbookOpen ? (
               <OffbookEntryDialog headers={headers} onClose={() => setOffbookOpen(false)} onSaved={() => void stack.refetch()} />
