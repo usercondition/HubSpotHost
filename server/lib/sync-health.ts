@@ -11,6 +11,7 @@ import { updateShipByPlan } from "./deal-ops";
 import { fetchPrintOrderDeals, fetchPrintOrderPipelineStages, HubSpotError } from "./hubspot";
 import { getDb } from "./order-links";
 import { fulfillmentChecklists } from "../../shared/schema";
+import { fillBlankLocalShipNotes } from "./fulfillment";
 import { listStackState } from "./priority-stack";
 import { loadProductionQueue } from "./queue-loader";
 import { recalculateDeal } from "./service";
@@ -48,7 +49,7 @@ export interface SyncDriftItem {
 
 export interface SyncRepair {
   dealId: string;
-  field: "tracking" | "notes" | "ship_by" | "retry";
+  field: "tracking" | "notes" | "ship_by" | "retry" | "local_notes";
   value: string;
 }
 
@@ -137,6 +138,11 @@ function sameMoney(left: string, right: string): boolean {
   const b = Number(right.replace(/[$,]/g, ""));
   if (!Number.isFinite(a) || !Number.isFinite(b)) return sameText(left, right);
   return Math.abs(a - b) < 0.009;
+}
+
+function zeroMoney(value: string): boolean {
+  const amount = Number(value.replace(/[$,]/g, ""));
+  return Number.isFinite(amount) && Math.abs(amount) < 0.009;
 }
 
 function dayKey(value: string | null | undefined): string {
@@ -277,7 +283,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
         items.push(item("shipNotes", local.dealId, "print_ship_notes", local.shipNotes, "", true, "HubSpot ship notes are blank. Print Ops can push the local notes."));
         repairs.push({ dealId: local.dealId, field: "notes", value: local.shipNotes });
       } else if (blank(local.shipNotes) && !blank(remote.shipNotes)) {
-        items.push(item("shipNotes", local.dealId, "print_ship_notes", "", remote.shipNotes, false, "HubSpot has ship notes and Print Ops does not. Not overwritten."));
+        repairs.push({ dealId: local.dealId, field: "local_notes", value: remote.shipNotes.trim() });
       } else if (!sameText(local.shipNotes, remote.shipNotes)) {
         items.push(item("shipNotes", local.dealId, "print_ship_notes", local.shipNotes, remote.shipNotes, false, "Ship notes differ. HubSpot’s value is left as-is."));
       }
@@ -305,6 +311,8 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
     ];
     for (const [field, localValue, remoteValue] of costPairs) {
       if (localValue == null || blank(localValue)) continue;
+      // Postage stays blank in HubSpot until a real label. A $0 Print Ops default is not drift, and is not written back.
+      if (field === "print_actual_shipping_cost" && blank(remoteValue) && zeroMoney(localValue)) continue;
       if (blank(remoteValue) || !sameMoney(localValue, remoteValue)) {
         items.push(item(
           "costs",
@@ -357,9 +365,6 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
   }
 
   const webhook = webhookNote(input.webhookConfigured, input.webhook, now);
-  if (input.webhookConfigured && !webhook.arriving) {
-    items.push(item("webhook", null, "webhook", input.webhook?.receivedAt ?? null, null, false, webhook.note));
-  }
 
   const counts = emptyCounts();
   for (const row of items) counts[row.kind] += 1;
@@ -554,9 +559,24 @@ export async function loadSyncCompareInput(now = new Date()): Promise<SyncCompar
 
 export async function applySyncRepairs(
   repairs: SyncRepair[],
-): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "read-failed" }>> {
-  const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "read-failed" }> = [];
+): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }>> {
+  const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" }> = [];
   for (const repair of repairs) {
+    if (repair.field === "local_notes") {
+      try {
+        const filled = fillBlankLocalShipNotes(repair.dealId, repair.value);
+        results.push({
+          dealId: repair.dealId,
+          field: repair.field,
+          wrote: filled.wrote,
+          dryRun: false,
+          ...(filled.skipped === "local-not-blank" ? { skipped: "local-not-blank" as const } : {}),
+        });
+      } catch {
+        results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: false, skipped: "read-failed" });
+      }
+      continue;
+    }
     const decision = resolveWriteDecision(getConfig(), true);
     if (!decision.write) {
       results.push({ dealId: repair.dealId, field: repair.field, wrote: false, dryRun: true });
@@ -641,11 +661,21 @@ async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
       try {
         const applied = await applySyncRepairs(report.repairs);
         const fixed = new Set(applied.filter((row) => row.wrote).map((row) => `${row.dealId}:${row.field}`));
-        if (fixed.size > 0) {
-          report.items = report.items.filter((row) => !fixed.has(`${row.dealId}:${repairFieldForKind(row.kind)}`));
-          report.repairs = report.repairs.filter((row) => !fixed.has(`${row.dealId}:${row.field}`));
-          recount(report);
+        report.items = report.items.filter((row) => !fixed.has(`${row.dealId}:${repairFieldForKind(row.kind)}`));
+        report.repairs = report.repairs.filter((row) => !fixed.has(`${row.dealId}:${row.field}`));
+        for (const row of applied) {
+          if (row.field !== "local_notes" || row.skipped !== "read-failed") continue;
+          report.items.push(item(
+            "shipNotes",
+            row.dealId,
+            "print_ship_notes",
+            "",
+            null,
+            true,
+            "HubSpot has ship notes and Print Ops is blank. Copying them into Print Ops failed.",
+          ));
         }
+        recount(report);
       } catch (error) {
         console.warn(`[sync-health] repair pass failed: ${error instanceof Error ? error.message : String(error)}`);
       }

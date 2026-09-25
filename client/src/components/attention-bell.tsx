@@ -15,6 +15,8 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
 
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
   const syncCount = health.data?.hubspotSync?.issueCount ?? 0;
+  const webhook = health.data?.hubspotSync?.webhook;
+  const webhookQuietNote = webhook && webhook.configured && webhook.arriving === false ? webhook.note : "";
 
   const performance = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
@@ -103,6 +105,12 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
             Floor
           </Link>
         </div>
+
+        {syncCount === 0 && webhookQuietNote ? (
+          <p className="text-xs leading-5 text-muted-foreground" data-testid="text-webhook-sync-note">
+            {webhookQuietNote}
+          </p>
+        ) : null}
 
         {syncCount > 0 ? (
           <HubspotSyncDialog
