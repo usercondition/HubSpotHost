@@ -6,6 +6,7 @@ import { serveStatic } from "./static";
 import { createServer } from "node:http";
 import { PRINT_FILE_MAX_LABEL } from "./lib/print-file-limits";
 import { startPrintOpsJobWorker } from "./lib/print-ops-jobs";
+import { startSyncHealthSchedule } from "./lib/sync-health";
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,6 +62,7 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
   // Redis failures are handled inside the worker; API health must not depend on it.
   startPrintOpsJobWorker();
+  startSyncHealthSchedule();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const oversizedUpload = err?.code === "LIMIT_FILE_SIZE";
