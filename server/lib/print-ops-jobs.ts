@@ -92,9 +92,6 @@ async function processJob(job: Job<PrintOpsJobData, unknown, PrintOpsJobName>): 
   throw new Error(`Unknown print-ops job ${job.name}`);
 }
 
-const SYNC_HEALTH_EVERY_MS = 15 * 60 * 1000;
-
-/** Repeat the HubSpot sync check on the existing Redis worker. No-op without REDIS_URL. */
 /** One-off sync check. Without Redis it runs in the background and does not block the caller. */
 export function enqueueSyncHealthSoon(): void {
   if (process.env.NODE_ENV === "test") return;
@@ -153,13 +150,36 @@ export function enqueueHubspotWriteJob(retryAfterMs: number | null): void {
   });
 }
 
+type SyncHealthScheduler = {
+  upsertJobScheduler: (
+    jobSchedulerId: "sync-health",
+    repeatOpts: { every: number },
+    jobTemplate?: { name?: "sync-health"; data?: SyncHealthJob },
+  ) => Promise<unknown>;
+};
+
+/**
+ * Registers the repeating reconcile. BullMQ 6 ignores `queue.add(..., { repeat })`,
+ * so the scheduler has to be stored with upsertJobScheduler or it never re-arms.
+ */
+export async function registerSyncHealthJobScheduler(
+  target: SyncHealthScheduler,
+  everyMs: number,
+): Promise<void> {
+  await target.upsertJobScheduler(
+    "sync-health",
+    { every: everyMs },
+    { name: "sync-health", data: { kind: "sync-health" } },
+  );
+}
+
 export async function scheduleSyncHealthJob(): Promise<void> {
   if (!redisUrl()) return;
   if (!queue) startPrintOpsJobWorker();
   if (!queue) throw new Error("Print Ops Redis queue did not initialize");
-  await queue.add("sync-health", { kind: "sync-health" }, {
-    repeat: { every: SYNC_HEALTH_EVERY_MS, key: "sync-health" },
-  });
+  const { SYNC_HEALTH_INTERVAL_MS } = await import("./sync-health");
+  await registerSyncHealthJobScheduler(queue, SYNC_HEALTH_INTERVAL_MS);
+  console.info(`[sync-health] reconcile scheduled every ${Math.round(SYNC_HEALTH_INTERVAL_MS / 60000)} minutes`);
 }
 
 export function startPrintOpsJobWorker(): void {

@@ -53,7 +53,7 @@ import {
   sendHealthNudge,
   startHealthNudgeScheduler,
 } from "./lib/health-nudge";
-import { getCachedSyncHealth, placeholderSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
+import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
@@ -930,7 +930,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         outputs: [...OUTPUT_PROPERTIES],
       },
       audit: { retained: auditCount(), limit: AUDIT_LIMIT },
-      hubspotSync: getCachedSyncHealth()?.summary ?? placeholderSyncSummary(),
+      hubspotSync: presentSyncSummary(getCachedSyncHealth()?.summary ?? placeholderSyncSummary()),
       serverTime: new Date().toISOString(),
     });
   });

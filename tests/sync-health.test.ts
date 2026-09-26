@@ -11,11 +11,18 @@ import type { AuditEntry } from "../server/lib/audit";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { registerRoutes } from "../server/routes";
 import { fulfillmentChecklists } from "../shared/schema";
+import { registerSyncHealthJobScheduler } from "../server/lib/print-ops-jobs";
 import {
   applySyncRepairs,
   clearCachedSyncHealthForTest,
   compareSyncHealth,
+  placeholderSyncSummary,
+  presentSyncSummary,
+  resetSyncHealthScheduleForTest,
   setCachedSyncHealth,
+  setSyncHealthKickForTest,
+  startSyncHealthSchedule,
+  SYNC_HEALTH_INTERVAL_MS,
   type SyncCompareInput,
   type SyncHealthReport,
   type SyncHubspotDeal,
@@ -521,6 +528,159 @@ test("public health summary has counts and timestamps and hides deal detail", as
     assert.equal(detail.status, 200);
     assert.equal(detailBody.items[0].dealId, "81");
     assert.match(detailBody.items[0].suggestedFix, /Alice/);
+  } finally {
+    clearCachedSyncHealthForTest();
+    if (previous === undefined) delete process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
+    else process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = previous;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("reconcile re-runs after its interval without Redis", () => {
+  const previous = process.env.REDIS_URL;
+  delete process.env.REDIS_URL;
+  resetSyncHealthScheduleForTest();
+  let runs = 0;
+  setSyncHealthKickForTest(() => {
+    runs += 1;
+  });
+  let captured: (() => void) | null = null;
+  let delay = 0;
+  const fakeSetInterval = ((fn: () => void, ms?: number) => {
+    captured = fn;
+    delay = ms ?? 0;
+    return { unref() {} } as unknown as ReturnType<typeof setInterval>;
+  }) as typeof setInterval;
+  try {
+    startSyncHealthSchedule({ setInterval: fakeSetInterval });
+    assert.equal(runs, 1);
+    assert.equal(delay, SYNC_HEALTH_INTERVAL_MS);
+    assert.equal(delay, 15 * 60 * 1000);
+    assert.ok(captured);
+    captured();
+    captured();
+    assert.equal(runs, 3);
+    startSyncHealthSchedule({ setInterval: fakeSetInterval });
+    assert.equal(runs, 3);
+  } finally {
+    resetSyncHealthScheduleForTest();
+    setSyncHealthKickForTest(null);
+    if (previous === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = previous;
+  }
+});
+
+test("Redis reconcile is a BullMQ job scheduler, not a one-shot repeat add", async () => {
+  const calls: unknown[][] = [];
+  await registerSyncHealthJobScheduler({
+    upsertJobScheduler: async (...args: unknown[]) => {
+      calls.push(args);
+    },
+  }, SYNC_HEALTH_INTERVAL_MS);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "sync-health");
+  assert.deepEqual(calls[0][1], { every: 15 * 60 * 1000 });
+  const template = calls[0][2] as { name?: string; data?: { kind?: string } };
+  assert.equal(template.name, "sync-health");
+  assert.equal(template.data?.kind, "sync-health");
+
+  const previous = process.env.REDIS_URL;
+  process.env.REDIS_URL = "redis://127.0.0.1:9";
+  resetSyncHealthScheduleForTest();
+  let runs = 0;
+  let intervals = 0;
+  setSyncHealthKickForTest(() => {
+    runs += 1;
+  });
+  const fakeSetInterval = (() => {
+    intervals += 1;
+    return { unref() {} } as unknown as ReturnType<typeof setInterval>;
+  }) as typeof setInterval;
+  try {
+    let scheduled = 0;
+    startSyncHealthSchedule({
+      setInterval: fakeSetInterval,
+      scheduleRedis: async () => {
+        scheduled += 1;
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(runs, 1);
+    assert.equal(scheduled, 1);
+    assert.equal(intervals, 0);
+
+    resetSyncHealthScheduleForTest();
+    runs = 0;
+    let fallbackDelay = 0;
+    const fallbackSetInterval = ((fn: () => void, ms?: number) => {
+      intervals += 1;
+      fallbackDelay = ms ?? 0;
+      fn();
+      return { unref() {} } as unknown as ReturnType<typeof setInterval>;
+    }) as typeof setInterval;
+    startSyncHealthSchedule({
+      setInterval: fallbackSetInterval,
+      scheduleRedis: async () => {
+        throw new Error("scheduler rejected");
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(runs, 2);
+    assert.equal(intervals, 1);
+    assert.equal(fallbackDelay, SYNC_HEALTH_INTERVAL_MS);
+  } finally {
+    resetSyncHealthScheduleForTest();
+    setSyncHealthKickForTest(null);
+    if (previous === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = previous;
+  }
+});
+
+test("health summary is stale when the last check is older than twice the interval", async () => {
+  const fresh = compareSyncHealth(input()).summary;
+  assert.equal(fresh.status, "ok");
+  const within = presentSyncSummary(fresh, new Date(NOW.getTime() + 2 * SYNC_HEALTH_INTERVAL_MS));
+  assert.equal(within.status, "ok");
+  const stale = presentSyncSummary(fresh, new Date(NOW.getTime() + 2 * SYNC_HEALTH_INTERVAL_MS + 1));
+  assert.equal(stale.status, "warn");
+  assert.match(stale.webhook.note, /Sync check is stale/);
+  assert.equal(fresh.status, "ok");
+  assert.equal(fresh.webhook.note.includes("Sync check is stale"), false);
+
+  const cold = placeholderSyncSummary(NOW);
+  assert.equal(cold.lastCheckedAt, null);
+  assert.equal(presentSyncSummary(cold, new Date(NOW.getTime() + 3 * SYNC_HEALTH_INTERVAL_MS)).status, "ok");
+
+  const warned = compareSyncHealth(input({
+    openDealIds: ["81"],
+    hubspotById: { "81": remote({ dealId: "81" }) },
+    localDeals: [],
+  })).summary;
+  assert.equal(warned.status, "warn");
+  assert.equal(presentSyncSummary(warned, new Date(NOW.getTime() + 3 * SYNC_HEALTH_INTERVAL_MS)).status, "warn");
+
+  const errored = compareSyncHealth(input({ tokenError: "rejected" })).summary;
+  assert.equal(errored.status, "error");
+  assert.equal(presentSyncSummary(errored, new Date(NOW.getTime() + 3 * SYNC_HEALTH_INTERVAL_MS)).status, "error");
+
+  clearCachedSyncHealthForTest();
+  const previous = process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
+  delete process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
+  const aged = compareSyncHealth(input());
+  aged.summary.lastCheckedAt = new Date(Date.now() - 2 * SYNC_HEALTH_INTERVAL_MS - 1_000).toISOString();
+  setCachedSyncHealth(aged);
+  const app = express();
+  app.use(express.json());
+  const server = http.createServer(app);
+  await registerRoutes(server, app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    const body = await health.json();
+    assert.equal(body.hubspotSync.status, "warn");
+    assert.match(body.hubspotSync.webhook.note, /Sync check is stale/);
+    assert.equal(aged.summary.status, "ok");
   } finally {
     clearCachedSyncHealthForTest();
     if (previous === undefined) delete process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH;
