@@ -19,7 +19,7 @@ import { loadProductionQueue } from "./queue-loader";
 import { recalculateDeal } from "./service";
 import { getLatestWebhookDiagnostic, type WebhookDiagnostic } from "./webhook-diagnostics";
 
-const INTERVAL_MS = 15 * 60 * 1000;
+export const SYNC_HEALTH_INTERVAL_MS = 15 * 60 * 1000;
 const WEBHOOK_FRESH_MS = 24 * 60 * 60 * 1000;
 
 export const SYNC_DRIFT_KINDS = [
@@ -406,6 +406,30 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
 let cached: SyncHealthReport | null = null;
 let running: Promise<SyncHealthReport> | null = null;
 let scheduleStarted = false;
+let scheduleTimer: ReturnType<typeof setInterval> | null = null;
+let scheduleTimerIsReal = false;
+let kickOverride: (() => void) | null = null;
+
+/**
+ * Health reads this instead of the raw cache. A check that has not run for
+ * more than twice the reconcile interval is no longer "ok", even when the
+ * last report itself had nothing to repair.
+ */
+export function presentSyncSummary(summary: HubspotSyncSummary, now = new Date()): HubspotSyncSummary {
+  if (summary.status !== "ok" || !summary.lastCheckedAt) return summary;
+  const checkedAt = Date.parse(summary.lastCheckedAt);
+  if (!Number.isFinite(checkedAt)) return summary;
+  if (now.getTime() - checkedAt <= 2 * SYNC_HEALTH_INTERVAL_MS) return summary;
+  const staleNote = "Sync check is stale.";
+  const note = summary.webhook.note.includes(staleNote)
+    ? summary.webhook.note
+    : `${summary.webhook.note} ${staleNote}`.trim();
+  return {
+    ...summary,
+    status: "warn",
+    webhook: { ...summary.webhook, note },
+  };
+}
 
 export function getCachedSyncHealth(): SyncHealthReport | null {
   return cached;
@@ -713,7 +737,12 @@ export function appendDurableFailures(report: SyncHealthReport): void {
   report.summary.writes = liveWriteCounts();
 }
 
+function logReconcileDone(report: SyncHealthReport): void {
+  console.info(`[sync-health] reconcile done status=${report.summary.status} issues=${report.summary.issueCount}`);
+}
+
 async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
+  console.info("[sync-health] reconcile start");
   try {
     dropNotFoundSampleAudit();
     dropNotFoundWebhookEvents();
@@ -736,6 +765,7 @@ async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
     }
     appendDurableFailures(report);
     cached = report;
+    logReconcileDone(report);
     return report;
   } catch (error) {
     const tokenError = error instanceof HubSpotError ? error.message : error instanceof Error ? error.message : "HubSpot read failed";
@@ -758,6 +788,7 @@ async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
       report.summary.writes = liveWriteCounts();
     }
     cached = report;
+    logReconcileDone(report);
     return report;
   }
 }
@@ -779,25 +810,51 @@ function recount(report: SyncHealthReport): void {
 }
 
 function kickSyncHealthCheck(): void {
+  if (kickOverride) {
+    kickOverride();
+    return;
+  }
   void runSyncHealthCheck().catch((error) => {
     console.warn(`[sync-health] check failed: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
 
-export function startSyncHealthSchedule(): void {
+function armSyncHealthInterval(setIntervalFn: typeof setInterval): void {
+  if (scheduleTimer) return;
+  scheduleTimerIsReal = setIntervalFn === setInterval;
+  scheduleTimer = setIntervalFn(kickSyncHealthCheck, SYNC_HEALTH_INTERVAL_MS);
+  scheduleTimer.unref?.();
+}
+
+/** Drops the in-process timer so tests can start the schedule again. */
+export function resetSyncHealthScheduleForTest(): void {
+  if (scheduleTimer && scheduleTimerIsReal) clearInterval(scheduleTimer);
+  scheduleTimer = null;
+  scheduleTimerIsReal = false;
+  scheduleStarted = false;
+}
+
+/** Replaces the HubSpot check with a counter. Pass null to restore the real kick. */
+export function setSyncHealthKickForTest(kick: (() => void) | null): void {
+  kickOverride = kick;
+}
+
+export function startSyncHealthSchedule(options?: {
+  setInterval?: typeof setInterval;
+  scheduleRedis?: () => Promise<void>;
+}): void {
   if (scheduleStarted) return;
   scheduleStarted = true;
   kickSyncHealthCheck();
+  const setIntervalFn = options?.setInterval ?? setInterval;
   if (process.env.REDIS_URL?.trim()) {
-    void import("./print-ops-jobs")
-      .then((jobs) => jobs.scheduleSyncHealthJob())
-      .catch((error) => {
-        console.warn(`[sync-health] Redis schedule failed; using an in-process timer: ${error instanceof Error ? error.message : String(error)}`);
-        const timer = setInterval(kickSyncHealthCheck, INTERVAL_MS);
-        timer.unref?.();
-      });
+    const schedule = options?.scheduleRedis
+      ?? (() => import("./print-ops-jobs").then((jobs) => jobs.scheduleSyncHealthJob()));
+    void schedule().catch((error) => {
+      console.warn(`[sync-health] Redis schedule failed; using an in-process timer: ${error instanceof Error ? error.message : String(error)}`);
+      armSyncHealthInterval(setIntervalFn);
+    });
     return;
   }
-  const timer = setInterval(kickSyncHealthCheck, INTERVAL_MS);
-  timer.unref?.();
+  armSyncHealthInterval(setIntervalFn);
 }
