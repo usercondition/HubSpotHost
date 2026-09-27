@@ -116,7 +116,7 @@ Slice files (`.ctb` and the other slicer formats) are stored in Miguel's persona
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and pick or create a project.
 2. Enable **Google Drive API** (APIs & Services → Library → Google Drive API → Enable).
-3. Configure the OAuth consent screen: User type **External**. Add the scope `https://www.googleapis.com/auth/drive.file` only. Add Miguel as a test user while the app is in testing, then click **Publish app** so the status is **In production**. A testing app expires refresh tokens after 7 days. Production does not.
+3. Configure the OAuth consent screen: User type **External**. Add the scope `https://www.googleapis.com/auth/drive.file` only. Privacy policy URL: `https://hubspothost-production.up.railway.app/privacy`. Terms URL: `https://hubspothost-production.up.railway.app/terms`. Both pages are public and do not ask for the owner code. Add Miguel as a test user while the app is in testing, then click **Publish app** so the status is **In production**. A testing app expires refresh tokens after 7 days. Production does not. Google requires the privacy policy URL before the app can be published.
 4. Create an OAuth client: APIs & Services → Credentials → Create credentials → OAuth client ID → Application type **Web application**.
 5. Authorized JavaScript origin: `https://hubspothost-production.up.railway.app`
 6. Authorized redirect URI, exactly: `https://hubspothost-production.up.railway.app/api/google/oauth/callback`
