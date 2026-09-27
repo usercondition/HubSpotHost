@@ -1208,6 +1208,18 @@ function ReviewDialog({
                   {shippingRequired ? "Required" : "Not required (pickup)"}
                 </span>
               </div>
+              {link.addressCheckStatus === "unverified" ||
+              link.addressCheckStatus === "unchecked" ||
+              link.addressCheckStatus === "error" ? (
+                <p className="sm:col-span-2 text-sm text-muted-foreground" data-testid="text-address-flagged">
+                  Flagged for you: this shipping address was not verified.
+                </p>
+              ) : null}
+              {link.addressCheckStatus === "verified" ? (
+                <p className="sm:col-span-2 text-sm text-muted-foreground" data-testid="text-address-verified-intake">
+                  Address verified on the client form.
+                </p>
+              ) : null}
               {shippingRequired && (
                 <>
                   <div className="sm:col-span-2">

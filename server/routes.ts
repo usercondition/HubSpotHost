@@ -57,7 +57,16 @@ import {
 } from "./lib/health-nudge";
 import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
 import { telegramConfigured } from "./lib/telegram";
-import { suggestAddresses } from "./lib/address-suggest";
+import { addressProviderStatus, suggestFromProvider } from "./lib/address-provider";
+import {
+  applyCapturedAddress,
+  capturePayload,
+  checkCapturedAddress,
+  previewPastedAddress,
+  rememberDealAddressCheck,
+} from "./lib/address-capture";
+import { resolveCaptureSubmit, type CaptureStatus } from "../shared/address-capture";
+import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
@@ -494,6 +503,7 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
     email: value("email"),
     phone: value("phone"),
     address: value("address"),
+    address2: value("address2"),
     city: value("city"),
     state: value("state"),
     postalCode: value("postalCode"),
@@ -3364,6 +3374,33 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         contactId: result.contactId,
         deals: result.deals,
       });
+      const storedStatus = link.addressCheckStatus as CaptureStatus;
+      if (storedStatus === "verified" || storedStatus === "corrected" || storedStatus === "unverified" || storedStatus === "error") {
+        const fields = normalizeShipAddress({
+          street1: link.shippingStreet,
+          street2: link.shippingStreet2,
+          city: link.shippingCity,
+          state: link.shippingState,
+          zip: link.shippingPostalCode,
+          country: link.shippingCountry,
+        }).normalized;
+        let messages: string[] = [];
+        try {
+          const parsedMessages = JSON.parse(link.addressCheckMessages || "[]");
+          messages = Array.isArray(parsedMessages) ? parsedMessages.filter((item) => typeof item === "string") : [];
+        } catch {
+          messages = [];
+        }
+        for (const deal of result.deals) {
+          rememberDealAddressCheck({
+            dealId: deal.dealId,
+            fields,
+            status: storedStatus,
+            messages,
+            suggestion: null,
+          });
+        }
+      }
       return res.status(201).json({
         ok: true,
         result,
@@ -3413,8 +3450,16 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
   });
 
   /**
-   * Public address suggestions for the buyer order form. Proxies Photon so the
-   * browser never needs a maps API key. Throttled with the other client routes.
+   * Tells the buyer form whether address suggestions are on.
+   * The provider is off unless GOOGLE_PLACES_API_KEY is set. The key is never sent.
+   */
+  app.get("/api/address-provider", (_req: Request, res: Response) => {
+    return res.json({ ok: true, provider: addressProviderStatus() });
+  });
+
+  /**
+   * Public address suggestions. Empty unless the Google Places provider is enabled,
+   * and then only US addresses. Throttled with the other client routes.
    */
   app.post("/api/address-suggest", async (req: Request, res: Response) => {
     if (tooManyClientAttempts(req, res)) return;
@@ -3423,18 +3468,42 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         ? String((req.body as { query: string }).query)
         : "";
     try {
-      const suggestions = await suggestAddresses(query);
-      return res.json({ ok: true, suggestions });
+      const suggestions = await suggestFromProvider(query);
+      return res.json({ ok: true, suggestions, provider: addressProviderStatus() });
     } catch {
-      return res.json({ ok: true, suggestions: [] });
+      return res.json({ ok: true, suggestions: [], provider: addressProviderStatus() });
     }
+  });
+
+  /** Public: ShipEngine check for the buyer form. Does not save the order. */
+  app.post("/api/client-order/validate-address", async (req: Request, res: Response) => {
+    if (tooManyClientAttempts(req, res)) return;
+    const token = tokenFromBody(req.body);
+    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
+    const lookup = lookupClientOrder(token);
+    if (!lookup.ok) return res.status(lookup.reason === "invalid" ? 404 : 410).json(lookup);
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    const text = (key: string) => (typeof body[key] === "string" ? body[key] : "");
+    const check = await checkCapturedAddress({
+      street1: text("shippingStreet"),
+      street2: text("shippingStreet2"),
+      city: text("shippingCity"),
+      state: text("shippingState"),
+      zip: text("shippingPostalCode"),
+      country: text("shippingCountry"),
+    });
+    return res.json(capturePayload(check));
   });
 
   /**
    * Public: one buyer submission per link. This writes ONLY to the local
-   * SQLite queue — it never calls HubSpot.
+   * SQLite queue — it never calls HubSpot. A shipping address is checked with
+   * ShipEngine first. A correction or a missing unit is not stored until the
+   * buyer picks one.
    */
-  app.post("/api/client-order/submit", (req: Request, res: Response) => {
+  app.post("/api/client-order/submit", async (req: Request, res: Response) => {
     if (tooManyClientAttempts(req, res)) return;
     const token = tokenFromBody(req.body);
     if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
@@ -3442,9 +3511,94 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     if (!parsed.success) {
       return res.status(400).json({ ok: false, reason: "invalid-details", error: firstIssue(parsed.error) });
     }
-    const result = submitClientOrder(token, parsed.data);
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    let submission = parsed.data;
+    let intakeCheck: { status: string; checkedAt: string; choice: string; messages: string[] } | undefined;
+    if (submission.shippingRequired) {
+      const check = await checkCapturedAddress({
+        street1: submission.shippingStreet,
+        street2: submission.shippingStreet2,
+        city: submission.shippingCity,
+        state: submission.shippingState,
+        zip: submission.shippingPostalCode,
+        country: submission.shippingCountry,
+      });
+      const resolved = resolveCaptureSubmit({
+        check,
+        decision: typeof body.addressDecision === "string" ? body.addressDecision : "",
+        noUnit: body.noUnit === true,
+      });
+      if (!resolved.ok) {
+        return res.status(resolved.status).json({
+          ...capturePayload(check),
+          ok: false,
+          code: resolved.code,
+          error: resolved.error,
+        });
+      }
+      submission = {
+        ...submission,
+        shippingStreet: resolved.fields.street1,
+        shippingStreet2: resolved.fields.street2,
+        shippingCity: resolved.fields.city,
+        shippingState: resolved.fields.state,
+        shippingPostalCode: resolved.fields.zip,
+        shippingCountry: resolved.fields.country,
+      };
+      intakeCheck = {
+        status: resolved.storedStatus,
+        checkedAt: new Date().toISOString(),
+        choice: resolved.choice,
+        messages: check.messages,
+      };
+    }
+    const result = submitClientOrder(token, submission, intakeCheck);
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.status(201).json({ ok: true });
+  });
+
+  /** Owner: parse a pasted address, validate it, and return it for confirmation. Does not save. */
+  app.post("/api/address-capture/preview", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const text =
+      req.body && typeof req.body === "object" && typeof (req.body as { text?: unknown }).text === "string"
+        ? String((req.body as { text: string }).text)
+        : "";
+    if (text.trim().length < 5) {
+      return res.status(400).json({ ok: false, error: "Paste a full address." });
+    }
+    const check = await previewPastedAddress(text);
+    return res.json(capturePayload(check));
+  });
+
+  /** Owner: save a confirmed address onto a deal contact or an off-book row. */
+  app.post("/api/address-capture/apply", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    const fields = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields)
+      ? (body.fields as Record<string, unknown>)
+      : {};
+    const text = (row: Record<string, unknown>, key: string) => (typeof row[key] === "string" ? row[key] : "");
+    const result = await applyCapturedAddress({
+      confirm: body.confirm === true,
+      dealId: typeof body.dealId === "string" ? body.dealId : "",
+      offbookId: typeof body.offbookId === "number" ? body.offbookId : undefined,
+      decision: typeof body.decision === "string" ? body.decision : "",
+      noUnit: body.noUnit === true,
+      fields: {
+        street1: text(fields, "street1"),
+        street2: text(fields, "street2"),
+        city: text(fields, "city"),
+        state: text(fields, "state"),
+        zip: text(fields, "zip"),
+        country: text(fields, "country"),
+      },
+    });
+    return res.status(result.ok ? 200 : result.status).json(result.body);
   });
 
   app.post("/api/paid-orders/analyze", (req: Request, res: Response) => {
@@ -3663,6 +3817,45 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     const validationError = validatePaidOrderDraft(draft);
     if (validationError) return res.status(400).json({ ok: false, error: validationError });
 
+    const paidBody = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    let addressStatus: CaptureStatus = "unchecked";
+    let addressMessages: string[] = [];
+    let addressSuggestion: ReturnType<typeof normalizeShipAddress>["normalized"] | null = null;
+    if (draft.address.trim()) {
+      const check = await checkCapturedAddress({
+        street1: draft.address,
+        street2: draft.address2,
+        city: draft.city,
+        state: draft.state,
+        zip: draft.postalCode,
+        country: draft.country,
+      });
+      const resolved = resolveCaptureSubmit({
+        check,
+        decision: typeof paidBody.addressDecision === "string" ? paidBody.addressDecision : "",
+        noUnit: paidBody.noUnit === true,
+      });
+      if (!resolved.ok) {
+        return res.status(resolved.status).json({
+          ...capturePayload(check),
+          ok: false,
+          code: resolved.code,
+          error: resolved.error,
+        });
+      }
+      draft.address = resolved.fields.street1;
+      draft.address2 = resolved.fields.street2;
+      draft.city = resolved.fields.city;
+      draft.state = resolved.fields.state;
+      draft.postalCode = resolved.fields.zip;
+      draft.country = resolved.fields.country;
+      addressStatus = resolved.storedStatus;
+      addressMessages = check.messages;
+      addressSuggestion = resolved.choice === "suggested" ? resolved.fields : check.suggestion;
+    }
+
     try {
       const orderGroup =
         lineItems && lineItems.length > 1 ? `manual-${Date.now().toString(36)}` : undefined;
@@ -3670,6 +3863,22 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         lineItems: lineItems ?? undefined,
         orderGroup,
       });
+      for (const deal of result.deals) {
+        rememberDealAddressCheck({
+          dealId: deal.dealId,
+          fields: normalizeShipAddress({
+            street1: draft.address,
+            street2: draft.address2,
+            city: draft.city,
+            state: draft.state,
+            zip: draft.postalCode,
+            country: draft.country,
+          }).normalized,
+          status: addressStatus,
+          messages: addressMessages,
+          suggestion: addressSuggestion,
+        });
+      }
       return res.status(201).json({
         ok: true,
         result,

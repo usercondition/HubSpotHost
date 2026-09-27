@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
   shipping_state TEXT NOT NULL DEFAULT '',
   shipping_postal_code TEXT NOT NULL DEFAULT '',
   shipping_country TEXT NOT NULL DEFAULT '',
+  address_check_status TEXT NOT NULL DEFAULT '',
+  address_checked_at TEXT NOT NULL DEFAULT '',
+  address_check_choice TEXT NOT NULL DEFAULT '',
+  address_check_messages TEXT NOT NULL DEFAULT '',
   confirmed_item TEXT NOT NULL DEFAULT '',
   quantity INTEGER NOT NULL DEFAULT 1,
   client_notes TEXT NOT NULL DEFAULT '',
@@ -569,6 +573,10 @@ const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["hubspot_deals_json", "TEXT NOT NULL DEFAULT '[]'"],
   ["shipping_street_2", "TEXT NOT NULL DEFAULT ''"],
   ["share_token", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_status", "TEXT NOT NULL DEFAULT ''"],
+  ["address_checked_at", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_choice", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_messages", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function ensureOrderIntakeColumns(sqlite: Database.Database): void {
@@ -1097,7 +1105,18 @@ export type ClientSubmitResult =
  * UPDATE's WHERE clause, so a duplicate or racing submission changes zero rows
  * and is rejected without leaking any order details.
  */
-export function submitClientOrder(token: string, input: ClientOrderSubmission): ClientSubmitResult {
+export type IntakeAddressCheck = {
+  status: string;
+  checkedAt: string;
+  choice: string;
+  messages: string[];
+};
+
+export function submitClientOrder(
+  token: string,
+  input: ClientOrderSubmission,
+  check?: IntakeAddressCheck,
+): ClientSubmitResult {
   const lookup = lookupClientOrder(token);
   if (!lookup.ok) return lookup;
   const cleaned = input.shippingRequired
@@ -1127,6 +1146,10 @@ export function submitClientOrder(token: string, input: ClientOrderSubmission): 
       shippingState: cleaned?.state ?? "",
       shippingPostalCode: cleaned?.zip ?? "",
       shippingCountry: cleaned?.country ?? "",
+      addressCheckStatus: check?.status ?? "",
+      addressCheckedAt: check?.checkedAt ?? "",
+      addressCheckChoice: check?.choice ?? "",
+      addressCheckMessages: JSON.stringify(check?.messages ?? []).slice(0, 4000),
       confirmedItem: input.confirmedItem,
       quantity: input.quantity,
       clientNotes: input.clientNotes,

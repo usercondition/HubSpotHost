@@ -15,6 +15,7 @@ import { targetLabel, type StackRowModel } from "@/components/priority-stack-lis
 import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
 import { drawerPanelVariants, drawerScrimVariants, drawerTransition } from "@/lib/motion";
+import { PasteAddressBox } from "@/components/paste-address";
 import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
 
@@ -240,6 +241,27 @@ export function StackOrderDrawer({
                     || (row.fulfillment?.labelBought || ops.data?.checklist?.labelBought ? "Label bought" : "None")}
                 </Fact>
               </dl>
+              <div className="mt-4">
+                <PasteAddressBox
+                  headers={headers}
+                  applyLabel="Save this address"
+                  onApply={async (fields, choice, skippedUnit) => {
+                    await apiRequest(
+                      "POST",
+                      "/api/address-capture/apply",
+                      {
+                        confirm: true,
+                        dealId: row.kind === "deal" && row.dealId ? row.dealId : undefined,
+                        offbookId: row.kind === "offbook" && row.offbookId ? row.offbookId : undefined,
+                        decision: choice,
+                        noUnit: skippedUnit,
+                        fields,
+                      },
+                      { headers },
+                    );
+                  }}
+                />
+              </div>
               {row.kind === "deal" && row.dealId ? (
                 <div className="mt-3 flex flex-wrap gap-2" data-testid="drawer-links">
                   <Button asChild size="sm" variant="outline">

@@ -504,6 +504,12 @@ export const orderIntakeLinks = sqliteTable("order_intake_links", {
   shippingState: text("shipping_state").notNull().default(""),
   shippingPostalCode: text("shipping_postal_code").notNull().default(""),
   shippingCountry: text("shipping_country").notNull().default(""),
+  /** ShipEngine result from the client form: verified, corrected, unverified, unchecked, or error. */
+  addressCheckStatus: text("address_check_status").notNull().default(""),
+  addressCheckedAt: text("address_checked_at").notNull().default(""),
+  /** typed or suggested — which version the buyer confirmed for the label. */
+  addressCheckChoice: text("address_check_choice").notNull().default(""),
+  addressCheckMessages: text("address_check_messages").notNull().default(""),
   confirmedItem: text("confirmed_item").notNull().default(""),
   quantity: integer("quantity").notNull().default(1),
   clientNotes: text("client_notes").notNull().default(""),

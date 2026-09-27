@@ -242,6 +242,25 @@ for (const [name, code] of Object.entries(US_STATE_NAME_TO_CODE)) {
   US_CODE_TO_NAME[code] = name;
 }
 
+/** 2-letter codes for the state dropdown, sorted by name. */
+export function usStateOptions(): Array<{ code: string; name: string }> {
+  return Object.entries(US_STATE_NAME_TO_CODE)
+    .map(([name, code]) => ({
+      code,
+      name: name.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function isUsZip(value: string): boolean {
+  return /^\d{5}(?:-\d{4})?$/.test(value.trim());
+}
+
+export function countryIsUs(value: string): boolean {
+  const key = value.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+  return key === "" || key === "us" || key === "usa" || key === "united states" || key === "united states of america";
+}
+
 export type ShipAddressField = "street1" | "street2" | "city" | "state" | "zip" | "country";
 
 export type ShipAddressFields = Record<ShipAddressField, string>;

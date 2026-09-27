@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,11 +22,25 @@ export function AddressAutocomplete({
   street,
   onStreetChange,
   onSelect,
+  id = "shipping-street",
 }: {
   street: string;
   onStreetChange: (value: string) => void;
   onSelect: (value: AddressFill) => void;
+  id?: string;
 }) {
+  const provider = useQuery({
+    queryKey: ["/api/address-provider"],
+    queryFn: async () => {
+      const response = await fetch("/api/address-provider");
+      if (!response.ok) return { enabled: false };
+      const data = (await response.json()) as { provider?: { enabled?: boolean } };
+      return { enabled: data.provider?.enabled === true };
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+  const suggestionsOn = provider.data?.enabled === true;
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -35,7 +50,7 @@ export function AddressAutocomplete({
 
   useEffect(() => {
     const query = street.trim();
-    if (query.length < 3) {
+    if (!suggestionsOn || query.length < 3) {
       setSuggestions([]);
       setOpen(false);
       setLoading(false);
@@ -71,7 +86,7 @@ export function AddressAutocomplete({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [street]);
+  }, [street, suggestionsOn]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -95,16 +110,18 @@ export function AddressAutocomplete({
   };
 
   return (
-    <div ref={rootRef} className="relative space-y-1.5 sm:col-span-2">
-      <Label htmlFor="shipping-street">
-        Street address
+    <div ref={rootRef} className="relative space-y-1.5">
+      <Label htmlFor={id}>
+        Street
         <span className="text-primary"> *</span>
       </Label>
       <div className="relative">
         <Input
-          id="shipping-street"
+          id={id}
+          name="address-line1"
           type="text"
-          autoComplete="street-address"
+          autoComplete="address-line1"
+          autoCapitalize="words"
           value={street}
           onChange={(event) => onStreetChange(event.target.value)}
           onFocus={() => {
@@ -131,12 +148,16 @@ export function AddressAutocomplete({
           aria-autocomplete="list"
           data-testid="input-shipping-street"
         />
-        <MapPin className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        {suggestionsOn ? (
+          <MapPin className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        ) : null}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Start typing and pick a suggestion to fill city, region, and postal code.
-        {loading ? " Looking up addresses…" : ""}
-      </p>
+      {suggestionsOn ? (
+        <p className="text-xs text-muted-foreground">
+          Start typing and pick a suggestion to fill city, state, and ZIP.
+          {loading ? " Looking up addresses…" : ""}
+        </p>
+      ) : null}
 
       {open && suggestions.length > 0 ? (
         <ul
