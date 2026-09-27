@@ -59,6 +59,7 @@ async function buildAll() {
   });
 
   await cp("server/fonts", "dist/fonts", { recursive: true });
+  await cp("shared/geo/us-zip-centroids.json", "dist/us-zip-centroids.json");
 }
 
 buildAll().catch((err) => {

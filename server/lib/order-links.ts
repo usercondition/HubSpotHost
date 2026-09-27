@@ -93,6 +93,18 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
   line_items_json TEXT NOT NULL DEFAULT '[]'
 );
 `;
+const CREATE_EXPENSES_SQL = `
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, vendor TEXT NOT NULL, name TEXT NOT NULL,
+  category TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
+  usd_amount_cents INTEGER, cadence TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT,
+  payment_count INTEGER, payment_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS expense_audit (
+  id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
+  new_values_json TEXT, created_at TEXT NOT NULL
+);`;
 
 const CREATE_ATTENTION_OVERRIDES_SQL = `
 CREATE TABLE IF NOT EXISTS attention_overrides (
@@ -676,6 +688,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
+  sqlite.exec(CREATE_EXPENSES_SQL);
   sqlite.exec(CREATE_ATTENTION_OVERRIDES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);

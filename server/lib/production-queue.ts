@@ -12,6 +12,7 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
+import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase, normalizeShipAddress } from "../../shared/ship-address";
 import { hashNormalizedAddress, readAddressCheck } from "./address-checks";
 import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
@@ -93,8 +94,6 @@ type QueueItemBase = Omit<
   | "shippingRequired"
 >;
 
-/** Ship-by planning always uses the shop's calendar, never the server's timezone. */
-export const SHIP_BY_TIME_ZONE = "America/Los_Angeles";
 export const SHIP_BY_POST_PROCESS_BUFFER_SECONDS = 24 * 60 * 60;
 /** Default calendar-day SLAs used only when no print-duration estimate exists. */
 export const SHIP_BY_SLA_DAYS = {
@@ -312,6 +311,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
       needsReply: deal.needsReply === true,
+      tentative: tentativeDeals.has(deal.dealId),
       fulfillment: checklistForDeal(deal.dealId, checklists.get(deal.dealId), deal.costsComplete),
     };
     const bucket = classifyBucket(base);
@@ -340,7 +340,6 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       bucket,
       readyToPack,
       shippingRequired,
-      tentative: tentativeDeals.has(deal.dealId),
       priorityScore: priorityScore(base),
       // Defaults until attachShipAddressReadiness enriches ship-side rows.
       ...addressDefaults,

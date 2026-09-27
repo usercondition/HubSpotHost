@@ -6,7 +6,8 @@
  * Rates need connected carrier_ids (auto-listed, or SHIPENGINE_CARRIER_IDS).
  */
 import { z } from "zod";
-import { normalizeShipAddress, normalizeUsStateProvince } from "../../shared/ship-address";
+import { normalizeShipAddress } from "../../shared/ship-address";
+import { normalizeUsStateProvince } from "../../shared/us-state";
 
 export { normalizeUsStateProvince };
 

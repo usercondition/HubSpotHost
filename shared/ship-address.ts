@@ -3,6 +3,7 @@
  * Presence-only (HubSpot contact fields) — never invents addresses.
  * Local pickup skips ship-to entirely.
  */
+import { normalizeUsStateProvince, usStateCode, usStateName } from "./us-state";
 
 export type AddressStatus = "ready" | "partial" | "missing" | "pickup" | "unknown";
 
@@ -199,66 +200,6 @@ export function addressStatusPill(status: AddressStatus): {
   }
 }
 
-/** USPS / ShipEngine want 2-letter codes when country is US (HubSpot often stores "California"). */
-const US_STATE_NAME_TO_CODE: Record<string, string> = {
-  alabama: "AL",
-  alaska: "AK",
-  arizona: "AZ",
-  arkansas: "AR",
-  california: "CA",
-  colorado: "CO",
-  connecticut: "CT",
-  delaware: "DE",
-  "district of columbia": "DC",
-  florida: "FL",
-  georgia: "GA",
-  hawaii: "HI",
-  idaho: "ID",
-  illinois: "IL",
-  indiana: "IN",
-  iowa: "IA",
-  kansas: "KS",
-  kentucky: "KY",
-  louisiana: "LA",
-  maine: "ME",
-  maryland: "MD",
-  massachusetts: "MA",
-  michigan: "MI",
-  minnesota: "MN",
-  mississippi: "MS",
-  missouri: "MO",
-  montana: "MT",
-  nebraska: "NE",
-  nevada: "NV",
-  "new hampshire": "NH",
-  "new jersey": "NJ",
-  "new mexico": "NM",
-  "new york": "NY",
-  "north carolina": "NC",
-  "north dakota": "ND",
-  ohio: "OH",
-  oklahoma: "OK",
-  oregon: "OR",
-  pennsylvania: "PA",
-  "rhode island": "RI",
-  "south carolina": "SC",
-  "south dakota": "SD",
-  tennessee: "TN",
-  texas: "TX",
-  utah: "UT",
-  vermont: "VT",
-  virginia: "VA",
-  washington: "WA",
-  "west virginia": "WV",
-  wisconsin: "WI",
-  wyoming: "WY",
-};
-
-const US_CODE_TO_NAME: Record<string, string> = {};
-for (const [name, code] of Object.entries(US_STATE_NAME_TO_CODE)) {
-  US_CODE_TO_NAME[code] = name;
-}
-
 export type ShipAddressField = "street1" | "street2" | "city" | "state" | "zip" | "country";
 
 export type ShipAddressFields = Record<ShipAddressField, string>;
@@ -276,25 +217,6 @@ export type NormalizedShipAddress = {
   changed: boolean;
   changes: ShipAddressChange[];
 };
-
-export function normalizeUsStateProvince(state: string): string {
-  const raw = state.trim();
-  if (!raw) return "";
-  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
-  const key = raw.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
-  return US_STATE_NAME_TO_CODE[key] ?? raw;
-}
-
-function knownStateCode(value: string): string | null {
-  const raw = value.trim().replace(/\./g, "");
-  if (!raw) return null;
-  if (/^[A-Za-z]{2}$/.test(raw)) {
-    const code = raw.toUpperCase();
-    return US_CODE_TO_NAME[code] ? code : null;
-  }
-  const key = raw.toLowerCase().replace(/\s+/g, " ");
-  return US_STATE_NAME_TO_CODE[key] ?? null;
-}
 
 function tidyCommas(value: string): string {
   return value
@@ -371,10 +293,10 @@ function stripDuplicateLocality(street: string, fields: ShipAddressFields): stri
   const city = fields.city.trim().toLowerCase();
   const stateCodes = new Set<string>();
   const stateNames = new Set<string>();
-  const code = knownStateCode(fields.state);
+  const code = usStateCode(fields.state);
   if (code) {
     stateCodes.add(code.toLowerCase());
-    const name = US_CODE_TO_NAME[code];
+    const name = usStateName(code);
     if (name) stateNames.add(name);
   }
   const rawState = fields.state.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
@@ -433,16 +355,16 @@ function splitCombinedStreet(street: string): { street1: string; city: string; s
   let city = "";
   if (before) {
     const bits = before.split(/\s+/).filter(Boolean);
-    const twoWord = bits.length >= 2 ? knownStateCode(bits.slice(-2).join(" ")) : null;
-    const oneWord = knownStateCode(bits[bits.length - 1] ?? "");
-    if (bits.length >= 3 && twoWord && US_STATE_NAME_TO_CODE[bits.slice(-2).join(" ").toLowerCase()]) {
+    const twoWord = bits.length >= 2 ? usStateCode(bits.slice(-2).join(" ")) : null;
+    const oneWord = usStateCode(bits[bits.length - 1] ?? "");
+    if (bits.length >= 3 && twoWord) {
       state = twoWord;
       city = bits.slice(0, -2).join(" ");
-    } else if (bits.length >= 2 && oneWord && !knownStateCode(before)) {
+    } else if (bits.length >= 2 && oneWord && !usStateCode(before)) {
       state = oneWord;
       city = bits.slice(0, -1).join(" ");
-    } else if (knownStateCode(before)) {
-      state = knownStateCode(before)!;
+    } else if (usStateCode(before)) {
+      state = usStateCode(before)!;
     } else {
       return null;
     }
@@ -450,7 +372,7 @@ function splitCombinedStreet(street: string): { street1: string; city: string; s
 
   if (!state && rest.length > 1) {
     const maybe = rest[rest.length - 1]!;
-    const code = knownStateCode(maybe);
+    const code = usStateCode(maybe);
     if (code) {
       state = code;
       rest.pop();

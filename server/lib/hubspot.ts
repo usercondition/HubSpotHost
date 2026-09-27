@@ -8,7 +8,6 @@ import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken } from "./conf
 import { PRINT_NEEDS_REPLY_PROPERTY, type PrintFileOrderSummary } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const PERFORMANCE_DEAL_LIMIT = 1_000;
 
 export const PRINT_ORDERS_PIPELINE = "default";
 
@@ -274,7 +273,7 @@ async function hubspotRequestOnce(
   apiBase: string,
   token: string,
   path: string,
-  init: { method: string; body?: string },
+  init: { method: string; body?: string; readOnly?: boolean },
 ): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -303,7 +302,7 @@ async function hubspotRequestOnce(
     }
     const method = init.method.toUpperCase();
     const isSearch = path.includes("/search");
-    if (method !== "GET" && method !== "HEAD" && !isSearch) {
+    if (!init.readOnly && method !== "GET" && method !== "HEAD" && !isSearch) {
       const { recordHubspotWriteSuccess } = await import("./hubspot-write-log");
       recordHubspotWriteSuccess();
     }
@@ -321,7 +320,7 @@ async function hubspotRequestOnce(
 
 export async function hubspotRequest(
   path: string,
-  init: { method: string; body?: string },
+  init: { method: string; body?: string; readOnly?: boolean },
 ): Promise<any> {
   const config = getConfig();
   const token = getToken();
@@ -568,7 +567,7 @@ async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
       ],
       properties: [...PERFORMANCE_PROPERTIES],
       sorts: [{ propertyName: "createdate", direction: "DESCENDING" }],
-      limit: Math.min(100, PERFORMANCE_DEAL_LIMIT - deals.length),
+      limit: 100,
     };
     if (after) body.after = after;
 
@@ -584,19 +583,18 @@ async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
           ? (result.properties as Record<string, string | null>)
           : {};
       deals.push({ id: result.id, properties });
-      if (deals.length >= PERFORMANCE_DEAL_LIMIT) break;
     }
 
     const next = data?.paging?.next?.after;
     after = typeof next === "string" && next.length > 0 ? next : undefined;
-  } while (after && deals.length < PERFORMANCE_DEAL_LIMIT);
+  } while (after);
 
   return deals;
 }
 
 /**
  * Read the Print Orders pipeline in pages of 100. This is intentionally
- * read-only and capped to keep one dashboard refresh bounded.
+ * read-only and paginated so Stats never silently omits older orders.
  * Concurrent callers share one in-flight search; results cache ~20s.
  */
 export async function fetchPrintOrderDeals(options?: {

@@ -1,12 +1,10 @@
 /**
- * Shared Print Ops motion — calm crossfades, no scroll-root transforms.
- * Transform only on overlays (drawers); page content uses opacity.
+ * Shared Print Ops motion for overlay drawers.
  */
 import type { Transition, Variants } from "framer-motion";
 
 export const MOTION = {
   fastMs: 120,
-  pageMs: 200,
   drawerMs: 280,
   staggerMs: 40,
   /** Slightly heavy ease — less “toy UI”, more product. */
@@ -18,20 +16,6 @@ export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
-
-export const pageTransition: Transition = {
-  duration: MOTION.pageMs / 1000,
-  ease: MOTION.ease,
-};
-
-/** Opacity-only so the scroll pane never carries a transform layer. */
-export const pageVariants: Variants = {
-  initial: { opacity: 0 },
-  enter: { opacity: 1, transition: pageTransition },
-  // Exiting copies stay in the DOM for the crossfade. They must not take taps,
-  // or a drawer opened on the copy disappears when the copy unmounts.
-  exit: { opacity: 0, pointerEvents: "none", transition: { duration: 0.12, ease: MOTION.ease } },
-};
 
 export const drawerTransition: Transition = {
   duration: MOTION.drawerMs / 1000,
@@ -50,8 +34,3 @@ export const drawerScrimVariants: Variants = {
   exit: { opacity: 0, transition: { duration: 0.15, ease: MOTION.ease } },
 };
 
-export const reducedPageVariants: Variants = {
-  initial: { opacity: 1 },
-  enter: { opacity: 1 },
-  exit: { opacity: 1, pointerEvents: "none" },
-};

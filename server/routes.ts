@@ -36,6 +36,9 @@ import {
   type HubSpotPipelineStage,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import { collectShopDashboard } from "./lib/shop-dashboard";
+import { loadDealShipTos } from "./lib/ship-to-index";
+import { resolveShopWindow, SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
 import {
   activeAttentionOverrideKeys,
   clearAttentionOverride,
@@ -61,6 +64,13 @@ import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyn
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
+import { listExpenses, overheadForPeriod } from "./lib/expenses";
+import { registerExpenseRoutes } from "./lib/expense-routes";
+import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
+import { registerPrinterRoutes } from "./lib/printer-routes";
+import { firstIssue } from "./lib/validation";
+import { shipByCalendarDate } from "../shared/ship-by";
+import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
@@ -84,7 +94,6 @@ import {
   previewAttachSummary,
   stagePrintFileFromPath,
   stageCtbFromPrefix,
-  syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
   addBitsToRecord,
@@ -266,7 +275,8 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
-import { applyAddressCleanup, gateLabelAddress, listAddressAudit, verifyAddressNow } from "./lib/label-address";
+import { gateLabelAddress } from "./lib/label-address";
+import { registerLabelAddressRoutes } from "./lib/label-address-routes";
 import { ensureAddressCheck } from "./lib/address-checks";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
@@ -610,10 +620,6 @@ async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
   };
 }
 
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
-}
-
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
@@ -639,30 +645,6 @@ function partitionPrintDealBoards(
 }
 
 /** Map live HubSpot Print Orders → stage label / name for plate-history refresh. */
-function livePrintOrderStageMap(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): Map<string, { stage: string; dealName: string }> {
-  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
-  const map = new Map<string, { stage: string; dealName: string }>();
-  for (const deal of deals) {
-    const stageId = deal.properties.dealstage ?? "";
-    const stage = stageById.get(stageId);
-    map.set(deal.id, {
-      stage: stage?.label || stageId || "No stage",
-      dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
-    });
-  }
-  return map;
-}
-
-function refreshPrintFileStagesFromHubSpot(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): void {
-  syncPrintFileDealStages(livePrintOrderStageMap(deals, stages));
-}
-
 /** The owner-side representation. The hash and raw token never leave as fields; a live form path does. */
 function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
   priorMatch: ReturnType<typeof findPriorClientDetails>;
@@ -890,6 +872,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         clientLinkWorkflow: "enabled",
       },
       storage: describeOrderLinksStorage(),
+      geo: { zipCentroids: zipCentroidsHealth() },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         callbackToken: process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim()
@@ -1009,6 +992,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       links: listOrderLinks(status).map(ownerLinkView),
     });
   });
+
+  registerExpenseRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
@@ -1976,70 +1961,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /** Force a ShipEngine check for this deal, even when the stored hash still matches. */
-  app.post("/api/shipping-labels/address-verify", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const result = await verifyAddressNow(dealId);
-      if (!result.ok) return res.status(result.status).json(result.body);
-      return res.json(result.body);
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not verify the address",
-      });
-    }
-  });
-
-  /** Write cleaned address fields to the HubSpot contact. Confirm is required. */
-  app.post("/api/shipping-labels/address-cleanup", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
-    const confirm = (req.body as { confirm?: unknown } | null)?.confirm;
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const result = await applyAddressCleanup({ dealId, confirm: confirm === true });
-      if (!result.ok) return res.status(result.status).json(result.body);
-      return res.json(result.body);
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not clean up the HubSpot address",
-      });
-    }
-  });
-
-  /** Open orders whose address needs cleanup or failed validation. */
-  app.get("/api/shipping-labels/address-audit", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const rows = await listAddressAudit();
-      return res.json({ ok: true, rows });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not audit addresses",
-      });
-    }
-  });
+  registerLabelAddressRoutes(app, rejectUnsecuredIntake);
 
   /** HubSpot contact email/name for a Print Order (Labels draft → mailto). */
   app.get("/api/shipping-labels/contact/:dealId", async (req: Request, res: Response) => {
@@ -2251,39 +2173,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /**
-   * Owner-only, read-only performance summary. The API token remains server
-   * side and this route deliberately performs no HubSpot writes.
-   */
-  app.get("/api/performance", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const [deals, stages, hubspotPortalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      return res.json(
-        buildPerformanceSnapshot({
-          deals,
-          stages,
-          intakeCounts: orderLinkCounts(),
-          supplySpend: buildSupplySpendSummary(),
-          attachedPrintDealIds: attachedPrintFileDealIds(),
-          shippingLabelDealIds: attachedShippingLabelDealIds(),
-          dismissedAttentionKeys: activeAttentionOverrideKeys(),
-          hubspotPortalId,
-        }),
-      );
-    } catch (error) {
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
-      });
-    }
-  });
+  registerPerformanceRoutes(app, rejectUnsecuredIntake);
 
   /** Skip / dismiss one attention alert for an open deal (e.g. legacy order without plates). */
   app.post("/api/attention/dismiss", (req: Request, res: Response) => {
@@ -2522,7 +2412,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
-      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+      return res.json({ ...result, ok: result.ok || Boolean(result.skipped) });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
@@ -2541,7 +2431,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
-      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+      return res.json({ ...result, ok: result.ok || Boolean(result.skipped) });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
@@ -2902,102 +2792,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     },
   );
 
-  /**
-   * Fleet usage + lifecycle for each named printer. Plate hours/layers/resin
-   * roll up from attached CTB/ULTX metrics matched by machine name aliases.
-   */
-  app.get("/api/printers", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      ensureDefaultPrinters();
-      return res.json({ ok: true, ...buildPrinterFleetSnapshot() });
-    } catch (error) {
-      return res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load printer fleet",
-      });
-    }
-  });
-
-  app.patch("/api/printers/:id", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    const parsed = updatePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const printer = updatePrinter(printerId, parsed.data);
-    if (!printer) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.json({ ok: true, printer, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  app.post("/api/printers/:id/events", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    if (!getPrinter(printerId)) {
-      return res.status(404).json({ ok: false, error: "That printer was not found" });
-    }
-    const parsed = createPrinterLifecycleEventSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const event = addPrinterLifecycleEvent(printerId, parsed.data);
-    if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  /**
-   * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
-   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
-   */
-  app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrinterProfileSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrinterProfile(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
-    }
-    const label = parsed.data.profile.trim();
-    const message = result.map
-      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
-      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
-    return res.json({
-      ok: true,
-      map: result.map,
-      stamped: result.stamped,
-      fleet: result.fleet,
-      message,
-    });
-  });
-
-  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
-  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrintFilePrinter(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
-    }
-    return res.json({
-      ok: true,
-      record: result.record,
-      fleet: result.fleet,
-      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
-    });
-  });
+  registerPrinterRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Reapply safe defaults to historical attached plates. This only fills blank
