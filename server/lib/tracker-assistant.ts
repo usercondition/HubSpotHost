@@ -15,6 +15,7 @@ import type {
   ProductionQueueResponse,
 } from "../../shared/schema";
 import { ORDER_INTAKE_STATUS_LABELS } from "../../shared/schema";
+import { addressNeedsChase } from "../../shared/ship-address";
 import { groupShipByAgenda, shipByCalendarDate, shipByHonestyLabel } from "../../shared/ship-by";
 
 export type TrackerAssistantMode = "rules" | "model";
@@ -136,13 +137,12 @@ export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): Trac
   const needsAddressSource = [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction].filter(
     (item) =>
       item.shippingRequired !== false &&
-      item.addressStatus !== "pickup" &&
+      addressNeedsChase(item.addressStatus) &&
       (item.bucket === "ship_ready" ||
         item.readyToPack ||
         item.fulfillment.readyPercent >= 80 ||
         // Labels shows in-production near-ship rows; count real HubSpot gaps after enrichment.
-        item.bucket === "in_production") &&
-      item.addressStatus !== "ready",
+        item.bucket === "in_production"),
   );
   const openJobs = [
     ...queue.nextPrint,

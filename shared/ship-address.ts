@@ -4,7 +4,7 @@
  * Local pickup skips ship-to entirely.
  */
 
-export type AddressStatus = "ready" | "partial" | "missing" | "pickup";
+export type AddressStatus = "ready" | "partial" | "missing" | "pickup" | "unknown";
 
 export type ShipAddressInput = {
   name?: string | null;
@@ -58,6 +58,14 @@ export function pickupAddressReadiness(): ShipAddressReadiness {
 /** Address is fine for labeling / digests (ready ship-to or pickup). */
 export function addressIsSatisfied(status: AddressStatus | null | undefined): boolean {
   return status === "ready" || status === "pickup";
+}
+
+/**
+ * Confirmed ship-to gap. Unknown means the lookup did not finish —
+ * do not chase or count it as needing an address.
+ */
+export function addressNeedsChase(status: string | null | undefined): boolean {
+  return status === "missing" || status === "partial";
 }
 
 function firstNameFrom(value: string | null | undefined): string {
@@ -158,7 +166,7 @@ export function deriveShipAddressReadiness(
 
 export function addressStatusPill(status: AddressStatus): {
   label: string;
-  tone: "good" | "warn" | "bad";
+  tone: "good" | "warn" | "bad" | "neutral";
 } {
   switch (status) {
     case "ready":
@@ -167,6 +175,8 @@ export function addressStatusPill(status: AddressStatus): {
       return { label: "Pickup", tone: "good" };
     case "partial":
       return { label: "Address partial", tone: "warn" };
+    case "unknown":
+      return { label: "Address unchecked", tone: "neutral" };
     default:
       return { label: "Needs address", tone: "bad" };
   }

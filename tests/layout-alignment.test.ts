@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
@@ -454,6 +454,50 @@ function bodyFor(input: string | URL) {
     return { ok: true, configured: true, connected: false, email: "", reconnect: false };
   }
   return { ok: true };
+}
+
+const LABEL_ORDERS = [
+  { dealId: "346140673754", name: "Daniel Ortega", city: "Phoenix", state: "AZ", status: "ready" },
+  { dealId: "349919419125", name: "Wayne Hood", city: "Tucson", state: "AZ", status: "ready" },
+  { dealId: "349912151800", name: "Glenn Chandler", city: "Mesa", state: "AZ", status: "ready" },
+  { dealId: "348746780377", name: "Angel Pineda", city: "Tempe", state: "AZ", status: "ready" },
+  { dealId: "342134173423", name: "Jose", city: "San Diego", state: "CA", status: "unknown" },
+];
+
+function labelsQueueBody() {
+  const shipReady = LABEL_ORDERS.map((order) => ({
+    ...queueItem(order.dealId, "ship_ready", 80),
+    dealName: `Print - ${order.name}`,
+    contactName: order.name,
+    stage: "Ready to Ship",
+    addressStatus: order.status,
+    addressSummary: order.status === "ready" ? `${order.city}, ${order.state}` : null,
+    chaseDraft: "",
+  }));
+  return {
+    ok: true,
+    generatedAt: "2026-09-25T19:39:00.000Z",
+    hubspotPortalId: "1",
+    stages: [],
+    printers: [],
+    nextPrint: [],
+    inProduction: [],
+    shipReady,
+    blocked: [],
+    needsReply: [],
+    readyToPack: [],
+    recentFailures: [],
+    summary: {
+      nextPrint: 0,
+      inProduction: 0,
+      shipReady: shipReady.length,
+      blocked: 0,
+      needsReply: 0,
+      readyToPack: 0,
+      needsAddress: 0,
+      openOrders: shipReady.length,
+    },
+  };
 }
 
 function spread(values: number[]) {
@@ -1212,6 +1256,109 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const connectText = await current().locator("[data-testid='panel-google-drive']").innerText();
     check(/Connect Google Drive/.test(connectText), `connect copy was ${connectText}`);
     check(!/refresh|ya29|client_secret/i.test(connectText), "connect panel leaks a secret");
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.startsWith("/api/production-queue")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(labelsQueueBody()),
+        });
+        return;
+      }
+      if (url.pathname.startsWith("/api/shipping-labels/shipengine/status")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            configured: true,
+            hasApiKey: true,
+            hasShipFrom: true,
+            testMode: true,
+            shipFrom: {
+              name: "Shop",
+              street1: "1 Main",
+              street2: "",
+              city: "San Diego",
+              state: "CA",
+              zip: "92101",
+              country: "US",
+            },
+            carriers: [
+              {
+                carrierId: "se-1",
+                carrierCode: "ups",
+                friendlyName: "UPS",
+                balance: 42,
+                requiresFundedAmount: true,
+              },
+            ],
+            funds: {
+              availableUsd: 42,
+              sharedWallet: true,
+              lowestBalanceUsd: 42,
+              fundedCarriers: [
+                { carrierId: "se-1", carrierCode: "ups", friendlyName: "UPS", balance: 42 },
+              ],
+            },
+          }),
+        });
+        return;
+      }
+      if (url.pathname.startsWith("/api/shipping-labels/ship-to/")) {
+        const dealId = url.pathname.split("/").pop() || "";
+        const order = LABEL_ORDERS.find((row) => row.dealId === dealId);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            dealId,
+            ready: true,
+            hasContact: true,
+            missing: [],
+            contact: {
+              id: "9",
+              name: order?.name ?? "Buyer",
+              email: "buyer@example.com",
+              phone: "",
+              addressLines: ["123 Main St", `${order?.city ?? "San Diego"}, ${order?.state ?? "CA"} 92101`],
+              city: order?.city ?? "San Diego",
+              state: order?.state ?? "CA",
+            },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    const shootLabels = async (width: number, height: number, file: string) => {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+      const picks = page.locator("[data-testid='panel-shipengine-order-picks']");
+      await picks.waitFor();
+      await page.locator("[data-testid='button-shipengine-pick-342134173423']").scrollIntoViewIfNeeded();
+      await page.locator("[data-testid='button-shipengine-pick-342134173423']").click();
+      await page.waitForFunction(() => {
+        const node = document.querySelector("[data-testid='status-shipengine-address-342134173423']");
+        const text = node && node.textContent ? node.textContent : "";
+        return text.indexOf("San Diego") >= 0;
+      });
+      const cardText = await page.locator("[data-testid='panel-shipengine-order-card-342134173423']").innerText();
+      check(!cardText.includes("Needs address"), `open label card showed Needs address: ${cardText}`);
+      check(cardText.includes("Address · San Diego, CA"), `live ship-to did not win: ${cardText}`);
+      const listText = await picks.innerText();
+      check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
+      await page.locator("[data-testid='panel-shipengine-order-card-342134173423']").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: file, fullPage: false });
+    };
+    await shootLabels(1440, 900, "/opt/cursor/artifacts/labels-desktop.png");
+    await shootLabels(390, 844, "/opt/cursor/artifacts/labels-phone.png");
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     const lockedContext = await browser!.newContext({ deviceScaleFactor: 1 });
     const lockedPage = await lockedContext.newPage();

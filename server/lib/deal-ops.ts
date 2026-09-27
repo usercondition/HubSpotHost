@@ -178,51 +178,92 @@ function contactIdFromAssociationResult(row: unknown): string | null {
   );
 }
 
+const DEAL_CONTACT_CACHE_MS = 90_000;
+
+type CachedDealContact = { value: DealAssociatedContact; fetchedAt: number };
+const dealContactCache = new Map<string, CachedDealContact>();
+const dealContactInflight = new Map<string, Promise<DealAssociatedContact>>();
+
+/** Last successful contact, including a confirmed empty association, even past the TTL. */
+export function peekDealContactCache(dealId: string): DealAssociatedContact | null {
+  return dealContactCache.get(dealId)?.value ?? null;
+}
+
+export function invalidateDealContactCache(dealId?: string): void {
+  if (dealId) {
+    dealContactCache.delete(dealId);
+    return;
+  }
+  dealContactCache.clear();
+}
+
+/** Keep the last value but force the next read to miss the TTL. */
+export function expireDealContactCache(dealId?: string): void {
+  const staleAt = Date.now() - DEAL_CONTACT_CACHE_MS - 1;
+  const ids = dealId ? [dealId] : Array.from(dealContactCache.keys());
+  for (const id of ids) {
+    const row = dealContactCache.get(id);
+    if (row) row.fetchedAt = staleAt;
+  }
+}
+
 export async function fetchDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
-  try {
-    const assoc = await hubspotRequest(
-      `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/contacts?limit=1`,
-      { method: "GET" },
-    );
-    const results = Array.isArray(assoc?.results) ? assoc.results : [];
-    const contactId = contactIdFromAssociationResult(results[0]);
-    if (!contactId) {
-      return { ...EMPTY_DEAL_CONTACT };
-    }
-    const contact = await hubspotRequest(
-      `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,address,city,state,zip,country`,
-      { method: "GET" },
-    );
-    const props = (contact.properties ?? {}) as Record<string, string | null>;
-    const name = [props.firstname, props.lastname].filter(Boolean).join(" ").trim();
-    const street1 = String(props.address ?? "").trim();
-    const city = String(props.city ?? "").trim();
-    const state = String(props.state ?? "").trim();
-    const zip = String(props.zip ?? "").trim();
-    const country = String(props.country ?? "").trim();
-    const addressLines = [
-      street1,
-      [city, state, zip].filter(Boolean).join(", "),
-      country,
-    ]
-      .map((line) => String(line ?? "").trim())
-      .filter(Boolean);
-    return {
-      id: contactId,
-      name,
-      email: String(props.email ?? "").trim(),
-      phone: String(props.phone ?? "").trim(),
-      addressLines,
-      street1,
-      street2: "",
-      city,
-      state,
-      zip,
-      country,
-    };
-  } catch {
+  const cached = dealContactCache.get(dealId);
+  if (cached && Date.now() - cached.fetchedAt < DEAL_CONTACT_CACHE_MS) {
+    return cached.value;
+  }
+  const inflight = dealContactInflight.get(dealId);
+  if (inflight) return inflight;
+
+  const pending = loadDealAssociatedContact(dealId)
+    .then((contact) => {
+      dealContactCache.set(dealId, { value: contact, fetchedAt: Date.now() });
+      return contact;
+    })
+    .finally(() => {
+      if (dealContactInflight.get(dealId) === pending) dealContactInflight.delete(dealId);
+    });
+  dealContactInflight.set(dealId, pending);
+  return pending;
+}
+
+async function loadDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
+  const assoc = await hubspotRequest(
+    `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/contacts?limit=1`,
+    { method: "GET" },
+  );
+  const results = Array.isArray(assoc?.results) ? assoc.results : [];
+  const contactId = contactIdFromAssociationResult(results[0]);
+  if (!contactId) {
     return { ...EMPTY_DEAL_CONTACT };
   }
+  const contact = await hubspotRequest(
+    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,address,city,state,zip,country`,
+    { method: "GET" },
+  );
+  const props = (contact.properties ?? {}) as Record<string, string | null>;
+  const name = [props.firstname, props.lastname].filter(Boolean).join(" ").trim();
+  const street1 = String(props.address ?? "").trim();
+  const city = String(props.city ?? "").trim();
+  const state = String(props.state ?? "").trim();
+  const zip = String(props.zip ?? "").trim();
+  const country = String(props.country ?? "").trim();
+  const addressLines = [street1, [city, state, zip].filter(Boolean).join(", "), country]
+    .map((line) => String(line ?? "").trim())
+    .filter(Boolean);
+  return {
+    id: contactId,
+    name,
+    email: String(props.email ?? "").trim(),
+    phone: String(props.phone ?? "").trim(),
+    addressLines,
+    street1,
+    street2: "",
+    city,
+    state,
+    zip,
+    country,
+  };
 }
 
 /** @deprecated use fetchDealAssociatedContact */

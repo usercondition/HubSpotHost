@@ -127,6 +127,9 @@ test("local pickup never needs a ship-to address", () => {
   assert.equal(pickup.chaseDraft, "");
   assert.equal(addressStatusPill("pickup").label, "Pickup");
   assert.equal(addressStatusPill("pickup").tone, "good");
+  assert.equal(addressStatusPill("unknown").label, "Address unchecked");
+  assert.equal(addressStatusPill("unknown").tone, "neutral");
+  assert.equal(addressStatusPill("missing").label, "Needs address");
 
   const fromNote = deriveShipAddressReadiness({
     dealName: "Terrain pack - Beau",

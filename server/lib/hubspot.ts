@@ -219,6 +219,26 @@ export class HubSpotError extends Error {
   }
 }
 
+/** Shown when a read fails because HubSpot is rate-limiting or unavailable. */
+export const HUBSPOT_BUSY_MESSAGE = "HubSpot busy, retry";
+
+/** 429, 5xx, and timeouts must not be treated as an empty CRM record. */
+export function isHubSpotBusyError(error: unknown): boolean {
+  return error instanceof HubSpotError && (error.status === 429 || error.status >= 500);
+}
+
+const READ_RETRY_LIMIT = 2;
+
+function isIdempotentHubSpotRead(method: string, path: string): boolean {
+  const verb = method.toUpperCase();
+  return verb === "GET" || verb === "HEAD" || path.includes("/search");
+}
+
+function waitForRetry(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function retryAfterMs(header: string | null): number | null {
   if (!header) return null;
   const seconds = Number(header);
@@ -235,20 +255,16 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-export async function hubspotRequest(
+async function hubspotRequestOnce(
+  apiBase: string,
+  token: string,
   path: string,
   init: { method: string; body?: string },
 ): Promise<any> {
-  const config = getConfig();
-  const token = getToken();
-  if (!token) {
-    throw new HubSpotError("HubSpot token not configured", 503);
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${config.apiBase}${path}`, {
+    const res = await fetch(`${apiBase}${path}`, {
       method: init.method,
       headers: authHeaders(token),
       body: init.body,
@@ -285,6 +301,33 @@ export async function hubspotRequest(
     throw new HubSpotError("HubSpot API request failed", 502);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function hubspotRequest(
+  path: string,
+  init: { method: string; body?: string },
+): Promise<any> {
+  const config = getConfig();
+  const token = getToken();
+  if (!token) {
+    throw new HubSpotError("HubSpot token not configured", 503);
+  }
+
+  // Reads and searches may be repeated. Writes stay single-shot.
+  const retries = isIdempotentHubSpotRead(init.method, path) ? READ_RETRY_LIMIT : 0;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await hubspotRequestOnce(config.apiBase, token, path, init);
+    } catch (err) {
+      if (!(err instanceof HubSpotError) || err.status !== 429 || attempt >= retries) {
+        throw err;
+      }
+      attempt += 1;
+      const backoff = 250 * 2 ** (attempt - 1);
+      await waitForRetry(Math.min(err.retryAfterMs ?? backoff, 8_000));
+    }
   }
 }
 
@@ -492,6 +535,11 @@ export function invalidatePrintOrderDealsCache(): void {
   printOrderDealsInflight = null;
 }
 
+export function invalidatePrintOrderStagesCache(): void {
+  printOrderStagesCache = null;
+  printOrderStagesInflight = null;
+}
+
 async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
   const deals: HubSpotDealRecord[] = [];
   let after: string | undefined;
@@ -574,6 +622,10 @@ async function overlayLocalTruth(deals: HubSpotDealRecord[]): Promise<HubSpotDea
 
 let cachedPortalId: { value: string; fetchedAt: number } | null = null;
 const PORTAL_ID_CACHE_MS = 60 * 60 * 1000;
+
+export function invalidateHubSpotPortalIdCache(): void {
+  cachedPortalId = null;
+}
 
 /**
  * Resolve the HubSpot portal/account id for deep links into CRM records.

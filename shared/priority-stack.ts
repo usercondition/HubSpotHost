@@ -81,7 +81,7 @@ export function suggestedBlocker(signals: StackBlockerSignals): string {
   if (signals.unassignedPlateCount === 1) return "1 plate unassigned";
   if (signals.unassignedPlateCount > 1) return `${signals.unassignedPlateCount} plates unassigned`;
   if (signals.costsIncomplete) return "Needs costs";
-  if (signals.shippingRequired && signals.addressStatus !== "ready" && signals.addressStatus !== "pickup") {
+  if (signals.shippingRequired && (signals.addressStatus === "missing" || signals.addressStatus === "partial")) {
     return "Address missing";
   }
   if (signals.needsReply) return "Waiting on reply";

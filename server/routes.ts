@@ -26,6 +26,8 @@ import {
   fetchPrintOrderDeals,
   fetchPrintOrderPipelineStages,
   HubSpotError,
+  HUBSPOT_BUSY_MESSAGE,
+  isHubSpotBusyError,
   clearDealPrintFileMetrics,
   patchDealPrintFileMetrics,
   type HubSpotDealRecord,
@@ -1763,6 +1765,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         missing,
       });
     } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
         ok: false,
@@ -1842,6 +1847,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         messages: quoted.messages,
       });
     } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
       const statusCode = error instanceof ShipEngineError ? error.status : 502;
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
         ok: false,
@@ -1866,13 +1874,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     try {
       const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
-      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
+      let recipientName: string | null = null;
+      try {
+        const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
+        recipientName = contact.name || null;
+      } catch (error) {
+        if (!isHubSpotBusyError(error)) throw error;
+      }
       const notes = buildShipNotesFromShipEngine({
         carrierCode: purchase.carrierCode || parsed.data.carrierCode,
         serviceType: purchase.serviceCode || parsed.data.serviceType,
         amount: purchase.amount || parsed.data.amount,
         labelUrl: purchase.labelUrl,
-        recipientName: contact.name || null,
+        recipientName,
       });
       const postageUsd = purchase.amount || parsed.data.amount || "";
       const attached = await attachShippingLabelToDeals({
@@ -1943,6 +1957,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
       });
     } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
         ok: false,

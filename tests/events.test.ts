@@ -57,6 +57,17 @@ test("ignores non-deal objects and unrelated properties", () => {
   assert.equal(s.ignoredOther, 4);
 });
 
+test("contact and association events bust the cache without a deal recalculation", () => {
+  const s = summarizeEvents([
+    { objectId: 77, subscriptionType: "contact.propertyChange", propertyName: "address" },
+    { subscriptionType: "deal.associationChange", fromObjectId: 88, toObjectId: 77 },
+  ]);
+  assert.equal(s.cacheBust, true);
+  assert.deepEqual(s.dealIds, []);
+  assert.equal(s.matched, 0);
+  assert.equal(s.ignoredOther, 0);
+});
+
 test("creation, deletion, and dealstage bust the cache and do not recalculate", () => {
   const s = summarizeEvents([
     { objectId: 8, objectTypeId: "0-3", subscriptionType: "deal.propertyChange", propertyName: "dealstage" },

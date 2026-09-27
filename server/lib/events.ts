@@ -139,6 +139,11 @@ export function summarizeEvents(payload: unknown): EventSummary {
       cacheBust = true;
       continue;
     }
+    // Contact and association changes can move a ship-to without touching deal inputs.
+    if (subscription.startsWith("contact.") || subscription.includes("association")) {
+      cacheBust = true;
+      continue;
+    }
     if (!isDealEvent(event) || !property || !INPUT_SET.has(property)) {
       ignoredOther += 1;
       continue;

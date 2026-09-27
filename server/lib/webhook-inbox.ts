@@ -173,6 +173,8 @@ export async function processWebhookInbox(now = new Date()): Promise<{ processed
 
   if (cacheBust) {
     invalidatePrintOrderDealsCache();
+    const { invalidateDealContactCache } = await import("./deal-ops");
+    invalidateDealContactCache();
     const { enqueueSyncHealthSoon } = await import("./print-ops-jobs");
     enqueueSyncHealthSoon();
     for (const eventId of bustIds) {

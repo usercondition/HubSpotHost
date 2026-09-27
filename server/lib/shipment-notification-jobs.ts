@@ -3,6 +3,7 @@
  * HubSpot remains the source for the contact used at execution time.
  */
 import { fetchDealAssociatedContact } from "./deal-ops";
+import { HUBSPOT_BUSY_MESSAGE, isHubSpotBusyError } from "./hubspot";
 import { enqueueMarketplaceShipmentSendRequest } from "./marketplace-send-request-store";
 import { sendShippedEmailViaResend } from "./resend-shipped-email";
 import { recordShippedEmailSent, wasShippedEmailSent } from "./shipped-email-store";
@@ -46,7 +47,21 @@ function carrierFromNotes(notes: string): { service: string | null; carrier: str
 
 /** Send once per deal/tracking, resolving the current contact from HubSpot. */
 export async function runShipmentEmailJob(input: ShipmentEmailJob): Promise<BuyerEmailSend> {
-  const contact = await fetchDealAssociatedContact(input.dealId);
+  let contact;
+  try {
+    contact = await fetchDealAssociatedContact(input.dealId);
+  } catch (error) {
+    if (!isHubSpotBusyError(error)) throw error;
+    return {
+      attempted: false,
+      sent: false,
+      skipped: true,
+      to: null,
+      id: null,
+      reason: HUBSPOT_BUSY_MESSAGE,
+      error: null,
+    };
+  }
   const email = contact.email.trim();
   if (!email.includes("@")) {
     return {

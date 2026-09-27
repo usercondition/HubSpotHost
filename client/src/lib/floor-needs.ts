@@ -4,7 +4,7 @@
  */
 import { formatMoney } from "@/lib/format";
 import { attentionNextStep, floorFocusMeta, floorWorkHref } from "@/lib/workflow";
-import { addressStatusPill } from "@shared/ship-address";
+import { addressNeedsChase, addressStatusPill } from "@shared/ship-address";
 
 export type FloorLane = "plates" | "warn" | "bad" | "shop";
 export type FloorNeedIcon = "file" | "alert" | "link" | "beaker" | "printer" | "pin";
@@ -53,7 +53,7 @@ export interface FloorNeedInput {
     bucket: string;
     needsReply: boolean;
     readyToPack: boolean;
-    addressStatus: "ready" | "partial" | "missing" | "pickup";
+    addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
     chaseDraft: string;
     fulfillment: { readyPercent: number };
   }>;
@@ -174,9 +174,7 @@ export function buildFloorNeeds(input: FloorNeedInput): FloorNeed[] {
     const address = addressStatusPill(item.addressStatus);
     if (
       nearShip &&
-      item.addressStatus !== "ready" &&
-      item.addressStatus !== "pickup" &&
-      address.tone !== "good" &&
+      addressNeedsChase(item.addressStatus) &&
       !floorNeeds.some((need) => need.dealId === item.dealId && need.key.endsWith("-address"))
     ) {
       floorNeeds.push({

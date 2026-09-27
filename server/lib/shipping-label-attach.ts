@@ -8,7 +8,9 @@ import {
   resolveCompletedPrintOrderStage,
   seedPrintDealCosts,
   updateDealCosts,
+  type DealAssociatedContact,
 } from "./deal-ops";
+import { HUBSPOT_BUSY_MESSAGE, isHubSpotBusyError } from "./hubspot";
 import {
   getFulfillmentChecklist,
   listExistingTrackingAttachments,
@@ -83,6 +85,32 @@ function normalizeTracking(value: string | null | undefined): string {
   return (value ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 
+const EMPTY_LABEL_CONTACT: DealAssociatedContact = {
+  id: null,
+  name: "",
+  email: "",
+  phone: "",
+  addressLines: [],
+  street1: "",
+  street2: "",
+  city: "",
+  state: "",
+  zip: "",
+  country: "",
+};
+
+/** A busy HubSpot read must not look like “no contact” and must not send mail. */
+async function readContactForLabel(
+  dealId: string,
+): Promise<{ contact: DealAssociatedContact; busy: boolean }> {
+  try {
+    return { contact: await fetchDealAssociatedContact(dealId), busy: false };
+  } catch (error) {
+    if (!isHubSpotBusyError(error)) throw error;
+    return { contact: { ...EMPTY_LABEL_CONTACT }, busy: true };
+  }
+}
+
 export async function attachShippingLabelToDeals(
   input: AttachShippingLabelInput & {
     shipengine?: { labelId?: string; carrier?: string; service?: string };
@@ -103,7 +131,8 @@ export async function attachShippingLabelToDeals(
 
   if (toAttach.length === 0) {
     const primary = alreadyOnSelected[0] ?? alreadyOn[0]!;
-    const contact = await fetchDealAssociatedContact(primary.dealId);
+    const loaded = await readContactForLabel(primary.dealId);
+    const contact = loaded.contact;
     return {
       ok: true,
       duplicate: true,
@@ -229,10 +258,11 @@ export async function attachShippingLabelToDeals(
 
   const notifyDealId = attachedDealIds.find((dealId) => !reprintDealIds.has(dealId)) ?? null;
   const primaryDealId = notifyDealId ?? attachedDealIds[0]!;
-  const contact = await fetchDealAssociatedContact(primaryDealId);
+  const loaded = await readContactForLabel(primaryDealId);
+  const contact = loaded.contact;
   const postageAmount = Number(postage);
   const marketplaceDispatch =
-    notifyDealId && contact.name && Number.isFinite(postageAmount) && postage !== ""
+    !loaded.busy && notifyDealId && contact.name && Number.isFinite(postageAmount) && postage !== ""
       ? await enqueueMarketplaceShipNoteJob({
           dealId: notifyDealId,
           trackingNumber: input.trackingNumber,
@@ -242,22 +272,27 @@ export async function attachShippingLabelToDeals(
         })
       : null;
 
-  const buyerEmailDispatch = notifyDealId
-    ? await enqueueShipmentEmailJob({
-        dealId: notifyDealId,
-        trackingNumber: input.trackingNumber,
-        notes: sharedNote,
-      })
-    : null;
+  const buyerEmailDispatch =
+    !loaded.busy && notifyDealId
+      ? await enqueueShipmentEmailJob({
+          dealId: notifyDealId,
+          trackingNumber: input.trackingNumber,
+          notes: sharedNote,
+        })
+      : null;
   const buyerEmail =
     buyerEmailDispatch?.result ??
     ({
       attempted: false,
       sent: false,
-      skipped: false,
+      skipped: loaded.busy,
       to: contact.email || null,
       id: null,
-      reason: notifyDealId ? "Shipped email queued" : "Reprint keeps the first completion",
+      reason: loaded.busy
+        ? HUBSPOT_BUSY_MESSAGE
+        : notifyDealId
+          ? "Shipped email queued"
+          : "Reprint keeps the first completion",
       error: null,
     } satisfies BuyerEmailSend);
 

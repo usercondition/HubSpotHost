@@ -40,7 +40,7 @@ import {
   isShopUsualBoxRate,
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
-import { addressStatusPill } from "@shared/ship-address";
+import { addressStatusPill, type AddressStatus } from "@shared/ship-address";
 import { labelMatchContactKey } from "@shared/shipping-label-select";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
@@ -202,6 +202,8 @@ type ShipToResponse = {
     email: string;
     phone: string;
     addressLines: string[];
+    city?: string;
+    state?: string;
   };
 };
 
@@ -632,8 +634,11 @@ export function ShipEngineBuyPanel({
     Boolean(hasActiveDeal) &&
     selectedPick?.addressStatus !== "pickup" &&
     selectedPick?.shippingRequired !== false &&
-    ((shipToQuery.data && !shipToReady) ||
-      (queueAddressStatus && queueAddressStatus !== "ready" && !shipToReady));
+    !shipToQuery.isError &&
+    !shipToReady &&
+    (shipToQuery.data
+      ? !shipToQuery.data.ready
+      : queueAddressStatus === "missing" || queueAddressStatus === "partial");
 
   const copyChaseDraft = async (item: ProductionQueueItem) => {
     const draft = item.chaseDraft?.trim();
@@ -654,16 +659,36 @@ export function ShipEngineBuyPanel({
   };
 
   const addressChip = (item: ProductionQueueItem) => {
-    const pill = addressStatusPill(item.addressStatus ?? "missing");
+    const live = item.dealId === dealId ? shipToQuery.data : undefined;
+    const liveError = item.dealId === dealId && shipToQuery.isError && !live?.ready;
+    if (liveError) {
+      return (
+        <StatusPill
+          tone="neutral"
+          icon={MapPin}
+          label="HubSpot busy, retry"
+          testId={`status-shipengine-address-${item.dealId}`}
+        />
+      );
+    }
+    const status: AddressStatus = live?.ready ? "ready" : (item.addressStatus ?? "unknown");
+    const liveCity = live?.contact.city?.trim();
+    const liveState = live?.contact.state?.trim();
+    const summary = live?.ready
+      ? liveCity && liveState
+        ? `${liveCity}, ${liveState}`
+        : item.addressSummary
+      : item.addressSummary;
+    const pill = addressStatusPill(status);
     return (
       <StatusPill
         tone={pill.tone}
         icon={MapPin}
         label={
-          item.addressStatus === "pickup"
+          status === "pickup"
             ? "Pickup"
-            : item.addressStatus === "ready" && item.addressSummary
-              ? `Address · ${item.addressSummary}`
+            : status === "ready" && summary
+              ? `Address · ${summary}`
               : pill.label
         }
         testId={`status-shipengine-address-${item.dealId}`}
@@ -747,6 +772,14 @@ export function ShipEngineBuyPanel({
   const shipToBlock =
     !hasActiveDeal ? null : shipToQuery.isFetching ? (
       <p className="text-xs text-muted-foreground">Loading HubSpot ship-to…</p>
+    ) : shipToQuery.isError ? (
+      <div
+        className="glance-item flex-col items-stretch gap-1"
+        data-tone="neutral"
+        data-testid="panel-shipengine-ship-to"
+      >
+        <p className="text-sm font-semibold">HubSpot busy, retry</p>
+      </div>
     ) : shipToQuery.data ? (
       <div
         className={cn("glance-item flex-col items-stretch gap-1", !shipToReady && "opacity-90")}
@@ -1218,6 +1251,9 @@ export function ShipEngineBuyPanel({
                             />
                             {item.addressStatus !== "ready" &&
                             item.addressStatus !== "pickup" &&
+                            item.addressStatus !== "unknown" &&
+                            !shipToQuery.data?.ready &&
+                            !shipToQuery.isError &&
                             item.chaseDraft ? (
                               <Button
                                 type="button"
