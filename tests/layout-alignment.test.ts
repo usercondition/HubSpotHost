@@ -1006,7 +1006,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
       await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
-      await settlePage();
+      await page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
       const filtered = current();
       await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
       await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
