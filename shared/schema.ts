@@ -510,6 +510,11 @@ export const orderIntakeLinks = sqliteTable("order_intake_links", {
   /** typed or suggested — which version the buyer confirmed for the label. */
   addressCheckChoice: text("address_check_choice").notNull().default(""),
   addressCheckMessages: text("address_check_messages").notNull().default(""),
+  /** When the buyer checked the name-and-address acknowledgment. Empty until they do. */
+  addressAckAt: text("address_ack_at").notNull().default(""),
+  addressAckSnapshot: text("address_ack_snapshot").notNull().default(""),
+  addressAckTextVersion: text("address_ack_text_version").notNull().default(""),
+  addressAckForm: text("address_ack_form").notNull().default(""),
   confirmedItem: text("confirmed_item").notNull().default(""),
   quantity: integer("quantity").notNull().default(1),
   clientNotes: text("client_notes").notNull().default(""),
@@ -2412,6 +2417,8 @@ export interface DealOpsDetail {
     allowWrites: boolean;
     liveWriteReady: boolean;
   };
+  /** "Client confirmed name and address on <date>" or "Entered by shop". Absent when nobody recorded one. */
+  addressEntryLabel: string | null;
 }
 
 export interface ReturningBuyerProfile {

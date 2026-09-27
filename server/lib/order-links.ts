@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
   address_checked_at TEXT NOT NULL DEFAULT '',
   address_check_choice TEXT NOT NULL DEFAULT '',
   address_check_messages TEXT NOT NULL DEFAULT '',
+  address_ack_at TEXT NOT NULL DEFAULT '',
+  address_ack_snapshot TEXT NOT NULL DEFAULT '',
+  address_ack_text_version TEXT NOT NULL DEFAULT '',
+  address_ack_form TEXT NOT NULL DEFAULT '',
   confirmed_item TEXT NOT NULL DEFAULT '',
   quantity INTEGER NOT NULL DEFAULT 1,
   client_notes TEXT NOT NULL DEFAULT '',
@@ -577,6 +581,10 @@ const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["address_checked_at", "TEXT NOT NULL DEFAULT ''"],
   ["address_check_choice", "TEXT NOT NULL DEFAULT ''"],
   ["address_check_messages", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_at", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_snapshot", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_text_version", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_form", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function ensureOrderIntakeColumns(sqlite: Database.Database): void {
@@ -1112,10 +1120,18 @@ export type IntakeAddressCheck = {
   messages: string[];
 };
 
+export type IntakeAddressAck = {
+  acknowledgedAt: string;
+  snapshot: string;
+  textVersion: string;
+  formSource: string;
+};
+
 export function submitClientOrder(
   token: string,
   input: ClientOrderSubmission,
   check?: IntakeAddressCheck,
+  ack?: IntakeAddressAck,
 ): ClientSubmitResult {
   const lookup = lookupClientOrder(token);
   if (!lookup.ok) return lookup;
@@ -1150,6 +1166,10 @@ export function submitClientOrder(
       addressCheckedAt: check?.checkedAt ?? "",
       addressCheckChoice: check?.choice ?? "",
       addressCheckMessages: JSON.stringify(check?.messages ?? []).slice(0, 4000),
+      addressAckAt: ack?.acknowledgedAt ?? "",
+      addressAckSnapshot: ack?.snapshot ?? "",
+      addressAckTextVersion: ack?.textVersion ?? "",
+      addressAckForm: ack?.formSource ?? "",
       confirmedItem: input.confirmedItem,
       quantity: input.quantity,
       clientNotes: input.clientNotes,

@@ -92,6 +92,7 @@ export default function ClientOrder() {
   const [form, setForm] = useState({ ...EMPTY });
   const [shippingRequired, setShippingRequired] = useState(true);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [addressAcknowledged, setAddressAcknowledged] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [identity, setIdentity] = useState({ email: "", username: "" });
@@ -125,6 +126,7 @@ export default function ClientOrder() {
     setForm({ ...EMPTY });
     setShippingRequired(true);
     setPaymentConfirmed(false);
+    setAddressAcknowledged(false);
     setError("");
     setSubmitted(false);
     setIdentity({ email: "", username: "" });
@@ -200,6 +202,7 @@ export default function ClientOrder() {
         quantity: Number(form.quantity) || 1,
         shippingRequired,
         clientPaymentConfirmed: paymentConfirmed,
+        addressAcknowledged,
         addressDecision: decision,
         noUnit,
       });
@@ -217,8 +220,10 @@ export default function ClientOrder() {
     },
   });
 
-  const set = (key: keyof typeof EMPTY, value: string) =>
+  const set = (key: keyof typeof EMPTY, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
+    setAddressAcknowledged(false);
+  };
 
   const showCapture = (check: CaptureCheck, fields: typeof form, skipUnit = false) => {
     setCapture(check);
@@ -457,7 +462,10 @@ export default function ClientOrder() {
                     <button
                       key={option.label}
                       type="button"
-                      onClick={() => setShippingRequired(option.value)}
+                      onClick={() => {
+                        setShippingRequired(option.value);
+                        setAddressAcknowledged(false);
+                      }}
                       aria-pressed={shippingRequired === option.value}
                       data-testid={`button-shipping-${option.value ? "yes" : "no"}`}
                       className={cn(
@@ -485,6 +493,7 @@ export default function ClientOrder() {
                         shippingPostalCode: next.postalCode,
                         shippingCountry: next.country,
                       }));
+                      setAddressAcknowledged(false);
                       if (phase !== "edit") setPhase("edit");
                     }}
                   />
@@ -522,11 +531,13 @@ export default function ClientOrder() {
                       }));
                       setLabelFields(suggestion);
                       setDecision("accept");
+                      setAddressAcknowledged(false);
                       setPhase("confirm");
                     }}
                     onKeepTyped={() => {
                       setLabelFields(capture.typed);
                       setDecision("override");
+                      setAddressAcknowledged(false);
                       setPhase("confirm");
                     }}
                   />
@@ -551,8 +562,24 @@ export default function ClientOrder() {
                           : undefined
                     }
                     pending={submit.isPending}
-                    onConfirm={() => submit.mutate()}
-                    onEdit={() => setPhase("edit")}
+                    confirmLabel="Send my details to the seller"
+                    identity={{
+                      name: form.clientFullName.trim(),
+                      email: form.clientEmail.trim(),
+                      phone: form.clientPhone.trim(),
+                    }}
+                    acknowledgment={{
+                      checked: addressAcknowledged,
+                      onCheckedChange: setAddressAcknowledged,
+                    }}
+                    onConfirm={() => {
+                      if (!addressAcknowledged) return;
+                      submit.mutate();
+                    }}
+                    onEdit={() => {
+                      setAddressAcknowledged(false);
+                      setPhase("edit");
+                    }}
                   />
                 ) : null}
               </fieldset>
@@ -612,7 +639,10 @@ export default function ClientOrder() {
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 accent-primary"
                   checked={paymentConfirmed}
-                  onChange={(event) => setPaymentConfirmed(event.target.checked)}
+                  onChange={(event) => {
+                    setPaymentConfirmed(event.target.checked);
+                    setAddressAcknowledged(false);
+                  }}
                   data-testid="checkbox-client-payment-confirmed"
                 />
                 <span>

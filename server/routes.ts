@@ -66,6 +66,13 @@ import {
   rememberDealAddressCheck,
 } from "./lib/address-capture";
 import { resolveCaptureSubmit, type CaptureStatus } from "../shared/address-capture";
+import {
+  CLIENT_ADDRESS_ACK_FORM,
+  CLIENT_ADDRESS_ACK_VERSION,
+  SHOP_ADDRESS_FORM_PASTE,
+  buildAddressAckSnapshot,
+} from "../shared/address-ack";
+import { addressEntryLabelFor, publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-ack";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
 import { UltxParseError } from "./lib/ultx";
@@ -1407,6 +1414,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   registerPlateLibraryRoutes(app);
 
+  app.get("/api/address-entry", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const orderKey = typeof req.query.orderKey === "string" ? req.query.orderKey : "";
+    if (!/^(deal|offbook):[0-9]{1,20}$/.test(orderKey)) {
+      return res.status(400).json({ ok: false, error: "Unknown order." });
+    }
+    return res.json({ ok: true, addressEntryLabel: addressEntryLabelFor(orderKey) });
+  });
+
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const result = await buildDealOpsDetail(String(req.params.dealId || ""));
@@ -1784,6 +1800,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           suggestion: ensured.matched,
           messages: ensured.messages,
         },
+        addressEntryLabel: addressEntryLabelFor(`deal:${dealId}`),
         ready: Boolean(address),
         hasContact: Boolean(contact.id),
         missing,
@@ -3401,6 +3418,17 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
           });
         }
       }
+      if (link.addressAckAt.trim()) {
+        await publishClientAddressAcknowledgments(
+          result.deals.map((deal) => deal.dealId),
+          {
+            acknowledgedAt: link.addressAckAt,
+            snapshot: link.addressAckSnapshot,
+            textVersion: link.addressAckTextVersion,
+            formSource: link.addressAckForm || CLIENT_ADDRESS_ACK_FORM,
+          },
+        );
+      }
       return res.status(201).json({
         ok: true,
         result,
@@ -3547,6 +3575,13 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         shippingPostalCode: resolved.fields.zip,
         shippingCountry: resolved.fields.country,
       };
+      if (body.addressAcknowledged !== true) {
+        return res.status(400).json({
+          ok: false,
+          reason: "invalid-details",
+          error: "Confirm that your name and shipping address are correct.",
+        });
+      }
       intakeCheck = {
         status: resolved.storedStatus,
         checkedAt: new Date().toISOString(),
@@ -3554,7 +3589,28 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         messages: check.messages,
       };
     }
-    const result = submitClientOrder(token, submission, intakeCheck);
+    const acknowledgedAt = new Date().toISOString();
+    const intakeAck = submission.shippingRequired
+      ? {
+          acknowledgedAt,
+          snapshot: buildAddressAckSnapshot({
+            fullName: submission.clientFullName,
+            email: submission.clientEmail,
+            phone: submission.clientPhone,
+            address: {
+              street1: submission.shippingStreet,
+              street2: submission.shippingStreet2,
+              city: submission.shippingCity,
+              state: submission.shippingState,
+              zip: submission.shippingPostalCode,
+              country: submission.shippingCountry,
+            },
+          }),
+          textVersion: CLIENT_ADDRESS_ACK_VERSION,
+          formSource: CLIENT_ADDRESS_ACK_FORM,
+        }
+      : undefined;
+    const result = submitClientOrder(token, submission, intakeCheck, intakeAck);
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.status(201).json({ ok: true });
   });
@@ -3863,21 +3919,35 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         lineItems: lineItems ?? undefined,
         orderGroup,
       });
+      const savedAddress = normalizeShipAddress({
+        street1: draft.address,
+        street2: draft.address2,
+        city: draft.city,
+        state: draft.state,
+        zip: draft.postalCode,
+        country: draft.country,
+      }).normalized;
       for (const deal of result.deals) {
         rememberDealAddressCheck({
           dealId: deal.dealId,
-          fields: normalizeShipAddress({
-            street1: draft.address,
-            street2: draft.address2,
-            city: draft.city,
-            state: draft.state,
-            zip: draft.postalCode,
-            country: draft.country,
-          }).normalized,
+          fields: savedAddress,
           status: addressStatus,
           messages: addressMessages,
           suggestion: addressSuggestion,
         });
+        if (paidBody.addressFormSource === SHOP_ADDRESS_FORM_PASTE && savedAddress.street1) {
+          recordShopAddressEntry({
+            orderKey: `deal:${deal.dealId}`,
+            formSource: SHOP_ADDRESS_FORM_PASTE,
+            snapshot: buildAddressAckSnapshot({
+              fullName: draft.fullName,
+              email: draft.email,
+              phone: draft.phone,
+              address: savedAddress,
+            }),
+            sourceKind: "manual",
+          });
+        }
       }
       return res.status(201).json({
         ok: true,

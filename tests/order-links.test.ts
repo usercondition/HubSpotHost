@@ -82,6 +82,7 @@ const submission = {
   quantity: 2,
   clientNotes: "Please pack the banner separately.",
   clientPaymentConfirmed: true,
+  addressAcknowledged: true,
 };
 
 function newLink(overrides: Partial<{ expiryDays: number }> = {}) {
@@ -752,6 +753,90 @@ test("shipping submissions require phone and a complete address", async () => {
     .where(eq(orderIntakeLinks.id, create.body.link.id))
     .get();
   assert.equal(row?.shippingStreet2, submission.shippingStreet2);
+});
+
+test("a shipping submit records the name and address acknowledgment, and pickup does not require it", async () => {
+  const create = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-ACK",
+    itemDescription: "Ack kit",
+    agreedAmount: "40",
+  });
+  assert.equal(create.status, 201);
+  const token: string = create.body.token;
+
+  const missing = await publicRequest("/api/client-order/submit", {
+    token,
+    ...submission,
+    addressAcknowledged: false,
+    snapshot: "HACKED SNAPSHOT",
+  });
+  assert.equal(missing.status, 400);
+  assert.match(missing.body.error, /name and shipping address/);
+
+  const ok = await publicRequest("/api/client-order/submit", {
+    token,
+    ...submission,
+    snapshot: "HACKED SNAPSHOT",
+  });
+  assert.equal(ok.status, 201);
+  const row = store
+    .getDb()
+    .select()
+    .from(orderIntakeLinks)
+    .where(eq(orderIntakeLinks.id, create.body.link.id))
+    .get();
+  assert.ok(row?.addressAckAt);
+  assert.match(row.addressAckSnapshot, /Jane Smith/);
+  assert.match(row.addressAckSnapshot, /jane@example.com/);
+  assert.match(row.addressAckSnapshot, /619-555-0199/);
+  assert.match(row.addressAckSnapshot, /123 Resin Way/);
+  assert.match(row.addressAckSnapshot, /Apt 4B/);
+  assert.match(row.addressAckSnapshot, /San Diego, CA 92101/);
+  assert.equal(row.addressAckSnapshot.includes("HACKED"), false);
+  assert.equal(row.addressAckTextVersion, "v1");
+  assert.equal(row.addressAckForm, "client-order");
+
+  const approved = await ownerRequest("POST", `/api/order-links/${create.body.link.id}/create-order`, {
+    paymentVerified: true,
+  });
+  assert.equal(approved.status, 201);
+  const dealId: string = approved.body.result.dealId;
+  const { readAddressAcknowledgment } = await import("../server/lib/address-ack");
+  const { listOrderUpdates } = await import("../server/lib/order-updates");
+  const { formatAddressEntryLabel } = await import("../shared/address-ack");
+  const ack = readAddressAcknowledgment(`deal:${dealId}`);
+  assert.equal(ack?.source, "client");
+  assert.equal(ack?.textVersion, "v1");
+  assert.equal(ack?.formSource, "client-order");
+  assert.match(ack?.snapshot ?? "", /Jane Smith/);
+  assert.equal(formatAddressEntryLabel(ack)?.startsWith("Client confirmed name and address on "), true);
+  const logged = listOrderUpdates(`deal:${dealId}`).map((entry) => entry.text).join("\n");
+  assert.match(logged, /Client confirmed name and address/);
+  assert.match(logged, /checkbox v1 · form client-order/);
+  assert.equal(
+    mockCalls.some((call) => call.url.includes("print_client_confirmed_address")),
+    false,
+  );
+
+  const pickup = await ownerRequest("POST", "/api/order-links", {
+    internalLabel: "MIG-ACK-PICKUP",
+    itemDescription: "Pickup kit",
+    agreedAmount: "20",
+  });
+  const pickupSubmit = await publicRequest("/api/client-order/submit", {
+    token: pickup.body.token,
+    ...submission,
+    shippingRequired: false,
+    addressAcknowledged: false,
+  });
+  assert.equal(pickupSubmit.status, 201);
+  const pickupRow = store
+    .getDb()
+    .select()
+    .from(orderIntakeLinks)
+    .where(eq(orderIntakeLinks.id, pickup.body.link.id))
+    .get();
+  assert.equal(pickupRow?.addressAckAt, "");
 });
 
 test("the owner can copy a live form link, and reissue replaces a legacy hash-only link", async () => {

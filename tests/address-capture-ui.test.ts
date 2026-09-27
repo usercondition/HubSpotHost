@@ -160,10 +160,24 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
       });
       await page.locator("[data-testid='button-use-standardized-address']").click();
       await page.locator("[data-testid='panel-label-confirm']").waitFor();
-      const confirmText = await page.locator("[data-testid='panel-label-confirm']").innerText();
+      const confirm = page.locator("[data-testid='panel-label-confirm']");
+      const confirmText = await confirm.innerText();
       assert.match(confirmText, /This is exactly what will go on your shipping label/);
+      assert.match(confirmText, /Wayne Hood/);
+      assert.match(confirmText, /wayne@example.com/);
+      assert.match(confirmText, /734-555-0100/);
       assert.match(confirmText, /10909 Hannan Road/);
-      await page.locator("[data-testid='panel-label-confirm']").screenshot({
+      assert.match(confirmText, /I confirm my name and shipping address above are correct/);
+      const ack = page.locator("[data-testid='checkbox-client-address-ack']");
+      const confirmButton = page.locator("[data-testid='button-confirm-label-address']");
+      assert.equal(await ack.isChecked(), false);
+      assert.equal(await confirmButton.isDisabled(), true);
+      await ack.check();
+      assert.equal(await confirmButton.isDisabled(), false);
+      await page.locator("[data-testid='input-client-phone']").fill("734-555-0199");
+      assert.equal(await ack.isChecked(), false);
+      assert.equal(await confirmButton.isDisabled(), true);
+      await confirm.screenshot({
         path: `/opt/cursor/artifacts/address-confirm-${suffix}.png`,
       });
     };

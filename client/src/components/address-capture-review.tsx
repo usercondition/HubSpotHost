@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatLabelAddress, type CaptureCheck } from "@shared/address-capture";
+import { CLIENT_ADDRESS_ACK_TEXT } from "@shared/address-ack";
 import type { ShipAddressFields } from "@shared/ship-address";
 
 function AddressBlock({ label, fields, testId }: { label: string; fields: ShipAddressFields; testId: string }) {
@@ -108,6 +109,8 @@ export function LabelConfirmCard({
   onConfirm,
   onEdit,
   confirmLabel = "Yes, this address is correct",
+  identity,
+  acknowledgment,
 }: {
   fields: ShipAddressFields;
   note?: string;
@@ -115,15 +118,44 @@ export function LabelConfirmCard({
   onConfirm: () => void;
   onEdit: () => void;
   confirmLabel?: string;
+  identity?: { name: string; email: string; phone: string };
+  /** Required on the client form. Paste-to-fill leaves this off so the shop can save without it. */
+  acknowledgment?: { checked: boolean; onCheckedChange: (checked: boolean) => void };
 }) {
+  const needsAck = Boolean(acknowledgment);
   return (
     <div className="space-y-3 rounded-md border border-primary/40 bg-primary/5 p-3" data-testid="panel-label-confirm">
       <p className="text-sm font-semibold">This is exactly what will go on your shipping label</p>
       {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
+      {identity ? (
+        <div className="text-sm" data-testid="text-label-identity">
+          <p>{identity.name}</p>
+          {identity.email ? <p>{identity.email}</p> : null}
+          {identity.phone ? <p>{identity.phone}</p> : null}
+        </div>
+      ) : null}
       <p className="whitespace-pre-line text-sm" data-testid="text-label-address">
         {formatLabelAddress(fields)}
       </p>
-      <Button type="button" className="w-full" onClick={onConfirm} disabled={pending} data-testid="button-confirm-label-address">
+      {acknowledgment ? (
+        <label className="flex cursor-pointer items-start gap-3" data-testid="control-client-address-ack">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-primary"
+            checked={acknowledgment.checked}
+            onChange={(event) => acknowledgment.onCheckedChange(event.target.checked)}
+            data-testid="checkbox-client-address-ack"
+          />
+          <span className="text-sm">{CLIENT_ADDRESS_ACK_TEXT}</span>
+        </label>
+      ) : null}
+      <Button
+        type="button"
+        className="w-full"
+        onClick={onConfirm}
+        disabled={pending || (needsAck && !acknowledgment?.checked)}
+        data-testid="button-confirm-label-address"
+      >
         {confirmLabel}
       </Button>
       <Button type="button" variant="ghost" className="w-full" onClick={onEdit} data-testid="button-edit-label-address">

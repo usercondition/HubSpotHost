@@ -18,6 +18,8 @@ import {
 } from "./deal-ops";
 import { hubspotRequest } from "./hubspot";
 import { appendOrderUpdate } from "./order-updates";
+import { recordShopAddressEntry } from "./address-ack";
+import { SHOP_ADDRESS_FORM_CLEANUP, buildAddressAckSnapshot } from "../../shared/address-ack";
 import { loadProductionQueue } from "./queue-loader";
 import {
   addressBelongsOnAudit,
@@ -215,6 +217,17 @@ export async function applyAddressCleanup(input: {
     text: cleanupLogText(normalized),
     source: "system",
     author: "Miguel",
+  });
+  recordShopAddressEntry({
+    orderKey: `deal:${input.dealId}`,
+    formSource: SHOP_ADDRESS_FORM_CLEANUP,
+    snapshot: buildAddressAckSnapshot({
+      fullName: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      address: normalized.normalized,
+    }),
+    sourceKind: "system",
   });
 
   return {

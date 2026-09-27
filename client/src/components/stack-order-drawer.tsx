@@ -16,7 +16,7 @@ import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
 import { drawerPanelVariants, drawerScrimVariants, drawerTransition } from "@/lib/motion";
 import { PasteAddressBox } from "@/components/paste-address";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
 
 type DrawerOps = {
@@ -24,6 +24,7 @@ type DrawerOps = {
   hubspotPortalId?: string | null;
   plates?: Array<{ id: number; fileName: string }>;
   checklist?: { trackingNumber?: string; labelBought?: boolean };
+  addressEntryLabel?: string | null;
 };
 
 const FOCUSABLE = "a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex='-1'])";
@@ -104,6 +105,20 @@ export function StackOrderDrawer({
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLElement | null>(null);
   const dealId = row?.kind === "deal" ? row.dealId : null;
+  const offbookKey = row?.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : null;
+  const offbookEntry = useQuery({
+    queryKey: ["/api/address-entry", offbookKey],
+    enabled: open && Boolean(offbookKey),
+    queryFn: async () => {
+      const response = await apiRequest(
+        "GET",
+        `/api/address-entry?orderKey=${encodeURIComponent(offbookKey || "")}`,
+        undefined,
+        { headers },
+      );
+      return (await response.json()) as { addressEntryLabel?: string | null };
+    },
+  });
   const ops = useQuery({
     queryKey: ["/api/deal-ops", dealId],
     enabled: open && Boolean(dealId),
@@ -206,6 +221,11 @@ export function StackOrderDrawer({
               <h2 id="stack-drawer-title" className="text-lg font-semibold tracking-tight">
                 {orderTitle(row.name, row.contactName)}
               </h2>
+              {ops.data?.addressEntryLabel || offbookEntry.data?.addressEntryLabel ? (
+                <p className="mt-2 text-xs text-muted-foreground" data-testid="text-address-entry">
+                  {ops.data?.addressEntryLabel || offbookEntry.data?.addressEntryLabel}
+                </p>
+              ) : null}
               <p className="mt-1 text-sm text-muted-foreground">
                 <span data-testid="drawer-customer">{row.contactName?.trim() || "No customer"}</span>
                 {" · "}
@@ -259,6 +279,11 @@ export function StackOrderDrawer({
                       },
                       { headers },
                     );
+                    await queryClient.invalidateQueries({ queryKey: ["/api/deal-ops", row.dealId] });
+                    const entryKey = row.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : null;
+                    if (entryKey) {
+                      await queryClient.invalidateQueries({ queryKey: ["/api/address-entry", entryKey] });
+                    }
                   }}
                 />
               </div>

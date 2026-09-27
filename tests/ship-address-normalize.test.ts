@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
 import { applyAddressCleanup, gateLabelAddress } from "../server/lib/label-address";
+import { readAddressAcknowledgment } from "../server/lib/address-ack";
+import { formatAddressEntryLabel } from "../shared/address-ack";
 import {
   addressBelongsOnAudit,
   ensureAddressCheck,
@@ -210,6 +212,11 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     assert.equal(methods.includes("PATCH"), false);
     const logged = listOrderUpdates("deal:349919419125").map((row) => row.text).join("\n");
     assert.match(logged, /10909 Hannan Rd, Romulus, Michigan, 48174/);
+    assert.match(logged, /Entered by shop/);
+    const ack = readAddressAcknowledgment("deal:349919419125");
+    assert.equal(ack?.source, "shop");
+    assert.equal(ack?.formSource, "hubspot-cleanup");
+    assert.equal(formatAddressEntryLabel(ack), "Entered by shop");
     assert.match(logged, /10909 Hannan Rd"/);
     assert.match(logged, /Michigan/);
     assert.match(logged, /"MI"/);
@@ -217,11 +224,13 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     invalidateDealContactCache("349919419125");
     process.env.DRY_RUN = "false";
     let patched = "";
+    const patchedUrls: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       if (method === "PATCH") {
         patched = String(init?.body ?? "");
+        patchedUrls.push(url);
         return jsonResponse({ id: "9001" });
       }
       if (url.includes("/associations/contacts")) {
@@ -250,6 +259,8 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     assert.equal(body.properties.state, "MI");
     assert.equal(body.properties.zip, "48174");
     assert.equal(body.properties.country, "US");
+    assert.equal(patchedUrls.some((url) => url.includes("print_client_confirmed_address")), false);
+    assert.equal(patchedUrls.every((url) => url.includes("/contacts/")), true);
   });
 
   test("an unverified correction blocks the buy until it is accepted", async () => {

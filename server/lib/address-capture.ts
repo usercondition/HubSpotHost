@@ -22,6 +22,8 @@ import { getConfig, resolveWriteDecision } from "./config";
 import { fetchDealAssociatedContact, invalidateDealContactCache } from "./deal-ops";
 import { hubspotRequest } from "./hubspot";
 import { appendOrderUpdate } from "./order-updates";
+import { recordShopAddressEntry } from "./address-ack";
+import { SHOP_ADDRESS_FORM_PASTE, buildAddressAckSnapshot } from "../../shared/address-ack";
 import { updateOffbook } from "./priority-stack";
 import type { ShipEngineMatchedAddress } from "./shipengine";
 
@@ -191,6 +193,12 @@ export async function applyCapturedAddress(input: {
       source: "manual",
       author: "Miguel",
     });
+    recordShopAddressEntry({
+      orderKey: `offbook:${offbookId}`,
+      formSource: SHOP_ADDRESS_FORM_PASTE,
+      snapshot: formatLabelAddress(resolved.fields),
+      sourceKind: "manual",
+    });
     return {
       ok: true,
       body: {
@@ -244,6 +252,17 @@ export async function applyCapturedAddress(input: {
     text: logText(before, resolved.fields, resolved.storedStatus),
     source: "manual",
     author: "Miguel",
+  });
+  recordShopAddressEntry({
+    orderKey: `deal:${dealId}`,
+    formSource: SHOP_ADDRESS_FORM_PASTE,
+    snapshot: buildAddressAckSnapshot({
+      fullName: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      address: resolved.fields,
+    }),
+    sourceKind: "manual",
   });
   return {
     ok: true,

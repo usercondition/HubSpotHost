@@ -229,6 +229,7 @@ type ShipToResponse = {
   original?: ShipAddressFields;
   normalized?: ShipAddressFields;
   validation?: AddressValidation;
+  addressEntryLabel?: string | null;
   contact: {
     id: string | null;
     name: string;
@@ -1009,6 +1010,11 @@ export function ShipEngineBuyPanel({
               Copy chase draft
             </Button>
           </div>
+        ) : null}
+        {shipToQuery.data.addressEntryLabel ? (
+          <p className="text-xs text-muted-foreground" data-testid="text-address-entry">
+            {shipToQuery.data.addressEntryLabel}
+          </p>
         ) : null}
         {shipToQuery.data.validation?.status === "verified" && shipToQuery.data.validation.checkedAt ? (
           <p className="text-xs text-chart-4" data-testid="text-address-verified">

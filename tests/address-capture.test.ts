@@ -17,6 +17,7 @@ import { createOrderLink, getOrderLink, resetOrderLinkStore, submitClientOrder }
 import { createOffbook } from "../server/lib/priority-stack";
 import { listOrderUpdates } from "../server/lib/order-updates";
 import { resetAddressCheckOutage } from "../server/lib/address-checks";
+import { readAddressAcknowledgment } from "../server/lib/address-ack";
 import type { ClientOrderSubmission } from "../shared/schema";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -278,6 +279,10 @@ describe("address capture save", { concurrency: 1 }, () => {
     assert.equal(calls.length, 0);
     const logged = listOrderUpdates(`offbook:${row.id}`).map((entry) => entry.text).join("\n");
     assert.match(logged, /10909 Hannan Rd/);
+    assert.match(logged, /Entered by shop/);
+    const ack = readAddressAcknowledgment(`offbook:${row.id}`);
+    assert.equal(ack?.source, "shop");
+    assert.equal(ack?.formSource, "paste");
   });
 
   test("a client submission stores the validation status with the split address", () => {

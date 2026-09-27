@@ -89,6 +89,7 @@ export default function PaidOrders() {
   const [assistHints, setAssistHints] = useState<PaidOrderAnalysis | null>(null);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
   const [addressDecision, setAddressDecision] = useState("");
+  const [addressFromPaste, setAddressFromPaste] = useState(false);
   const [noUnit, setNoUnit] = useState(false);
   const [addressGate, setAddressGate] = useState<(CaptureCheck & { code?: string }) | null>(null);
   const [unitDraft, setUnitDraft] = useState("");
@@ -306,6 +307,7 @@ export default function PaidOrders() {
           lineItems: cleanedLines,
           addressDecision,
           noUnit,
+          addressFormSource: addressFromPaste ? "paste" : "",
         },
         { headers },
       );
@@ -635,6 +637,7 @@ export default function PaidOrders() {
                       }));
                       setAddressDecision(choice);
                       setNoUnit(skippedUnit);
+                      setAddressFromPaste(true);
                       setCreated(null);
                     }}
                   />
