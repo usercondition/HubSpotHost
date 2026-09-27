@@ -47,33 +47,55 @@ const FILE = {
 
 function rle(white: boolean, length: number): number[] {
   if (length < 1) return [];
-  return [0x80 | (white ? 0x7f : 0), length];
+  const head = 0x80 | (white ? 0x7f : 0);
+  if (length < 0x80) return [head, length];
+  if (length < 0x4000) return [head, 0x80 | (length >> 8), length & 0xff];
+  return [head, 0xc0 | ((length >> 16) & 0x1f), (length >> 8) & 0xff, length & 0xff];
 }
 
-function testPyramidCtb(): Buffer {
-  const width = 48;
-  const height = 48;
-  const layerCount = 16;
+/** Several separated parts and a thin support, at 0.05 mm so the viewer frames the mesh. */
+function testPartsCtb(): Buffer {
+  const pixel = 0.05;
+  const width = 480;
+  const height = 320;
+  const layerCount = 140;
   const tableOffset = 0x80;
+  const mm = (value: number) => Math.round(value / pixel);
+  const boxes = [
+    { x0: mm(2), x1: mm(10), y0: mm(2), y1: mm(8), z0: mm(1.6), z1: mm(6.5) },
+    { x0: mm(14), x1: mm(19), y0: mm(2.4), y1: mm(6.4), z0: mm(2), z1: mm(6) },
+    { x0: mm(4), x1: mm(12), y0: mm(11), y1: mm(12.4), z0: mm(1.2), z1: mm(5.5) },
+    { x0: mm(4), x1: mm(4.8), y0: mm(4), y1: mm(4.8), z0: 0, z1: mm(2.2) },
+    { x0: mm(7), x1: mm(7.8), y0: mm(5), y1: mm(5.8), z0: 0, z1: mm(2.2) },
+    { x0: mm(21), x1: mm(21.8), y0: mm(8), y1: mm(8.8), z0: 0, z1: mm(3) },
+  ];
   const layers: Buffer[] = [];
   for (let layer = 0; layer < layerCount; layer += 1) {
-    const inset = Math.min(18, layer);
     const bytes: number[] = [];
     for (let y = 0; y < height; y += 1) {
-      const solid = y >= inset && y < height - inset;
-      if (!solid) {
-        bytes.push(...rle(false, width));
-        continue;
+      const spans: Array<[number, number]> = [];
+      for (const box of boxes) {
+        if (layer < box.z0 || layer >= box.z1 || y < box.y0 || y >= box.y1) continue;
+        spans.push([box.x0, box.x1]);
       }
-      const x0 = inset;
-      const x1 = width - inset;
-      bytes.push(...rle(false, x0), ...rle(true, x1 - x0), ...rle(false, width - x1));
+      spans.sort((a, b) => a[0] - b[0]);
+      let cursor = 0;
+      for (const [x0, x1] of spans) {
+        if (x0 > cursor) bytes.push(...rle(false, x0 - cursor));
+        bytes.push(...rle(true, x1 - x0));
+        cursor = x1;
+      }
+      if (cursor < width) bytes.push(...rle(false, width - cursor));
     }
     layers.push(Buffer.from(bytes));
   }
   const dataStart = tableOffset + layerCount * 36;
   const file = Buffer.alloc(dataStart + layers.reduce((sum, layer) => sum + layer.length, 0));
   file.writeUInt32LE(0x12fd0086, 0);
+  file.writeFloatLE(width * pixel, 0x08);
+  file.writeFloatLE(height * pixel, 0x0c);
+  file.writeFloatLE(layerCount * pixel, 0x10);
+  file.writeFloatLE(pixel, 0x20);
   file.writeUInt32LE(width, 0x34);
   file.writeUInt32LE(height, 0x38);
   file.writeUInt32LE(tableOffset, 0x40);
@@ -112,15 +134,15 @@ async function freePort(): Promise<number> {
 
 test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, async () => {
   mkdirSync(ARTIFACTS, { recursive: true });
-  const pyramid = testPyramidCtb();
+  const parts = testPartsCtb();
   const meshStarted = Date.now();
   const MESH = await buildPlateGlb(
-    async (start, length) => pyramid.subarray(start, Math.min(pyramid.length, start + length)),
-    pyramid.length,
+    async (start, length) => parts.subarray(start, Math.min(parts.length, start + length)),
+    parts.length,
   );
   const meshMs = Date.now() - meshStarted;
-  assert.ok(MESH.length > 100 && MESH.length < 4 * 1024 * 1024, `test mesh ${MESH.length} bytes in ${meshMs}ms`);
-  console.log(`[plate-mesh] test ctb pyramid ${MESH.length} bytes in ${meshMs}ms`);
+  assert.ok(MESH.length > 100 && MESH.length <= 8 * 1024 * 1024, `test mesh ${MESH.length} bytes in ${meshMs}ms`);
+  console.log(`[plate-mesh] test ctb parts ${MESH.length} bytes in ${meshMs}ms`);
   const port = await freePort();
   const child: ChildProcess = spawn("node", ["dist/index.cjs"], {
     env: { ...process.env, NODE_ENV: "production", PORT: String(port), DRY_RUN: "true" },
@@ -218,6 +240,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-layers-desktop-1440.png` });
     await page.locator("[data-testid='button-view-model']").click();
     await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+    await page.locator("[data-testid='button-reset-mesh-view']").click();
     await page.waitForTimeout(500);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-desktop-1440.png` });
 
@@ -226,6 +249,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-layers-phone-390.png` });
     await page.locator("[data-testid='button-view-model']").click();
     await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+    await page.locator("[data-testid='button-reset-mesh-view']").click();
     await page.waitForTimeout(500);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-phone-390.png` });
     assert.deepEqual(pageErrors, []);

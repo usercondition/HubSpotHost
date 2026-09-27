@@ -346,6 +346,13 @@ export interface CtbLayerPlan {
   xorKey: number;
   tableOffset: number;
   tableBytes: number;
+  /** Millimeters per pixel. 0.05 when the header has no usable build volume. */
+  pixelMmX: number;
+  pixelMmY: number;
+  /** Millimeters per layer. 0.05 when the header has no usable layer height. */
+  layerMm: number;
+  plateMmX: number;
+  plateMmY: number;
 }
 
 export interface CtbLayerEntry {
@@ -377,6 +384,9 @@ export function ctbLayerPlan(reader: CtbReader): CtbLayerPlan {
       xorKey: u32(settings, 128) ?? 0,
       fileSize: reader.size,
       stride: ENCRYPTED_POINTER_STRIDE,
+      buildX: f32(settings, 12),
+      buildY: f32(settings, 16),
+      layerHeight: f32(settings, 36),
     });
   }
   const header = reader.read(0, Math.min(CLASSIC_HEADER_READ, reader.size));
@@ -391,6 +401,9 @@ export function ctbLayerPlan(reader: CtbReader): CtbLayerPlan {
     xorKey: header.length >= 0x68 ? (u32(header, 0x64) ?? 0) : 0,
     fileSize: reader.size,
     stride: CLASSIC_LAYER_STRIDE,
+    buildX: f32(header, 0x08),
+    buildY: f32(header, 0x0c),
+    layerHeight: f32(header, 0x20),
   });
 }
 
@@ -404,6 +417,9 @@ function layerPlanFromSettings(
     xorKey: number;
     fileSize: number;
     stride: number;
+    buildX: number | null;
+    buildY: number | null;
+    layerHeight: number | null;
   },
 ): CtbLayerPlan {
   const layerCount = layerCountOrNull(input.layerCount);
@@ -419,6 +435,7 @@ function layerPlanFromSettings(
   if (input.tableOffset < 0 || input.tableOffset + tableBytes > input.fileSize) {
     throw new CtbParseError("That CTB layer table does not fit the file");
   }
+  const scale = plateScale(input.buildX, input.buildY, input.layerHeight, width, height);
   return {
     encrypted,
     layerCount,
@@ -427,7 +444,29 @@ function layerPlanFromSettings(
     xorKey: input.xorKey >>> 0,
     tableOffset: input.tableOffset,
     tableBytes,
+    ...scale,
   };
+}
+
+const FALLBACK_PITCH_MM = 0.05;
+
+function plateScale(
+  buildX: number | null,
+  buildY: number | null,
+  layerHeight: number | null,
+  width: number,
+  height: number,
+): Pick<CtbLayerPlan, "pixelMmX" | "pixelMmY" | "layerMm" | "plateMmX" | "plateMmY"> {
+  const axis = (buildMm: number | null, pixels: number) => {
+    const plate = buildMm !== null && buildMm > 0.5 && buildMm < 5_000 ? buildMm : pixels * FALLBACK_PITCH_MM;
+    const pixel = plate / pixels;
+    if (pixel < 0.001 || pixel > 2) return { plate: pixels * FALLBACK_PITCH_MM, pixel: FALLBACK_PITCH_MM };
+    return { plate, pixel };
+  };
+  const x = axis(buildX, width);
+  const y = axis(buildY, height);
+  const layerMm = layerHeight !== null && layerHeight >= 0.001 && layerHeight <= 1 ? layerHeight : FALLBACK_PITCH_MM;
+  return { pixelMmX: x.pixel, pixelMmY: y.pixel, layerMm, plateMmX: x.plate, plateMmY: y.plate };
 }
 
 /** Parse a cached layer table buffer into per-layer offsets. Pixels are not included. */

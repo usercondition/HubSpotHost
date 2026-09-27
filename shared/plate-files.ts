@@ -206,6 +206,8 @@ export interface PlateFileRecord {
   meshDriveFileId: string;
   /** "" while missing, "preparing" in flight, "ready" when finished (even if the plate was empty). */
   meshState: string;
+  /** Mesher generation. Older ready meshes are rebuilt by plate backfill. */
+  meshVersion: number;
 }
 
 export interface PlateLibraryPending {

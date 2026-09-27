@@ -4,10 +4,10 @@
  */
 import { Readable } from "node:stream";
 import { libraryFolderName, librarySliceName } from "../../shared/plate-files";
-import { ensureLibraryFolder, openDriveMedia, uploadDriveFile } from "./google-drive";
+import { ensureLibraryFolder, openDriveMedia, trashDriveFile, uploadDriveFile } from "./google-drive";
 import { getPlateFile, listPlateIdsNeedingMesh, markPlateMesh } from "./plate-files";
 import { plateMeshEpoch, registerPlateMeshGate } from "./plate-mesh-gate";
-import { buildPlateGlb } from "./plate-mesh";
+import { PLATE_MESH_VERSION, buildPlateGlb } from "./plate-mesh";
 
 /** One plate at a time. A 480MB decode must not overlap another. */
 const MESH_JOB_CONCURRENCY = 1;
@@ -47,20 +47,37 @@ async function readPlateRange(fileId: string, start: number, length: number): Pr
   return bytes.length > 0 ? bytes : null;
 }
 
+function meshCurrent(file: { meshState: string; meshVersion: number }): boolean {
+  return file.meshState === "ready" && file.meshVersion >= PLATE_MESH_VERSION;
+}
+
+async function retireMesh(previousId: string, nextId: string): Promise<void> {
+  if (!previousId || previousId === nextId) return;
+  try {
+    await trashDriveFile(previousId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "trash failed";
+    console.error("[plate-mesh] kept the previous GLB", previousId, message);
+  }
+}
+
 async function generateOne(driveFileId: string, epoch: number): Promise<void> {
   const live = () => plateMeshEpoch() === epoch;
   const file = getPlateFile(driveFileId);
-  if (!live() || !file || file.meshState === "ready" || !/\.ctb$/i.test(file.name)) return;
+  if (!live() || !file || meshCurrent(file) || !/\.ctb$/i.test(file.name)) return;
+  const previousId = file.meshDriveFileId;
   const size = file.sizeBytes ?? 0;
   if (size < 1) {
-    markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: "" });
+    markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: "", meshVersion: PLATE_MESH_VERSION });
+    await retireMesh(previousId, "");
     return;
   }
-  markPlateMesh(driveFileId, { meshState: "preparing", meshDriveFileId: "" });
+  markPlateMesh(driveFileId, { meshState: "preparing" });
   const glb = await buildPlateGlb((start, length) => readPlateRange(file.driveFileId, start, length), size);
   if (!live()) return;
   if (glb.length < 20) {
-    markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: "" });
+    markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: "", meshVersion: PLATE_MESH_VERSION });
+    await retireMesh(previousId, "");
     return;
   }
   const folder = await ensureLibraryFolder(libraryFolderName(file.kit || "Kit"));
@@ -73,7 +90,8 @@ async function generateOne(driveFileId: string, epoch: number): Promise<void> {
     body: Readable.from(glb),
   });
   if (!uploaded.id) throw new Error("Drive did not confirm the mesh.");
-  markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: uploaded.id });
+  markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: uploaded.id, meshVersion: PLATE_MESH_VERSION });
+  await retireMesh(previousId, uploaded.id);
 }
 
 async function drain(): Promise<void> {
@@ -116,7 +134,7 @@ export function enqueuePlateMesh(driveFileId: string): boolean {
   const id = driveFileId.trim();
   if (!id || pending.has(id) || running.has(id)) return false;
   const file = getPlateFile(id);
-  if (!file || !/\.ctb$/i.test(file.name) || file.meshState === "ready") return false;
+  if (!file || !/\.ctb$/i.test(file.name) || meshCurrent(file)) return false;
   pending.add(id);
   if (!draining) {
     draining = true;

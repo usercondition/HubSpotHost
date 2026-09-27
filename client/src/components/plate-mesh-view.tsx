@@ -1,7 +1,8 @@
 /**
  * Library 3D view. three.js is imported here so the Library page does not load it up front.
+ * The camera frames the mesh. The plate outline stays on the floor and does not set the fit.
  */
-export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promise<() => void> {
+export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promise<{ dispose: () => void; reset: () => void }> {
   const THREE = await import("three");
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
   const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
@@ -30,18 +31,15 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   const plate = gltf.scene.children[0]?.userData?.plate as [number, number] | undefined;
   const plateW = Math.max(plate?.[0] ?? meshBox.max.x, 1);
   const plateD = Math.max(plate?.[1] ?? meshBox.max.z, 1);
-  const span = Math.max(plateW, plateD, meshBox.getSize(new THREE.Vector3()).y, 1);
-  const pad = Math.max(span * 0.03, 0.15);
-  const floorY = meshBox.min.y - Math.max(span * 0.012, 0.02);
-  const fit = meshBox.clone();
-  fit.expandByPoint(new THREE.Vector3(-pad, floorY, -pad));
-  fit.expandByPoint(new THREE.Vector3(plateW + pad, floorY, plateD + pad));
+  const size = meshBox.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 1);
+  const floorY = meshBox.min.y - Math.max(span * 0.012, 0.15);
   const outline = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-pad, floorY, -pad),
-      new THREE.Vector3(plateW + pad, floorY, -pad),
-      new THREE.Vector3(plateW + pad, floorY, plateD + pad),
-      new THREE.Vector3(-pad, floorY, plateD + pad),
+      new THREE.Vector3(0, floorY, 0),
+      new THREE.Vector3(plateW, floorY, 0),
+      new THREE.Vector3(plateW, floorY, plateD),
+      new THREE.Vector3(0, floorY, plateD),
     ]),
     new THREE.LineBasicMaterial({ color: 0x9aa3b2 }),
   );
@@ -51,8 +49,8 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   key.position.set(span, span * 2, span);
   scene.add(key);
 
-  const center = fit.getCenter(new THREE.Vector3());
-  const radius = Math.max(fit.getBoundingSphere(new THREE.Sphere()).radius, 0.5);
+  const center = meshBox.getCenter(new THREE.Vector3());
+  const radius = Math.max(meshBox.getBoundingSphere(new THREE.Sphere()).radius, 0.5);
   /** Front is +Z. A 3/4 view sits up and to the right of that edge. */
   const view = new THREE.Vector3(0.75, 0.62, 1).normalize();
 
@@ -65,7 +63,7 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
     const distance = (radius / Math.sin(Math.min(fovV, fovH) / 2)) * 1.22;
     camera.position.copy(center).addScaledVector(view, distance);
     camera.near = Math.max(distance / 200, 0.01);
-    camera.far = distance * 8;
+    camera.far = Math.max(distance * 8, plateW + plateD);
     camera.lookAt(center);
     camera.updateProjectionMatrix();
     controls.target.copy(center);
@@ -87,13 +85,13 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   const observer = new ResizeObserver(() => frameCamera());
   observer.observe(host);
 
-  return () => {
+  const dispose = () => {
     cancelAnimationFrame(frame);
     observer.disconnect();
     controls.dispose();
     renderer.dispose();
     outline.geometry.dispose();
-    outline.material.dispose();
+    (outline.material as { dispose(): void }).dispose();
     gltf.scene.traverse((obj) => {
       const mesh = obj as {
         geometry?: { dispose(): void };
@@ -107,4 +105,5 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
     });
     renderer.domElement.remove();
   };
+  return { dispose, reset: () => frameCamera() };
 }

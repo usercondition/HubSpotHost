@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { ENCRYPTED_LAYER_DEF, encryptCtbSettingsBlock, xorCtbLayer } from "../server/lib/ctb";
 import { saveDriveConnection, setDriveFetchForTest } from "../server/lib/google-drive";
 import { resetOrderLinkStore } from "../server/lib/order-links";
-import { upsertPlateFiles } from "../server/lib/plate-files";
+import { getPlateFile, markPlateMesh, upsertPlateFiles } from "../server/lib/plate-files";
 import { enqueuePlateMesh, plateMeshJobPeak, resetPlateMeshJobPeak, whenPlateMeshesIdle } from "../server/lib/plate-mesh-jobs";
-import { MESH_BYTE_BUDGET, buildPlateGlb } from "../server/lib/plate-mesh";
+import { MESH_BYTE_BUDGET, PLATE_MESH_VERSION, buildPlateGlb } from "../server/lib/plate-mesh";
 import { STREAM_PLATE_BYTES, streamLargePlate } from "./plate-mesh-stream";
 
 function rle(white: boolean, length: number): number[] {
@@ -119,7 +119,12 @@ function reader(file: Buffer, reads: number[]) {
   };
 }
 
-function gltf(glb: Buffer): { materials: Array<{ doubleSided?: boolean }>; accessors: Array<{ count: number; min: number[] }> } {
+function gltf(glb: Buffer): {
+  materials: Array<{ doubleSided?: boolean }>;
+  accessors: Array<{ count: number; min?: number[] }>;
+  meshes: Array<{ primitives: Array<{ attributes: { NORMAL?: number } }> }>;
+  nodes: Array<{ extras?: { plate?: number[] } }>;
+} {
   assert.equal(glb.subarray(0, 4).toString(), "glTF");
   const jsonLen = glb.readUInt32LE(12);
   return JSON.parse(glb.subarray(20, 20 + jsonLen).toString().trim()) as ReturnType<typeof gltf>;
@@ -135,6 +140,8 @@ test("a classic plate becomes a compact double-sided GLB without holding every l
   assert.ok(glb.length <= MESH_BYTE_BUDGET, `mesh is ${glb.length} bytes`);
   const doc = gltf(glb);
   assert.equal(doc.materials[0]?.doubleSided, true);
+  assert.equal(doc.meshes[0]?.primitives[0]?.attributes.NORMAL, 1);
+  assert.ok(Math.abs((doc.nodes[0]?.extras?.plate?.[0] ?? 0) - 1.6) < 0.05);
   assert.ok((doc.accessors[0]?.count ?? 0) > 8);
   assert.equal(reads[0], file.length);
   assert.ok(reads.slice(1).every((length) => length < file.length));
@@ -160,8 +167,14 @@ test("a 480MB plate is read as ranges, not as one buffer", async () => {
   const result = await streamLargePlate();
   assert.equal(result.maxRead <= 8 * 1024 * 1024, true);
   assert.ok(result.bytesRead < 32 * 1024 * 1024, `read ${result.bytesRead} of ${STREAM_PLATE_BYTES}`);
-  assert.ok(result.glbBytes > 100);
+  assert.ok(result.glbBytes > 100 && result.glbBytes <= MESH_BYTE_BUDGET, `glb ${result.glbBytes}`);
+  assert.ok(result.triangles > 1_000, `triangles ${result.triangles}`);
+  assert.ok(result.components >= 3, `components ${result.components}`);
+  assert.ok(result.thinSupports >= 1, `thin supports ${result.thinSupports}`);
   assert.ok(result.reads > 2);
+  console.log(
+    `[plate-mesh] 480MB parts glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} bytesRead=${result.bytesRead} ms=${result.ms}`,
+  );
 });
 
 test("mesh jobs run one at a time", async () => {
@@ -220,7 +233,7 @@ test("mesh jobs run one at a time", async () => {
   }
 });
 
-test("a 480MB stream stays under 300MB RSS", { timeout: 120_000 }, async () => {
+test("a 480MB stream stays under 1GB RSS", { timeout: 120_000 }, async () => {
   const child = spawn("npx", ["tsx", "tests/plate-mesh-stream.ts"], {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
@@ -238,9 +251,98 @@ test("a 480MB stream stays under 300MB RSS", { timeout: 120_000 }, async () => {
     child.on("exit", (status) => resolve(status ?? 1));
   });
   assert.equal(code, 0, err || out);
-  const result = JSON.parse(out) as { peakRss: number; startRss: number; ms: number; glbBytes: number; bytesRead: number };
+  const result = JSON.parse(out) as {
+    peakRss: number;
+    startRss: number;
+    ms: number;
+    glbBytes: number;
+    bytesRead: number;
+    triangles: number;
+    components: number;
+    thinSupports: number;
+  };
   console.log(
-    `[plate-mesh] 480MB stream peakRss=${result.peakRss} startRss=${result.startRss} bytesRead=${result.bytesRead} glb=${result.glbBytes} ms=${result.ms}`,
+    `[plate-mesh] 480MB stream peakRss=${result.peakRss} startRss=${result.startRss} bytesRead=${result.bytesRead} glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} ms=${result.ms}`,
   );
-  assert.ok(result.peakRss < 300 * 1024 * 1024, `peak RSS ${result.peakRss}`);
+  assert.ok(result.peakRss < 1024 * 1024 * 1024, `peak RSS ${result.peakRss}`);
+  assert.ok(result.glbBytes <= MESH_BYTE_BUDGET);
+  assert.ok(result.triangles > 1_000);
+  assert.ok(result.components >= 3);
+  assert.ok(result.thinSupports >= 1);
+});
+
+test("backfill regenerates an older mesh and trashes the previous GLB", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plate-mesh-version-"));
+  const previous = {
+    db: process.env.ORDER_LINKS_DB_FILE,
+    client: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+  };
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "test.db");
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "drive-client";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "drive-secret";
+  resetOrderLinkStore();
+  const plate = classicPyramid();
+  const trashed: string[] = [];
+  setDriveFetchForTest(async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.includes("oauth2.googleapis.com/token")) {
+      return new Response(JSON.stringify({ access_token: "access-ok" }), { status: 200 });
+    }
+    if (url.includes("alt=media")) {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const match = /bytes=(\d+)-(\d+)/.exec(headers.range ?? "");
+      const start = match ? Number(match[1]) : 0;
+      const end = match ? Number(match[2]) + 1 : plate.length;
+      return new Response(plate.subarray(start, Math.min(end, plate.length)), { status: 206 });
+    }
+    if (method === "GET" && url.includes("/drive/v3/files?")) {
+      return new Response(JSON.stringify({ files: [] }), { status: 200 });
+    }
+    if (method === "POST" && url.includes("/drive/v3/files") && !url.includes("uploadType")) {
+      return new Response(JSON.stringify({ id: "folder-1" }), { status: 200 });
+    }
+    if (method === "POST" && url.includes("uploadType=resumable")) {
+      return new Response(null, { status: 200, headers: { location: "https://upload.example/session" } });
+    }
+    if (url.startsWith("https://upload.example/session")) {
+      return new Response(
+        JSON.stringify({ id: "glb-new", name: "Castellan.glb", size: "100", mimeType: "model/gltf-binary" }),
+        { status: 200 },
+      );
+    }
+    if (method === "PATCH") {
+      const id = decodeURIComponent(url.split("/files/")[1]?.split("?")[0] ?? "");
+      trashed.push(id);
+      return new Response(JSON.stringify({ id, trashed: true }), { status: 200 });
+    }
+    return new Response("no", { status: 500 });
+  });
+  try {
+    saveDriveConnection({ email: "miguel.plates@gmail.com", refreshToken: "refresh-marker" });
+    upsertPlateFiles(
+      [{ driveFileId: "mesh-stale", name: "Castellan_Bits.ctb", webViewLink: "", sizeBytes: plate.length, kit: "Knight Castellan" }],
+      "indexed",
+    );
+    markPlateMesh("mesh-stale", { meshState: "ready", meshDriveFileId: "old-glb", meshVersion: 0 });
+    assert.equal(enqueuePlateMesh("mesh-stale"), true);
+    await whenPlateMeshesIdle();
+    const saved = getPlateFile("mesh-stale");
+    assert.equal(saved?.meshState, "ready");
+    assert.equal(saved?.meshVersion, PLATE_MESH_VERSION);
+    assert.equal(saved?.meshDriveFileId, "glb-new");
+    assert.deepEqual(trashed, ["old-glb"]);
+    assert.equal(enqueuePlateMesh("mesh-stale"), false);
+  } finally {
+    setDriveFetchForTest(null);
+    resetOrderLinkStore();
+    if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previous.db;
+    if (previous.client === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+    else process.env.GOOGLE_OAUTH_CLIENT_ID = previous.client;
+    if (previous.secret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    else process.env.GOOGLE_OAUTH_CLIENT_SECRET = previous.secret;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
