@@ -593,7 +593,7 @@ function bodyFor(input: string | URL) {
       if (orderKey && !file.orderKeys.includes(orderKey)) return false;
       if (printer && file.printer !== printer) return false;
       if (!q) return true;
-      return [file.name, file.kit, file.printer, file.customer, file.kitTags].join(" ").toLowerCase().includes(q);
+      return [file.name, file.kit, file.printer, file.kitTags].join(" ").toLowerCase().includes(q);
     });
     return { ok: true, files, failures: [] };
   }
@@ -959,7 +959,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(listBox.right <= pageScroll.inner + 1, `${label} library list runs off screen`);
       const text = await root.locator("[data-testid='page-library']").innerText();
       check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(text), `${label} library has dev text`);
-      check(/Sep 26/.test(text) && !/\d{1,2}\/\d{1,2}/.test(text), `${label} library date was ${text}`);
+      check(/Used on 1 order/.test(text), `${label} library orders count was ${text}`);
+      check(!/Ada|Daniel Ortega|Wayne Hood|Glenn/.test(text), `${label} library shows a customer: ${text}`);
       await root.locator("[data-testid='input-library-search']").fill("Castigator");
       await root.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
@@ -1004,12 +1005,13 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         check(switchCount === 0, "desktop shows the phone Prints | Library switch");
       }
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
-      await page.goto(`${base}/#/library?orderKey=${encodeURIComponent("deal:c1")}`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
       const filtered = current();
       await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
       await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
-      const orderChip = (await filtered.locator("[data-testid='chip-library-order']").innerText()).replace(/\s+/g, " ").trim();
-      check(orderChip === "Deal c1", `${label} library order chip was ${orderChip}`);
+      const kitChip = (await filtered.locator("[data-testid='chip-library-kit']").innerText()).replace(/\s+/g, " ").trim();
+      check(kitChip === "Castigator", `${label} library kit chip was ${kitChip}`);
     };
     const checkDrawer = async (label: string) => {
       await openDrawer();
@@ -1079,7 +1081,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const filesHeading = (await page.locator("[data-testid='slice-files'] h3").innerText()).trim();
       check(filesHeading === "Files", `${label} files heading was ${filesHeading}`);
       const seeLibrary = (await page.locator("[data-testid='link-see-in-library']").getAttribute("href")) || "";
-      check(/library/.test(seeLibrary) && /orderKey/.test(seeLibrary) && /c1/.test(seeLibrary), `${label} see-in-library href was ${seeLibrary}`);
+      check(/library/.test(seeLibrary) && /kit=/.test(seeLibrary) && /Castigator/.test(seeLibrary) && !/orderKey/.test(seeLibrary), `${label} see-in-library href was ${seeLibrary}`);
       const sliceBox = await page.locator("[data-testid='slice-file-name']").first().evaluate((el) => {
         const rect = el.getBoundingClientRect();
         const drawer = el.closest("[data-testid='drawer-deal-ops']")?.getBoundingClientRect();

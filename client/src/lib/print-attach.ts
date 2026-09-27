@@ -6,6 +6,7 @@
 import { apiRequest } from "@/lib/queryClient";
 import { buildSliceLogUploadFromLinkedFolder } from "@/lib/blueprint-slice-log";
 import { ctbPrefixBlob, isCtbFileName } from "@/lib/ctb-prefix";
+import { SLICE_FINGERPRINT_CHUNK } from "@shared/slice-fingerprint";
 import type { PrintFileMetrics, PrintFileOrderSummary, PrintFileRecord } from "@shared/schema";
 
 export type PrinterMatchInfo = {
@@ -27,6 +28,7 @@ export type AnalyzePrintResult = {
 
 export type AttachPrintResult = {
   ok: true;
+  linked?: boolean;
   record: PrintFileRecord;
   summary: PrintFileOrderSummary;
   message: string;
@@ -104,6 +106,10 @@ export async function analyzePrintPlate(
     form.append("file", blob, file.name);
     form.append("mode", "ctb-prefix");
     form.append("fullFileSize", String(fullFileSize));
+    if (fullFileSize > SLICE_FINGERPRINT_CHUNK) {
+      const tailLen = Math.min(fullFileSize, SLICE_FINGERPRINT_CHUNK);
+      form.append("suffix", file.slice(fullFileSize - tailLen), file.name);
+    }
   } else {
     form.append("file", file);
   }

@@ -7,7 +7,7 @@
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   printFileAnalyses,
   printFileRecords,
@@ -19,6 +19,9 @@ import {
 } from "../../shared/schema";
 import { getDb } from "./order-links";
 import { CtbParseError, parseCtbFile, parseCtbFileFromPath, parseCtbFileFromPrefix } from "./ctb";
+import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
+import { findPlateBySha256, libraryMarksForPrints, linkPlatePrint, savePlatePreview } from "./plate-files";
+import type { PlatePreviewStats, PrintLibraryMark } from "../../shared/plate-files";
 import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
@@ -103,10 +106,9 @@ export function stagePrintFile(
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options));
+  rememberSlicePreview(fileName, metrics, buffer, buffer.length);
+  return stageParsedPrintFile(fileName, metrics);
 }
 
 /** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
@@ -119,17 +121,30 @@ export function stagePrintFileFromPath(
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options));
+  let prefix: Buffer | null = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const length = Math.min(stat.size, 8 * 1024 * 1024);
+    prefix = Buffer.alloc(length);
+    const fd = fs.openSync(filePath, "r");
+    try {
+      fs.readSync(fd, prefix, 0, length, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    prefix = null;
+  }
+  rememberSlicePreview(fileName, metrics, prefix, metrics.fileSizeBytes);
+  return stageParsedPrintFile(fileName, metrics);
 }
 
 /**
  * Stage a CTB from a browser-sampled prefix. `fullFileSize` is the real plate
  * size on the owner's machine (Mega 8K plates are often hundreds of MB).
  */
-export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number): {
+export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number, tail?: Buffer): {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
@@ -138,10 +153,33 @@ export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFil
     throw new CtbParseError("Prefix sampling is only supported for Chitubox .ctb plates");
   }
   const prefix = fs.readFileSync(prefixPath);
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize, tail));
+  rememberSlicePreview(fileName, metrics, prefix, fullFileSize);
+  return stageParsedPrintFile(fileName, metrics);
+}
+
+function previewStats(metrics: PrintFileMetrics): PlatePreviewStats {
+  return {
+    printerProfile: metrics.printerProfile ?? "",
+    layerCount: metrics.layerCount,
+    layerHeightMm: metrics.layerHeightMm,
+    printTimeSeconds: metrics.printTimeSeconds,
+    resinVolumeMl: metrics.resinVolumeMl,
+    resinCost: metrics.resinCost,
+  };
+}
+
+function rememberSlicePreview(fileName: string, metrics: PrintFileMetrics, bytes: Buffer | null, fullFileSize?: number): void {
+  try {
+    let png: Buffer | null = null;
+    if (bytes && bytes.length > 0) {
+      if (/\.ultx$/i.test(fileName)) png = extractUltxPreviewPng(bytes);
+      else if (/\.ctb$/i.test(fileName)) png = extractCtbPreviewFromPrefix(bytes, fullFileSize ?? bytes.length)?.png ?? null;
+    }
+    savePlatePreview(metrics.sha256, png, previewStats(metrics));
+  } catch {
+    /* A missing thumbnail must not block attaching the plate. */
+  }
 }
 
 function stageParsedPrintFile(
@@ -198,6 +236,8 @@ export function createPrintFileRecord(input: {
   fleetPrinterId?: number | null;
 }): PrintFileRecord {
   const { metrics } = input;
+  const already = findPrintFileByFingerprint(input.hubspotDealId, metrics.sha256);
+  if (already) return already;
   const attachedAt = nowIso();
   return getDb()
     .insert(printFileRecords)
@@ -241,13 +281,21 @@ export function createPrintFileRecord(input: {
     .get();
 }
 
+function attachLibraryMarks(rows: PrintFileRecord[]): PrintFileRecord[] {
+  if (rows.length === 0) return rows;
+  const marks = libraryMarksForPrints(rows.map((row) => row.id));
+  const missing: PrintLibraryMark = { status: "missing", driveFileId: "", error: "" };
+  return rows.map((row) => Object.assign({}, row, { library: marks.get(row.id) ?? missing }));
+}
+
 export function listPrintFileRecords(limit = 100): PrintFileRecord[] {
-  return getDb()
+  const rows = getDb()
     .select()
     .from(printFileRecords)
     .orderBy(desc(printFileRecords.attachedAt), desc(printFileRecords.id))
     .limit(Math.max(1, Math.min(limit, 500)))
     .all();
+  return attachLibraryMarks(rows);
 }
 
 /**
@@ -283,6 +331,22 @@ export function listPrintFileRecordsForDeal(hubspotDealId: string): PrintFileRec
 
 export function getPrintFileRecord(recordId: number): PrintFileRecord | null {
   return getDb().select().from(printFileRecords).where(eq(printFileRecords.id, recordId)).get() ?? null;
+}
+
+/** Same slice already attached to this order. A second upload links this row. */
+export function findPrintFileByFingerprint(hubspotDealId: string, sha256: string): PrintFileRecord | null {
+  const fingerprint = sha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) return null;
+  const row =
+    getDb()
+      .select()
+      .from(printFileRecords)
+      .where(and(eq(printFileRecords.hubspotDealId, hubspotDealId), eq(printFileRecords.sha256, fingerprint)))
+      .get() ?? null;
+  if (!row) return null;
+  const libraryFile = findPlateBySha256(`deal:${hubspotDealId}`, fingerprint);
+  if (libraryFile) linkPlatePrint(libraryFile.driveFileId, row.id);
+  return row;
 }
 
 export function deletePrintFileRecord(recordId: number): PrintFileRecord | null {
@@ -418,6 +482,10 @@ export function buildPrintFileOrderSummary(
   hubspotDealId: string,
   latest: PrintFileMetrics,
 ): PrintFileOrderSummary {
+  if (findPrintFileByFingerprint(hubspotDealId, latest.sha256)) {
+    const current = buildPrintFileOrderSummaryFromRecords(hubspotDealId);
+    if (current) return current;
+  }
   const existing = listPrintFileRecordsForDeal(hubspotDealId);
   return {
     plateCount: existing.length + 1,

@@ -264,11 +264,29 @@ async function ensureFolder(access: string, name: string, parentId: string | nul
   return job;
 }
 
-export async function ensureOrderFolder(folderName: string, env: NodeJS.ProcessEnv = process.env): Promise<{ access: string; folderId: string }> {
+export async function ensureLibraryFolder(kitName: string, env: NodeJS.ProcessEnv = process.env): Promise<{ access: string; folderId: string }> {
   const access = await accessToken(env);
   const root = await ensureFolder(access, "Print Ops", null);
-  const folderId = await ensureFolder(access, folderName, root);
+  const library = await ensureFolder(access, "Library", root);
+  const folderId = await ensureFolder(access, kitName, library);
   return { access, folderId };
+}
+
+/** Rename a kit folder when the new name is not already a folder. Merge leaves the old folder in place. */
+export async function renameLibraryFolder(from: string, to: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const access = await accessToken(env);
+  const root = await ensureFolder(access, "Print Ops", null);
+  const library = await ensureFolder(access, "Library", root);
+  const source = await findFolder(access, from, library);
+  if (!source) return;
+  const target = await findFolder(access, to, library);
+  if (target) return;
+  const response = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(source)}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
+    body: JSON.stringify({ name: to }),
+  });
+  if (!response.ok) throw new Error("Could not rename the Library folder in Drive.");
 }
 
 export interface DriveUploadedFile {
@@ -317,12 +335,32 @@ async function putChunk(session: string, chunk: Buffer, start: number, total: nu
   throw new Error(lastError);
 }
 
+export class DriveUnreadableError extends Error {
+  constructor() {
+    super("Drive could not read that file.");
+    this.name = "DriveUnreadableError";
+  }
+}
+
+/** Stream a file this app created. Forwards Range so large plates are not buffered. */
+export async function openDriveMedia(fileId: string, range: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<Response> {
+  const access = await accessToken(env);
+  const headers: Record<string, string> = { authorization: `Bearer ${access}` };
+  if (range) headers.range = range;
+  const response = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
+  if (response.status === 401 || response.status === 403) throw new DriveReconnectError();
+  if (response.status === 404) throw new DriveUnreadableError();
+  return response;
+}
+
 export async function uploadDriveFile(input: {
   access: string;
   folderId: string;
   name: string;
   size: number;
   body: Readable;
+  /** First bytes, for a thumbnail. Must not retain the whole plate. */
+  onPrefix?: (chunk: Buffer, offset: number) => void;
 }): Promise<DriveUploadedFile> {
   const start = await driveFetch(DRIVE_UPLOAD, {
     method: "POST",
@@ -340,6 +378,7 @@ export async function uploadDriveFile(input: {
   let offset = 0;
   let file: Record<string, unknown> | undefined;
   for await (const chunk of chunksOf(input.body, CHUNK_BYTES)) {
+    input.onPrefix?.(chunk, offset);
     const result = await putChunk(session, chunk, offset, input.size);
     offset += chunk.length;
     if (result.done) file = result.file;

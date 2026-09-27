@@ -11,20 +11,36 @@ import { Readable } from "node:stream";
 import { setDriveFetchForTest, uploadDriveFile } from "../server/lib/google-drive";
 import { listPlateFiles } from "../server/lib/plate-files";
 import { registerRoutes } from "../server/routes";
-import { guessPlatePrinter, isPlateFileName, orderFolderName, DRIVE_FILE_SCOPE } from "../shared/plate-files";
+import { guessPlatePrinter, isPlateFileName, libraryFolderName, libraryKitName, librarySliceName, platePartName, usedOnOrders, DRIVE_FILE_SCOPE } from "../shared/plate-files";
 
 const REFRESH = "REFRESHTOKENMARKER-do-not-log";
 
-test("plate names, printer guesses, and Drive folder titles", () => {
+test("plate names, kit titles, and printer guesses", () => {
   assert.equal(isPlateFileName("Castigator_MEGA_8K.CTB"), true);
+  assert.equal(isPlateFileName("body.ultx"), true);
   assert.equal(isPlateFileName("notes.txt"), false);
+  assert.equal(guessPlatePrinter("body.ultx"), "HeyGears");
   assert.equal(guessPlatePrinter("Castigator_MEGA_8K.ctb"), "MEGA 8K");
   assert.equal(guessPlatePrinter("land-raider-12k.ctb"), "Mighty 12K");
   assert.equal(guessPlatePrinter("helmet-heygears.prz"), "HeyGears");
   assert.equal(guessPlatePrinter("bit-8k.ctb"), "Mighty 8K");
   assert.equal(guessPlatePrinter("plain.stl"), "");
-  assert.equal(orderFolderName("Castigator", "Ada", "deal:123"), "Castigator \u2013 Ada (123)");
-  assert.equal(orderFolderName("Sword", "Glenn", "offbook:4"), "Sword \u2013 Glenn (offbook:4)");
+  assert.equal(libraryKitName("Knight - Castellan - Glenn Casey Chandler"), "Knight Castellan");
+  assert.equal(libraryKitName("Cerastus Chassis - Castigator - Wayne Hood"), "Cerastus Castigator");
+  assert.equal(libraryKitName("Cerastus Chassis - Castigator - Wayne Hood", "Wayne Hood"), "Cerastus Castigator");
+  assert.equal(libraryKitName("Ikarus BA LR KIT - Daniel Ortega"), "Ikarus BA LR KIT");
+  assert.equal(libraryKitName("Knight - Castellan"), "Knight Castellan");
+  assert.equal(libraryKitName("Knight - Ada", "Ada"), "Knight");
+  assert.equal(libraryKitName("Cerastus Chassis - Castigator"), "Cerastus Castigator");
+  assert.equal(libraryKitName("Castigator"), "Castigator");
+  assert.equal(librarySliceName("Castigator - Ada.ctb", "Ada"), "Castigator.ctb");
+  assert.equal(librarySliceName("Knight_Castellan_8K - Glenn Casey Chandler.ctb", "Glenn Casey Chandler"), "Knight_Castellan_8K.ctb");
+  assert.equal(librarySliceName("Knight_Castellan_8K.ctb", "Castellan"), "Knight_Castellan_8K.ctb");
+  assert.equal(libraryFolderName("Knight Castellan"), "Knight Castellan");
+  assert.equal(libraryFolderName("Land/Raider"), "Land Raider");
+  assert.equal(platePartName("Castellan_Bits_Plate_1.ctb"), "Castellan Bits Plate 1");
+  assert.equal(usedOnOrders(1), "Used on 1 order");
+  assert.equal(usedOnOrders(2), "Used on 2 orders");
 });
 
 test("slice library uploads, search, index, and Google connect stay owner-only", async () => {
@@ -88,7 +104,14 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
       return new Response(JSON.stringify({ user: { emailAddress: "miguel.plates@gmail.com" } }), { status: 200 });
     }
     if (method === "GET" && url.includes("/drive/v3/files?")) {
+      const decoded = decodeURIComponent(url);
+      if (decoded.includes("name = 'Knight Castellan'")) {
+        return new Response(JSON.stringify({ files: [{ id: "kit-folder", name: "Knight Castellan" }] }), { status: 200 });
+      }
       return new Response(JSON.stringify({ files: [] }), { status: 200 });
+    }
+    if (method === "PATCH") {
+      return new Response("unexpected", { status: 500 });
     }
     if (method === "POST" && url.includes("/drive/v3/files") && !url.includes("uploadType")) {
       return new Response(JSON.stringify({ id: "folder-1" }), { status: 200 });
@@ -186,6 +209,7 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const okBody = await ok.json();
     assert.equal(okBody.file.driveFileId, "id-Castigator_MEGA_8K.ctb");
     assert.equal(okBody.file.printer, "MEGA 8K");
+    assert.equal(okBody.file.kit, "Castigator");
     assert.equal(okBody.file.source, "upload");
     assert.deepEqual(okBody.file.orderKeys, ["deal:81"]);
 
@@ -255,7 +279,10 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const found = await fetch(`${base}/api/plate-files?q=${encodeURIComponent("Land Raider")}`, { headers });
     const foundBody = await found.json();
     assert.equal(foundBody.files.length, 1);
-    assert.equal(foundBody.files[0].customer, "Ada");
+    assert.equal(foundBody.files[0].customer, "");
+    const hiddenCustomer = await fetch(`${base}/api/plate-files?q=${encodeURIComponent("Ada")}`, { headers });
+    const hiddenCustomerBody = await hiddenCustomer.json();
+    assert.equal(hiddenCustomerBody.files.length, 0);
     const byPrinter = await fetch(`${base}/api/plate-files?printer=${encodeURIComponent("Mighty 8K")}`, { headers });
     const byPrinterBody = await byPrinter.json();
     assert.equal(byPrinterBody.files.length, 1);
@@ -333,6 +360,70 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const wipedBody = await wiped.json();
     assert.equal(wipedBody.files[0].source, "upload");
     assert.deepEqual(wipedBody.files[0].orderKeys, []);
+
+    const byDaniel = await fetch(`${base}/api/plate-files?q=${encodeURIComponent("Daniel Ortega")}`, { headers });
+    const byDanielBody = await byDaniel.json();
+    assert.equal(byDanielBody.files.length, 0);
+
+    const knightUpload = await fetch(
+      `${base}/api/plate-files/upload?${new URLSearchParams({
+        orderKey: "deal:90",
+        fileName: "Knight_Castellan_8K - Glenn Casey Chandler.ctb",
+        printer: "Mighty 8K",
+        kit: "Knight - Castellan - Glenn Casey Chandler",
+        customer: "Glenn Casey Chandler",
+      }).toString()}`,
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/octet-stream", "content-length": "11" },
+        body: "slice-bytes",
+      },
+    );
+    assert.equal(knightUpload.status, 201);
+    const knightBody = await knightUpload.json();
+    assert.equal(knightBody.file.kit, "Knight Castellan");
+    assert.equal(knightBody.file.name, "Knight_Castellan_8K.ctb");
+    assert.equal(knightBody.file.customer, "");
+    assert.equal(/Glenn|Chandler/.test(JSON.stringify(knightBody.file)), false);
+    const reuse = await fetch(
+      `${base}/api/plate-files/reuse?${new URLSearchParams({
+        kit: "Knight - Castellan - Glenn Casey Chandler",
+        part: "Knight_Castellan_8K.ctb",
+        printer: "Mighty 8K",
+      }).toString()}`,
+      { headers },
+    );
+    const reuseBody = await reuse.json();
+    assert.equal(reuseBody.file?.name, "Knight_Castellan_8K.ctb");
+    assert.equal(reuseBody.file?.printer, "Mighty 8K");
+    const reuseMiss = await fetch(
+      `${base}/api/plate-files/reuse?${new URLSearchParams({
+        kit: "Knight Castellan",
+        part: "Knight_Castellan_8K.ctb",
+        printer: "MEGA 8K",
+      }).toString()}`,
+      { headers },
+    );
+    const reuseMissBody = await reuseMiss.json();
+    assert.equal(reuseMissBody.file, null);
+
+    const renamed = await fetch(`${base}/api/plate-files/kit`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ from: "Knight Castellan", to: "Castellan" }),
+    });
+    assert.equal(renamed.status, 200);
+    const renamedBody = await renamed.json();
+    assert.equal(renamedBody.to, "Castellan");
+    assert.ok(renamedBody.changed >= 1);
+    assert.equal(listPlateFiles({ q: "Castellan" }).files.some((file) => file.kit === "Castellan"), true);
+    assert.ok(logs.some((line) => line.includes("[drive] kit rename failed")));
+    const missingKit = await fetch(`${base}/api/plate-files/kit`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ from: "Nope", to: "Other" }),
+    });
+    assert.equal(missingKit.status, 404);
 
     mode = "invalid";
     const revoked = await upload("Helmet.ctb", "deal:81");

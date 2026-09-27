@@ -2425,14 +2425,14 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     },
     printFileUpload.fields([
       { name: "file", maxCount: 1 },
-      { name: "sliceLog", maxCount: 1 },
+      { name: "sliceLog", maxCount: 1 }, { name: "suffix", maxCount: 1 },
     ]),
     (req: Request, res: Response) => {
       const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
       const file = files?.file?.[0];
-      const sliceLogFile = files?.sliceLog?.[0];
+      const sliceLogFile = files?.sliceLog?.[0], suffixFile = files?.suffix?.[0];
       if (!file?.path) {
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
@@ -2440,7 +2440,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       }
       if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
@@ -2467,7 +2467,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         }
         const staged =
           mode === "ctb-prefix"
-            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize, suffixFile?.path ? fs.readFileSync(suffixFile.path) : undefined)
             : stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
         const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
         const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
@@ -2499,7 +2499,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         return res.status(400).json({ ok: false, error: message });
       } finally {
         removeTempUpload(file.path);
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
       }
     },
   );
@@ -2641,12 +2641,12 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         /* Inventory should never block plate attach. */
       }
 
-      return res.status(201).json({
-        ok: true,
+      return res.status(record.analysisId !== parsed.data.analysisId ? 200 : 201).json({
+        ok: true, linked: record.analysisId !== parsed.data.analysisId || undefined,
         record,
         summary,
         resinConsumption,
-        message: `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
+        message: record.analysisId !== parsed.data.analysisId ? "This plate is already attached. Linked the existing print record instead of adding it again." : `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
