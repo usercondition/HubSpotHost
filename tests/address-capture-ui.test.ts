@@ -147,6 +147,7 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
     const shootClient = async (width: number, height: number, suffix: string) => {
       await page.setViewportSize({ width, height });
       await page.goto(`${base}/#/order-form/${TOKEN}`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator("[data-testid='panel-shipping-address']").waitFor();
       await fillClient(page);
       await page.locator("[data-testid='panel-shipping-address']").screenshot({
@@ -170,13 +171,16 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
     const shootPaste = async (width: number, height: number, suffix: string) => {
       await page.setViewportSize({ width, height });
       await page.goto(`${base}/#/paid-orders`, { waitUntil: "domcontentloaded" });
-      const paste = page.locator("[data-testid='panel-paste-address']");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const current = page.locator("[data-testid='page-transition']").last();
+      const paste = current.locator("[data-testid='panel-paste-address']");
       await paste.waitFor();
-      await page.locator("[data-testid='input-paste-address']").fill(
+      await current.locator("[data-testid='input-paste-address']").fill(
         "Wayne Hood\n10909 Hannan Rd\nRomulus, MI 48174\nUnited States",
       );
-      await page.locator("[data-testid='button-check-pasted-address']").click();
-      await page.locator("[data-testid='panel-did-you-mean']").waitFor();
+      const checkPaste = paste.locator("[data-testid='button-check-pasted-address']");
+      await checkPaste.click({ force: true });
+      await paste.locator("[data-testid='panel-did-you-mean']").waitFor();
       await paste.screenshot({ path: `/opt/cursor/artifacts/address-paste-${suffix}.png` });
     };
 
