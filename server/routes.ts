@@ -62,6 +62,7 @@ import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
 import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
+import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -87,7 +88,6 @@ import {
   previewAttachSummary,
   stagePrintFileFromPath,
   stageCtbFromPrefix,
-  syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
   addBitsToRecord,
@@ -641,30 +641,6 @@ function partitionPrintDealBoards(
 }
 
 /** Map live HubSpot Print Orders → stage label / name for plate-history refresh. */
-function livePrintOrderStageMap(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): Map<string, { stage: string; dealName: string }> {
-  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
-  const map = new Map<string, { stage: string; dealName: string }>();
-  for (const deal of deals) {
-    const stageId = deal.properties.dealstage ?? "";
-    const stage = stageById.get(stageId);
-    map.set(deal.id, {
-      stage: stage?.label || stageId || "No stage",
-      dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
-    });
-  }
-  return map;
-}
-
-function refreshPrintFileStagesFromHubSpot(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): void {
-  syncPrintFileDealStages(livePrintOrderStageMap(deals, stages));
-}
-
 /** The owner-side representation. The hash and raw token never leave as fields; a live form path does. */
 function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
   priorMatch: ReturnType<typeof findPriorClientDetails>;
@@ -2142,49 +2118,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /**
-   * Owner-only, read-only performance summary. The API token remains server
-   * side and this route deliberately performs no HubSpot writes.
-   */
-  app.get("/api/performance", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const [deals, stages, hubspotPortalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      const snapshot = buildPerformanceSnapshot({
-        deals,
-        stages,
-        intakeCounts: orderLinkCounts(),
-        supplySpend: buildSupplySpendSummary(),
-        attachedPrintDealIds: attachedPrintFileDealIds(),
-        shippingLabelDealIds: attachedShippingLabelDealIds(),
-        dismissedAttentionKeys: activeAttentionOverrideKeys(),
-        hubspotPortalId,
-      });
-      if (String(req.query.dashboard ?? "") !== "1") return res.json(snapshot);
-      const period = String(req.query.period ?? "30");
-      if (!SHOP_PERIODS.includes(period as ShopPeriodId)) {
-        return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
-      }
-      const shipToLoad = await loadDealShipTos(deals.map((deal) => deal.id));
-      const window = resolveShopWindow(period as ShopPeriodId, new Date());
-      const overhead = overheadForPeriod(listExpenses(), window.start == null ? "0000-01-01" : shipByCalendarDate(new Date(window.start)), shipByCalendarDate(new Date(window.end)));
-      return res.json({
-        ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, mapBusy: shipToLoad.busy, overheadCents: overhead }),
-      });
-    } catch (error) {
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
-      });
-    }
-  });
+  registerPerformanceRoutes(app, rejectUnsecuredIntake);
 
   /** Skip / dismiss one attention alert for an open deal (e.g. legacy order without plates). */
   app.post("/api/attention/dismiss", (req: Request, res: Response) => {
