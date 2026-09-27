@@ -31,7 +31,8 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Panel, StatusPill } from "@/components/primitives";
+import { CardMenu, Panel, StatusPill } from "@/components/primitives";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { formatMoney } from "@/lib/format";
 import { floorWorkHref } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
@@ -190,12 +191,33 @@ type ShipEngineStatus = {
   carriersError?: string | null;
 };
 
+type ShipAddressFields = {
+  street1: string;
+  street2: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+};
+
+type AddressConfirmation = {
+  code: "address_confirmation";
+  error?: string;
+  original?: ShipAddressFields;
+  normalized?: ShipAddressFields;
+  suggestion: ShipAddressFields | null;
+  messages?: string[];
+};
+
 type ShipToResponse = {
   ok: true;
   dealId: string;
   ready: boolean;
   hasContact?: boolean;
   missing: string[];
+  needsCleanup?: boolean;
+  original?: ShipAddressFields;
+  normalized?: ShipAddressFields;
   contact: {
     id: string | null;
     name: string;
@@ -206,6 +228,23 @@ type ShipToResponse = {
     state?: string;
   };
 };
+
+function formatShipFields(fields: ShipAddressFields | null | undefined): string {
+  if (!fields) return "";
+  const locality = [fields.city, [fields.state, fields.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  return [fields.street1, fields.street2, locality].filter(Boolean).join(", ");
+}
+
+function readAddressConfirmation(error: Error): AddressConfirmation | null {
+  const raw = error.message.replace(/^\d+:\s*/, "");
+  try {
+    const body = JSON.parse(raw) as AddressConfirmation;
+    if (body?.code !== "address_confirmation") return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
 
 type RatesResponse = {
   ok: true;
@@ -293,6 +332,9 @@ export function ShipEngineBuyPanel({
   const [addFundsAmount, setAddFundsAmount] = useState("25");
   /** Extra same-client deals that share this label / tracking (shared box). */
   const [bundleDealIds, setBundleDealIds] = useState<string[]>([]);
+  const [addressDecision, setAddressDecision] = useState<"" | "accept" | "override">("");
+  const [addressPrompt, setAddressPrompt] = useState<AddressConfirmation | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
 
   useEffect(() => {
     if (prefillDealId && /^[0-9]{1,20}$/.test(prefillDealId)) {
@@ -461,7 +503,7 @@ export function ShipEngineBuyPanel({
   }, [rates, visibleRates, selectedRateId]);
 
   const quote = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (decision?: "accept" | "override") => {
       const response = await apiRequest(
         "POST",
         "/api/shipping-labels/shipengine/rates",
@@ -473,12 +515,15 @@ export function ShipEngineBuyPanel({
             heightIn: Number(parcel.heightIn),
             weightOz: Number(parcel.weightOz),
           },
+          ...(decision ? { addressDecision: decision } : {}),
         },
         { headers },
       );
       return (await response.json()) as RatesResponse;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, decision) => {
+      setAddressDecision(decision ?? "");
+      setAddressPrompt(null);
       setRates(data.rates);
       setTestMode(data.testMode);
       setRateSort("recommended");
@@ -499,6 +544,13 @@ export function ShipEngineBuyPanel({
       });
     },
     onError: (error: Error) => {
+      const confirmation = readAddressConfirmation(error);
+      if (confirmation) {
+        setRates([]);
+        setSelectedRateId("");
+        setAddressPrompt(confirmation);
+        return;
+      }
       toast({
         title: "Could not get rates",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
@@ -522,6 +574,7 @@ export function ShipEngineBuyPanel({
           serviceType: selectedRate.serviceType,
           messageChannel,
           packingDone: true,
+          ...(addressDecision ? { addressDecision } : {}),
         },
         { headers },
       );
@@ -576,6 +629,14 @@ export function ShipEngineBuyPanel({
       });
     },
     onError: (error: Error) => {
+      const confirmation = readAddressConfirmation(error);
+      if (confirmation) {
+        setRates([]);
+        setSelectedRateId("");
+        setAddressDecision("");
+        setAddressPrompt(confirmation);
+        return;
+      }
       toast({
         title: "Could not buy label",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
@@ -626,6 +687,37 @@ export function ShipEngineBuyPanel({
     },
   });
 
+  const cleanup = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest(
+        "POST",
+        "/api/shipping-labels/address-cleanup",
+        { dealId, confirm: true },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; wrote: boolean; reason?: string };
+    },
+    onSuccess: (data) => {
+      setCleanupOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/ship-to", dealId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/address-audit"] });
+      toast({
+        title: data.wrote ? "Address updated in HubSpot" : "Cleanup logged",
+        description: data.wrote
+          ? "The contact now has the cleaned street, city, state, and ZIP."
+          : data.reason || "HubSpot writes are off, so the old address was only saved in the update log.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not fix the address",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
   const status = statusQuery.data;
   const shipToReady = shipToQuery.data?.ready ?? false;
   const hasActiveDeal = /^[0-9]{1,20}$/.test(dealId);
@@ -658,6 +750,12 @@ export function ShipEngineBuyPanel({
     }
   };
 
+  const orderNeedsCleanup = (item: ProductionQueueItem) => {
+    const live = item.dealId === dealId ? shipToQuery.data : undefined;
+    if (live) return Boolean(live.needsCleanup);
+    return Boolean(item.addressNeedsCleanup);
+  };
+
   const addressChip = (item: ProductionQueueItem) => {
     const live = item.dealId === dealId ? shipToQuery.data : undefined;
     const liveError = item.dealId === dealId && shipToQuery.isError && !live?.ready;
@@ -672,8 +770,8 @@ export function ShipEngineBuyPanel({
       );
     }
     const status: AddressStatus = live?.ready ? "ready" : (item.addressStatus ?? "unknown");
-    const liveCity = live?.contact.city?.trim();
-    const liveState = live?.contact.state?.trim();
+    const liveCity = (live?.normalized?.city || live?.contact.city)?.trim();
+    const liveState = (live?.normalized?.state || live?.contact.state)?.trim();
     const summary = live?.ready
       ? liveCity && liveState
         ? `${liveCity}, ${liveState}`
@@ -692,6 +790,18 @@ export function ShipEngineBuyPanel({
               : pill.label
         }
         testId={`status-shipengine-address-${item.dealId}`}
+      />
+    );
+  };
+
+  const cleanupChip = (item: ProductionQueueItem) => {
+    if (!orderNeedsCleanup(item)) return null;
+    return (
+      <StatusPill
+        tone="warn"
+        icon={AlertTriangle}
+        label="Address needs cleanup"
+        testId={`status-address-cleanup-${item.dealId}`}
       />
     );
   };
@@ -729,6 +839,9 @@ export function ShipEngineBuyPanel({
     setSelectedRateId("");
     setAddressHint("");
     setBundleDealIds([]);
+    setAddressDecision("");
+    setAddressPrompt(null);
+    setCleanupOpen(false);
   }
 
   function clearActiveDeal() {
@@ -793,11 +906,11 @@ export function ShipEngineBuyPanel({
               ? "No HubSpot contact linked to this deal"
               : "Ship-to incomplete on HubSpot contact"}
         </p>
-        {shipToReady && shipToQuery.data.contact.addressLines.length ? (
+        {shipToReady && (shipToQuery.data.normalized || shipToQuery.data.contact.addressLines.length) ? (
           <p className="text-sm text-muted-foreground">
-            {[shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines]
-              .filter(Boolean)
-              .join(" · ")}
+            {shipToQuery.data.normalized
+              ? [shipToQuery.data.contact.name, formatShipFields(shipToQuery.data.normalized)].filter(Boolean).join(" · ")
+              : [shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines].filter(Boolean).join(" · ")}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -818,6 +931,12 @@ export function ShipEngineBuyPanel({
               <Copy className="mr-1.5 h-3.5 w-3.5" />
               Copy chase draft
             </Button>
+          </div>
+        ) : null}
+        {shipToQuery.data.needsCleanup && shipToQuery.data.original && shipToQuery.data.normalized ? (
+          <div className="mt-1 space-y-0.5 text-xs" data-testid="panel-address-cleanup-diff">
+            <p className="text-muted-foreground">Before: {formatShipFields(shipToQuery.data.original)}</p>
+            <p>After: {formatShipFields(shipToQuery.data.normalized)}</p>
           </div>
         ) : null}
       </div>
@@ -1045,12 +1164,54 @@ export function ShipEngineBuyPanel({
   const activeOrderWorkspace = hasActiveDeal ? (
     <div className="space-y-2.5 border-t border-border/60 pt-2.5" data-testid="panel-shipengine-active-order-body">
       {shipToBlock}
+      {addressPrompt ? (
+        <div
+          className="space-y-2 rounded-md border border-border bg-muted/30 p-3"
+          data-testid="panel-address-confirmation"
+        >
+          <p className="text-sm font-semibold">Confirm this address before buying a label</p>
+          <p className="text-xs text-muted-foreground">
+            {addressPrompt.messages?.[0] || "ShipEngine suggested a correction. Rates stay hidden until you choose."}
+          </p>
+          {addressPrompt.suggestion ? (
+            <p className="text-sm" data-testid="text-address-suggestion">
+              Suggestion: {formatShipFields(addressPrompt.suggestion)}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">ShipEngine could not verify this address.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!addressPrompt.suggestion || quote.isPending}
+              onClick={() => quote.mutate("accept")}
+              data-testid="button-address-accept"
+            >
+              Use suggestion
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={quote.isPending}
+              onClick={() => quote.mutate("override")}
+              data-testid="button-address-override"
+            >
+              Keep my address
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {parcelFields}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
           disabled={!shipToReady || quote.isPending}
-          onClick={() => quote.mutate()}
+          onClick={() => {
+            setAddressPrompt(null);
+            quote.mutate(undefined);
+          }}
           data-testid="button-shipengine-get-rates"
           title={!shipToReady ? "Fix HubSpot ship-to before rate shopping" : undefined}
         >
@@ -1236,6 +1397,7 @@ export function ShipEngineBuyPanel({
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
                             {addressChip(item)}
+                            {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
                             ) : (
@@ -1249,6 +1411,16 @@ export function ShipEngineBuyPanel({
                               icon={Ship}
                               label={`Ship ${item.fulfillment.readyPercent}%`}
                             />
+                            {orderNeedsCleanup(item) ? (
+                              <CardMenu label="More actions" testId={`menu-shipengine-order-${item.dealId}`}>
+                                <DropdownMenuItem
+                                  onSelect={() => setCleanupOpen(true)}
+                                  data-testid={`button-fix-address-hubspot-${item.dealId}`}
+                                >
+                                  Fix in HubSpot
+                                </DropdownMenuItem>
+                              </CardMenu>
+                            ) : null}
                             {item.addressStatus !== "ready" &&
                             item.addressStatus !== "pickup" &&
                             item.addressStatus !== "unknown" &&
@@ -1348,6 +1520,7 @@ export function ShipEngineBuyPanel({
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
                             {addressChip(item)}
+                            {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
                             ) : (
@@ -1567,6 +1740,36 @@ export function ShipEngineBuyPanel({
               <Wallet className="mr-2 h-4 w-4" />
             )}
             Add {Number.isFinite(addFundsAmountNum) ? formatMoney(addFundsAmountNum) : "funds"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={cleanupOpen} onOpenChange={setCleanupOpen}>
+      <DialogContent data-testid="dialog-address-cleanup">
+        <DialogHeader>
+          <DialogTitle>Fix this address in HubSpot?</DialogTitle>
+          <DialogDescription>
+            This writes the cleaned street, city, state, ZIP, and country to the contact. The old values stay in the order update log.
+          </DialogDescription>
+        </DialogHeader>
+        {shipToQuery.data?.original && shipToQuery.data.normalized ? (
+          <div className="space-y-1 text-sm">
+            <p className="text-muted-foreground">Before: {formatShipFields(shipToQuery.data.original)}</p>
+            <p>After: {formatShipFields(shipToQuery.data.normalized)}</p>
+          </div>
+        ) : null}
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button type="button" variant="outline" onClick={() => setCleanupOpen(false)} disabled={cleanup.isPending}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => cleanup.mutate()}
+            disabled={cleanup.isPending}
+            data-testid="button-confirm-address-cleanup"
+          >
+            {cleanup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Confirm cleanup
           </Button>
         </DialogFooter>
       </DialogContent>

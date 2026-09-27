@@ -6,6 +6,9 @@
  * Rates need connected carrier_ids (auto-listed, or SHIPENGINE_CARRIER_IDS).
  */
 import { z } from "zod";
+import { normalizeShipAddress, normalizeUsStateProvince } from "../../shared/ship-address";
+
+export { normalizeUsStateProvince };
 
 const SHIPENGINE_API_BASE = "https://api.shipengine.com";
 
@@ -590,6 +593,8 @@ export const shipEngineRatesRequestSchema = z.object({
       email: z.string().trim().max(200).optional().default(""),
     })
     .optional(),
+  /** accept = use ShipEngine's suggestion; override = keep the cleaned address. */
+  addressDecision: z.enum(["accept", "override"]).optional(),
 });
 
 export const shipEnginePurchaseRequestSchema = z
@@ -611,6 +616,7 @@ export const shipEnginePurchaseRequestSchema = z
     messageChannel: z.enum(["marketplace", "offerup"]).optional().default("marketplace"),
     packingDone: z.boolean().optional().default(true),
     liveWrite: z.boolean().optional(),
+    addressDecision: z.enum(["accept", "override"]).optional(),
   })
   .superRefine((value, ctx) => {
     const ids = [...(value.dealIds ?? []), ...(value.dealId ? [value.dealId] : [])];
@@ -631,70 +637,8 @@ export const shipEnginePurchaseRequestSchema = z
     messageChannel: value.messageChannel,
     packingDone: value.packingDone,
     liveWrite: value.liveWrite,
+    addressDecision: value.addressDecision,
   }));
-
-/** USPS / ShipEngine want 2-letter codes when country is US (HubSpot often stores "California"). */
-const US_STATE_NAME_TO_CODE: Record<string, string> = {
-  alabama: "AL",
-  alaska: "AK",
-  arizona: "AZ",
-  arkansas: "AR",
-  california: "CA",
-  colorado: "CO",
-  connecticut: "CT",
-  delaware: "DE",
-  "district of columbia": "DC",
-  florida: "FL",
-  georgia: "GA",
-  hawaii: "HI",
-  idaho: "ID",
-  illinois: "IL",
-  indiana: "IN",
-  iowa: "IA",
-  kansas: "KS",
-  kentucky: "KY",
-  louisiana: "LA",
-  maine: "ME",
-  maryland: "MD",
-  massachusetts: "MA",
-  michigan: "MI",
-  minnesota: "MN",
-  mississippi: "MS",
-  missouri: "MO",
-  montana: "MT",
-  nebraska: "NE",
-  nevada: "NV",
-  "new hampshire": "NH",
-  "new jersey": "NJ",
-  "new mexico": "NM",
-  "new york": "NY",
-  "north carolina": "NC",
-  "north dakota": "ND",
-  ohio: "OH",
-  oklahoma: "OK",
-  oregon: "OR",
-  pennsylvania: "PA",
-  "rhode island": "RI",
-  "south carolina": "SC",
-  "south dakota": "SD",
-  tennessee: "TN",
-  texas: "TX",
-  utah: "UT",
-  vermont: "VT",
-  virginia: "VA",
-  washington: "WA",
-  "west virginia": "WV",
-  wisconsin: "WI",
-  wyoming: "WY",
-};
-
-export function normalizeUsStateProvince(state: string): string {
-  const raw = state.trim();
-  if (!raw) return "";
-  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
-  const key = raw.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
-  return US_STATE_NAME_TO_CODE[key] ?? raw;
-}
 
 export function contactToShipEngineAddress(contact: {
   name: string;
@@ -708,32 +652,126 @@ export function contactToShipEngineAddress(contact: {
   country: string;
 }): ShipEngineAddress | null {
   const name = contact.name.trim();
-  const street1 = contact.street1.trim();
-  const city = contact.city.trim();
-  const zip = contact.zip.trim();
-  if (!name || !street1 || !city || !contact.state.trim() || !zip) return null;
-  const countryRaw = contact.country.trim() || "US";
-  const country =
-    countryRaw.length === 2
-      ? countryRaw.toUpperCase()
-      : /united states|usa/i.test(countryRaw)
-        ? "US"
-        : countryRaw.slice(0, 2).toUpperCase() || "US";
-  const state =
-    country === "US" ? normalizeUsStateProvince(contact.state) : contact.state.trim();
-  if (country === "US" && state.length !== 2) return null;
+  const cleaned = normalizeShipAddress({
+    street1: contact.street1,
+    street2: contact.street2,
+    city: contact.city,
+    state: contact.state,
+    zip: contact.zip,
+    country: contact.country,
+  }).normalized;
+  if (!name || !cleaned.street1 || !cleaned.city || !cleaned.state || !cleaned.zip) return null;
+  if (cleaned.country === "US" && cleaned.state.length !== 2) return null;
   return {
     name,
-    street1,
-    street2: contact.street2.trim() || undefined,
-    city,
-    state,
-    zip,
-    country,
+    street1: cleaned.street1,
+    street2: cleaned.street2 || undefined,
+    city: cleaned.city,
+    state: cleaned.state,
+    zip: cleaned.zip,
+    country: cleaned.country || "US",
     phone: contact.phone.trim() || undefined,
     email: contact.email.trim() || undefined,
     residential: true,
   };
+}
+
+export type ShipEngineMatchedAddress = {
+  street1: string;
+  street2: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+};
+
+export type ShipEngineAddressCheck = {
+  status: "verified" | "unverified" | "warning" | "error";
+  matched: ShipEngineMatchedAddress | null;
+  messages: string[];
+  /** True when ShipEngine's match is not the address we submitted. */
+  differs: boolean;
+};
+
+function looseAddressText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function zipDigits(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+export function shipAddressMateriallyDiffers(
+  submitted: { street1: string; city: string; state: string; zip: string },
+  matched: { street1: string; city: string; state: string; zip: string },
+): boolean {
+  return (
+    looseAddressText(submitted.street1) !== looseAddressText(matched.street1) ||
+    looseAddressText(submitted.city) !== looseAddressText(matched.city) ||
+    looseAddressText(submitted.state) !== looseAddressText(matched.state) ||
+    zipDigits(submitted.zip) !== zipDigits(matched.zip)
+  );
+}
+
+function readMatchedAddress(raw: unknown): ShipEngineMatchedAddress | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const street1 = asString(row.address_line1);
+  const city = asString(row.city_locality);
+  const state = asString(row.state_province);
+  const zip = asString(row.postal_code);
+  if (!street1 && !city && !state && !zip) return null;
+  return {
+    street1,
+    street2: asString(row.address_line2),
+    city,
+    state,
+    zip,
+    country: asString(row.country_code) || "US",
+  };
+}
+
+/** ShipEngine address validation. Does not buy a label. */
+export async function validateShipEngineAddress(
+  address: ShipEngineAddress,
+  apiKey?: string,
+): Promise<ShipEngineAddressCheck> {
+  const key = apiKey ?? getShipEngineApiKey();
+  if (!key) throw new ShipEngineError("ShipEngine API key is not configured", 503);
+  const body = await shipEngineRequest("/v1/addresses/validate", {
+    method: "POST",
+    apiKey: key,
+    body: JSON.stringify([
+      {
+        address_line1: address.street1,
+        address_line2: address.street2 || undefined,
+        city_locality: address.city,
+        state_province: address.state,
+        postal_code: address.zip,
+        country_code: (address.country || "US").slice(0, 2).toUpperCase(),
+      },
+    ]),
+  });
+  const row = (Array.isArray(body) ? body[0] : body) as Record<string, unknown> | null;
+  const statusRaw = asString(row?.status).toLowerCase();
+  const status =
+    statusRaw === "verified" || statusRaw === "unverified" || statusRaw === "warning" || statusRaw === "error"
+      ? statusRaw
+      : "error";
+  const messages: string[] = [];
+  const rawMessages = row && Array.isArray(row.messages) ? row.messages : [];
+  for (const message of rawMessages) {
+    if (typeof message === "string" && message.trim()) messages.push(message.trim());
+    else if (message && typeof message === "object" && "message" in message) {
+      const text = asString((message as { message: unknown }).message);
+      if (text) messages.push(text);
+    }
+  }
+  const matched = readMatchedAddress(row?.matched_address);
+  const differs = matched
+    ? shipAddressMateriallyDiffers(address, matched)
+    : true;
+  return { status, matched, messages, differs };
 }
 
 export function buildShipNotesFromShipEngine(purchase: {

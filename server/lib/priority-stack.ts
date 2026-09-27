@@ -18,6 +18,7 @@ import {
   type StackTier,
 } from "../../shared/priority-stack";
 import { addShipByCalendarDays, shipByCalendarDate } from "../../shared/ship-by";
+import { normalizeShipAddress } from "../../shared/ship-address";
 import { getFulfillmentChecklist } from "./fulfillment";
 import {
   priorityStackBundles,
@@ -307,6 +308,40 @@ export function deleteBundle(id: number): boolean {
   return true;
 }
 
+function offbookShipFields(input: {
+  mode?: "pickup" | "ship";
+  shipStreet?: string;
+  shipCity?: string;
+  shipState?: string;
+  shipZip?: string;
+  shipCountry?: string;
+}): {
+  shipStreet: string;
+  shipCity: string;
+  shipState: string;
+  shipZip: string;
+  shipCountry: string;
+} {
+  if ((input.mode ?? "pickup") !== "ship") {
+    return { shipStreet: "", shipCity: "", shipState: "", shipZip: "", shipCountry: "" };
+  }
+  const cleaned = normalizeShipAddress({
+    street1: input.shipStreet ?? "",
+    street2: "",
+    city: input.shipCity ?? "",
+    state: input.shipState ?? "",
+    zip: input.shipZip ?? "",
+    country: input.shipCountry ?? "",
+  }).normalized;
+  return {
+    shipStreet: cleaned.street1,
+    shipCity: cleaned.city,
+    shipState: cleaned.state,
+    shipZip: cleaned.zip,
+    shipCountry: cleaned.street1 || cleaned.city ? cleaned.country : "",
+  };
+}
+
 export function createOffbook(input: {
   title: string;
   contactName?: string;
@@ -317,9 +352,15 @@ export function createOffbook(input: {
   nextStep?: string;
   tentative?: boolean;
   steps?: StackStep[];
+  shipStreet?: string;
+  shipCity?: string;
+  shipState?: string;
+  shipZip?: string;
+  shipCountry?: string;
 }): PriorityStackEntryRow {
   const database = getDb();
   const stamp = nowIso();
+  const ship = offbookShipFields(input);
   return database
     .insert(priorityStackEntries)
     .values({
@@ -336,6 +377,7 @@ export function createOffbook(input: {
       stepsJson: JSON.stringify(input.steps ?? []),
       doneAmount: "",
       doneName: "",
+      ...ship,
       createdAt: stamp,
       updatedAt: stamp,
     })
@@ -356,6 +398,11 @@ export function updateOffbook(
     tentative: boolean;
     hidden: boolean;
     steps: StackStep[];
+    shipStreet: string;
+    shipCity: string;
+    shipState: string;
+    shipZip: string;
+    shipCountry: string;
   }>,
 ): PriorityStackEntryRow | null {
   const database = getDb();
@@ -365,6 +412,24 @@ export function updateOffbook(
     .where(and(eq(priorityStackEntries.id, id), eq(priorityStackEntries.kind, "offbook")))
     .get();
   if (!existing) return null;
+  const mode = patch.mode ?? (existing.fulfillmentMode === "pickup" ? "pickup" : "ship");
+  const touchesAddress =
+    patch.mode !== undefined ||
+    patch.shipStreet !== undefined ||
+    patch.shipCity !== undefined ||
+    patch.shipState !== undefined ||
+    patch.shipZip !== undefined ||
+    patch.shipCountry !== undefined;
+  const ship = touchesAddress
+    ? offbookShipFields({
+        mode,
+        shipStreet: patch.shipStreet ?? existing.shipStreet,
+        shipCity: patch.shipCity ?? existing.shipCity,
+        shipState: patch.shipState ?? existing.shipState,
+        shipZip: patch.shipZip ?? existing.shipZip,
+        shipCountry: patch.shipCountry ?? existing.shipCountry,
+      })
+    : null;
   database
     .update(priorityStackEntries)
     .set({
@@ -378,6 +443,7 @@ export function updateOffbook(
       tentative: patch.tentative ?? existing.tentative,
       hidden: patch.hidden ?? existing.hidden,
       stepsJson: patch.steps ? JSON.stringify(patch.steps) : existing.stepsJson,
+      ...(ship ?? {}),
       updatedAt: nowIso(),
     })
     .where(eq(priorityStackEntries.id, id))

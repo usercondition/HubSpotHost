@@ -264,6 +264,8 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
+import { applyAddressCleanup, gateLabelAddress, listAddressAudit } from "./lib/label-address";
+import { normalizeShipAddress } from "../shared/ship-address";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
 import {
@@ -1734,15 +1736,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     try {
       const contact = await fetchDealAssociatedContact(dealId);
+      const cleaned = normalizeShipAddress({
+        street1: contact.street1,
+        street2: contact.street2,
+        city: contact.city,
+        state: contact.state,
+        zip: contact.zip,
+        country: contact.country,
+      });
       const address = contactToShipEngineAddress(contact);
       const missing = address
         ? []
         : [
             !contact.name && "name",
-            !contact.street1 && "street",
-            !contact.city && "city",
-            !contact.state && "state",
-            !contact.zip && "zip",
+            !cleaned.normalized.street1 && "street",
+            !cleaned.normalized.city && "city",
+            !cleaned.normalized.state && "state",
+            !cleaned.normalized.zip && "zip",
           ].filter(Boolean);
       return res.json({
         ok: true,
@@ -1760,6 +1770,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           zip: contact.zip,
           country: contact.country,
         },
+        original: cleaned.original,
+        normalized: cleaned.normalized,
+        needsCleanup: cleaned.changed,
+        changes: cleaned.changes,
         ready: Boolean(address),
         hasContact: Boolean(contact.id),
         missing,
@@ -1813,18 +1827,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     try {
       const contact = await fetchDealAssociatedContact(parsed.data.dealId);
-      const addressTo = contactToShipEngineAddress(contact);
-      if (!addressTo) {
-        return res.status(400).json({
-          ok: false,
-          error:
-            "HubSpot contact is missing a full ship-to address (name, street, city, state, zip).",
-          contact: {
-            name: contact.name,
-            addressLines: contact.addressLines,
-          },
-        });
+      const gated = await gateLabelAddress(contact, parsed.data.addressDecision);
+      if (!gated.ok) {
+        return res.status(gated.status).json(gated.body);
       }
+      const addressTo = gated.address;
 
       const quoted = await createShipEngineRates({
         addressFrom,
@@ -1843,6 +1850,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           state: addressTo.state,
           zip: addressTo.zip,
         },
+        original: gated.normalized.original,
+        normalized: gated.normalized.normalized,
         rates: quoted.rates,
         messages: quoted.messages,
       });
@@ -1873,14 +1882,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     try {
-      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
-      let recipientName: string | null = null;
-      try {
-        const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
-        recipientName = contact.name || null;
-      } catch (error) {
-        if (!isHubSpotBusyError(error)) throw error;
+      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
+      const gated = await gateLabelAddress(contact, parsed.data.addressDecision);
+      if (!gated.ok) {
+        return res.status(gated.status).json(gated.body);
       }
+      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
+      const recipientName = contact.name || null;
       const notes = buildShipNotesFromShipEngine({
         carrierCode: purchase.carrierCode || parsed.data.carrierCode,
         serviceType: purchase.serviceCode || parsed.data.serviceType,
@@ -1930,10 +1938,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
       });
     } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
       const statusCode = error instanceof ShipEngineError ? error.status : 502;
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not purchase ShipEngine label",
+      });
+    }
+  });
+
+  /** Write cleaned address fields to the HubSpot contact. Confirm is required. */
+  app.post("/api/shipping-labels/address-cleanup", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
+    const confirm = (req.body as { confirm?: unknown } | null)?.confirm;
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    try {
+      const result = await applyAddressCleanup({ dealId, confirm: confirm === true });
+      if (!result.ok) return res.status(result.status).json(result.body);
+      return res.json(result.body);
+    } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not clean up the HubSpot address",
+      });
+    }
+  });
+
+  /** Open orders whose address needs cleanup or failed validation. */
+  app.get("/api/shipping-labels/address-audit", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    try {
+      const rows = await listAddressAudit();
+      return res.json({ ok: true, rows });
+    } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not audit addresses",
       });
     }
   });

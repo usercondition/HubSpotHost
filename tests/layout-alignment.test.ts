@@ -457,11 +457,11 @@ function bodyFor(input: string | URL) {
 }
 
 const LABEL_ORDERS = [
-  { dealId: "346140673754", name: "Daniel Ortega", city: "Phoenix", state: "AZ", status: "ready" },
-  { dealId: "349919419125", name: "Wayne Hood", city: "Tucson", state: "AZ", status: "ready" },
-  { dealId: "349912151800", name: "Glenn Chandler", city: "Mesa", state: "AZ", status: "ready" },
-  { dealId: "348746780377", name: "Angel Pineda", city: "Tempe", state: "AZ", status: "ready" },
-  { dealId: "342134173423", name: "Jose", city: "San Diego", state: "CA", status: "unknown" },
+  { dealId: "346140673754", name: "Daniel Ortega", city: "Phoenix", state: "AZ", status: "ready", needsCleanup: false },
+  { dealId: "349919419125", name: "Wayne Hood", city: "Romulus", state: "MI", status: "ready", needsCleanup: true },
+  { dealId: "349912151800", name: "Glenn Chandler", city: "Mesa", state: "AZ", status: "ready", needsCleanup: false },
+  { dealId: "348746780377", name: "Angel Pineda", city: "Tempe", state: "AZ", status: "ready", needsCleanup: false },
+  { dealId: "342134173423", name: "Jose", city: "San Diego", state: "CA", status: "unknown", needsCleanup: false },
 ];
 
 function labelsQueueBody() {
@@ -472,6 +472,7 @@ function labelsQueueBody() {
     stage: "Ready to Ship",
     addressStatus: order.status,
     addressSummary: order.status === "ready" ? `${order.city}, ${order.state}` : null,
+    addressNeedsCleanup: order.needsCleanup,
     chaseDraft: "",
   }));
   return {
@@ -1311,6 +1312,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       if (url.pathname.startsWith("/api/shipping-labels/ship-to/")) {
         const dealId = url.pathname.split("/").pop() || "";
         const order = LABEL_ORDERS.find((row) => row.dealId === dealId);
+        const wayne = dealId === "349919419125";
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -1320,12 +1322,35 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             ready: true,
             hasContact: true,
             missing: [],
+            needsCleanup: Boolean(order?.needsCleanup),
+            original: wayne
+              ? {
+                  street1: "10909 Hannan Rd, Romulus, Michigan, 48174",
+                  street2: "",
+                  city: "Romulus",
+                  state: "Michigan",
+                  zip: "48174",
+                  country: "United States",
+                }
+              : undefined,
+            normalized: wayne
+              ? {
+                  street1: "10909 Hannan Rd",
+                  street2: "",
+                  city: "Romulus",
+                  state: "MI",
+                  zip: "48174",
+                  country: "US",
+                }
+              : undefined,
             contact: {
               id: "9",
               name: order?.name ?? "Buyer",
               email: "buyer@example.com",
               phone: "",
-              addressLines: ["123 Main St", `${order?.city ?? "San Diego"}, ${order?.state ?? "CA"} 92101`],
+              addressLines: wayne
+                ? ["10909 Hannan Rd, Romulus, Michigan, 48174"]
+                : ["123 Main St", `${order?.city ?? "San Diego"}, ${order?.state ?? "CA"} 92101`],
               city: order?.city ?? "San Diego",
               state: order?.state ?? "CA",
             },
@@ -1349,6 +1374,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const listText = await picks.innerText();
       check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
       check(listText.includes("Daniel Ortega") && listText.includes("Address · Phoenix, AZ"), `Daniel address missing: ${listText}`);
+      check(listText.includes("Address needs cleanup"), `Wayne cleanup pill missing: ${listText}`);
       const joseButton = current().locator("[data-testid='button-shipengine-pick-342134173423']");
       if ((await joseButton.count()) > 0) await joseButton.click();
       await page.waitForFunction(() => {
@@ -1357,10 +1383,23 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         const text = node && node.textContent ? node.textContent : "";
         return text.indexOf("San Diego") >= 0;
       });
-      const card = current().locator("[data-testid='panel-shipengine-order-card-342134173423']");
-      const cardText = await card.innerText();
-      check(!cardText.includes("Needs address"), `open label card showed Needs address: ${cardText}`);
-      check(cardText.includes("Address · San Diego, CA"), `live ship-to did not win: ${cardText}`);
+      const joseCard = current().locator("[data-testid='panel-shipengine-order-card-342134173423']");
+      const joseText = await joseCard.innerText();
+      check(!joseText.includes("Needs address"), `open label card showed Needs address: ${joseText}`);
+      check(joseText.includes("Address · San Diego, CA"), `live ship-to did not win: ${joseText}`);
+      const wayneButton = current().locator("[data-testid='button-shipengine-pick-349919419125']");
+      if ((await wayneButton.count()) > 0) await wayneButton.click();
+      await page.waitForFunction(() => {
+        const nodes = document.querySelectorAll("[data-testid='panel-address-cleanup-diff']");
+        const node = nodes[nodes.length - 1];
+        const text = node && node.textContent ? node.textContent : "";
+        return text.indexOf("10909 Hannan Rd") >= 0 && text.indexOf("Before:") >= 0;
+      });
+      const wayneCard = current().locator("[data-testid='panel-shipengine-order-card-349919419125']");
+      const wayneText = await wayneCard.innerText();
+      check(!wayneText.includes("Needs address"), `Wayne card showed Needs address: ${wayneText}`);
+      check(wayneText.includes("Address needs cleanup"), `Wayne card missing cleanup pill: ${wayneText}`);
+      check(wayneText.includes("Address · Romulus, MI"), `Wayne live address missing: ${wayneText}`);
       await picks.screenshot({ path: file });
     };
     await shootLabels(1440, 900, "/opt/cursor/artifacts/labels-desktop.png");

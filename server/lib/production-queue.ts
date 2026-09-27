@@ -12,7 +12,7 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
-import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
+import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase, normalizeShipAddress } from "../../shared/ship-address";
 import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
@@ -423,16 +423,24 @@ const UNCHECKED_ADDRESS = {
 function readinessFromContact(
   contact: DealAssociatedContact,
   item: ProductionQueueItem,
-): Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft"> {
-  const engineAddress = contactToShipEngineAddress(contact);
-  const readiness = deriveShipAddressReadiness({
-    name: contact.name,
-    firstName: contact.name.split(/\s+/)[0] || null,
+): Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft" | "addressNeedsCleanup"> {
+  const cleaned = normalizeShipAddress({
     street1: contact.street1,
+    street2: contact.street2,
     city: contact.city,
     state: contact.state,
     zip: contact.zip,
     country: contact.country,
+  });
+  const engineAddress = contactToShipEngineAddress(contact);
+  const readiness = deriveShipAddressReadiness({
+    name: contact.name,
+    firstName: contact.name.split(/\s+/)[0] || null,
+    street1: cleaned.normalized.street1,
+    city: cleaned.normalized.city,
+    state: cleaned.normalized.state,
+    zip: cleaned.normalized.zip,
+    country: cleaned.normalized.country,
     dealName: item.dealName,
     contactNameHint: item.contactName ?? contact.name,
     shippingRequired: item.shippingRequired,
@@ -443,6 +451,7 @@ function readinessFromContact(
       addressStatus: readiness.addressStatus,
       addressSummary: readiness.addressSummary,
       chaseDraft: readiness.chaseDraft,
+      addressNeedsCleanup: false,
     };
   }
   // Prefer ShipEngine gate: ready only when label buy would accept the address.
@@ -457,6 +466,7 @@ function readinessFromContact(
     addressSummary:
       engineAddress != null ? `${engineAddress.city}, ${engineAddress.state}` : readiness.addressSummary,
     chaseDraft: readiness.chaseDraft,
+    addressNeedsCleanup: cleaned.changed,
   };
 }
 
@@ -503,7 +513,10 @@ export async function attachShipAddressReadiness(
     }
   });
 
-  const byDeal = new Map<string, Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">>();
+  const byDeal = new Map<
+    string,
+    Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft" | "addressNeedsCleanup">
+  >();
   for (const entry of entries) {
     if (entry) byDeal.set(entry[0], entry[1]);
   }

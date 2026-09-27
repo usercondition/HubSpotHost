@@ -35,6 +35,7 @@ import {
   type PriorClientMatch,
   type ReviewEditInput,
 } from "../../shared/schema";
+import { normalizeShipAddress } from "../../shared/ship-address";
 
 const CREATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS order_intake_links (
@@ -385,6 +386,11 @@ CREATE TABLE IF NOT EXISTS priority_stack_entries (
   done_at TEXT,
   done_amount TEXT NOT NULL DEFAULT '',
   done_name TEXT NOT NULL DEFAULT '',
+  ship_street TEXT NOT NULL DEFAULT '',
+  ship_city TEXT NOT NULL DEFAULT '',
+  ship_state TEXT NOT NULL DEFAULT '',
+  ship_zip TEXT NOT NULL DEFAULT '',
+  ship_country TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -587,6 +593,22 @@ const FULFILLMENT_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["shipengine_service", "TEXT NOT NULL DEFAULT ''"],
 ];
 
+function ensureOffbookAddressColumns(sqlite: Database.Database): void {
+  const names = new Set(
+    (sqlite.prepare("PRAGMA table_info(priority_stack_entries)").all() as Array<{ name: string }>).map((row) => row.name),
+  );
+  const add: Array<[string, string]> = [
+    ["ship_street", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_city", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_state", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_zip", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_country", "TEXT NOT NULL DEFAULT ''"],
+  ];
+  for (const [name, type] of add) {
+    if (!names.has(name)) sqlite.exec(`ALTER TABLE priority_stack_entries ADD COLUMN ${name} ${type}`);
+  }
+}
+
 function ensureFulfillmentColumns(sqlite: Database.Database): void {
   const existing = new Set(
     (sqlite.prepare("PRAGMA table_info(fulfillment_checklists)").all() as Array<{ name: string }>).map((row) => row.name),
@@ -678,6 +700,7 @@ export function getDb(): BetterSQLite3Database {
   ensureOrderIntakeColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
   ensureFulfillmentColumns(sqlite);
+  ensureOffbookAddressColumns(sqlite);
   sqliteConn = sqlite;
   db = drizzle(sqlite);
   return db;
@@ -925,6 +948,32 @@ export function applyReviewEdits(id: number, edits: ReviewEditInput): OrderIntak
   assign("paymentMethod", edits.paymentMethod);
   assign("paymentReference", edits.paymentReference);
   assign("ownerNotes", edits.ownerNotes);
+  const touchesAddress =
+    edits.shippingStreet !== undefined ||
+    edits.shippingStreet2 !== undefined ||
+    edits.shippingCity !== undefined ||
+    edits.shippingState !== undefined ||
+    edits.shippingPostalCode !== undefined ||
+    edits.shippingCountry !== undefined;
+  if (touchesAddress) {
+    const shippingRequired = patch.shippingRequired ?? link.shippingRequired;
+    if (shippingRequired) {
+      const cleaned = normalizeShipAddress({
+        street1: patch.shippingStreet ?? link.shippingStreet,
+        street2: patch.shippingStreet2 ?? link.shippingStreet2,
+        city: patch.shippingCity ?? link.shippingCity,
+        state: patch.shippingState ?? link.shippingState,
+        zip: patch.shippingPostalCode ?? link.shippingPostalCode,
+        country: patch.shippingCountry ?? link.shippingCountry,
+      }).normalized;
+      patch.shippingStreet = cleaned.street1;
+      patch.shippingStreet2 = cleaned.street2;
+      patch.shippingCity = cleaned.city;
+      patch.shippingState = cleaned.state;
+      patch.shippingPostalCode = cleaned.zip;
+      patch.shippingCountry = cleaned.country;
+    }
+  }
   if (Object.keys(patch).length === 0) return link;
   getDb().update(orderIntakeLinks).set(patch).where(eq(orderIntakeLinks.id, id)).run();
   return getOrderLink(id);
@@ -1051,6 +1100,16 @@ export type ClientSubmitResult =
 export function submitClientOrder(token: string, input: ClientOrderSubmission): ClientSubmitResult {
   const lookup = lookupClientOrder(token);
   if (!lookup.ok) return lookup;
+  const cleaned = input.shippingRequired
+    ? normalizeShipAddress({
+        street1: input.shippingStreet,
+        street2: input.shippingStreet2,
+        city: input.shippingCity,
+        state: input.shippingState,
+        zip: input.shippingPostalCode,
+        country: input.shippingCountry,
+      }).normalized
+    : null;
   const changed = getDb()
     .update(orderIntakeLinks)
     .set({
@@ -1062,12 +1121,12 @@ export function submitClientOrder(token: string, input: ClientOrderSubmission): 
       clientEmail: input.clientEmail,
       clientPhone: input.clientPhone,
       shippingRequired: input.shippingRequired,
-      shippingStreet: input.shippingRequired ? input.shippingStreet : "",
-      shippingStreet2: input.shippingRequired ? input.shippingStreet2 : "",
-      shippingCity: input.shippingRequired ? input.shippingCity : "",
-      shippingState: input.shippingRequired ? input.shippingState : "",
-      shippingPostalCode: input.shippingRequired ? input.shippingPostalCode : "",
-      shippingCountry: input.shippingRequired ? input.shippingCountry : "",
+      shippingStreet: cleaned?.street1 ?? "",
+      shippingStreet2: cleaned?.street2 ?? "",
+      shippingCity: cleaned?.city ?? "",
+      shippingState: cleaned?.state ?? "",
+      shippingPostalCode: cleaned?.zip ?? "",
+      shippingCountry: cleaned?.country ?? "",
       confirmedItem: input.confirmedItem,
       quantity: input.quantity,
       clientNotes: input.clientNotes,
