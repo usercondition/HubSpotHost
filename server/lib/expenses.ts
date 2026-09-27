@@ -4,10 +4,10 @@
  */
 import crypto from "node:crypto";
 import { getSqlite } from "./order-links";
+import { EXPENSE_CATEGORIES, monthlyEquivalentCents, type ExpenseCategory } from "../../shared/expenses";
 
-export const EXPENSE_CATEGORIES = ["Models/Patreon", "Model marketplace (MMF)", "Software/AI", "Hosting", "Materials", "Equipment", "Shipping supplies", "Other"] as const;
 export const EXPENSE_CADENCES = ["one-off", "monthly", "yearly", "usage"] as const;
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+export { EXPENSE_CATEGORIES };
 export type ExpenseCadence = (typeof EXPENSE_CADENCES)[number];
 
 export type ExpenseInput = {
@@ -104,7 +104,5 @@ function addCadence(start: string, cadence: string, payments: number): string {
 }
 
 export function monthlyEquivalent(row: any): number | null {
-  const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
-  if (!Number.isFinite(amount) || row.cadence === "one-off" || row.cadence === "usage") return null;
-  return row.cadence === "yearly" ? Math.round(amount / 12) : amount;
+  return monthlyEquivalentCents(row);
 }
