@@ -108,11 +108,11 @@ An off-book example uses `"key": "offbook:4"`. The Stack drawer shows these entr
 
 ## Slice files (Google Drive)
 
-Slice files (`.ctb` and the other slicer formats) are stored in Miguel's personal Google Drive, not on Railway. Print Ops keeps a searchable index in the same SQLite file as the Stack (`ORDER_LINKS_DB_FILE`). Nothing in this feature is written to a HubSpot deal property. Off-book orders never write to HubSpot.
+Slice files (`.ctb` and the other slicer formats) are stored in Miguel's personal Google Drive, not on Railway. Print Ops keeps a searchable index in the same SQLite file as the Stack (`ORDER_LINKS_DB_FILE`). The Drive index is not itself a HubSpot property. Attaching the plate still updates the existing print-planning fields on that deal. Off-book orders never write to HubSpot.
 
 `drive.file` can only see files this app created. Existing Drive files are registered by metadata through the owner index API below. The assistant does that with its own Drive access; Print Ops does not list the rest of the Drive.
 
-Attaching a `.ctb` or `.ultx` on Prints also uploads that file into `Print Ops/<Kit> – <Customer> (<id>)/` and links it to the print record. The same file (same fingerprint) already on that order is linked instead of uploaded again. If Drive is not connected, the plate still attaches and the row stays retryable with Send to Library. Download streams files this app uploaded, including `Range` for large plates. Files that were only indexed open their Drive link. Preview uses the CTB header thumbnail, cached when the plate is analyzed, so opening it does not download the slice.
+Uploading a `.ctb` or `.ultx` from Prints or from the Stack drawer Files section runs the same steps: analyze the plate, attach it to that order (print time, resin, cost, and the HubSpot print totals), upload the file into `Print Ops/<Kit> – <Customer> (<id>)/`, and register it in the Library with its preview. The same fingerprint already on that order links the existing print record and Drive file instead of adding a second plate or a second copy. If Drive is not connected, the plate still attaches and the row stays retryable with Send to Library. Off-book orders have no HubSpot deal, so they are stored in the Library only. Download streams files this app uploaded, including `Range` for large plates. Files that were only indexed open their Drive link. Preview uses the CTB header thumbnail, cached when the plate is analyzed, so opening it does not download the slice.
 
 ### Google Cloud setup
 

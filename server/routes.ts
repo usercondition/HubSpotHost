@@ -71,6 +71,7 @@ import {
   buildPrintFileOrderSummary,
   createPrintFileRecord,
   deletePrintFileRecord,
+  findPrintFileByFingerprint,
   getPrintFileRecord,
   getStagedPrintFile,
   groupPrintFileRecordsByDeal,
@@ -264,7 +265,7 @@ import {
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
-import { libraryMarksForPrints } from "./lib/plate-files";
+import { findPlateBySha256, libraryMarksForPrints, linkPlatePrint } from "./lib/plate-files";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -2960,6 +2961,20 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         return res.status(409).json({
           ok: false,
           error: "That Print Order is closed. Choose an outstanding or in-work order instead.",
+        });
+      }
+
+      const already = findPrintFileByFingerprint(deal.id, staged.metrics.sha256);
+      if (already) {
+        markPrintFileAnalysisUsed(parsed.data.analysisId);
+        const libraryFile = findPlateBySha256(`deal:${deal.id}`, staged.metrics.sha256);
+        if (libraryFile) linkPlatePrint(libraryFile.driveFileId, already.id);
+        return res.status(200).json({
+          ok: true,
+          linked: true,
+          record: already,
+          summary: buildPrintFileOrderSummaryFromRecords(deal.id),
+          message: "This plate is already attached. Linked the existing print record instead of adding it again.",
         });
       }
 

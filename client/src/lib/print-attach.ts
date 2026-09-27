@@ -27,6 +27,7 @@ export type AnalyzePrintResult = {
 
 export type AttachPrintResult = {
   ok: true;
+  linked?: boolean;
   record: PrintFileRecord;
   summary: PrintFileOrderSummary;
   message: string;

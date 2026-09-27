@@ -57,7 +57,7 @@ function listen(server: http.Server): Promise<number> {
   });
 }
 
-function fixtureCtb(): Buffer {
+function fixtureCtb(salt = 0): Buffer {
   const file = Buffer.alloc(0x180);
   file.writeUInt32LE(0x12fd0086, 0x00);
   file.writeUInt32LE(4, 0x04);
@@ -91,6 +91,7 @@ function fixtureCtb(): Buffer {
   file.writeUInt32LE(0x100, 0xdc);
   file.writeUInt32LE(13, 0xe0);
   file.write("ELEGOO SATURN", 0x100, "ascii");
+  if (salt) file.writeUInt8(salt, 0x170);
   return file;
 }
 
@@ -312,7 +313,7 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.record.dealStage, "In work");
   assert.equal(firstAttach.body.record.fleetPrinterId, printerId);
 
-  const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb());
+  const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb(2));
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
@@ -372,7 +373,7 @@ test("attach previews and confirmed detach rebuilds only print planning totals",
     printerId,
   });
   assert.equal(firstAttach.status, 201);
-  const second = stagePrintFile("detach-plate-02.ctb", fixtureCtb());
+  const second = stagePrintFile("detach-plate-02.ctb", fixtureCtb(2));
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
@@ -456,7 +457,7 @@ test("plate attach preserves an existing material actual", async () => {
   process.env.ALLOW_HUBSPOT_WRITES = "true";
   try {
     const fleet = await jsonOwnerRequest("GET", "/api/printers");
-    const staged = stagePrintFile("actual-material.ctb", fixtureCtb());
+    const staged = stagePrintFile("actual-material.ctb", fixtureCtb(4));
     const attached = await jsonOwnerRequest("POST", "/api/prints/attach", {
       analysisId: staged.analysisId,
       dealId: "701",

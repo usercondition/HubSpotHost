@@ -4,7 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { fingerprintFile, preparePlateUpload, uploadPlateBytes } from "@/lib/plate-library-client";
+import { commitSliceToOrder, SlicePrinterChoiceError } from "@/lib/plate-library-client";
 import { PlateFileMenu, PlatePreviewHost, PlateThumb, usePlatePreview } from "@/components/plate-file-menu";
 import { formatPacificUpdateStamp } from "@shared/ship-by";
 import {
@@ -47,6 +47,9 @@ export function SliceFiles({
   const [printer, setPrinter] = useState("");
   const [notes, setNotes] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
+  const [progressLabel, setProgressLabel] = useState("");
+  const [fleetPrinterId, setFleetPrinterId] = useState("");
+  const [fleetChoices, setFleetChoices] = useState<Array<{ id: number; name: string }>>([]);
   const [localError, setLocalError] = useState("");
   const preview = usePlatePreview();
 
@@ -67,40 +70,50 @@ export function SliceFiles({
   async function send(nextFile: File, nextPrinter: string, nextNotes: string) {
     setLocalError("");
     setProgress(0);
+    setProgressLabel("Reading the plate");
     try {
-      const sha256 = await fingerprintFile(nextFile);
-      const prepared = await preparePlateUpload(
-        { orderKey, sha256, fileName: nextFile.name, printer: nextPrinter, kit, customer },
+      const result = await commitSliceToOrder({
+        file: nextFile,
+        orderKey,
         headers,
-      );
-      if (prepared.action === "pending") {
-        throw new Error("Not in Library yet. Connect Drive or retry.");
+        kit,
+        customer,
+        printer: nextPrinter,
+        notes: nextNotes,
+        printerId: fleetPrinterId ? Number(fleetPrinterId) : null,
+        onProgress: (label, fraction) => {
+          setProgressLabel(label);
+          setProgress(fraction);
+        },
+      });
+      setFleetChoices([]);
+      setFleetPrinterId("");
+      if (result.library === "pending" && result.libraryError) {
+        setLocalError(result.libraryError);
+        retryFile.current = nextFile;
+      } else {
+        setFile(null);
+        setNotes("");
+        setOpen(false);
+        retryFile.current = null;
       }
-      if (prepared.action !== "linked") {
-        await uploadPlateBytes({
-          file: nextFile,
-          orderKey,
-          printer: nextPrinter,
-          notes: nextNotes,
-          kit,
-          customer,
-          sha256,
-          headers,
-          onProgress: setProgress,
-        });
-      }
-      setFile(null);
-      setNotes("");
-      setOpen(false);
-      retryFile.current = null;
       await queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/priority-stack"] });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "Drive upload failed.");
-      setLocalError(message);
+      if (error instanceof SlicePrinterChoiceError) {
+        setFleetChoices(error.printers);
+        setLocalError(error.message);
+      } else {
+        const message = error instanceof Error ? error.message : String(error || "Drive upload failed.");
+        setLocalError(message);
+      }
       retryFile.current = nextFile;
       await queryClient.invalidateQueries({ queryKey: ["/api/plate-files", orderKey] });
     } finally {
       setProgress(null);
+      setProgressLabel("");
     }
   }
 
@@ -163,6 +176,21 @@ export function SliceFiles({
               onChange={(event) => setNotes(event.target.value)}
             />
           </div>
+          {fleetChoices.length > 0 ? (
+            <select
+              className="h-9 min-w-0 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={fleetPrinterId}
+              data-testid="select-slice-fleet-printer"
+              onChange={(event) => setFleetPrinterId(event.target.value)}
+            >
+              <option value="">Which printer ran this plate</option>
+              {fleetChoices.map((option) => (
+                <option key={option.id} value={String(option.id)}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <Button
             type="button"
             size="sm"
@@ -176,7 +204,7 @@ export function SliceFiles({
           </Button>
           {progress != null ? (
             <p className="text-xs text-muted-foreground" data-testid="slice-upload-progress">
-              Uploading {Math.round(progress * 100)}%
+              {progressLabel === "Sending to Library" ? `Sending to Library ${Math.round(progress * 100)}%` : progressLabel || "Uploading"}
             </p>
           ) : null}
         </div>

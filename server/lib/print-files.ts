@@ -7,7 +7,7 @@
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   printFileAnalyses,
   printFileRecords,
@@ -321,6 +321,19 @@ export function listPrintFileRecordsForDeal(hubspotDealId: string): PrintFileRec
 
 export function getPrintFileRecord(recordId: number): PrintFileRecord | null {
   return getDb().select().from(printFileRecords).where(eq(printFileRecords.id, recordId)).get() ?? null;
+}
+
+/** Same slice already attached to this order. A second upload links this row. */
+export function findPrintFileByFingerprint(hubspotDealId: string, sha256: string): PrintFileRecord | null {
+  const fingerprint = sha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) return null;
+  return (
+    getDb()
+      .select()
+      .from(printFileRecords)
+      .where(and(eq(printFileRecords.hubspotDealId, hubspotDealId), eq(printFileRecords.sha256, fingerprint)))
+      .get() ?? null
+  );
 }
 
 export function deletePrintFileRecord(recordId: number): PrintFileRecord | null {
