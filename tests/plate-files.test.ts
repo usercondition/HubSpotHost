@@ -72,6 +72,7 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
 
   let mode: "ok" | "no-id" | "invalid" = "ok";
   let pendingName = "";
+  const putSizes: number[] = [];
   setDriveFetchForTest(async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -97,7 +98,14 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
       return new Response(null, { status: 200, headers: { location: "https://upload.example/session" } });
     }
     if (url.startsWith("https://upload.example/session")) {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const match = /bytes (\d+)-(\d+)\/(\d+)/.exec(headers["content-range"] ?? "");
+      const end = match ? Number(match[2]) : 0;
+      const total = match ? Number(match[3]) : 0;
+      const body = init?.body;
+      putSizes.push(body instanceof Uint8Array ? body.byteLength : 0);
       if (mode === "no-id") return new Response(JSON.stringify({ name: pendingName }), { status: 200 });
+      if (match && end + 1 < total) return new Response(null, { status: 308 });
       return new Response(
         JSON.stringify({
           id: `id-${pendingName}`,
@@ -214,6 +222,27 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     );
     assert.equal(listPlateFiles({ q: "partial" }).files.length, 0);
 
+    putSizes.length = 0;
+    mode = "ok";
+    const largeTotal = 8 * 1024 * 1024 + 1;
+    const pieces: Buffer[] = [];
+    for (let left = largeTotal; left > 0; ) {
+      const n = Math.min(64 * 1024, left);
+      pieces.push(Buffer.alloc(n, 7));
+      left -= n;
+    }
+    const large = await uploadDriveFile({
+      access: "access-ok",
+      folderId: "folder-1",
+      name: "Cerastus_body.ctb",
+      size: largeTotal,
+      body: Readable.from(pieces),
+    });
+    assert.equal(large.id, "id-Cerastus_body.ctb");
+    assert.ok(putSizes.length >= 2, `expected multiple Drive chunks, got ${putSizes.length}`);
+    assert.ok(putSizes.every((size) => size > 0 && size <= 8 * 1024 * 1024));
+    assert.equal(putSizes.reduce((sum, size) => sum + size, 0), largeTotal);
+
     const offbook = await upload("Sword_8K.stl", "offbook:4");
     assert.equal(offbook.status, 201);
     assert.equal(calls.length, 0);
@@ -321,6 +350,21 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const expiredText = await expired.text();
     assert.equal(expiredText.includes(REFRESH), false);
     assert.match(expiredText, /did not connect/);
+
+    delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+    delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const bare = await fetch(`${base}/api/google/drive`, { headers });
+    assert.equal(bare.status, 200);
+    const bareBody = await bare.json();
+    assert.equal(bareBody.configured, false);
+    assert.equal(bareBody.connected, false);
+    assert.equal(bareBody.reconnect, false);
+    const bareStart = await fetch(`${base}/api/google/oauth/start`, { headers });
+    assert.equal(bareStart.status, 503);
+    const bareUpload = await upload("Cerastus_body.ctb", "deal:81");
+    assert.equal(bareUpload.status, 503);
+    const bareUploadBody = await bareUpload.json();
+    assert.match(bareUploadBody.error, /not configured/);
 
     const blob = logs.join("\n");
     assert.equal(blob.includes(REFRESH), false);
