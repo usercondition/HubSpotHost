@@ -6,16 +6,18 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink, MoreHorizontal, X } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { OrderUpdates } from "@/components/order-updates";
 import { SliceFiles } from "@/components/slice-files";
 import { targetLabel, type StackRowModel } from "@/components/priority-stack-list";
 import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
 import { drawerPanelVariants, drawerScrimVariants, drawerTransition } from "@/lib/motion";
-import { apiRequest } from "@/lib/queryClient";
+import { PasteAddressBox } from "@/components/paste-address";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
 
 type DrawerOps = {
@@ -23,6 +25,7 @@ type DrawerOps = {
   hubspotPortalId?: string | null;
   plates?: Array<{ id: number; fileName: string }>;
   checklist?: { trackingNumber?: string; labelBought?: boolean };
+  addressEntryLabel?: string | null;
 };
 
 const FOCUSABLE = "a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex='-1'])";
@@ -102,7 +105,22 @@ export function StackOrderDrawer({
   const desktop = useDesktopDrawer();
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLElement | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
   const dealId = row?.kind === "deal" ? row.dealId : null;
+  const offbookKey = row?.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : null;
+  const offbookEntry = useQuery({
+    queryKey: ["/api/address-entry", offbookKey],
+    enabled: open && Boolean(offbookKey),
+    queryFn: async () => {
+      const response = await apiRequest(
+        "GET",
+        `/api/address-entry?orderKey=${encodeURIComponent(offbookKey || "")}`,
+        undefined,
+        { headers },
+      );
+      return (await response.json()) as { addressEntryLabel?: string | null };
+    },
+  });
   const ops = useQuery({
     queryKey: ["/api/deal-ops", dealId],
     enabled: open && Boolean(dealId),
@@ -150,6 +168,10 @@ export function StackOrderDrawer({
     };
   }, [open, row?.key]);
 
+  useEffect(() => {
+    setPasteOpen(false);
+  }, [row?.key]);
+
   const drawer = (
     <AnimatePresence>
       {open && row ? (
@@ -189,6 +211,29 @@ export function StackOrderDrawer({
           >
             <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
               <p className="rule-label">{row.kind === "offbook" ? "Off-book" : "Order"}</p>
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
+                      aria-label="More order actions"
+                      data-testid="button-drawer-overflow"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="z-[90]">
+                    <DropdownMenuItem
+                      data-testid="menu-paste-address"
+                      onSelect={() => setPasteOpen(true)}
+                    >
+                      Paste address
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               <Button
                 type="button"
                 size="sm"
@@ -200,11 +245,17 @@ export function StackOrderDrawer({
                 <X className="h-4 w-4" />
                 <span className="sr-only">Close</span>
               </Button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
               <h2 id="stack-drawer-title" className="text-lg font-semibold tracking-tight">
                 {orderTitle(row.name, row.contactName)}
               </h2>
+              {ops.data?.addressEntryLabel || offbookEntry.data?.addressEntryLabel ? (
+                <p className="mt-2 text-xs text-muted-foreground" data-testid="text-address-entry">
+                  {ops.data?.addressEntryLabel || offbookEntry.data?.addressEntryLabel}
+                </p>
+              ) : null}
               <p className="mt-1 text-sm text-muted-foreground">
                 <span data-testid="drawer-customer">{row.contactName?.trim() || "No customer"}</span>
                 {" · "}
@@ -240,6 +291,38 @@ export function StackOrderDrawer({
                     || (row.fulfillment?.labelBought || ops.data?.checklist?.labelBought ? "Label bought" : "None")}
                 </Fact>
               </dl>
+              {pasteOpen ? (
+              <div className="mt-4">
+                <PasteAddressBox
+                  headers={headers}
+                  applyLabel="Save this address"
+                  onApply={async (fields, choice, skippedUnit, options) => {
+                    const response = await apiRequest(
+                      "POST",
+                      "/api/address-capture/apply",
+                      {
+                        confirm: true,
+                        dealId: row.kind === "deal" && row.dealId ? row.dealId : undefined,
+                        offbookId: row.kind === "offbook" && row.offbookId ? row.offbookId : undefined,
+                        decision: choice,
+                        noUnit: skippedUnit,
+                        replaceHubspot: options?.replaceHubspot === true,
+                        switchToShip: options?.switchToShip === true,
+                        fields,
+                      },
+                      { headers },
+                    );
+                    const body = (await response.json()) as { wrote?: boolean; writesOff?: boolean; message?: string; offbookId?: number };
+                    await queryClient.invalidateQueries({ queryKey: ["/api/deal-ops", row.dealId] });
+                    const entryKey = row.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : null;
+                    if (entryKey) {
+                      await queryClient.invalidateQueries({ queryKey: ["/api/address-entry", entryKey] });
+                    }
+                    return body;
+                  }}
+                />
+              </div>
+              ) : null}
               {row.kind === "deal" && row.dealId ? (
                 <div className="mt-3 flex flex-wrap gap-2" data-testid="drawer-links">
                   <Button asChild size="sm" variant="outline">

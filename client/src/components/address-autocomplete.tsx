@@ -21,10 +21,14 @@ export function AddressAutocomplete({
   street,
   onStreetChange,
   onSelect,
+  id = "shipping-street",
+  readOnly = false,
 }: {
   street: string;
   onStreetChange: (value: string) => void;
   onSelect: (value: AddressFill) => void;
+  id?: string;
+  readOnly?: boolean;
 }) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -35,7 +39,7 @@ export function AddressAutocomplete({
 
   useEffect(() => {
     const query = street.trim();
-    if (query.length < 3) {
+    if (readOnly || query.length < 3) {
       setSuggestions([]);
       setOpen(false);
       setLoading(false);
@@ -71,7 +75,7 @@ export function AddressAutocomplete({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [street]);
+  }, [street, readOnly]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -102,10 +106,11 @@ export function AddressAutocomplete({
       </Label>
       <div className="relative">
         <Input
-          id="shipping-street"
+          id={id}
           type="text"
           autoComplete="street-address"
           value={street}
+          readOnly={readOnly}
           onChange={(event) => onStreetChange(event.target.value)}
           onFocus={() => {
             if (suggestions.length > 0) setOpen(true);

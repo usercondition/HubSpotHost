@@ -131,6 +131,8 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/shipping-labels/shipengine/status", note: "ShipEngine key + ship-from + carriers" },
   { method: "POST", path: "/api/shipping-labels/shipengine/rates", note: "Quote UPS/USPS rates for a Print Order" },
   { method: "POST", path: "/api/shipping-labels/shipengine/purchase", note: "Buy ShipEngine label → attach tracking" },
+  { method: "POST", path: "/api/shipping-labels/address-verify", note: "Run ShipEngine validation now for one Print Order" },
+  { method: "POST", path: "/api/shipping-labels/address-cleanup", note: "Write a cleaned address to HubSpot after confirm" },
 ];
 
 const DAILY_ROUTES = [

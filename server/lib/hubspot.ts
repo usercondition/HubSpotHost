@@ -186,6 +186,14 @@ const PRINT_FILE_DEAL_PROPERTIES = [
       { label: "No", value: "false", displayOrder: 1, hidden: false },
     ],
   },
+  {
+    name: "print_client_confirmed_address",
+    label: "Client confirmed address",
+    description:
+      "Timestamp and snapshot of the name and shipping address the client confirmed on the order form. Print Ops does not overwrite an existing value.",
+    type: "string",
+    fieldType: "textarea",
+  },
 ] as const;
 
 /** True when a HubSpot bool property is missing the required true/false options. */

@@ -7,8 +7,10 @@ import { createServer } from "node:http";
 import { PRINT_FILE_MAX_LABEL } from "./lib/print-file-limits";
 import { startPrintOpsJobWorker } from "./lib/print-ops-jobs";
 import { startSyncHealthSchedule } from "./lib/sync-health";
+import { configureTrustProxy } from "./lib/trust-proxy";
 
 const app = express();
+configureTrustProxy(app);
 const httpServer = createServer(app);
 
 declare module "http" {

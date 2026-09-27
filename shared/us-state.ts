@@ -56,6 +56,26 @@ const US_STATE_NAME_TO_CODE: Record<string, string> = {
 
 export const US_STATE_CODES = new Set(Object.values(US_STATE_NAME_TO_CODE));
 
+const US_CODE_TO_NAME: Record<string, string> = {};
+for (const [name, code] of Object.entries(US_STATE_NAME_TO_CODE)) {
+  if (!US_CODE_TO_NAME[code]) US_CODE_TO_NAME[code] = name;
+}
+
+/** Lowercase state name for a 2-letter code, or "" when the code is not a state. */
+export function usStateName(code: string): string {
+  return US_CODE_TO_NAME[code.trim().toUpperCase()] ?? "";
+}
+
+/** 2-letter codes for the state dropdown, sorted by name. */
+export function usStateOptions(): Array<{ code: string; name: string }> {
+  return Object.entries(US_STATE_NAME_TO_CODE)
+    .map(([name, code]) => ({
+      code,
+      name: name.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function normalizeUsStateProvince(state: string): string {
   const raw = state.trim();
   if (!raw) return "";

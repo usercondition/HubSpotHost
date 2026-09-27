@@ -735,6 +735,7 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
         allowWrites: config.allowWrites,
         liveWriteReady: decision.write,
       },
+      addressEntryLabel: (await import("./address-capture")).addressEntryLabelFor(`deal:${id}`),
     };
   } catch (error) {
     const message = error instanceof HubSpotError ? error.message : "Could not load deal ops.";
