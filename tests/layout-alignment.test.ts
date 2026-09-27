@@ -1460,7 +1460,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.getByRole("button", { name: "Add expense" }).first().waitFor();
     if (artifactPath("expenses-phone-390.png")) await page.screenshot({ path: artifactPath("expenses-phone-390.png")!, fullPage: true });
     await page.getByRole("button", { name: "Add expense" }).first().click();
-    const saveVisible = await page.getByRole("button", { name: "Save" }).evaluate((el) => {
+    const saveVisible = await page.getByRole("button", { name: "Save" }).last().evaluate((el) => {
       const rect = el.getBoundingClientRect();
       const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       return rect.top >= 0 && rect.bottom <= innerHeight && (center === el || el.contains(center));
