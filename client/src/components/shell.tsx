@@ -27,6 +27,7 @@ import { AttentionBell } from "@/components/attention-bell";
 import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
 import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
 import { PageTransition } from "@/components/page-transition";
+import { PrintsLibrarySwitch } from "@/components/prints-library-switch";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
@@ -135,7 +136,7 @@ const NAV: Array<{
   { href: "/stack", label: "Stack", title: "This week's priority stack", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
-  { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "more" },
+  { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "never" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   {
@@ -258,6 +259,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (href === "/") return { value: shop.needsYou, hot: true, testId: "badge-nav-floor" };
     if (href === "/stack") return { value: shop.stackCount, testId: "badge-nav-stack" };
     if (href === "/queue") return { value: shop.queueCount, testId: "badge-nav-queue" };
+    if (href === "/library") return { value: shop.libraryCount, testId: "badge-nav-library" };
     return null;
   };
 
@@ -385,6 +387,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main className="scroll-pane relative z-[1] min-h-0 min-w-0 flex-1 bg-transparent pb-24 md:pb-0" data-scroll-pane>
+          {pathOnly === "/prints" || pathOnly === "/library" ? (
+            <div className="px-4 pt-3 md:hidden">
+              <PrintsLibrarySwitch />
+            </div>
+          ) : null}
           <PageTransition routeKey={pathOnly}>{children}</PageTransition>
         </main>
 
@@ -409,7 +416,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <nav aria-label="Mobile navigation" className="ops-tabbar grid md:hidden">
           {PHONE_TABS.map((item) => {
-            const active = pathOnly === item.href;
+            const active = item.href === "/prints" ? pathOnly === "/prints" || pathOnly === "/library" : pathOnly === item.href;
             const count = countFor(item.href);
             const badge = count?.value != null && count.value > 0 ? count.value : null;
             const phoneTestId =

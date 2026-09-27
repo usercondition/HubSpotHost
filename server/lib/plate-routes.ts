@@ -25,7 +25,7 @@ import {
   googleRedirectUri,
   uploadDriveFile,
 } from "./google-drive";
-import { linkPlateFile, listPlateFiles, recordUploadFailure, registerUploadedPlate, unlinkPlateFile, upsertPlateFiles } from "./plate-files";
+import { countPlateFiles, linkPlateFile, listPlateFiles, recordUploadFailure, registerUploadedPlate, unlinkPlateFile, upsertPlateFiles } from "./plate-files";
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -116,6 +116,9 @@ export function registerPlateLibraryRoutes(app: Express): void {
 
   app.get("/api/plate-files", (req: Request, res: Response) => {
     if (rejectOwner(req, res)) return;
+    if (queryValue(req.query.summary) === "1") {
+      return res.json({ ok: true, total: countPlateFiles(), files: [], failures: [] });
+    }
     const orderKey = queryValue(req.query.orderKey);
     if (orderKey && !plateOrderKeySchema.safeParse(orderKey).success) {
       return res.status(400).json({ ok: false, error: "Use a deal or off-book order key" });

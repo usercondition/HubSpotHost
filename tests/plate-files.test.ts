@@ -208,6 +208,11 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const afterRetry = listPlateFiles({ orderKey: "deal:81" });
     assert.equal(afterRetry.failures.length, 0);
     assert.equal(afterRetry.files.length, 2);
+    const summary = await fetch(`${base}/api/plate-files?summary=1`, { headers });
+    assert.equal(summary.status, 200);
+    const summaryBody = await summary.json();
+    assert.equal(summaryBody.total, 2);
+    assert.deepEqual(summaryBody.files, []);
 
     await assert.rejects(
       () =>

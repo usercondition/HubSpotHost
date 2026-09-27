@@ -87,6 +87,11 @@ function likePattern(value: string): string {
   return `%${value.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
+export function countPlateFiles(): number {
+  const row = getSqlite().prepare(`SELECT COUNT(*) AS n FROM plate_files`).get() as { n: number };
+  return row?.n ?? 0;
+}
+
 export function listPlateFiles(query: { q?: string; printer?: string; orderKey?: string }): {
   files: PlateFileRecord[];
   failures: PlateUploadFailure[];

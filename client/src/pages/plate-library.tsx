@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { PageHeader } from "@/components/shell";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
+import { readHashQueryParam } from "@/lib/workflow";
 import { formatPacificUpdateStamp } from "@shared/ship-by";
 import { PLATE_PRINTERS, type PlateFileRecord } from "@shared/plate-files";
 
@@ -28,6 +29,16 @@ function orderLabel(file: PlateFileRecord): string {
   return who || "No order";
 }
 
+function printerChipId(printer: string): string {
+  return printer.toLowerCase().replace(/\s+/g, "-");
+}
+
+function orderChipLabel(orderKey: string): string {
+  if (orderKey.startsWith("deal:")) return `Deal ${orderKey.slice("deal:".length)}`;
+  if (orderKey.startsWith("offbook:")) return `Off-book ${orderKey.slice("offbook:".length)}`;
+  return orderKey;
+}
+
 export default function PlateLibraryPage() {
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
   const unlock = useOwnerUnlock({
@@ -36,13 +47,21 @@ export default function PlateLibraryPage() {
   });
   const [q, setQ] = useState("");
   const [printer, setPrinter] = useState("");
+  const [orderKey, setOrderKey] = useState(() => readHashQueryParam("orderKey") ?? "");
+  useEffect(() => {
+    const sync = () => setOrderKey(readHashQueryParam("orderKey") ?? "");
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  const filtering = Boolean(q.trim() || printer || orderKey);
   const library = useQuery({
-    queryKey: ["/api/plate-files", "library", ownerCode, q, printer],
+    queryKey: ["/api/plate-files", "library", ownerCode, q, printer, orderKey],
     enabled: isUnlocked,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
       if (printer) params.set("printer", printer);
+      if (orderKey) params.set("orderKey", orderKey);
       const response = await apiRequest("GET", `/api/plate-files?${params.toString()}`, undefined, { headers });
       const body = (await response.json()) as { files?: PlateFileRecord[] };
       return Array.isArray(body.files) ? body.files : [];
@@ -64,31 +83,53 @@ export default function PlateLibraryPage() {
           />
         ) : (
           <>
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+            <div className="mb-3 flex min-w-0 flex-col gap-2">
               <input
-                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm"
-                placeholder="Search name, kit, printer, or customer"
+                className="h-9 min-w-0 w-full rounded-md border border-input bg-background px-2 text-sm"
+                placeholder="Search kit, customer, order, printer, or file"
                 value={q}
                 data-testid="input-library-search"
                 onChange={(event) => setQ(event.target.value)}
               />
-              <select
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm sm:w-40"
-                value={printer}
-                data-testid="select-library-printer"
-                onChange={(event) => setPrinter(event.target.value)}
-              >
-                <option value="">All printers</option>
+              <div className="library-printer-chips" data-testid="library-printer-chips">
+                <button
+                  type="button"
+                  className="library-printer-chip"
+                  data-testid="chip-library-printer-all"
+                  data-active={printer ? "false" : "true"}
+                  onClick={() => setPrinter("")}
+                >
+                  All printers
+                </button>
                 {PLATE_PRINTERS.map((option) => (
-                  <option key={option} value={option}>
+                  <button
+                    key={option}
+                    type="button"
+                    className="library-printer-chip"
+                    data-testid={`chip-library-printer-${printerChipId(option)}`}
+                    data-active={printer === option ? "true" : "false"}
+                    onClick={() => setPrinter(option)}
+                  >
                     {option}
-                  </option>
+                  </button>
                 ))}
-              </select>
+                {orderKey ? (
+                  <button type="button" className="library-printer-chip" data-testid="chip-library-order" data-active="true" onClick={() => setOrderKey("")}>
+                    {orderChipLabel(orderKey)}
+                  </button>
+                ) : null}
+              </div>
             </div>
             {library.isLoading ? <Skeleton className="h-40 rounded-lg" /> : null}
             {library.isError ? <p className="text-sm text-destructive">Could not load the slice library.</p> : null}
-            {library.data && library.data.length === 0 ? <p className="text-sm text-muted-foreground">No slice files yet.</p> : null}
+            {library.data && library.data.length === 0 ? (
+              <p className="text-sm text-muted-foreground" data-testid="text-library-empty">
+                {filtering
+                  ? "No slice files match that search. "
+                  : "No slice files yet. "}
+                Upload a slice file from an order on the Stack, or connect Google Drive in Setup.
+              </p>
+            ) : null}
             {library.data && library.data.length > 0 ? (
               <div data-testid="library-list">
                 <div className="library-head" aria-hidden="true">
