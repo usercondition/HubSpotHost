@@ -3,7 +3,12 @@ import { createSupplyPurchaseSchema } from "../../shared/schema";
 import { buildSupplySpendSummary, createSupplyPurchase, listSupplyPurchases } from "./supplies";
 import { firstIssue } from "./validation";
 
-/** Owner-only supply ledger; receipt parsing remains beside its upload middleware. */
+/**
+ * Owner-only supply ledger. Amazon has no official order-feed integration, so
+ * the owner records receipt totals here. This remains independent from HubSpot
+ * deal cost fields so the same spend is never double-counted in gross profit.
+ * Receipt parsing stays beside its upload middleware.
+ */
 export function registerSupplyRoutes(app: Express, rejectOwner: (req: Request, res: Response) => boolean) {
   app.get("/api/supplies", (req, res) => {
     if (rejectOwner(req, res)) return;
