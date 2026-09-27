@@ -16,6 +16,9 @@ import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import OrderLinks from "@/pages/order-links";
 import Expenses from "@/pages/expenses";
 const Performance = lazy(() => import("@/pages/performance"));
+function PerformanceRoute() {
+  return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Stats…</div>}><Performance /></Suspense>;
+}
 import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
 import PlateLibraryPage from "@/pages/plate-library";
@@ -60,7 +63,7 @@ function ShellRoutes() {
             the route until attach uses the same Slice.log + printer + bits path.
           */}
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
-          <Route path="/performance" component={Performance} />
+          <Route path="/performance" component={PerformanceRoute} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />
         </Switch>
@@ -80,7 +83,7 @@ function App() {
               {/* Public buyer form. Legacy /client-order path still works. */}
               <Route path="/order-form/:token" component={ClientOrder} />
               <Route path="/client-order/:token" component={ClientOrder} />
-              <Suspense fallback={null}><Route component={ShellRoutes} /></Suspense>
+              <Route component={ShellRoutes} />
             </Switch>
           </Router>
         </TooltipProvider>

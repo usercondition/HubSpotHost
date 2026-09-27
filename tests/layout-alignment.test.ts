@@ -647,6 +647,14 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       () => document.querySelector('[data-testid="badge-nav-library"]')?.textContent?.trim() === "2",
     );
     await page.locator("[data-testid='link-nav-library']").waitFor();
+    const assertOneStatsPage = async () => {
+      await page.locator("[data-testid='stats-origin-svg']").waitFor();
+      assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, "one page transition remains after navigation");
+      assert.equal(await page.locator("main [data-testid='stats-origin-svg']").count(), 1, "one origin map remains after navigation");
+    };
+    await page.locator("[data-testid='link-nav-performance']").click();
+    await assertOneStatsPage();
+    await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
     assert.ok(nav.length >= 3, "nav count slots rendered");
