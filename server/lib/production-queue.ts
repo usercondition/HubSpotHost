@@ -12,6 +12,7 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
+import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressIsSatisfied } from "../../shared/ship-address";
 import { fetchDealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
@@ -92,8 +93,6 @@ type QueueItemBase = Omit<
   | "shippingRequired"
 >;
 
-/** Ship-by planning always uses the shop's calendar, never the server's timezone. */
-export const SHIP_BY_TIME_ZONE = "America/Los_Angeles";
 export const SHIP_BY_POST_PROCESS_BUFFER_SECONDS = 24 * 60 * 60;
 /** Default calendar-day SLAs used only when no print-duration estimate exists. */
 export const SHIP_BY_SLA_DAYS = {
