@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import type { PlateFileRecord, PlateFileSource, PlateLibraryPending, PlatePreviewStats, PlateUploadFailure, PrintLibraryMark } from "../../shared/plate-files";
 import { libraryCatalogRecord, libraryCatalogText, libraryKitName, librarySliceName, plateExtension, platePartName } from "../../shared/plate-files";
 import { getSqlite } from "./order-links";
+import { PLATE_MESH_VERSION } from "./plate-mesh";
 
 type FileRow = {
   drive_file_id: string;
@@ -24,6 +25,7 @@ type FileRow = {
   sha256: string;
   mesh_drive_file_id?: string;
   mesh_state?: string;
+  mesh_version?: number;
 };
 
 export interface PlateIndexInput {
@@ -114,6 +116,7 @@ function toRecord(row: FileRow): PlateFileRecord {
     stats: preview.stats,
     meshDriveFileId: row.mesh_drive_file_id || "",
     meshState: row.mesh_state || "",
+    meshVersion: row.mesh_version ?? 0,
   });
 }
 
@@ -269,15 +272,16 @@ export function upsertPlateFiles(files: PlateIndexInput[], source: PlateFileSour
 
 export function markPlateMesh(
   driveFileId: string,
-  patch: { meshDriveFileId?: string; meshState?: string },
+  patch: { meshDriveFileId?: string; meshState?: string; meshVersion?: number },
 ): PlateFileRecord | null {
   const row = readFile(driveFileId);
   if (!row) return null;
   const meshDriveFileId = patch.meshDriveFileId ?? row.mesh_drive_file_id ?? "";
   const meshState = patch.meshState ?? row.mesh_state ?? "";
+  const meshVersion = patch.meshVersion ?? row.mesh_version ?? 0;
   getSqlite()
-    .prepare(`UPDATE plate_files SET mesh_drive_file_id = ?, mesh_state = ?, updated_at = ? WHERE drive_file_id = ?`)
-    .run(meshDriveFileId, meshState, new Date().toISOString(), driveFileId);
+    .prepare(`UPDATE plate_files SET mesh_drive_file_id = ?, mesh_state = ?, mesh_version = ?, updated_at = ? WHERE drive_file_id = ?`)
+    .run(meshDriveFileId, meshState, meshVersion, new Date().toISOString(), driveFileId);
   return toRecord(readFile(driveFileId)!);
 }
 
@@ -286,11 +290,11 @@ export function listPlateIdsNeedingMesh(): string[] {
     .prepare(
       `SELECT drive_file_id FROM plate_files
        WHERE (lower(extension) = '.ctb' OR lower(name) LIKE '%.ctb')
-         AND mesh_state != 'ready'
+         AND (mesh_state != 'ready' OR IFNULL(mesh_version, 0) < ?)
        ORDER BY id ASC
        LIMIT 40`,
     )
-    .all() as Array<{ drive_file_id: string }>;
+    .all(PLATE_MESH_VERSION) as Array<{ drive_file_id: string }>;
   return rows.map((row) => row.drive_file_id);
 }
 

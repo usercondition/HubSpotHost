@@ -461,6 +461,7 @@ CREATE TABLE IF NOT EXISTS plate_files (
   sha256 TEXT NOT NULL DEFAULT '',
   mesh_drive_file_id TEXT NOT NULL DEFAULT '',
   mesh_state TEXT NOT NULL DEFAULT '',
+  mesh_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -613,6 +614,7 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
     sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_drive_file_id TEXT NOT NULL DEFAULT ''`);
   }
   if (!existing.has("mesh_state")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_state TEXT NOT NULL DEFAULT ''`);
+  if (!existing.has("mesh_version")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_version INTEGER NOT NULL DEFAULT 0`);
 }
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {

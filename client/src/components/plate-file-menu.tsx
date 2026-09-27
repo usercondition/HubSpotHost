@@ -27,26 +27,46 @@ function formatCost(value: number | null): string {
 
 function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Record<string, string> }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const resetRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !file.meshDriveFileId) return;
     let cancelled = false;
-    let stop = () => {};
+    let dispose = () => {};
     void apiRequest("GET", `/api/plate-files/${encodeURIComponent(file.driveFileId)}/mesh`, undefined, { headers })
       .then((response) => response.arrayBuffer())
       .then(async (glb) => {
         if (cancelled) return;
         const view = await import("@/components/plate-mesh-view");
         if (cancelled || !host.isConnected) return;
-        stop = await view.mountPlateMesh(host, glb);
+        const mounted = await view.mountPlateMesh(host, glb);
+        if (cancelled) {
+          mounted.dispose();
+          return;
+        }
+        dispose = mounted.dispose;
+        resetRef.current = mounted.reset;
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
-      stop();
+      resetRef.current = null;
+      dispose();
     };
   }, [file.driveFileId, file.meshDriveFileId, headers]);
-  return <div ref={hostRef} className="relative mb-3 h-72 w-full overflow-hidden rounded-md bg-black touch-none" data-testid="plate-model-view" />;
+  return (
+    <div className="relative mb-3 h-72 w-full overflow-hidden rounded-md bg-black touch-none" data-testid="plate-model-view">
+      <div ref={hostRef} className="h-full w-full" />
+      <button
+        type="button"
+        className="absolute right-2 top-2 z-10 rounded-md bg-zinc-900/80 px-2 py-1 text-xs text-zinc-100"
+        data-testid="button-reset-mesh-view"
+        onClick={() => resetRef.current?.()}
+      >
+        Reset view
+      </button>
+    </div>
+  );
 }
 
 function PreviewPanel({

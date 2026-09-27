@@ -1,0 +1,778 @@
+/**
+ * Surface nets, smoothed normals, and quadric simplification for one plate mesh.
+ * The voxel-face mesher is gone. This module is only called from plate-mesh.ts.
+ */
+const TARGET_VOXEL_MM = 0.35;
+const CLUSTER_AT = 1_200_000;
+
+export interface Occupancy {
+  forEach(visit: (x: number, y: number, z: number) => void): void;
+  get(x: number, y: number, z: number): boolean;
+}
+
+export interface MeshScale {
+  binX: number;
+  binY: number;
+  step: number;
+  pixelMmX: number;
+  pixelMmY: number;
+  layerMm: number;
+  originX: number;
+  originY: number;
+  originZ: number;
+}
+
+export interface PlateSurface {
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+}
+
+interface RawMesh {
+  positions: Float32Array;
+  indices: Uint32Array;
+}
+
+export function meshSurface(
+  occupancy: Occupancy,
+  scale: MeshScale,
+  gx: number,
+  gy: number,
+  gz: number,
+  byteBudget: number,
+): PlateSurface | null {
+  const raw = surfaceNets(occupancy, gx, gy, gz);
+  if (!raw || raw.indices.length < 3) return null;
+  orientOutward(raw.positions, raw.indices);
+  smooth(raw.positions, raw.indices, 3, 0.35);
+  toMillimeters(raw.positions, scale);
+  const budgeted = fitBudget(raw, byteBudget);
+  return {
+    positions: budgeted.positions,
+    indices: budgeted.indices,
+    normals: vertexNormals(budgeted.positions, budgeted.indices),
+  };
+}
+
+function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): RawMesh | null {
+  const strideY = gx + 4;
+  const strideZ = strideY * (gy + 4);
+  const cellOf = new Map<number, number>();
+  let sx = new Float64Array(256);
+  let sy = new Float64Array(256);
+  let sz = new Float64Array(256);
+  let sn = new Uint8Array(256);
+  let cells = 0;
+  let quads = new Uint32Array(1024);
+  let qn = 0;
+
+  const growCells = () => {
+    const n = sx.length * 2;
+    const nx = new Float64Array(n);
+    const ny = new Float64Array(n);
+    const nz = new Float64Array(n);
+    const nn = new Uint8Array(n);
+    nx.set(sx);
+    ny.set(sy);
+    nz.set(sz);
+    nn.set(sn);
+    sx = nx;
+    sy = ny;
+    sz = nz;
+    sn = nn;
+  };
+
+  const cell = (x: number, y: number, z: number): number => {
+    const key = x + 1 + (y + 1) * strideY + (z + 1) * strideZ;
+    const found = cellOf.get(key);
+    if (found !== undefined) return found;
+    const index = cells;
+    cells += 1;
+    if (index >= sx.length) growCells();
+    cellOf.set(key, index);
+    return index;
+  };
+
+  const pushQuad = (a: number, b: number, c: number, d: number) => {
+    if (a === b || a === c || a === d || b === c || b === d || c === d) return;
+    if (qn + 4 > quads.length) {
+      const next = new Uint32Array(quads.length * 2);
+      next.set(quads);
+      quads = next;
+    }
+    quads[qn] = a;
+    quads[qn + 1] = b;
+    quads[qn + 2] = c;
+    quads[qn + 3] = d;
+    qn += 4;
+  };
+
+  const addEdge = (ax: number, ay: number, az: number, bx: number, by: number, bz: number) => {
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const mz = (az + bz) / 2;
+    const x0 = Math.min(ax, bx);
+    const y0 = Math.min(ay, by);
+    const z0 = Math.min(az, bz);
+    const corners: Array<[number, number, number]> =
+      ax !== bx
+        ? [
+            [x0, y0, z0],
+            [x0, y0 - 1, z0],
+            [x0, y0, z0 - 1],
+            [x0, y0 - 1, z0 - 1],
+          ]
+        : ay !== by
+          ? [
+              [x0, y0, z0],
+              [x0 - 1, y0, z0],
+              [x0, y0, z0 - 1],
+              [x0 - 1, y0, z0 - 1],
+            ]
+          : [
+              [x0, y0, z0],
+              [x0 - 1, y0, z0],
+              [x0, y0 - 1, z0],
+              [x0 - 1, y0 - 1, z0],
+            ];
+    const ids = corners.map(([x, y, z]) => {
+      const index = cell(x, y, z);
+      sx[index] = (sx[index] ?? 0) + mx;
+      sy[index] = (sy[index] ?? 0) + my;
+      sz[index] = (sz[index] ?? 0) + mz;
+      sn[index] = ((sn[index] ?? 0) + 1) as number;
+      return index;
+    });
+    pushQuad(ids[0]!, ids[1]!, ids[2]!, ids[3]!);
+  };
+
+  const dirs: Array<[number, number, number]> = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+  ];
+  occupancy.forEach((x, y, z) => {
+    for (const [dx, dy, dz] of dirs) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const nz = z + dz;
+      if (nx >= 0 && ny >= 0 && nz >= 0 && nx < gx && ny < gy && nz < gz && occupancy.get(nx, ny, nz)) continue;
+      addEdge(x, y, z, nx, ny, nz);
+    }
+  });
+  if (cells < 4 || qn < 4) return null;
+
+  const positions = new Float32Array(cells * 3);
+  for (let i = 0; i < cells; i += 1) {
+    const n = sn[i] || 1;
+    positions[i * 3] = (sx[i] ?? 0) / n;
+    positions[i * 3 + 1] = (sy[i] ?? 0) / n;
+    positions[i * 3 + 2] = (sz[i] ?? 0) / n;
+  }
+  const quadCount = qn / 4;
+  const indices = new Uint32Array(quadCount * 6);
+  let t = 0;
+  for (let q = 0; q < qn; q += 4) {
+    const a = quads[q]!;
+    const b = quads[q + 1]!;
+    const c = quads[q + 2]!;
+    const d = quads[q + 3]!;
+    indices[t] = a;
+    indices[t + 1] = b;
+    indices[t + 2] = c;
+    indices[t + 3] = a;
+    indices[t + 4] = c;
+    indices[t + 5] = d;
+    t += 6;
+  }
+  return { positions, indices };
+}
+
+function orientOutward(positions: Float32Array, indices: Uint32Array): void {
+  let volume = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i]! * 3;
+    const b = indices[i + 1]! * 3;
+    const c = indices[i + 2]! * 3;
+    const ax = positions[a]!;
+    const ay = positions[a + 1]!;
+    const az = positions[a + 2]!;
+    volume +=
+      ax * (positions[b + 1]! * positions[c + 2]! - positions[b + 2]! * positions[c + 1]!) -
+      ay * (positions[b]! * positions[c + 2]! - positions[b + 2]! * positions[c]!) +
+      az * (positions[b]! * positions[c + 1]! - positions[b + 1]! * positions[c]!);
+  }
+  if (volume >= 0) return;
+  for (let i = 0; i < indices.length; i += 3) {
+    const swap = indices[i + 1]!;
+    indices[i + 1] = indices[i + 2]!;
+    indices[i + 2] = swap;
+  }
+}
+
+function smooth(positions: Float32Array, indices: Uint32Array, iterations: number, factor: number): void {
+  const verts = positions.length / 3;
+  const seen = new Set<number>();
+  const edges: Array<[number, number]> = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    const tri = [indices[i]!, indices[i + 1]!, indices[i + 2]!];
+    for (let e = 0; e < 3; e += 1) {
+      let a = tri[e]!;
+      let b = tri[(e + 1) % 3]!;
+      if (a > b) {
+        const swap = a;
+        a = b;
+        b = swap;
+      }
+      const key = a + b * verts;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push([a, b]);
+    }
+  }
+  const acc = new Float32Array(positions.length);
+  const counts = new Int32Array(verts);
+  for (let iter = 0; iter < iterations; iter += 1) {
+    acc.fill(0);
+    counts.fill(0);
+    for (const [a, b] of edges) {
+      acc[a * 3] = (acc[a * 3] ?? 0) + (positions[b * 3] ?? 0);
+      acc[a * 3 + 1] = (acc[a * 3 + 1] ?? 0) + (positions[b * 3 + 1] ?? 0);
+      acc[a * 3 + 2] = (acc[a * 3 + 2] ?? 0) + (positions[b * 3 + 2] ?? 0);
+      acc[b * 3] = (acc[b * 3] ?? 0) + (positions[a * 3] ?? 0);
+      acc[b * 3 + 1] = (acc[b * 3 + 1] ?? 0) + (positions[a * 3 + 1] ?? 0);
+      acc[b * 3 + 2] = (acc[b * 3 + 2] ?? 0) + (positions[a * 3 + 2] ?? 0);
+      counts[a] = (counts[a] ?? 0) + 1;
+      counts[b] = (counts[b] ?? 0) + 1;
+    }
+    for (let v = 0; v < verts; v += 1) {
+      const n = counts[v] ?? 0;
+      if (n < 1) continue;
+      positions[v * 3] = (positions[v * 3] ?? 0) * (1 - factor) + ((acc[v * 3] ?? 0) / n) * factor;
+      positions[v * 3 + 1] = (positions[v * 3 + 1] ?? 0) * (1 - factor) + ((acc[v * 3 + 1] ?? 0) / n) * factor;
+      positions[v * 3 + 2] = (positions[v * 3 + 2] ?? 0) * (1 - factor) + ((acc[v * 3 + 2] ?? 0) / n) * factor;
+    }
+  }
+}
+
+function toMillimeters(positions: Float32Array, scale: MeshScale): void {
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i] ?? 0;
+    const y = positions[i + 1] ?? 0;
+    const z = positions[i + 2] ?? 0;
+    positions[i] = (scale.originX + x * scale.binX) * scale.pixelMmX;
+    positions[i + 1] = (scale.originZ + z * scale.step) * scale.layerMm;
+    positions[i + 2] = (scale.originY + y * scale.binY) * scale.pixelMmY;
+  }
+}
+
+function estimateBytes(tris: number, verts: number): number {
+  return verts * 24 + tris * 12 + 1024;
+}
+
+function targetTriangles(budget: number): number {
+  return Math.max(2_000, Math.floor((budget * 0.85) / 24));
+}
+
+function fitBudget(raw: RawMesh, budget: number): RawMesh {
+  let mesh = raw;
+  const tris = mesh.indices.length / 3;
+  const verts = mesh.positions.length / 3;
+  if (tris > CLUSTER_AT) mesh = clusterUntil(mesh, 800_000);
+  const target = targetTriangles(budget);
+  if (estimateBytes(mesh.indices.length / 3, mesh.positions.length / 3) > budget) {
+    mesh = quadricDecimate(mesh, target);
+  }
+  if (estimateBytes(mesh.indices.length / 3, mesh.positions.length / 3) > budget) {
+    mesh = clusterUntil(mesh, target);
+  }
+  return mesh;
+}
+
+function clusterUntil(mesh: RawMesh, targetTris: number): RawMesh {
+  let cell = TARGET_VOXEL_MM;
+  let current = mesh;
+  for (let attempt = 0; attempt < 8 && current.indices.length / 3 > targetTris; attempt += 1) {
+    cell *= 1.45;
+    const next = cluster(current, cell);
+    if (next.indices.length >= current.indices.length) break;
+    current = next;
+  }
+  return current;
+}
+
+function cluster(mesh: RawMesh, cell: number): RawMesh {
+  const { positions, indices } = mesh;
+  const map = new Map<string, number>();
+  const remap = new Int32Array(positions.length / 3);
+  const packed: number[] = [];
+  for (let v = 0; v < remap.length; v += 1) {
+    const ix = Math.round((positions[v * 3] ?? 0) / cell);
+    const iy = Math.round((positions[v * 3 + 1] ?? 0) / cell);
+    const iz = Math.round((positions[v * 3 + 2] ?? 0) / cell);
+    const key = `${ix},${iy},${iz}`;
+    let id = map.get(key);
+    if (id === undefined) {
+      id = packed.length / 3;
+      map.set(key, id);
+      packed.push(positions[v * 3] ?? 0, positions[v * 3 + 1] ?? 0, positions[v * 3 + 2] ?? 0);
+    }
+    remap[v] = id;
+  }
+  const next: number[] = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = remap[indices[i]!]!;
+    const b = remap[indices[i + 1]!]!;
+    const c = remap[indices[i + 2]!]!;
+    if (a === b || b === c || a === c) continue;
+    next.push(a, b, c);
+  }
+  return { positions: Float32Array.from(packed), indices: Uint32Array.from(next) };
+}
+
+function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
+  const srcPos = mesh.positions;
+  const vertCount = srcPos.length / 3;
+  const triCount = mesh.indices.length / 3;
+  if (triCount <= targetTris || vertCount < 8) return mesh;
+  const px = new Float64Array(srcPos);
+  const Q = new Float64Array(vertCount * 10);
+  const tris = Int32Array.from(mesh.indices);
+  const deadTri = new Uint8Array(triCount);
+  const deadVert = new Uint8Array(vertCount);
+  const adj: number[][] = Array.from({ length: vertCount }, () => []);
+  let live = triCount;
+
+  const addPlane = (v: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number) => {
+    let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const area = Math.hypot(nx, ny, nz);
+    if (area < 1e-12) return;
+    nx /= area;
+    ny /= area;
+    nz /= area;
+    const d = -(nx * ax + ny * ay + nz * az);
+    const o = v * 10;
+    Q[o] = (Q[o] ?? 0) + area * nx * nx;
+    Q[o + 1] = (Q[o + 1] ?? 0) + area * nx * ny;
+    Q[o + 2] = (Q[o + 2] ?? 0) + area * nx * nz;
+    Q[o + 3] = (Q[o + 3] ?? 0) + area * nx * d;
+    Q[o + 4] = (Q[o + 4] ?? 0) + area * ny * ny;
+    Q[o + 5] = (Q[o + 5] ?? 0) + area * ny * nz;
+    Q[o + 6] = (Q[o + 6] ?? 0) + area * ny * d;
+    Q[o + 7] = (Q[o + 7] ?? 0) + area * nz * nz;
+    Q[o + 8] = (Q[o + 8] ?? 0) + area * nz * d;
+    Q[o + 9] = (Q[o + 9] ?? 0) + area * d * d;
+  };
+
+  for (let t = 0; t < triCount; t += 1) {
+    const a = tris[t * 3]!;
+    const b = tris[t * 3 + 1]!;
+    const c = tris[t * 3 + 2]!;
+    adj[a]!.push(t);
+    adj[b]!.push(t);
+    adj[c]!.push(t);
+    addPlane(
+      a,
+      px[a * 3]!,
+      px[a * 3 + 1]!,
+      px[a * 3 + 2]!,
+      px[b * 3]!,
+      px[b * 3 + 1]!,
+      px[b * 3 + 2]!,
+      px[c * 3]!,
+      px[c * 3 + 1]!,
+      px[c * 3 + 2]!,
+    );
+    addPlane(
+      b,
+      px[a * 3]!,
+      px[a * 3 + 1]!,
+      px[a * 3 + 2]!,
+      px[b * 3]!,
+      px[b * 3 + 1]!,
+      px[b * 3 + 2]!,
+      px[c * 3]!,
+      px[c * 3 + 1]!,
+      px[c * 3 + 2]!,
+    );
+    addPlane(
+      c,
+      px[a * 3]!,
+      px[a * 3 + 1]!,
+      px[a * 3 + 2]!,
+      px[b * 3]!,
+      px[b * 3 + 1]!,
+      px[b * 3 + 2]!,
+      px[c * 3]!,
+      px[c * 3 + 1]!,
+      px[c * 3 + 2]!,
+    );
+  }
+
+  const combined = new Float64Array(10);
+  const errorAt = (a: number, b: number): number => {
+    for (let k = 0; k < 10; k += 1) combined[k] = (Q[a * 10 + k] ?? 0) + (Q[b * 10 + k] ?? 0);
+    const x = (px[a * 3]! + px[b * 3]!) / 2;
+    const y = (px[a * 3 + 1]! + px[b * 3 + 1]!) / 2;
+    const z = (px[a * 3 + 2]! + px[b * 3 + 2]!) / 2;
+    const q00 = combined[0]!;
+    const q01 = combined[1]!;
+    const q02 = combined[2]!;
+    const q03 = combined[3]!;
+    const q11 = combined[4]!;
+    const q12 = combined[5]!;
+    const q13 = combined[6]!;
+    const q22 = combined[7]!;
+    const q23 = combined[8]!;
+    const q33 = combined[9]!;
+    let err =
+      q00 * x * x +
+      2 * q01 * x * y +
+      2 * q02 * x * z +
+      2 * q03 * x +
+      q11 * y * y +
+      2 * q12 * y * z +
+      2 * q13 * y +
+      q22 * z * z +
+      2 * q23 * z +
+      q33;
+    if (sharedFaces(a, b) < 2) {
+      const dx = px[a * 3]! - px[b * 3]!;
+      const dy = px[a * 3 + 1]! - px[b * 3 + 1]!;
+      const dz = px[a * 3 + 2]! - px[b * 3 + 2]!;
+      err = err * 16 + (dx * dx + dy * dy + dz * dz) * 64;
+    }
+    return err;
+  };
+
+  const contains = (t: number, v: number) => {
+    const o = t * 3;
+    return tris[o] === v || tris[o + 1] === v || tris[o + 2] === v;
+  };
+
+  function sharedFaces(a: number, b: number): number {
+    let n = 0;
+    const list = adj[a]!;
+    for (let i = 0; i < list.length; i += 1) {
+      const t = list[i]!;
+      if (!deadTri[t] && contains(t, b)) n += 1;
+    }
+    return n;
+  }
+
+  const mark = new Int32Array(vertCount);
+  let markId = 1;
+  const linkOk = (a: number, b: number): boolean => {
+    markId += 1;
+    if (markId > 2_000_000_000) {
+      mark.fill(0);
+      markId = 1;
+    }
+    const stamp = (v: number) => {
+      const list = adj[v]!;
+      for (let i = 0; i < list.length; i += 1) {
+        const t = list[i]!;
+        if (deadTri[t]) continue;
+        const o = t * 3;
+        const ids = [tris[o]!, tris[o + 1]!, tris[o + 2]!];
+        for (const id of ids) {
+          if (id !== v) mark[id] = markId;
+        }
+      }
+    };
+    stamp(a);
+    const common: number[] = [];
+    const seen = new Set<number>();
+    const listB = adj[b]!;
+    for (let i = 0; i < listB.length; i += 1) {
+      const t = listB[i]!;
+      if (deadTri[t]) continue;
+      const o = t * 3;
+      const ids = [tris[o]!, tris[o + 1]!, tris[o + 2]!];
+      for (const id of ids) {
+        if (id !== b && mark[id] === markId && !seen.has(id)) {
+          seen.add(id);
+          common.push(id);
+        }
+      }
+    }
+    const opp = new Set<number>();
+    const listA = adj[a]!;
+    for (let i = 0; i < listA.length; i += 1) {
+      const t = listA[i]!;
+      if (deadTri[t] || !contains(t, b)) continue;
+      const o = t * 3;
+      const ids = [tris[o]!, tris[o + 1]!, tris[o + 2]!];
+      for (const id of ids) {
+        if (id !== a && id !== b) opp.add(id);
+      }
+    }
+    if (common.length !== opp.size) return false;
+    for (const id of common) {
+      if (!opp.has(id)) return false;
+    }
+    return true;
+  };
+
+  const faceNormal = (t: number, ax: number, ay: number, az: number, replace: number): [number, number, number] => {
+    const o = t * 3;
+    const ids = [tris[o]!, tris[o + 1]!, tris[o + 2]!];
+    const at = (id: number, axis: number) => (id === replace ? [ax, ay, az][axis]! : px[id * 3 + axis]!);
+    const abx = at(ids[1]!, 0) - at(ids[0]!, 0);
+    const aby = at(ids[1]!, 1) - at(ids[0]!, 1);
+    const abz = at(ids[1]!, 2) - at(ids[0]!, 2);
+    const acx = at(ids[2]!, 0) - at(ids[0]!, 0);
+    const acy = at(ids[2]!, 1) - at(ids[0]!, 1);
+    const acz = at(ids[2]!, 2) - at(ids[0]!, 2);
+    return [aby * acz - abz * acy, abz * acx - abx * acz, abx * acy - aby * acx];
+  };
+
+  const flips = (a: number, b: number, mx: number, my: number, mz: number): boolean => {
+    const check = (v: number, other: number) => {
+      const list = adj[v]!;
+      for (let i = 0; i < list.length; i += 1) {
+        const t = list[i]!;
+        if (deadTri[t] || contains(t, other)) continue;
+        const before = faceNormal(t, 0, 0, 0, -1);
+        const after = faceNormal(t, mx, my, mz, v);
+        if (before[0] * after[0] + before[1] * after[1] + before[2] * after[2] <= 0) return true;
+      }
+      return false;
+    };
+    return check(a, b) || check(b, a);
+  };
+
+  const collapse = (a: number, b: number): boolean => {
+    if (deadVert[a] || deadVert[b] || a === b) return false;
+    const faces = sharedFaces(a, b);
+    if (faces < 1 || faces > 2) return false;
+    if (!linkOk(a, b)) return false;
+    const mx = (px[a * 3]! + px[b * 3]!) / 2;
+    const my = (px[a * 3 + 1]! + px[b * 3 + 1]!) / 2;
+    const mz = (px[a * 3 + 2]! + px[b * 3 + 2]!) / 2;
+    if (flips(a, b, mx, my, mz)) return false;
+    const next: number[] = [];
+    const keep = (t: number, from: number) => {
+      if (deadTri[t]) return;
+      if (contains(t, from === a ? b : a)) {
+        deadTri[t] = 1;
+        live -= 1;
+        return;
+      }
+      if (from === b) {
+        const o = t * 3;
+        for (let k = 0; k < 3; k += 1) {
+          if (tris[o + k] === b) tris[o + k] = a;
+        }
+        const i0 = tris[o]!;
+        const i1 = tris[o + 1]!;
+        const i2 = tris[o + 2]!;
+        if (i0 === i1 || i1 === i2 || i0 === i2) {
+          deadTri[t] = 1;
+          live -= 1;
+          return;
+        }
+      }
+      next.push(t);
+    };
+    for (const t of adj[a]!) keep(t, a);
+    for (const t of adj[b]!) keep(t, b);
+    adj[a] = next;
+    adj[b] = [];
+    deadVert[b] = 1;
+    px[a * 3] = mx;
+    px[a * 3 + 1] = my;
+    px[a * 3 + 2] = mz;
+    for (let k = 0; k < 10; k += 1) Q[a * 10 + k] = (Q[a * 10 + k] ?? 0) + (Q[b * 10 + k] ?? 0);
+    return true;
+  };
+
+  for (let pass = 0; pass < 14 && live > targetTris; pass += 1) {
+    const edges: Array<[number, number, number]> = [];
+    const seen = new Set<number>();
+    for (let v = 0; v < vertCount; v += 1) {
+      if (deadVert[v]) continue;
+      const list = adj[v]!;
+      for (let i = 0; i < list.length; i += 1) {
+        const t = list[i]!;
+        if (deadTri[t]) continue;
+        const o = t * 3;
+        const ids = [tris[o]!, tris[o + 1]!, tris[o + 2]!];
+        for (let e = 0; e < 3; e += 1) {
+          let a = ids[e]!;
+          let b = ids[(e + 1) % 3]!;
+          if (deadVert[a] || deadVert[b]) continue;
+          if (a > b) {
+            const swap = a;
+            a = b;
+            b = swap;
+          }
+          const key = a + b * vertCount;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          edges.push([a, b, errorAt(a, b)]);
+        }
+      }
+    }
+    edges.sort((left, right) => left[2] - right[2]);
+    const touched = new Uint8Array(vertCount);
+    let collapsed = 0;
+    for (const [a, b] of edges) {
+      if (live <= targetTris) break;
+      if (touched[a] || touched[b]) continue;
+      if (!collapse(a, b)) continue;
+      touched[a] = 1;
+      touched[b] = 1;
+      collapsed += 1;
+    }
+    if (collapsed < 1) break;
+  }
+
+  const remap = new Int32Array(vertCount).fill(-1);
+  const packed: number[] = [];
+  for (let v = 0; v < vertCount; v += 1) {
+    if (deadVert[v]) continue;
+    remap[v] = packed.length / 3;
+    packed.push(px[v * 3]!, px[v * 3 + 1]!, px[v * 3 + 2]!);
+  }
+  const out: number[] = [];
+  for (let t = 0; t < triCount; t += 1) {
+    if (deadTri[t]) continue;
+    const a = remap[tris[t * 3]!]!;
+    const b = remap[tris[t * 3 + 1]!]!;
+    const c = remap[tris[t * 3 + 2]!]!;
+    if (a < 0 || b < 0 || c < 0 || a === b || b === c || a === c) continue;
+    out.push(a, b, c);
+  }
+  if (out.length < 3) return mesh;
+  return { positions: Float32Array.from(packed), indices: Uint32Array.from(out) };
+}
+
+function vertexNormals(positions: Float32Array, indices: Uint32Array): Float32Array {
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i]! * 3;
+    const b = indices[i + 1]! * 3;
+    const c = indices[i + 2]! * 3;
+    const abx = (positions[b] ?? 0) - (positions[a] ?? 0);
+    const aby = (positions[b + 1] ?? 0) - (positions[a + 1] ?? 0);
+    const abz = (positions[b + 2] ?? 0) - (positions[a + 2] ?? 0);
+    const acx = (positions[c] ?? 0) - (positions[a] ?? 0);
+    const acy = (positions[c + 1] ?? 0) - (positions[a + 1] ?? 0);
+    const acz = (positions[c + 2] ?? 0) - (positions[a + 2] ?? 0);
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    normals[a] = (normals[a] ?? 0) + nx;
+    normals[a + 1] = (normals[a + 1] ?? 0) + ny;
+    normals[a + 2] = (normals[a + 2] ?? 0) + nz;
+    normals[b] = (normals[b] ?? 0) + nx;
+    normals[b + 1] = (normals[b + 1] ?? 0) + ny;
+    normals[b + 2] = (normals[b + 2] ?? 0) + nz;
+    normals[c] = (normals[c] ?? 0) + nx;
+    normals[c + 1] = (normals[c + 1] ?? 0) + ny;
+    normals[c + 2] = (normals[c + 2] ?? 0) + nz;
+  }
+  for (let i = 0; i < normals.length; i += 3) {
+    const x = normals[i] ?? 0;
+    const y = normals[i + 1] ?? 0;
+    const z = normals[i + 2] ?? 0;
+    const len = Math.hypot(x, y, z);
+    if (len < 1e-8) {
+      normals[i] = 0;
+      normals[i + 1] = 1;
+      normals[i + 2] = 0;
+      continue;
+    }
+    normals[i] = x / len;
+    normals[i + 1] = y / len;
+    normals[i + 2] = z / len;
+  }
+  return normals;
+}
+
+export function glbFromSurface(plateMmX: number, plateMmY: number, surface: PlateSurface): Buffer {
+  const { positions, normals, indices } = surface;
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i]!;
+    const y = positions[i + 1]!;
+    const z = positions[i + 2]!;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  }
+  const posBytes = Buffer.from(positions.buffer, positions.byteOffset, positions.byteLength);
+  const nrmBytes = Buffer.from(normals.buffer, normals.byteOffset, normals.byteLength);
+  const idxBytes = Buffer.from(indices.buffer, indices.byteOffset, indices.byteLength);
+  const bin = Buffer.concat([posBytes, nrmBytes, idxBytes]);
+  const json = JSON.stringify({
+    asset: { version: "2.0" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0, extras: { plate: [plateMmX, plateMmY] } }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 }] }],
+    materials: [
+      {
+        doubleSided: true,
+        pbrMetallicRoughness: {
+          baseColorFactor: [0.55, 0.62, 0.52, 1],
+          metallicFactor: 0.05,
+          roughnessFactor: 0.7,
+        },
+      },
+    ],
+    accessors: [
+      {
+        bufferView: 0,
+        componentType: 5126,
+        count: positions.length / 3,
+        type: "VEC3",
+        min: [minX, minY, minZ],
+        max: [maxX, maxY, maxZ],
+      },
+      { bufferView: 1, componentType: 5126, count: normals.length / 3, type: "VEC3" },
+      { bufferView: 2, componentType: 5125, count: indices.length, type: "SCALAR" },
+    ],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: posBytes.length, target: 34962 },
+      { buffer: 0, byteOffset: posBytes.length, byteLength: nrmBytes.length, target: 34962 },
+      { buffer: 0, byteOffset: posBytes.length + nrmBytes.length, byteLength: idxBytes.length, target: 34963 },
+    ],
+    buffers: [{ byteLength: bin.length }],
+  });
+  const jsonChunk = pad4(Buffer.from(json), 0x20);
+  const binChunk = pad4(bin, 0);
+  const total = 12 + 8 + jsonChunk.length + 8 + binChunk.length;
+  const out = Buffer.alloc(total);
+  out.writeUInt32LE(0x46546c67, 0);
+  out.writeUInt32LE(2, 4);
+  out.writeUInt32LE(total, 8);
+  out.writeUInt32LE(jsonChunk.length, 12);
+  out.writeUInt32LE(0x4e4f534a, 16);
+  jsonChunk.copy(out, 20);
+  const binAt = 20 + jsonChunk.length;
+  out.writeUInt32LE(binChunk.length, binAt);
+  out.writeUInt32LE(0x004e4942, binAt + 4);
+  binChunk.copy(out, binAt + 8);
+  return out;
+}
+
+function pad4(bytes: Buffer, fill: number): Buffer {
+  const extra = (4 - (bytes.length % 4)) % 4;
+  if (extra === 0) return bytes;
+  return Buffer.concat([bytes, Buffer.alloc(extra, fill)]);
+}

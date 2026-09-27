@@ -353,6 +353,20 @@ export async function openDriveMedia(fileId: string, range: string | undefined, 
   return response;
 }
 
+/** Move a file this app created into the Drive trash. A missing file is already gone. */
+export async function trashDriveFile(fileId: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const access = await accessToken(env);
+  const response = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (response.status === 404) return;
+  if (response.status === 401 || response.status === 403) throw new DriveReconnectError();
+  if (!response.ok) throw new Error("Drive did not trash the previous mesh.");
+  await response.text();
+}
+
 export async function uploadDriveFile(input: {
   access: string;
   folderId: string;
