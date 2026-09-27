@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
 import { StatusPill, WorkspaceSection } from "@/components/primitives";
+import { OrderUpdates } from "@/components/order-updates";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { drawerScrimVariants, drawerTransition } from "@/lib/motion";
@@ -61,14 +62,16 @@ function invalidateOps(dealId?: string) {
  */
 export function DealOpsDrawer({
   dealId,
+  offbook = null,
   headers,
   onClose,
 }: {
   dealId: string | null;
+  offbook?: { id: number; name: string } | null;
   headers: Record<string, string>;
   onClose: () => void;
 }) {
-  const open = Boolean(dealId);
+  const open = Boolean(dealId || offbook);
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
@@ -82,7 +85,7 @@ export function DealOpsDrawer({
 
   const drawer = (
     <AnimatePresence>
-      {open && dealId ? (
+      {open && (dealId || offbook) ? (
         <motion.div
           key="deal-ops-drawer"
           className="pointer-events-none fixed inset-0 z-[80]"
@@ -105,7 +108,7 @@ export function DealOpsDrawer({
           <motion.aside
             role="dialog"
             aria-modal="true"
-            aria-label="Deal ops"
+            aria-label={dealId ? "Deal ops" : "Order updates"}
             className="ops-deal-drawer pointer-events-auto absolute inset-x-0 bottom-0 flex h-[min(85dvh,720px)] w-full flex-col rounded-t-2xl border-t border-border bg-background shadow-2xl md:inset-x-auto md:bottom-0 md:right-0 md:top-14 md:h-auto md:max-w-2xl md:rounded-none md:border-l md:border-t-0"
             data-testid="drawer-deal-ops"
             onClick={(event) => event.stopPropagation()}
@@ -123,7 +126,7 @@ export function DealOpsDrawer({
             exit={reduceMotion ? undefined : "exit"}
           >
             <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-              <p className="rule-label">Deal ops</p>
+              <p className="rule-label">{dealId ? "Deal ops" : "Off-book"}</p>
               <Button
                 type="button"
                 size="sm"
@@ -137,7 +140,14 @@ export function DealOpsDrawer({
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
-              <DealOpsPanel dealId={dealId} headers={headers} onClose={onClose} flush />
+              {dealId ? (
+                <DealOpsPanel dealId={dealId} headers={headers} onClose={onClose} flush />
+              ) : offbook ? (
+                <section className="space-y-3" data-testid="panel-offbook-updates">
+                  <h2 className="text-lg font-semibold tracking-tight">{offbook.name}</h2>
+                  <OrderUpdates orderKey={`offbook:${offbook.id}`} headers={headers} />
+                </section>
+              ) : null}
             </div>
           </motion.aside>
         </motion.div>
@@ -615,6 +625,8 @@ export function DealOpsPanel({
           ) : null}
         </div>
       </div>
+
+      <OrderUpdates orderKey={`deal:${dealId}`} headers={headers} />
 
       <div className="deal-grid grid gap-4 lg:grid-cols-2">
         <div className="space-y-3 rounded-md border border-border/80 p-3">

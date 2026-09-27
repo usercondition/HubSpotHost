@@ -8,7 +8,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { readHashQueryParam, stripDealIdFromLocation } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsDrawer } from "@/components/deal-ops-panel";
+import { StackOrderDrawer } from "@/components/stack-order-drawer";
 import { Panel } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import {
@@ -17,10 +17,27 @@ import {
   StackRow,
   StackTotalsBar,
   rowsWithDividers,
+  type StackRowModel,
   type StackView,
 } from "@/components/priority-stack-list";
 import { OffbookEntryDialog } from "@/components/offbook-entry-dialog";
 import { StackBundleDialog } from "@/components/stack-bundle-dialog";
+
+function locateStackRow(
+  view: StackView,
+  match: (row: StackRowModel) => boolean,
+): { row: StackRowModel; bundleName: string | null } | null {
+  for (const row of view.rows) {
+    if (match(row)) return { row, bundleName: null };
+    for (const member of row.members) {
+      if (match(member)) return { row: member, bundleName: row.name };
+    }
+  }
+  for (const row of view.outTheDoor) {
+    if (match(row)) return { row, bundleName: null };
+  }
+  return null;
+}
 
 function useDesktopDrag(): boolean {
   const [desktop, setDesktop] = useState(false);
@@ -47,7 +64,8 @@ export default function PriorityStackPage() {
   if (pendingDealId.current === undefined) {
     pendingDealId.current = readHashQueryParam("dealId");
   }
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [drawerRow, setDrawerRow] = useState<StackRowModel | null>(null);
+  const [drawerBundle, setDrawerBundle] = useState<string | null>(null);
 
   useEffect(() => {
     stripDealIdFromLocation();
@@ -73,7 +91,11 @@ export default function PriorityStackPage() {
     if (!id || !stack.data) return;
     pendingDealId.current = null;
     const openId = stackDrawerDealId(id, { rows: stack.data.rows, outTheDoor: stack.data.outTheDoor });
-    if (openId) setSelectedDealId(openId);
+    if (!openId) return;
+    const found = locateStackRow(stack.data, (row) => row.dealId === openId);
+    if (!found) return;
+    setDrawerBundle(found.bundleName);
+    setDrawerRow(found.row);
   }, [stack.data]);
 
   async function persistOrder(keys: string[]) {
@@ -119,6 +141,20 @@ export default function PriorityStackPage() {
     keys.splice(to, 0, draggingKey);
     setDraggingKey(null);
     void persistOrder(keys);
+  }
+
+  function openRow(row: StackRowModel, bundleName: string | null = null) {
+    if (row.kind === "bundle") return;
+    if (row.kind === "offbook" && !row.offbookId) return;
+    if (row.kind === "deal" && !row.dealId) return;
+    const found = stack.data ? locateStackRow(stack.data, (candidate) => candidate.key === row.key) : null;
+    setDrawerBundle(bundleName ?? found?.bundleName ?? null);
+    setDrawerRow(row);
+  }
+
+  function closeDrawer() {
+    setDrawerRow(null);
+    setDrawerBundle(null);
   }
 
   const data = stack.data;
@@ -215,7 +251,8 @@ export default function PriorityStackPage() {
                     onDone={() => {
                       void apiRequest("POST", "/api/priority-stack/done", { key: line.row.key }, { headers }).then(() => stack.refetch());
                     }}
-                    onOpen={() => setSelectedDealId(line.row.dealId)}
+                    onOpen={() => openRow(line.row)}
+                    onOpenMember={(member) => openRow(member, line.row.kind === "bundle" ? line.row.name : null)}
                     onMove={(direction) => move(line.row.key, direction)}
                     onDragStart={() => setDraggingKey(line.row.key)}
                     onDragEnd={() => setDraggingKey(null)}
@@ -240,7 +277,14 @@ export default function PriorityStackPage() {
                   <div key={row.key} className="stack-row" data-lane="good" data-testid={`stack-done-${row.key}`}>
                     <span className="stack-rank" />
                     <span className="stack-name">
-                      <span className="stack-clip text-sm font-medium">{row.name}</span>
+                      <button
+                        type="button"
+                        className="stack-clip bg-transparent p-0 text-left text-sm font-medium"
+                        onClick={() => openRow(row)}
+                        data-testid={`button-open-${row.key}`}
+                      >
+                        {row.name}
+                      </button>
                       {row.contactName ? <span className="stack-clip stack-sub">{row.contactName}</span> : null}
                     </span>
                     <span className="stack-stage stack-clip text-sm">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
@@ -265,7 +309,13 @@ export default function PriorityStackPage() {
               )}
               <StackCommitLine label="Out the door" amount={data.totals.outTheDoor} />
             </section>
-            <DealOpsDrawer dealId={selectedDealId} headers={headers} onClose={() => setSelectedDealId(null)} />
+            <StackOrderDrawer
+              row={drawerRow}
+              today={data.today}
+              bundleName={drawerBundle}
+              headers={headers}
+              onClose={closeDrawer}
+            />
             {offbookOpen ? (
               <OffbookEntryDialog headers={headers} onClose={() => setOffbookOpen(false)} onSaved={() => void stack.refetch()} />
             ) : null}

@@ -41,6 +41,71 @@ Do not enable both live-write environment settings until a test deal produces th
 
 `#/stack` ranks what goes out the door this week. Blocker text, manual order, pickup bundles, and off-book orders (a friend pickup that is not a HubSpot deal) live in the same SQLite file as fulfillment checklists. Deal target dates stay on the HubSpot `print_ship_by` field. The blocker is not stored in `print_ship_notes`, which is the ship plan.
 
+### Order update log
+
+Each HubSpot deal and each off-book order has an append-only update log in that same SQLite file (`order_update_log` in `ORDER_LINKS_DB_FILE`, usually the Railway volume at `/data`). Entries are never updated or deleted. They are not written to HubSpot deal properties, notes, or engagements. Off-book orders never write to HubSpot. Timestamps are stored in UTC and shown in Pacific time.
+
+Owner routes use the same access-code header as the rest of the Stack API: `x-paid-order-access-code`. A missing or wrong code returns 401. If `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` is unset, the route returns 503.
+
+List entries, newest first:
+
+```http
+GET /api/priority-stack/updates?key=deal:123456789
+x-paid-order-access-code: <owner code>
+```
+
+`key` is `deal:<hubspotDealId>` or `offbook:<id>`. Bundle keys are rejected.
+
+```json
+{
+  "ok": true,
+  "orderKey": "deal:123456789",
+  "entries": [
+    {
+      "id": 2,
+      "orderKey": "deal:123456789",
+      "createdAt": "2026-09-27T00:31:00.000Z",
+      "text": "Left leg supports failed. Reprint that piece.",
+      "source": "voice",
+      "author": "Miguel"
+    }
+  ]
+}
+```
+
+Append one entry:
+
+```http
+POST /api/priority-stack/updates
+content-type: application/json
+x-paid-order-access-code: <owner code>
+
+{
+  "key": "deal:123456789",
+  "text": "Left leg supports failed. Reprint that piece.",
+  "source": "voice",
+  "author": "Miguel"
+}
+```
+
+`source` is `voice`, `manual`, or `system`. Omitted `source` is `manual`. Omitted `author` is `Miguel`. `text` is required, trimmed, and at most 4000 characters. The server sets `createdAt`. Response `201`:
+
+```json
+{
+  "ok": true,
+  "entry": {
+    "id": 2,
+    "orderKey": "deal:123456789",
+    "createdAt": "2026-09-27T00:31:00.000Z",
+    "text": "Left leg supports failed. Reprint that piece.",
+    "source": "voice",
+    "author": "Miguel"
+  }
+}
+```
+
+An off-book example uses `"key": "offbook:4"`. The Stack drawer shows these entries under Updates and can add a manual line. Mirroring a copy onto a HubSpot note is intentionally not part of this API.
+
 ## Client order links (primary intake)
 
 **Order links** is the main way a paid Marketplace order enters the system. Nothing reaches HubSpot until you approve it.
