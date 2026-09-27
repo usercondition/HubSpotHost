@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { startPlateDownload } from "@/lib/plate-library-client";
+import { plainDriveMessage, startPlateDownload } from "@/lib/plate-library-client";
 import type { PlateFileRecord, PlatePreviewStats } from "@shared/plate-files";
 
 function formatDuration(seconds: number | null): string {
@@ -141,7 +141,8 @@ export function PlateFileMenu({
               setOpen(false);
               setError("");
               void startPlateDownload(file.driveFileId, headers).catch((reason: unknown) => {
-                setError(reason instanceof Error ? reason.message : "Drive could not read that file.");
+                const raw = reason instanceof Error ? reason.message : "";
+                setError(plainDriveMessage(raw, "Drive could not read that file."));
               });
             }}
           >
@@ -152,7 +153,15 @@ export function PlateFileMenu({
           </a>
         </div>
       ) : null}
-      {error ? <p className="absolute right-0 z-20 mt-1 w-48 text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p
+          className="fixed bottom-3 left-3 right-3 z-[80] mx-auto max-w-sm rounded-md border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-md"
+          role="alert"
+          data-testid="text-plate-download-error"
+        >
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

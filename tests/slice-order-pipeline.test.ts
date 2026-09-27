@@ -44,7 +44,7 @@ let mock: http.Server;
 let app: http.Server;
 let base = "";
 
-function plate(salt = 0): Buffer {
+function plate(salt = 0, resinCost = 4.75): Buffer {
   const file = Buffer.alloc(0x180);
   file.writeUInt32LE(0x12fd0086, 0x00);
   file.writeUInt32LE(4, 0x04);
@@ -71,7 +71,7 @@ function plate(salt = 0): Buffer {
   file.writeFloatLE(150, 0x90);
   file.writeFloatLE(31.25, 0x94);
   file.writeFloatLE(34.5, 0x98);
-  file.writeFloatLE(4.75, 0x9c);
+  file.writeFloatLE(resinCost, 0x9c);
   file.writeFloatLE(2, 0xa0);
   file.writeFloatLE(0.5, 0xa4);
   file.writeUInt32LE(8, 0xa8);
@@ -313,4 +313,48 @@ test("a second upload from the other entry point links the record and the Drive 
   assert.deepEqual(second.library.files[0].printRecordIds, [first.attached.record.id]);
   assert.equal(dealProps.get("803")?.print_plate_count, "1");
   assert.equal(dealProps.get("803")?.print_estimated_resin_cost, "4.75");
+});
+
+test("a plate priced by the shop keeps that cost after the Drive upload", async () => {
+  const priced = await ownerFetch(`${base}/api/resin-profile`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "ELEGOO ABS-Like 3.0",
+      amazonAsin: "B0D6Y6JV42",
+      bottleMassG: 1000,
+      bottlePriceUsd: "20.00",
+    }),
+  });
+  assert.equal(priced.status, 200);
+  const fleet = await ownerFetch(`${base}/api/printers`);
+  const printers = await fleet.json();
+  const printerId = printers.printers[0]?.printerId as number;
+  const result = await runPipeline("804", "priced-body.ctb", plate(4, 0), printerId);
+  assert.ok(result.attached.summary.totalResinCost > 0, "shop resin price should fill a plate with no slicer cost");
+  assert.equal(result.library.files[0].stats.resinCost, result.attached.summary.totalResinCost);
+  assert.equal(result.library.files[0].stats.layerCount, 420);
+  assert.equal(result.attached.summary.plateCount, 1);
+});
+
+test("analyze fingerprints the last megabyte so two plates do not collide", async () => {
+  const head = plate();
+  const size = 3 * 1024 * 1024;
+  async function analyze(suffix: Buffer) {
+    const form = new FormData();
+    form.append("file", new Blob([head]), "big.ctb");
+    form.append("mode", "ctb-prefix");
+    form.append("fullFileSize", String(size));
+    form.append("suffix", new Blob([suffix]), "big.ctb");
+    const response = await ownerFetch(`${base}/api/prints/analyze`, { method: "POST", body: form });
+    const body = await response.json();
+    assert.equal(response.status, 201, body?.error || "analyze failed");
+    return body.metrics.sha256 as string;
+  }
+  const left = Buffer.alloc(64, 1);
+  const right = Buffer.alloc(64, 1);
+  right[63] = 2;
+  const first = await analyze(left);
+  const second = await analyze(right);
+  assert.notEqual(first, second);
 });

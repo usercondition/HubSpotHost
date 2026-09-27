@@ -1,6 +1,7 @@
 import { apiRequest } from "@/lib/queryClient";
 import { analyzePrintPlate, attachPrintPlate, isPlateFile, type PrinterMatchInfo } from "@/lib/print-attach";
 import { guessPlatePrinter, type PlateFileRecord } from "@shared/plate-files";
+import { SLICE_FINGERPRINT_CHUNK, fingerprintPayload } from "@shared/slice-fingerprint";
 import type { PrintFileMetrics, PrintFileOrderSummary, PrintFileRecord } from "@shared/schema";
 
 const heldFiles = new Map<string, File>();
@@ -13,15 +14,28 @@ export function heldSliceFile(sha256: string): File | undefined {
   return heldFiles.get(sha256);
 }
 
+/** Shop copy for Drive failures. Raw provider text stays on the server log. */
+export function plainDriveMessage(message: string, fallback = "Drive upload failed."): string {
+  const embedded = /"error"\s*:\s*"([^"]+)"/.exec(message)?.[1];
+  const text = (embedded || message).replace(/^\d{3}:\s*/, "").trim();
+  if (/reconnect/i.test(text)) return "Reconnect Google Drive.";
+  if (/not in library|not configured/i.test(text)) return "Not in Library yet.";
+  if (/does not match/i.test(text)) return "That file does not match this plate.";
+  if (/could not read|unreadable/i.test(text)) return "Drive could not read that file.";
+  if (/did not finish/i.test(text)) return "The upload did not finish.";
+  if (text === "Drive upload failed." || text === "Choose which physical printer ran this plate.") return text;
+  if (/googleapis|invalid_grant|ya29\.|\bError:|ECONN|ETIMEDOUT|oauth|unexpected token|status code/i.test(text)) return fallback;
+  if (!text || text.length > 160 || /[{}<>]/.test(text)) return fallback;
+  return text;
+}
+
 export async function fingerprintFile(file: File): Promise<string> {
-  const sizeBuf = new Uint8Array(8);
-  new DataView(sizeBuf.buffer).setBigUint64(0, BigInt(file.size), true);
-  const prefix = new Uint8Array(await file.slice(0, Math.min(file.size, 1024 * 1024)).arrayBuffer());
-  const data = new Uint8Array(8 + prefix.length);
-  data.set(sizeBuf, 0);
-  data.set(prefix, 8);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const headLen = Math.min(file.size, SLICE_FINGERPRINT_CHUNK);
+  const tailLen = Math.min(file.size, SLICE_FINGERPRINT_CHUNK);
+  const head = new Uint8Array(await file.slice(0, headLen).arrayBuffer());
+  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - tailLen)).arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", fingerprintPayload(file.size, head, tail));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function splitDealTitle(dealName: string): { kit: string; customer: string } {
@@ -92,7 +106,7 @@ export function uploadPlateBytes(input: {
         parsed = {};
       }
       if (xhr.status >= 200 && xhr.status < 300 && parsed.file?.driveFileId) resolve(parsed.file);
-      else reject(new Error(parsed.error || "Drive upload failed."));
+      else reject(new Error(plainDriveMessage(parsed.error || "Drive upload failed.")));
     };
     xhr.onerror = () => reject(new Error("Drive upload failed."));
     xhr.send(input.file);
@@ -229,7 +243,7 @@ async function storeSliceInLibrary(input: {
     );
     if (prepared.action === "linked") return { library: "linked", libraryError: "", file: prepared.file };
     if (prepared.action === "pending") {
-      return { library: "pending", libraryError: "Not in Library yet. Connect Drive or retry.", file: null };
+      return { library: "pending", libraryError: "Not in Library yet.", file: null };
     }
     const file = await uploadPlateBytes({
       file: input.file,
@@ -245,7 +259,7 @@ async function storeSliceInLibrary(input: {
     });
     return { library: "uploaded", libraryError: "", file };
   } catch (error) {
-    const libraryError = error instanceof Error ? error.message : "Drive upload failed.";
+    const libraryError = plainDriveMessage(error instanceof Error ? error.message : "");
     return { library: "pending", libraryError, file: null };
   }
 }

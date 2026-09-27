@@ -1,7 +1,14 @@
 import { useRef, useState } from "react";
-import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { fingerprintFile, heldSliceFile, preparePlateUpload, splitDealTitle, uploadPlateBytes } from "@/lib/plate-library-client";
+import { MoreHorizontal } from "lucide-react";
+import {
+  fingerprintFile,
+  heldSliceFile,
+  plainDriveMessage,
+  preparePlateUpload,
+  splitDealTitle,
+  uploadPlateBytes,
+} from "@/lib/plate-library-client";
 import { guessPlatePrinter, type PrintLibraryMark } from "@shared/plate-files";
 
 export interface LibraryJob {
@@ -59,7 +66,7 @@ export function useSendPlateToLibrary(headers: Record<string, string>) {
         return next;
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Drive upload failed.";
+      const message = plainDriveMessage(error instanceof Error ? error.message : "");
       setJobs((current) => ({ ...current, [input.recordId]: { progress: null, error: message } }));
     } finally {
       await queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
@@ -72,7 +79,6 @@ export function useSendPlateToLibrary(headers: Record<string, string>) {
 
 export function PrintLibraryStatus({
   record,
-  headers,
   job,
   onSend,
   onMismatch,
@@ -80,14 +86,26 @@ export function PrintLibraryStatus({
   record: { id: number; sha256: string; fileName: string; hubspotDealName: string; hubspotDealId: string; library?: PrintLibraryMark };
   headers: Record<string, string>;
   job?: LibraryJob;
-  onSend: (file: File, record: PrintLibraryStatus["record"]) => void;
+  onSend: (file: File, record: PrintLibraryStatus["record"], sha256: string) => void;
   onMismatch: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const mark = record.library;
   const inLibrary = mark?.status === "in_library" && !job?.error;
-  const warning = job?.error || (mark?.status === "pending" ? mark.error : "");
   if (inLibrary && job?.progress == null) return null;
+
+  const detail = job?.error ? plainDriveMessage(job.error) : "";
+  const status = detail && detail !== "Not in Library yet." ? detail : "Not in Library";
+
+  async function sendFile(file: File) {
+    const sha = await fingerprintFile(file);
+    if (sha !== record.sha256) {
+      onMismatch();
+      return;
+    }
+    onSend(file, record, sha);
+  }
 
   return (
     <div className="mt-1 min-w-0" data-testid={`print-library-${record.id}`}>
@@ -95,30 +113,41 @@ export function PrintLibraryStatus({
         <p className="text-xs text-muted-foreground" data-testid={`text-library-progress-${record.id}`}>
           Sending to Library {Math.round(job.progress * 100)}%
         </p>
-      ) : null}
-      {warning ? (
-        <p className="text-xs text-destructive" data-testid={`text-library-pending-${record.id}`}>
-          {warning}{" "}
-          {/connect drive/i.test(warning) ? (
-            <Link href="/setup" className="underline">
-              Connect Drive
-            </Link>
-          ) : null}
-        </p>
-      ) : null}
-      {!inLibrary && job?.progress == null ? (
-        <button
-          type="button"
-          className="text-xs font-medium text-primary underline"
-          data-testid={`button-send-to-library-${record.id}`}
-          onClick={() => {
-            const held = heldSliceFile(record.sha256);
-            if (held) onSend(held, record);
-            else inputRef.current?.click();
-          }}
-        >
-          Send to Library
-        </button>
+      ) : (
+        <div className="flex min-w-0 items-center gap-1">
+          <p className="min-w-0 truncate text-xs text-muted-foreground" data-testid={`text-library-pending-${record.id}`}>
+            {status}
+          </p>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={`Actions for ${record.fileName}`}
+              aria-expanded={menuOpen}
+              data-testid={`button-print-library-menu-${record.id}`}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      {menuOpen && job?.progress == null ? (
+        <div className="mt-1 w-full max-w-[11rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+          <button
+            type="button"
+            className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+            data-testid={`button-send-to-library-${record.id}`}
+            onClick={() => {
+              setMenuOpen(false);
+              const held = heldSliceFile(record.sha256);
+              if (held) void sendFile(held);
+              else inputRef.current?.click();
+            }}
+          >
+            Send to Library
+          </button>
+        </div>
       ) : null}
       <input
         ref={inputRef}
@@ -130,13 +159,7 @@ export function PrintLibraryStatus({
           const next = event.target.files?.[0];
           event.target.value = "";
           if (!next) return;
-          void fingerprintFile(next).then((sha) => {
-            if (sha !== record.sha256) {
-              onMismatch();
-              return;
-            }
-            onSend(next, record);
-          });
+          void sendFile(next);
         }}
       />
     </div>
@@ -146,12 +169,13 @@ export function PrintLibraryStatus({
 export function librarySendInput(
   file: File,
   record: { id: number; sha256: string; fileName: string; hubspotDealName: string; hubspotDealId: string },
+  sha256: string,
 ) {
   const names = splitDealTitle(record.hubspotDealName);
   return {
     file,
     recordId: record.id,
-    sha256: record.sha256,
+    sha256,
     fileName: file.name || record.fileName,
     orderKey: `deal:${record.hubspotDealId}`,
     kit: names.kit,

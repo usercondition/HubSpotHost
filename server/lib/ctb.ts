@@ -13,6 +13,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { PrintFileMetrics } from "../../shared/schema";
+import { SLICE_FINGERPRINT_CHUNK, fingerprintPayload } from "../../shared/slice-fingerprint";
 
 const CTB_MAGIC_PREFIX = 0x12fd;
 export const CTB_ENCRYPTED_MAGIC = 0x12fd0107;
@@ -26,16 +27,20 @@ const MAX_MACHINE_TYPE_BYTES = 200;
 const MAX_EXT_CONFIG_BYTES = 4_096;
 const ENCRYPTED_HEADER_SIZE = 48;
 const ENCRYPTED_SETTINGS_MIN = 168;
-const HASH_CHUNK_BYTES = 1024 * 1024;
+const HASH_CHUNK_BYTES = SLICE_FINGERPRINT_CHUNK;
 
-/** Same fingerprint Prints stores: file size plus the first 1 MiB. */
-export function sliceFingerprint(size: number, prefix: Buffer): string {
-  const hash = crypto.createHash("sha256");
-  const sizeBuf = Buffer.alloc(8);
-  sizeBuf.writeBigUInt64LE(BigInt(size));
-  hash.update(sizeBuf);
-  hash.update(prefix.subarray(0, Math.min(prefix.length, HASH_CHUNK_BYTES, size)));
-  return hash.digest("hex");
+/**
+ * Fingerprint a plate from its size, the first 1 MiB, the last 1 MiB, and the
+ * CTB header layer count and print time. Pass the full buffer as `head` when
+ * the whole file is already in memory; otherwise pass the tail separately.
+ */
+export function sliceFingerprint(size: number, head: Buffer, tail?: Buffer): string {
+  const tailBytes =
+    tail ??
+    (head.length >= size
+      ? head.subarray(Math.max(0, size - Math.min(size, HASH_CHUNK_BYTES)), size)
+      : Buffer.alloc(0));
+  return crypto.createHash("sha256").update(fingerprintPayload(size, head, tailBytes)).digest("hex");
 }
 
 /**
@@ -75,7 +80,7 @@ export function createBufferCtbReader(buffer: Buffer): CtbReader {
       return buffer.subarray(offset, offset + length);
     },
     sha256() {
-      return crypto.createHash("sha256").update(buffer).digest("hex");
+      return sliceFingerprint(buffer.length, buffer);
     },
     close() {
       /* in-memory reader */
@@ -109,18 +114,25 @@ export function createFileCtbReader(filePath: string): CtbReader {
       return out;
     },
     sha256() {
-      if (closed) return crypto.createHash("sha256").update("").digest("hex");
-      // Large Mega 8K plates can be multi-GB. Fingerprint size + a 1 MiB prefix
-      // so analysis stays responsive without hashing the entire layer payload.
-      const prefixLen = Math.min(stat.size, HASH_CHUNK_BYTES);
-      const prefix = Buffer.alloc(prefixLen);
+      if (closed) return sliceFingerprint(0, Buffer.alloc(0), Buffer.alloc(0));
+      const headLen = Math.min(stat.size, HASH_CHUNK_BYTES);
+      const head = Buffer.alloc(headLen);
       let read = 0;
-      while (read < prefixLen) {
-        const n = fs.readSync(fd, prefix, read, prefixLen - read, read);
+      while (read < headLen) {
+        const n = fs.readSync(fd, head, read, headLen - read, read);
         if (n <= 0) break;
         read += n;
       }
-      return sliceFingerprint(stat.size, prefix.subarray(0, read));
+      const tailLen = Math.min(stat.size, HASH_CHUNK_BYTES);
+      const tail = Buffer.alloc(tailLen);
+      let tailRead = 0;
+      const tailStart = Math.max(0, stat.size - tailLen);
+      while (tailRead < tailLen) {
+        const n = fs.readSync(fd, tail, tailRead, tailLen - tailRead, tailStart + tailRead);
+        if (n <= 0) break;
+        tailRead += n;
+      }
+      return sliceFingerprint(stat.size, head.subarray(0, read), tail.subarray(0, tailRead));
     },
     close,
   };
@@ -129,9 +141,9 @@ export function createFileCtbReader(filePath: string): CtbReader {
 /**
  * Analyze a CTB using only an uploaded prefix of the real plate file.
  * `fullFileSize` is the on-disk plate size from the owner's machine; the
- * fingerprint matches `createFileCtbReader` (size + first 1 MiB).
+ * fingerprint matches `createFileCtbReader` (size, first 1 MiB, last 1 MiB, header tags).
  */
-export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number): CtbReader {
+export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number, tail?: Buffer): CtbReader {
   if (!Number.isFinite(fullFileSize) || fullFileSize < prefix.length || fullFileSize < HEADER_MIN_BYTES) {
     throw new CtbParseError("That CTB prefix does not match the reported plate size");
   }
@@ -149,8 +161,14 @@ export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number): Ctb
       return prefix.subarray(offset, offset + length);
     },
     sha256() {
-      const prefixLen = Math.min(fullFileSize, HASH_CHUNK_BYTES, prefix.length);
-      return sliceFingerprint(fullFileSize, prefix.subarray(0, prefixLen));
+      const head = prefix.subarray(0, Math.min(fullFileSize, HASH_CHUNK_BYTES, prefix.length));
+      const derivedTail =
+        tail && tail.length > 0
+          ? tail
+          : prefix.length >= fullFileSize
+            ? prefix.subarray(Math.max(0, fullFileSize - Math.min(fullFileSize, HASH_CHUNK_BYTES)), fullFileSize)
+            : Buffer.alloc(0);
+      return sliceFingerprint(fullFileSize, head, derivedTail);
     },
     close() {
       /* prefix buffer */
@@ -519,8 +537,9 @@ export function parseCtbFileFromPrefix(
   fileName: string,
   prefix: Buffer,
   fullFileSize: number,
+  tail?: Buffer,
 ): PrintFileMetrics {
-  const reader = createPrefixCtbReader(prefix, fullFileSize);
+  const reader = createPrefixCtbReader(prefix, fullFileSize, tail);
   try {
     return parseCtbReader(fileName, reader);
   } catch (error) {

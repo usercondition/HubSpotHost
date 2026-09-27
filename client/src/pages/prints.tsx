@@ -1556,7 +1556,7 @@ export default function Prints() {
                               record={record}
                               headers={headers}
                               job={librarySend.jobs[record.id]}
-                              onSend={(file, row) => void librarySend.send(librarySendInput(file, row))}
+                              onSend={(file, row, sha256) => void librarySend.send(librarySendInput(file, row, sha256))}
                               onMismatch={() =>
                                 toast({
                                   title: "That file does not match this plate",
@@ -1702,7 +1702,7 @@ export default function Prints() {
                             record={record}
                             headers={headers}
                             job={librarySend.jobs[record.id]}
-                            onSend={(file, row) => void librarySend.send(librarySendInput(file, row))}
+                            onSend={(file, row, sha256) => void librarySend.send(librarySendInput(file, row, sha256))}
                             onMismatch={() =>
                               toast({
                                 title: "That file does not match this plate",

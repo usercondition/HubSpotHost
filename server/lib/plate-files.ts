@@ -396,18 +396,45 @@ export function libraryMarksForPrints(printRecordIds: number[]): Map<number, Pri
   return marks;
 }
 
+function statFilled(value: string | number | null | undefined): boolean {
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Keep values already stored (attach-time cost included) and only fill blanks. */
+export function mergePreviewStats(existing: PlatePreviewStats | null, incoming: PlatePreviewStats): PlatePreviewStats {
+  if (!existing) return incoming;
+  const keys = ["printerProfile", "layerCount", "layerHeightMm", "printTimeSeconds", "resinVolumeMl", "resinCost"] as const;
+  const merged: PlatePreviewStats = { ...incoming };
+  for (const key of keys) {
+    const prior = existing[key];
+    if (statFilled(prior)) merged[key] = prior as never;
+  }
+  return merged;
+}
+
 export function savePlatePreview(sha256: string, png: Buffer | null, stats: PlatePreviewStats): void {
   const fingerprint = sha256.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(fingerprint)) return;
   const now = new Date().toISOString();
-  const existing = getSqlite().prepare(`SELECT png FROM plate_previews WHERE sha256 = ?`).get(fingerprint) as { png: Buffer } | undefined;
+  const existing = getSqlite()
+    .prepare(`SELECT png, stats_json FROM plate_previews WHERE sha256 = ?`)
+    .get(fingerprint) as { png: Buffer; stats_json: string } | undefined;
+  let prior: PlatePreviewStats | null = null;
+  if (existing?.stats_json) {
+    try {
+      prior = JSON.parse(existing.stats_json) as PlatePreviewStats;
+    } catch {
+      prior = null;
+    }
+  }
   const nextPng = png && png.length > 32 ? png : existing?.png ?? Buffer.alloc(0);
   getSqlite()
     .prepare(
       `INSERT INTO plate_previews (sha256, png, stats_json, updated_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(sha256) DO UPDATE SET png = excluded.png, stats_json = excluded.stats_json, updated_at = excluded.updated_at`,
     )
-    .run(fingerprint, nextPng, JSON.stringify(stats), now);
+    .run(fingerprint, nextPng, JSON.stringify(mergePreviewStats(prior, stats)), now);
 }
 
 export function readPlatePreviewPng(sha256: string): Buffer | null {

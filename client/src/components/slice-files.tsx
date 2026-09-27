@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, MoreHorizontal } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { commitSliceToOrder, SlicePrinterChoiceError } from "@/lib/plate-library-client";
+import { commitSliceToOrder, fingerprintFile, heldSliceFile, plainDriveMessage, SlicePrinterChoiceError } from "@/lib/plate-library-client";
 import { PlateFileMenu, PlatePreviewHost, PlateThumb, usePlatePreview } from "@/components/plate-file-menu";
 import { formatPacificUpdateStamp } from "@shared/ship-by";
 import {
@@ -41,7 +41,9 @@ export function SliceFiles({
   headers: Record<string, string>;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const retryFile = useRef<File | null>(null);
+  const pendingInput = useRef<HTMLInputElement | null>(null);
+  const pendingTarget = useRef<PlateLibraryPending | null>(null);
+  const [pendingMenu, setPendingMenu] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [printer, setPrinter] = useState("");
@@ -88,14 +90,13 @@ export function SliceFiles({
       });
       setFleetChoices([]);
       setFleetPrinterId("");
-      if (result.library === "pending" && result.libraryError) {
-        setLocalError(result.libraryError);
-        retryFile.current = nextFile;
+      if (result.library === "pending" && !result.record) {
+        setLocalError(plainDriveMessage(result.libraryError || "Not in Library yet."));
       } else {
         setFile(null);
         setNotes("");
         setOpen(false);
-        retryFile.current = null;
+        setLocalError("");
       }
       await queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
@@ -106,10 +107,8 @@ export function SliceFiles({
         setFleetChoices(error.printers);
         setLocalError(error.message);
       } else {
-        const message = error instanceof Error ? error.message : String(error || "Drive upload failed.");
-        setLocalError(message);
+        setLocalError(plainDriveMessage(error instanceof Error ? error.message : ""));
       }
-      retryFile.current = nextFile;
       await queryClient.invalidateQueries({ queryKey: ["/api/plate-files", orderKey] });
     } finally {
       setProgress(null);
@@ -211,24 +210,14 @@ export function SliceFiles({
       ) : null}
       {localError ? (
         <p className="mb-2 text-sm text-destructive" data-testid="slice-upload-error">
-          {localError}{" "}
-          {retryFile.current ? (
-            <button
-              type="button"
-              className="underline"
-              data-testid="button-retry-slice"
-              onClick={() => {
-                const next = retryFile.current;
-                if (next) void send(next, printer, notes);
-              }}
-            >
-              Retry
-            </button>
-          ) : null}
-          {/reconnect/i.test(localError) ? (
-            <Link href="/setup" className="underline">
-              Reconnect
-            </Link>
+          {plainDriveMessage(localError)}
+          {/not in library|reconnect/i.test(localError) ? (
+            <>
+              {" "}
+              <Link href="/setup" className="underline" data-testid="link-connect-drive">
+                Connect Drive
+              </Link>
+            </>
           ) : null}
         </p>
       ) : null}
@@ -237,9 +226,52 @@ export function SliceFiles({
       ) : null}
       <ul className="space-y-2">
         {pending.map((item) => (
-          <li key={item.printRecordId} className="min-w-0 text-sm" data-testid={`slice-library-pending-${item.printRecordId}`}>
-            <p className="truncate font-medium">{item.name}</p>
-            <p className="text-destructive">{item.error}</p>
+          <li key={item.printRecordId} className="min-w-0" data-testid={`slice-library-pending-${item.printRecordId}`}>
+            <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{item.name}</p>
+                <p className="text-xs text-muted-foreground" data-testid={`text-slice-pending-${item.printRecordId}`}>
+                  Not in Library
+                </p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={`Actions for ${item.name}`}
+                aria-expanded={pendingMenu === item.printRecordId}
+                data-testid={`button-pending-menu-${item.printRecordId}`}
+                onClick={() => setPendingMenu((current) => (current === item.printRecordId ? null : item.printRecordId))}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </div>
+            {pendingMenu === item.printRecordId ? (
+              <div className="mt-1 w-full max-w-[11rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+                <button
+                  type="button"
+                  className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                  data-testid={`button-send-to-library-${item.printRecordId}`}
+                  onClick={() => {
+                    setPendingMenu(null);
+                    pendingTarget.current = item;
+                    const held = heldSliceFile(item.sha256);
+                    if (!held) {
+                      pendingInput.current?.click();
+                      return;
+                    }
+                    void fingerprintFile(held).then((sha) => {
+                      if (sha !== item.sha256) {
+                        setLocalError("That file does not match this plate.");
+                        return;
+                      }
+                      void send(held, printer, notes);
+                    });
+                  }}
+                >
+                  Send to Library
+                </button>
+              </div>
+            ) : null}
           </li>
         ))}
         {files.map((item) => (
@@ -285,6 +317,26 @@ export function SliceFiles({
           </li>
         ))}
       </ul>
+      <input
+        ref={pendingInput}
+        type="file"
+        accept={PLATE_FILE_EXTENSIONS.join(",")}
+        className="hidden"
+        data-testid="input-send-pending-to-library"
+        onChange={(event) => {
+          const next = event.target.files?.[0] ?? null;
+          event.target.value = "";
+          const target = pendingTarget.current;
+          if (!next || !target) return;
+          void fingerprintFile(next).then((sha) => {
+            if (sha !== target.sha256) {
+              setLocalError("That file does not match this plate.");
+              return;
+            }
+            void send(next, printer || guessPlatePrinter(next.name), notes);
+          });
+        }}
+      />
       <PlatePreviewHost file={preview.preview} headers={headers} onClose={() => preview.setPreview(null)} />
     </section>
   );

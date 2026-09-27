@@ -53,8 +53,8 @@ import {
 } from "./plate-files";
 import { getPrintFileRecord } from "./print-files";
 
-const NOT_IN_LIBRARY = "Not in Library yet. Connect Drive or retry.";
-const UPLOAD_UNFINISHED = "Not in Library yet. The upload did not finish. Retry.";
+const NOT_IN_LIBRARY = "Not in Library yet.";
+const UPLOAD_UNFINISHED = "The upload did not finish.";
 const PREVIEW_PREFIX_BYTES = 8 * 1024 * 1024;
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -274,8 +274,13 @@ export function registerPlateLibraryRoutes(app: Express): void {
 
   app.get("/api/plate-previews/:sha256", (req: Request, res: Response) => {
     if (rejectOwner(req, res)) return;
-    const png = readPlatePreviewPng(req.params.sha256 || "");
+    const sha = String(req.params.sha256 || "").trim().toLowerCase();
+    const etag = `"${sha}"`;
+    if (req.get("if-none-match") === etag) return res.status(304).end();
+    const png = readPlatePreviewPng(sha);
     if (!png) return res.status(404).json({ ok: false, error: "No preview for that plate." });
+    res.setHeader("etag", etag);
+    res.setHeader("cache-control", "private, max-age=86400");
     res.status(200).type("png").send(png);
   });
 
@@ -385,6 +390,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
       const folder = await ensureOrderFolder(orderFolderName(meta.kit, meta.customer, meta.orderKey));
       const kept: Buffer[] = [];
       let keptBytes = 0;
+      let uploadTail = Buffer.alloc(0);
       const uploaded = await uploadDriveFile({
         access: folder.access,
         folderId: folder.folderId,
@@ -392,6 +398,8 @@ export function registerPlateLibraryRoutes(app: Express): void {
         size,
         body: req,
         onPrefix: (chunk, offset) => {
+          const nextTail = Buffer.concat([uploadTail, chunk]);
+          uploadTail = nextTail.length > 1024 * 1024 ? nextTail.subarray(nextTail.length - 1024 * 1024) : nextTail;
           if (offset >= PREVIEW_PREFIX_BYTES || keptBytes >= PREVIEW_PREFIX_BYTES) return;
           const take = chunk.subarray(0, PREVIEW_PREFIX_BYTES - keptBytes);
           kept.push(Buffer.from(take));
@@ -400,7 +408,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
       });
       if (!uploaded.id) return fail(502, "Drive did not confirm the file.");
       const prefix = Buffer.concat(kept);
-      const sha256 = prefix.length > 0 ? sliceFingerprint(size, prefix) : clientSha;
+      const sha256 = prefix.length > 0 ? sliceFingerprint(size, prefix.subarray(0, Math.min(prefix.length, 1024 * 1024)), uploadTail) : clientSha;
       cacheUploadedPreview(meta.fileName, sha256, prefix, size, meta.printer);
       const record = printRecordId ? getPrintFileRecord(printRecordId) : null;
       const linkedRecord = record && record.sha256 === sha256 ? printRecordId : undefined;
@@ -432,12 +440,12 @@ export function registerPlateLibraryRoutes(app: Express): void {
       }
       return res.status(201).json({ ok: true, file });
     } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error || "");
+      console.error("[drive] upload failed", raw);
       if (error instanceof DriveReconnectError) {
         return fail(409, "Reconnect Google Drive.", { reconnect: true });
       }
-      const raw = error instanceof Error ? error.message : "";
-      const message = raw && !/token|bearer|ya29|refresh/i.test(raw) ? raw : "Drive upload failed.";
-      return fail(502, message);
+      return fail(502, "Drive upload failed.");
     }
   });
 }

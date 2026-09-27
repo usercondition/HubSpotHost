@@ -144,7 +144,7 @@ export function stagePrintFileFromPath(
  * Stage a CTB from a browser-sampled prefix. `fullFileSize` is the real plate
  * size on the owner's machine (Mega 8K plates are often hundreds of MB).
  */
-export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number): {
+export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFileSize: number, tail?: Buffer): {
   analysisId: string;
   metrics: PrintFileMetrics;
   expiresAt: string;
@@ -153,7 +153,7 @@ export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFil
     throw new CtbParseError("Prefix sampling is only supported for Chitubox .ctb plates");
   }
   const prefix = fs.readFileSync(prefixPath);
-  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize));
+  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize, tail));
   rememberSlicePreview(fileName, metrics, prefix, fullFileSize);
   return stageParsedPrintFile(fileName, metrics);
 }

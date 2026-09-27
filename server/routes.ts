@@ -2711,13 +2711,16 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     printFileUpload.fields([
       { name: "file", maxCount: 1 },
       { name: "sliceLog", maxCount: 1 },
+      { name: "suffix", maxCount: 1 },
     ]),
     (req: Request, res: Response) => {
       const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
       const file = files?.file?.[0];
       const sliceLogFile = files?.sliceLog?.[0];
+      const suffixFile = files?.suffix?.[0];
       if (!file?.path) {
         removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
@@ -2726,6 +2729,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
         removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
@@ -2750,9 +2754,10 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
             error: "Slice.log upload was empty or not a .log file. Re-import Blueprint logs and try again.",
           });
         }
+        const suffix = suffixFile?.path ? fs.readFileSync(suffixFile.path) : undefined;
         const staged =
           mode === "ctb-prefix"
-            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize, suffix)
             : stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
         const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
         const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
@@ -2785,6 +2790,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       } finally {
         removeTempUpload(file.path);
         removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(suffixFile?.path);
       }
     },
   );

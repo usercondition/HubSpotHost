@@ -177,6 +177,12 @@ test("prints plates link into the library once, and downloads stream with Range"
     assert.match(preview.headers.get("content-type") || "", /png/);
     const png = Buffer.from(await preview.arrayBuffer());
     assert.equal(png[0], 0x89);
+    assert.equal(preview.headers.get("cache-control"), "private, max-age=86400");
+    assert.equal(preview.headers.get("etag"), `"${sha}"`);
+    const cached = await fetch(`${base}/api/plate-previews/${sha}`, {
+      headers: { "x-paid-order-access-code": "stack-test", "if-none-match": `"${sha}"` },
+    });
+    assert.equal(cached.status, 304);
 
     const lockedPreview = await fetch(`${base}/api/plate-previews/${sha}`);
     assert.equal(lockedPreview.status, 401);
