@@ -9,7 +9,7 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
 
   const width = Math.max(1, host.clientWidth);
   const height = Math.max(1, host.clientHeight);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(width, height);
   renderer.setClearColor(0x111111, 1);
@@ -50,23 +50,73 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   scene.add(key);
 
   const center = meshBox.getCenter(new THREE.Vector3());
-  const radius = Math.max(meshBox.getBoundingSphere(new THREE.Sphere()).radius, 0.5);
+  const corners = [
+    new THREE.Vector3(meshBox.min.x, meshBox.min.y, meshBox.min.z),
+    new THREE.Vector3(meshBox.min.x, meshBox.min.y, meshBox.max.z),
+    new THREE.Vector3(meshBox.min.x, meshBox.max.y, meshBox.min.z),
+    new THREE.Vector3(meshBox.min.x, meshBox.max.y, meshBox.max.z),
+    new THREE.Vector3(meshBox.max.x, meshBox.min.y, meshBox.min.z),
+    new THREE.Vector3(meshBox.max.x, meshBox.min.y, meshBox.max.z),
+    new THREE.Vector3(meshBox.max.x, meshBox.max.y, meshBox.min.z),
+    new THREE.Vector3(meshBox.max.x, meshBox.max.y, meshBox.max.z),
+  ];
   /** Front is +Z. A 3/4 view sits up and to the right of that edge. */
   const view = new THREE.Vector3(0.75, 0.62, 1).normalize();
+  const fill = 0.8;
 
   const frameCamera = () => {
     const nextW = Math.max(1, host.clientWidth);
     const nextH = Math.max(1, host.clientHeight);
     camera.aspect = nextW / nextH;
-    const fovV = (camera.fov * Math.PI) / 180;
-    const fovH = 2 * Math.atan(Math.tan(fovV / 2) * camera.aspect);
-    const distance = (radius / Math.sin(Math.min(fovV, fovH) / 2)) * 1.22;
-    camera.position.copy(center).addScaledVector(view, distance);
+    camera.near = Math.max(span / 1000, 0.01);
+    camera.far = Math.max(span * 100, plateW + plateD);
+    camera.updateProjectionMatrix();
+    const target = center.clone();
+    let distance = span * 4;
+    const projectBox = () => {
+      camera.position.copy(target).addScaledVector(view, distance);
+      camera.lookAt(target);
+      camera.updateMatrixWorld(true);
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const corner of corners) {
+        const ndc = corner.clone().project(camera);
+        if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y)) return null;
+        if (ndc.x < minX) minX = ndc.x;
+        if (ndc.x > maxX) maxX = ndc.x;
+        if (ndc.y < minY) minY = ndc.y;
+        if (ndc.y > maxY) maxY = ndc.y;
+      }
+      return { minX, maxX, minY, maxY };
+    };
+    for (let pass = 0; pass < 6; pass += 1) {
+      let lo = Math.max(span * 0.02, 0.05);
+      let hi = Math.max(span * 80, plateW + plateD);
+      for (let step = 0; step < 14; step += 1) {
+        distance = (lo + hi) / 2;
+        const box = projectBox();
+        const spanNdc = box ? Math.max(box.maxX - box.minX, box.maxY - box.minY) : 4;
+        if (spanNdc > fill * 2) lo = distance;
+        else hi = distance;
+      }
+      distance = hi;
+      const box = projectBox();
+      if (!box) break;
+      const halfH = Math.tan(((camera.fov * Math.PI) / 180) / 2) * distance;
+      const halfW = halfH * camera.aspect;
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      target.addScaledVector(right, ((box.minX + box.maxX) / 2) * halfW);
+      target.addScaledVector(camUp, ((box.minY + box.maxY) / 2) * halfH);
+    }
+    camera.position.copy(target).addScaledVector(view, distance);
     camera.near = Math.max(distance / 200, 0.01);
     camera.far = Math.max(distance * 8, plateW + plateD);
-    camera.lookAt(center);
+    camera.lookAt(target);
     camera.updateProjectionMatrix();
-    controls.target.copy(center);
+    controls.target.copy(target);
     controls.minDistance = distance * 0.35;
     controls.maxDistance = distance * 4;
     controls.update();

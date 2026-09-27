@@ -2,6 +2,10 @@
  * One-time mesh from a CTB plate. Layers are decoded one at a time into a
  * cropped bit grid, then turned into a smooth surface. One job, ranged reads.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { walkCtbRle } from "../../shared/ctb-rle";
 import {
   createBufferCtbReader,
@@ -13,14 +17,13 @@ import {
   type CtbLayerEntry,
   type CtbLayerPlan,
 } from "./ctb";
-import { glbFromSurface, meshSurface, type Occupancy } from "./plate-mesh-surface";
 
 const PREFIX_BYTES = 8 * 1024 * 1024;
 /** About 0.35 mm, inside the 0.3–0.4 mm band. Coarsened only if the grid would exceed the chunk budget. */
 export const MESH_VOXEL_MM = 0.35;
 export const MESH_BYTE_BUDGET = 8 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
-export const PLATE_MESH_VERSION = 2;
+export const PLATE_MESH_VERSION = 3;
 const CHUNK = 32;
 const CHUNK_BUDGET = 256 * 1024 * 1024;
 const CHUNK_STRIDE = 1_000_000;
@@ -42,9 +45,21 @@ interface Origin {
   z: number;
 }
 
-class SparseBits implements Occupancy {
+class SparseBits {
   private readonly chunks = new Map<number, Uint32Array>();
   solids = 0;
+
+  pack(): { keys: Float64Array; chunks: Uint32Array[] } {
+    const keys = new Float64Array(this.chunks.size);
+    const chunks: Uint32Array[] = [];
+    let index = 0;
+    for (const [key, chunk] of this.chunks) {
+      keys[index] = key;
+      chunks.push(chunk);
+      index += 1;
+    }
+    return { keys, chunks };
+  }
 
   set(x: number, y: number, z: number): void {
     if (x < 0 || y < 0 || z < 0) return;
@@ -145,6 +160,17 @@ function paintRun(bits: SparseBits, start: number, stride: number, width: number
   }
 }
 
+let yieldedAt = 0;
+
+async function breathe(): Promise<void> {
+  const now = Date.now();
+  if (yieldedAt !== 0 && now - yieldedAt < 40) return;
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+  yieldedAt = Date.now();
+}
+
 async function raster(
   readRange: RangeRead,
   plan: CtbLayerPlan,
@@ -155,6 +181,7 @@ async function raster(
   origin: Origin,
 ): Promise<void> {
   const paint = async (layer: number) => {
+    await breathe();
     const z = Math.floor((layer - origin.z) / grid.step);
     if (z < 0 || z >= grid.gz) return;
     const bytes = await readCtbLayerBytes(readRange, plan, entries, spans, layer);
@@ -186,6 +213,7 @@ async function scanBounds(
 ): Promise<PixelBounds | null> {
   const bounds: PixelBounds = { minX: Infinity, maxX: -1, minY: Infinity, maxY: -1, minL: Infinity, maxL: -1 };
   const touch = (layer: number) => async () => {
+    await breathe();
     const bytes = await readCtbLayerBytes(readRange, plan, entries, spans, layer);
     let hit = false;
     walkCtbRle(bytes, plan.width * plan.height, (start, stride, gray) => {
@@ -217,29 +245,83 @@ async function scanBounds(
   return bounds;
 }
 
-function finish(bits: SparseBits, plan: CtbLayerPlan, grid: Grid, origin: Origin): Buffer {
-  if (bits.solids < 1) return Buffer.alloc(0);
-  const surface = meshSurface(
-    bits,
-    {
-      binX: grid.binX,
-      binY: grid.binY,
-      step: grid.step,
-      pixelMmX: plan.pixelMmX,
-      pixelMmY: plan.pixelMmY,
-      layerMm: plan.layerMm,
-      originX: origin.x,
-      originY: origin.y,
-      originZ: origin.z,
-    },
-    grid.gx,
-    grid.gy,
-    grid.gz,
-    MESH_BYTE_BUDGET,
+const meshWorkerFile: Promise<string> = (async () => {
+  const source = typeof import.meta.url === "string" ? import.meta.url : "";
+  if (!source.includes("/server/lib/plate-mesh.ts")) return join(process.cwd(), "dist", "plate-mesh-worker.cjs");
+  const outfile = join(tmpdir(), `plate-mesh-worker-${process.pid}.cjs`);
+  const specifier = "es" + "build";
+  const compiler = (await import(specifier)) as { build(options: object): Promise<unknown> };
+  await compiler.build({
+    entryPoints: [fileURLToPath(new URL("./plate-mesh-worker.ts", source))],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile,
+    logLevel: "silent",
+  });
+  return outfile;
+})();
+
+function openMeshWorker(file: string): Worker {
+  return new Worker(file, { execArgv: [] });
+}
+
+function surfaceOnWorker(bits: SparseBits, plan: CtbLayerPlan, grid: Grid, origin: Origin): Promise<Buffer> {
+  if (bits.solids < 1) return Promise.resolve(Buffer.alloc(0));
+  const packed = bits.pack();
+  return meshWorkerFile.then(
+    (file) =>
+      new Promise((resolve, reject) => {
+        const worker = openMeshWorker(file);
+        let settled = false;
+        const timer = setTimeout(() => finish(() => reject(new Error("mesh worker timed out"))), 8 * 60 * 1000);
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+          void worker.terminate();
+        };
+        worker.once("message", (message: Uint8Array | { error?: string }) => {
+          if (message && typeof message === "object" && "error" in message && message.error) {
+            finish(() => reject(new Error(message.error)));
+            return;
+          }
+          const bytes = Buffer.from(message as Uint8Array);
+          finish(() => resolve(bytes.length > 20 ? bytes : Buffer.alloc(0)));
+        });
+        worker.once("error", (error) => finish(() => reject(error)));
+        worker.once("exit", (code) => {
+          if (!settled && code !== 0) finish(() => reject(new Error(`mesh worker exited ${code}`)));
+        });
+        const transfers: ArrayBuffer[] = [packed.keys.buffer as ArrayBuffer];
+        for (const chunk of packed.chunks) transfers.push(chunk.buffer as ArrayBuffer);
+        worker.postMessage(
+          {
+            keys: packed.keys,
+            chunks: packed.chunks,
+            scale: {
+              binX: grid.binX,
+              binY: grid.binY,
+              step: grid.step,
+              pixelMmX: plan.pixelMmX,
+              pixelMmY: plan.pixelMmY,
+              layerMm: plan.layerMm,
+              originX: origin.x,
+              originY: origin.y,
+              originZ: origin.z,
+            },
+            gx: grid.gx,
+            gy: grid.gy,
+            gz: grid.gz,
+            plateMmX: plan.plateMmX,
+            plateMmY: plan.plateMmY,
+            budget: MESH_BYTE_BUDGET,
+          },
+          transfers,
+        );
+      }),
   );
-  if (!surface) return Buffer.alloc(0);
-  const glb = glbFromSurface(plan.plateMmX, plan.plateMmY, surface);
-  return glb.length > 20 ? glb : Buffer.alloc(0);
 }
 
 async function loadLayerIndex(readRange: RangeRead, size: number): Promise<{ plan: CtbLayerPlan; entries: CtbLayerEntry[] }> {
@@ -259,6 +341,7 @@ async function loadLayerIndex(readRange: RangeRead, size: number): Promise<{ pla
 
 /** Decode sampled layers into a GLB. An empty plate returns a zero-length buffer. */
 export async function buildPlateGlb(readRange: RangeRead, size: number): Promise<Buffer> {
+  yieldedAt = 0;
   const { plan, entries } = await loadLayerIndex(readRange, size);
   const spans = new Map<number, CtbEncryptedSpan>();
   const full = chooseGrid(plan.width, plan.height, plan.layerCount, plan.pixelMmX, plan.pixelMmY, plan.layerMm);
@@ -266,7 +349,7 @@ export async function buildPlateGlb(readRange: RangeRead, size: number): Promise
   if (chunkBytes(full.gx, full.gy, full.gz) <= CHUNK_BUDGET) {
     const bits = new SparseBits();
     await raster(readRange, plan, entries, spans, bits, full, origin);
-    return finish(bits, plan, full, origin);
+    return surfaceOnWorker(bits, plan, full, origin);
   }
   const bounds = await scanBounds(readRange, plan, entries, spans, full.step);
   if (!bounds) return Buffer.alloc(0);
@@ -281,5 +364,5 @@ export async function buildPlateGlb(readRange: RangeRead, size: number): Promise
   const cropOrigin: Origin = { x: bounds.minX, y: bounds.minY, z: bounds.minL };
   const bits = new SparseBits();
   await raster(readRange, plan, entries, spans, bits, cropped, cropOrigin);
-  return finish(bits, plan, cropped, cropOrigin);
+  return surfaceOnWorker(bits, plan, cropped, cropOrigin);
 }

@@ -44,19 +44,19 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
-  await esbuild({
-    entryPoints: ["server/index.ts"],
-    platform: "node",
+  const serverBuild = {
+    platform: "node" as const,
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "cjs" as const,
     define: {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
     external: externals,
-    logLevel: "info",
-  });
+    logLevel: "info" as const,
+  };
+  await esbuild({ ...serverBuild, entryPoints: ["server/index.ts"], outfile: "dist/index.cjs" });
+  await esbuild({ ...serverBuild, entryPoints: ["server/lib/plate-mesh-worker.ts"], outfile: "dist/plate-mesh-worker.cjs" });
 
   await cp("server/fonts", "dist/fonts", { recursive: true });
   await cp("shared/geo/us-zip-centroids.json", "dist/us-zip-centroids.json");

@@ -1,9 +1,9 @@
 /**
  * Surface nets, smoothed normals, and quadric simplification for one plate mesh.
- * The voxel-face mesher is gone. This module is only called from plate-mesh.ts.
+ * The voxel-face mesher is gone. The mesh worker is the only caller.
  */
-const TARGET_VOXEL_MM = 0.35;
-const CLUSTER_AT = 1_200_000;
+const CHUNK = 32;
+const CHUNK_STRIDE = 1_000_000;
 
 export interface Occupancy {
   forEach(visit: (x: number, y: number, z: number) => void): void;
@@ -33,6 +33,43 @@ interface RawMesh {
   indices: Uint32Array;
 }
 
+/** Read-only view of the chunked bit grid. Layout matches the mesher's SparseBits. */
+export function occupancyFromChunks(keys: ArrayLike<number>, chunks: Uint32Array[]): Occupancy {
+  const map = new Map<number, Uint32Array>();
+  for (let i = 0; i < keys.length; i += 1) map.set(keys[i]!, chunks[i]!);
+  const get = (x: number, y: number, z: number) => {
+    if (x < 0 || y < 0 || z < 0) return false;
+    const key = (x >> 5) + (y >> 5) * CHUNK_STRIDE + (z >> 5) * CHUNK_STRIDE * CHUNK_STRIDE;
+    const chunk = map.get(key);
+    if (!chunk) return false;
+    const bit = (x & 31) + ((y & 31) << 5) + ((z & 31) << 10);
+    return (chunk[bit >> 5]! & (1 << (bit & 31))) !== 0;
+  };
+  return {
+    get,
+    forEach(visit) {
+      for (const [key, chunk] of map) {
+        const cz = Math.floor(key / (CHUNK_STRIDE * CHUNK_STRIDE));
+        const cy = Math.floor((key % (CHUNK_STRIDE * CHUNK_STRIDE)) / CHUNK_STRIDE);
+        const cx = key % CHUNK_STRIDE;
+        const ox = cx * CHUNK;
+        const oy = cy * CHUNK;
+        const oz = cz * CHUNK;
+        for (let word = 0; word < chunk.length; word += 1) {
+          let value = chunk[word]!;
+          while (value) {
+            const lowest = value & -value;
+            const bit = 31 - Math.clz32(lowest);
+            const index = word * 32 + bit;
+            visit(ox + (index & 31), oy + ((index >> 5) & 31), oz + (index >> 10));
+            value &= value - 1;
+          }
+        }
+      }
+    },
+  };
+}
+
 export function meshSurface(
   occupancy: Occupancy,
   scale: MeshScale,
@@ -43,7 +80,6 @@ export function meshSurface(
 ): PlateSurface | null {
   const raw = surfaceNets(occupancy, gx, gy, gz);
   if (!raw || raw.indices.length < 3) return null;
-  orientOutward(raw.positions, raw.indices);
   smooth(raw.positions, raw.indices, 3, 0.35);
   toMillimeters(raw.positions, scale);
   const budgeted = fitBudget(raw, byteBudget);
@@ -114,7 +150,7 @@ function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): 
     const x0 = Math.min(ax, bx);
     const y0 = Math.min(ay, by);
     const z0 = Math.min(az, bz);
-    const corners: Array<[number, number, number]> =
+    const around: Array<[number, number, number]> =
       ax !== bx
         ? [
             [x0, y0, z0],
@@ -135,6 +171,7 @@ function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): 
               [x0, y0 - 1, z0],
               [x0 - 1, y0 - 1, z0],
             ];
+    const corners = windOutward(around, bx - ax, by - ay, bz - az, mx, my, mz);
     const ids = corners.map(([x, y, z]) => {
       const index = cell(x, y, z);
       sx[index] = (sx[index] ?? 0) + mx;
@@ -191,26 +228,41 @@ function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): 
   return { positions, indices };
 }
 
-function orientOutward(positions: Float32Array, indices: Uint32Array): void {
-  let volume = 0;
-  for (let i = 0; i < indices.length; i += 3) {
-    const a = indices[i]! * 3;
-    const b = indices[i + 1]! * 3;
-    const c = indices[i + 2]! * 3;
-    const ax = positions[a]!;
-    const ay = positions[a + 1]!;
-    const az = positions[a + 2]!;
-    volume +=
-      ax * (positions[b + 1]! * positions[c + 2]! - positions[b + 2]! * positions[c + 1]!) -
-      ay * (positions[b]! * positions[c + 2]! - positions[b + 2]! * positions[c]!) +
-      az * (positions[b]! * positions[c + 1]! - positions[b + 1]! * positions[c]!);
-  }
-  if (volume >= 0) return;
-  for (let i = 0; i < indices.length; i += 3) {
-    const swap = indices[i + 1]!;
-    indices[i + 1] = indices[i + 2]!;
-    indices[i + 2] = swap;
-  }
+/** Order the four cells around a crossing so the quad normal points toward empty space. */
+function windOutward(
+  cells: Array<[number, number, number]>,
+  ox: number,
+  oy: number,
+  oz: number,
+  ex: number,
+  ey: number,
+  ez: number,
+): Array<[number, number, number]> {
+  let ux = 0;
+  let uy = 0;
+  let uz = 0;
+  if (Math.abs(ox) > 0.5) uy = 1;
+  else ux = 1;
+  const vx = oy * uz - oz * uy;
+  const vy = oz * ux - ox * uz;
+  const vz = ox * uy - oy * ux;
+  const ordered = cells
+    .map((cell) => {
+      const dx = cell[0] + 0.5 - ex;
+      const dy = cell[1] + 0.5 - ey;
+      const dz = cell[2] + 0.5 - ez;
+      return { cell, ang: Math.atan2(dx * vx + dy * vy + dz * vz, dx * ux + dy * uy + dz * uz) };
+    })
+    .sort((left, right) => left.ang - right.ang)
+    .map((item) => item.cell);
+  const a = ordered[0]!;
+  const b = ordered[1]!;
+  const c = ordered[2]!;
+  const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+  const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+  const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  if (nx * ox + ny * oy + nz * oz < 0) ordered.reverse();
+  return ordered;
 }
 
 function smooth(positions: Float32Array, indices: Uint32Array, iterations: number, factor: number): void {
@@ -278,59 +330,8 @@ function targetTriangles(budget: number): number {
 }
 
 function fitBudget(raw: RawMesh, budget: number): RawMesh {
-  let mesh = raw;
-  const tris = mesh.indices.length / 3;
-  const verts = mesh.positions.length / 3;
-  if (tris > CLUSTER_AT) mesh = clusterUntil(mesh, 800_000);
-  const target = targetTriangles(budget);
-  if (estimateBytes(mesh.indices.length / 3, mesh.positions.length / 3) > budget) {
-    mesh = quadricDecimate(mesh, target);
-  }
-  if (estimateBytes(mesh.indices.length / 3, mesh.positions.length / 3) > budget) {
-    mesh = clusterUntil(mesh, target);
-  }
-  return mesh;
-}
-
-function clusterUntil(mesh: RawMesh, targetTris: number): RawMesh {
-  let cell = TARGET_VOXEL_MM;
-  let current = mesh;
-  for (let attempt = 0; attempt < 8 && current.indices.length / 3 > targetTris; attempt += 1) {
-    cell *= 1.45;
-    const next = cluster(current, cell);
-    if (next.indices.length >= current.indices.length) break;
-    current = next;
-  }
-  return current;
-}
-
-function cluster(mesh: RawMesh, cell: number): RawMesh {
-  const { positions, indices } = mesh;
-  const map = new Map<string, number>();
-  const remap = new Int32Array(positions.length / 3);
-  const packed: number[] = [];
-  for (let v = 0; v < remap.length; v += 1) {
-    const ix = Math.round((positions[v * 3] ?? 0) / cell);
-    const iy = Math.round((positions[v * 3 + 1] ?? 0) / cell);
-    const iz = Math.round((positions[v * 3 + 2] ?? 0) / cell);
-    const key = `${ix},${iy},${iz}`;
-    let id = map.get(key);
-    if (id === undefined) {
-      id = packed.length / 3;
-      map.set(key, id);
-      packed.push(positions[v * 3] ?? 0, positions[v * 3 + 1] ?? 0, positions[v * 3 + 2] ?? 0);
-    }
-    remap[v] = id;
-  }
-  const next: number[] = [];
-  for (let i = 0; i < indices.length; i += 3) {
-    const a = remap[indices[i]!]!;
-    const b = remap[indices[i + 1]!]!;
-    const c = remap[indices[i + 2]!]!;
-    if (a === b || b === c || a === c) continue;
-    next.push(a, b, c);
-  }
-  return { positions: Float32Array.from(packed), indices: Uint32Array.from(next) };
+  if (estimateBytes(raw.indices.length / 3, raw.positions.length / 3) <= budget) return raw;
+  return quadricDecimate(raw, targetTriangles(budget));
 }
 
 function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
@@ -441,12 +442,6 @@ function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
       q22 * z * z +
       2 * q23 * z +
       q33;
-    if (sharedFaces(a, b) < 2) {
-      const dx = px[a * 3]! - px[b * 3]!;
-      const dy = px[a * 3 + 1]! - px[b * 3 + 1]!;
-      const dz = px[a * 3 + 2]! - px[b * 3 + 2]!;
-      err = err * 16 + (dx * dx + dy * dy + dz * dz) * 64;
-    }
     return err;
   };
 
@@ -540,6 +535,8 @@ function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
         if (deadTri[t] || contains(t, other)) continue;
         const before = faceNormal(t, 0, 0, 0, -1);
         const after = faceNormal(t, mx, my, mz, v);
+        const span = before[0] * before[0] + before[1] * before[1] + before[2] * before[2];
+        if (span < 1e-12) continue;
         if (before[0] * after[0] + before[1] * after[1] + before[2] * after[2] <= 0) return true;
       }
       return false;
@@ -550,7 +547,7 @@ function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
   const collapse = (a: number, b: number): boolean => {
     if (deadVert[a] || deadVert[b] || a === b) return false;
     const faces = sharedFaces(a, b);
-    if (faces < 1 || faces > 2) return false;
+    if (faces !== 2) return false;
     if (!linkOk(a, b)) return false;
     const mx = (px[a * 3]! + px[b * 3]!) / 2;
     const my = (px[a * 3 + 1]! + px[b * 3 + 1]!) / 2;

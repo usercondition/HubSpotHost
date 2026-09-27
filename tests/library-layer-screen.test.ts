@@ -132,6 +132,41 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+async function modelCoverage(page: playwright.Page): Promise<{ coverX: number; coverY: number; clipped: boolean }> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector("[data-testid='plate-model-view'] canvas") as HTMLCanvasElement | null;
+    const gl = canvas?.getContext("webgl2") ?? canvas?.getContext("webgl");
+    if (!canvas || !gl) return { coverX: 0, coverY: 0, clipped: true };
+    const w = canvas.width;
+    const h = canvas.height;
+    const pixels = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let minX = w;
+    let minY = h;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        const i = (y * w + x) * 4;
+        const r = pixels[i] ?? 0;
+        const g = pixels[i + 1] ?? 0;
+        const b = pixels[i + 2] ?? 0;
+        if (g + 8 < r || g + 4 < b || r + g + b < 90) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX < 0) return { coverX: 0, coverY: 0, clipped: true };
+    return {
+      coverX: (maxX - minX) / w,
+      coverY: (maxY - minY) / h,
+      clipped: minX <= 2 || minY <= 2 || maxX >= w - 3 || maxY >= h - 3,
+    };
+  });
+}
+
 test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, async () => {
   mkdirSync(ARTIFACTS, { recursive: true });
   const parts = testPartsCtb();
@@ -243,6 +278,10 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     await page.locator("[data-testid='button-reset-mesh-view']").click();
     await page.waitForTimeout(500);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-desktop-1440.png` });
+    const desktopCover = await modelCoverage(page);
+    console.log(`[plate-mesh] desktop cover x=${desktopCover.coverX.toFixed(3)} y=${desktopCover.coverY.toFixed(3)} clipped=${desktopCover.clipped}`);
+    const desktopFill = Math.max(desktopCover.coverX, desktopCover.coverY);
+    assert.ok(desktopFill >= 0.74 && desktopFill <= 0.94, `desktop fill ${desktopCover.coverX} ${desktopCover.coverY}`);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await openLayers();
@@ -252,6 +291,10 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     await page.locator("[data-testid='button-reset-mesh-view']").click();
     await page.waitForTimeout(500);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-phone-390.png` });
+    const phoneCover = await modelCoverage(page);
+    console.log(`[plate-mesh] phone cover x=${phoneCover.coverX.toFixed(3)} y=${phoneCover.coverY.toFixed(3)} clipped=${phoneCover.clipped}`);
+    const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
+    assert.ok(phoneFill >= 0.74 && phoneFill <= 0.94, `phone fill ${phoneCover.coverX} ${phoneCover.coverY}`);
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();
