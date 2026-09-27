@@ -63,3 +63,28 @@ export function archiveExpense(id: string) {
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "archived", JSON.stringify(before), JSON.stringify(after), now);
   return after;
 }
+
+export function updateExpense(id: string, input: ExpenseInput) {
+  ensureTables(); validate(input);
+  const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ? AND archived_at IS NULL").get(id);
+  if (!before) return null;
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,updated_at=? WHERE id=?`)
+    .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", now, id);
+  const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
+  db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "updated", JSON.stringify(before), JSON.stringify(after), now);
+  return after;
+}
+
+export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {
+  const startAt = new Date(`${start}T00:00:00Z`).getTime(), endAt = new Date(`${end}T23:59:59Z`).getTime();
+  return rows.reduce((sum, row: any) => {
+    const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
+    if (!Number.isFinite(amount) || row.start_date > end || (row.end_date && row.end_date < start)) return sum;
+    if (row.cadence === "monthly" || row.cadence === "yearly") {
+      const daily = amount / (row.cadence === "monthly" ? 30.4375 : 365.25);
+      return sum + Math.round(daily * Math.max(0, Math.floor((endAt - startAt) / 86_400_000) + 1));
+    }
+    return row.start_date >= start && row.start_date <= end ? sum + amount : sum;
+  }, 0);
+}
