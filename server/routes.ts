@@ -262,6 +262,7 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
+import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
 import {
   getShipByGcalConfig,
@@ -852,6 +853,8 @@ function v3SignatureDiagnosticCandidates(
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  // Public OAuth consent pages. No owner code.
+  registerLegalPages(app);
   // Local / flagged mock Messenger page for extension V1 testing.
   registerMessengerScanTestUi(app);
 
