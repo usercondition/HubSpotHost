@@ -1257,6 +1257,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(/Connect Google Drive/.test(connectText), `connect copy was ${connectText}`);
     check(!/refresh|ya29|client_secret/i.test(connectText), "connect panel leaks a secret");
 
+    await page.unroute("**/api/**");
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.startsWith("/api/production-queue")) {
@@ -1332,29 +1333,35 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         });
         return;
       }
-      await route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(bodyFor(url)),
+      });
     });
 
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
     const shootLabels = async (width: number, height: number, file: string) => {
       await page.setViewportSize({ width, height });
       await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
-      const picks = page.locator("[data-testid='panel-shipengine-order-picks']");
+      const picks = current().locator("[data-testid='panel-shipengine-order-picks']");
       await picks.waitFor();
-      await page.locator("[data-testid='button-shipengine-pick-342134173423']").scrollIntoViewIfNeeded();
-      await page.locator("[data-testid='button-shipengine-pick-342134173423']").click();
+      const listText = await picks.innerText();
+      check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
+      check(listText.includes("Daniel Ortega") && listText.includes("Address · Phoenix, AZ"), `Daniel address missing: ${listText}`);
+      const joseButton = current().locator("[data-testid='button-shipengine-pick-342134173423']");
+      if ((await joseButton.count()) > 0) await joseButton.click();
       await page.waitForFunction(() => {
-        const node = document.querySelector("[data-testid='status-shipengine-address-342134173423']");
+        const nodes = document.querySelectorAll("[data-testid='status-shipengine-address-342134173423']");
+        const node = nodes[nodes.length - 1];
         const text = node && node.textContent ? node.textContent : "";
         return text.indexOf("San Diego") >= 0;
       });
-      const cardText = await page.locator("[data-testid='panel-shipengine-order-card-342134173423']").innerText();
+      const card = current().locator("[data-testid='panel-shipengine-order-card-342134173423']");
+      const cardText = await card.innerText();
       check(!cardText.includes("Needs address"), `open label card showed Needs address: ${cardText}`);
       check(cardText.includes("Address · San Diego, CA"), `live ship-to did not win: ${cardText}`);
-      const listText = await picks.innerText();
-      check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
-      await page.locator("[data-testid='panel-shipengine-order-card-342134173423']").scrollIntoViewIfNeeded();
-      await page.screenshot({ path: file, fullPage: false });
+      await picks.screenshot({ path: file });
     };
     await shootLabels(1440, 900, "/opt/cursor/artifacts/labels-desktop.png");
     await shootLabels(390, 844, "/opt/cursor/artifacts/labels-phone.png");
