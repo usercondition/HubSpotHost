@@ -82,7 +82,24 @@ function bodyFor(url: URL, method: string): unknown {
   if (url.pathname.includes("/production-queue")) return LABEL_QUEUE;
   if (url.pathname.includes("/shipping-labels/ship-to/")) return SHIP_TO;
   if (url.pathname.endsWith("/shipengine/status")) {
-    return { ok: true, hasApiKey: true, testMode: true, carriers: [], funds: null };
+    return {
+      ok: true,
+      configured: true,
+      hasApiKey: true,
+      hasShipFrom: true,
+      testMode: true,
+      carriers: [
+        {
+          carrierId: "se-1",
+          carrierCode: "usps",
+          friendlyName: "USPS",
+          nickname: "USPS",
+          requiresFundedAmount: true,
+          balance: 42,
+        },
+      ],
+      funds: { availableUsd: 42, lowestBalanceUsd: 42, fundedCarriers: [] },
+    };
   }
   return EMPTY_SHOP;
 }
@@ -237,10 +254,18 @@ const SHIP_TO = {
     zip: "",
     country: "US",
   },
-  ready: false,
+  ready: true,
   hasContact: true,
-  missing: ["street", "city", "state", "zip"],
-  validation: { status: "unchecked", checkedAt: null, addressHash: "", suggestion: null, messages: [] },
+  missing: [],
+  normalized: {
+    street1: "10909 Hannan Road",
+    street2: "",
+    city: "Romulus",
+    state: "MI",
+    zip: "48174",
+    country: "US",
+  },
+  validation: { status: "unchecked", checkedAt: null, addressHash: "", suggestion: null, messages: ["Address unchecked"] },
 };
 
 const REPLACE = {
@@ -402,8 +427,10 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
       await page.setViewportSize({ width, height });
       await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
       await page.reload({ waitUntil: "domcontentloaded" });
-      const panel = page.locator("[data-testid='panel-labels-shipengine']");
+      const panel = page.locator("[data-testid='panel-labels-ship']");
       await panel.waitFor();
+      await page.locator("[data-testid='button-shipengine-pick-349919419126']").click();
+      await panel.locator("[data-testid='panel-shipping-address']").waitFor();
       await panel.screenshot({ path: join(artifactsDir, `labels-panel-${suffix}.png`) });
     };
     await shootLabels(1440, 900, "1440");
