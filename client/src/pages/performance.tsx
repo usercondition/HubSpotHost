@@ -117,6 +117,7 @@ export default function Performance() {
   });
 
   const dashboard = performance.data?.dashboard;
+  const headlineIds = new Set(dashboard?.headlines.map((item) => item.id) ?? []);
   const maxStage = Math.max(1, ...(dashboard?.pipeline.map((stage) => stage.count) ?? [0]));
   const maxPrinter = Math.max(1, ...(dashboard?.printers.map((printer) => printer.hours) ?? [0]));
 
@@ -215,10 +216,10 @@ export default function Performance() {
 
             <section className="grid gap-4 lg:grid-cols-2">
               <Panel title="Money" description={dashboard.period.compareLabel}>
-                <MetricList metrics={dashboard.money} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.money.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Speed and reliability">
-                <MetricList metrics={dashboard.speed} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.speed.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Production">
                 <MetricList metrics={dashboard.production} openId={openId} setOpenId={setOpenId} />

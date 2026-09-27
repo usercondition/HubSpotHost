@@ -198,3 +198,10 @@ test("Pacific ship-by date stays current through 6 PM and YTD starts in Pacific 
   const ytd = resolveShopWindow("ytd", new Date("2026-01-01T07:30:00.000Z"));
   assert.equal(new Date(ytd.start!).toISOString(), "2025-01-01T08:00:00.000Z");
 });
+
+test("headline metrics are not repeated in Money or Speed panels", () => {
+  const result = dashboard({ orders: [order({ id: "one" })] });
+  const headlineIds = new Set(result.headlines.map((item) => item.id));
+  const renderedPanelMetrics = [...result.money, ...result.speed].filter((item) => !headlineIds.has(item.id));
+  assert.equal(renderedPanelMetrics.some((item) => headlineIds.has(item.id)), false);
+});
