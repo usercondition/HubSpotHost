@@ -13,10 +13,17 @@ import test from "node:test";
 import playwright from "playwright";
 import { indexZipRows } from "../shared/order-origins";
 import { buildShopDashboard } from "../shared/shop-dashboard";
+import { overheadForPeriod } from "../server/lib/expenses";
 
 const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
+const EXPENSE_FIXTURE = [
+  { currency: "USD", amount_cents: 1200, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, category: "Models/Patreon" },
+  { currency: "USD", amount_cents: 9999, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, category: "Software/AI" },
+  { currency: "USD", amount_cents: 8500, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: null, category: "Equipment" },
+  { currency: "USD", amount_cents: 4200, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, category: "Materials" },
+] as any;
 const artifactsDir = process.env.ARTIFACTS_DIR;
 function artifactPath(name: string) {
   return artifactsDir ? `${artifactsDir}/${name}` : undefined;
@@ -340,8 +347,8 @@ function bodyFor(input: string | URL) {
         ],
         });
         const gross = dashboard.headlines.find((item) => item.id === "gross-profit")?.value ?? 0;
-        const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: 147.33, unit: "usd" as const, previous: null, compare: false, note: null, series: [] };
-        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: null, series: [] };
+        const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: overheadForPeriod(EXPENSE_FIXTURE, "2026-08-26", "2026-09-25") / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
         dashboard.headlines.push(overhead, net);
         return dashboard;
       })(),
@@ -1181,6 +1188,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
     check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
     check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    assert.match(await current().locator("[data-testid='headline-overhead']").innerText(), /30 days/);
+    assert.match(await current().locator("[data-testid='headline-net-profit']").innerText(), /30 days/);
     await current().locator("[data-testid='stats-origin-svg']").waitFor();
     assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "desktop renders exactly one order-origin map");
     const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
