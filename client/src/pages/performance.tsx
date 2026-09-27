@@ -121,7 +121,7 @@ export default function Performance() {
   const maxPrinter = Math.max(1, ...(dashboard?.printers.map((printer) => printer.hours) ?? [0]));
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-6xl pb-24 md:pb-6">
       <PageHeader
         title="Stats"
         subtitle="How the shop did in the period you pick. Tap a figure to see how it is counted."
@@ -169,9 +169,9 @@ export default function Performance() {
           </Panel>
         ) : (
           <>
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Period" data-testid="stats-period">
+            <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Period" data-testid="stats-period">
               {SHOP_PERIODS.map((id) => (
-                <Button key={id} size="sm" variant={period === id ? "default" : "outline"} onClick={() => setPeriod(id)} data-testid={`button-period-${id}`}>
+                <Button key={id} size="sm" className="shrink-0" variant={period === id ? "default" : "outline"} onClick={() => setPeriod(id)} data-testid={`button-period-${id}`}>
                   {PERIOD_LABEL[id]}
                 </Button>
               ))}

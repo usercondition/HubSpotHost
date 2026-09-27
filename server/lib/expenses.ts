@@ -80,11 +80,28 @@ export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: 
   const startAt = new Date(`${start}T00:00:00Z`).getTime(), endAt = new Date(`${end}T23:59:59Z`).getTime();
   return rows.reduce((sum, row: any) => {
     const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
-    if (!Number.isFinite(amount) || row.start_date > end || (row.end_date && row.end_date < start)) return sum;
+    const installmentEnd = row.payment_count && (row.cadence === "monthly" || row.cadence === "yearly")
+      ? addCadence(row.start_date, row.cadence, row.payment_count)
+      : null;
+    const effectiveEnd = [row.end_date, installmentEnd].filter(Boolean).sort()[0] as string | undefined;
+    if (!Number.isFinite(amount) || row.start_date > end || (effectiveEnd && effectiveEnd < start)) return sum;
     if (row.cadence === "monthly" || row.cadence === "yearly") {
       const daily = amount / (row.cadence === "monthly" ? 30.4375 : 365.25);
       return sum + Math.round(daily * Math.max(0, Math.floor((endAt - startAt) / 86_400_000) + 1));
     }
     return row.start_date >= start && row.start_date <= end ? sum + amount : sum;
   }, 0);
+}
+
+function addCadence(start: string, cadence: string, payments: number): string {
+  const date = new Date(`${start}T12:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + (cadence === "yearly" ? 12 : 1) * payments);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function monthlyEquivalent(row: any): number | null {
+  const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
+  if (!Number.isFinite(amount) || row.cadence === "one-off" || row.cadence === "usage") return null;
+  return row.cadence === "yearly" ? Math.round(amount / 12) : amount;
 }

@@ -34,7 +34,7 @@ import {
 import { buildPerformanceSnapshot } from "./lib/performance";
 import { collectShopDashboard } from "./lib/shop-dashboard";
 import { loadDealShipTos } from "./lib/ship-to-index";
-import { SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
+import { resolveShopWindow, SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
 import {
   activeAttentionOverrideKeys,
   clearAttentionOverride,
@@ -60,7 +60,8 @@ import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyn
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
-import { archiveExpense, createExpense, listExpenses, updateExpense, type ExpenseInput } from "./lib/expenses";
+import { archiveExpense, createExpense, listExpenses, overheadForPeriod, updateExpense, type ExpenseInput } from "./lib/expenses";
+import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
@@ -2205,9 +2206,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
       }
       const shipToLoad = await loadDealShipTos(deals.map((deal) => deal.id));
+      const window = resolveShopWindow(period as ShopPeriodId, new Date());
+      const overhead = overheadForPeriod(listExpenses(), window.start == null ? "0000-01-01" : shipByCalendarDate(new Date(window.start)), shipByCalendarDate(new Date(window.end)));
       return res.json({
         ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete }),
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, overheadCents: overhead }),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
