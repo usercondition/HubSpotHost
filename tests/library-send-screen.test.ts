@@ -12,7 +12,7 @@ import test from "node:test";
 import playwright from "playwright";
 
 const { chromium } = playwright;
-const ARTIFACTS = "/opt/cursor/artifacts";
+const ARTIFACTS = process.env.ARTIFACTS_DIR?.trim() || "/opt/cursor/artifacts";
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -318,7 +318,11 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    try {
+      browser = await chromium.launch({ channel: "chrome", headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
     const page = await browser.newPage();
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(String(error)));
