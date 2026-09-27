@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { formatMoney as formatUsd } from "@/lib/format";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
 import { describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
@@ -150,6 +151,13 @@ function formatNumber(value: number | string | null | undefined, suffix = ""): s
   if (value === null || value === undefined || value === "") return "Not reported";
   const numeric = typeof value === "string" ? Number(value) : value;
   return Number.isFinite(numeric) ? `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}` : "Not reported";
+}
+
+function formatSlicerCost(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "Not reported";
+  const numeric = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(numeric)) return "Not reported";
+  return formatUsd(numeric, { compact: false });
 }
 
 function formatMoney(value: number | string | null | undefined): string {
@@ -1728,7 +1736,7 @@ export default function Prints() {
                           </div>
                           <div>
                             <p className="text-muted-foreground">Slicer cost</p>
-                            <p className="numeric font-medium">{formatMoney(record.resinCost)}</p>
+                            <p className="numeric font-medium">{formatSlicerCost(record.resinCost)}</p>
                           </div>
                           <div>
                             <p className="text-muted-foreground">Synced</p>

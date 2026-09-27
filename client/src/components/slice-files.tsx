@@ -19,6 +19,13 @@ import {
   type PlateUploadFailure,
 } from "@shared/plate-files";
 
+function matchesPending(file: PlateFileRecord, item: PlateLibraryPending): boolean {
+  if ((file.printRecordIds ?? []).includes(item.printRecordId)) return true;
+  const sha = item.sha256.trim().toLowerCase();
+  if (sha && file.sha256.toLowerCase() === sha) return true;
+  return item.name.trim().toLowerCase() === file.name.trim().toLowerCase();
+}
+
 function formatFileSize(bytes: number | null): string {
   if (bytes == null || !Number.isFinite(bytes)) return "";
   const mb = bytes / (1024 * 1024);
@@ -135,6 +142,29 @@ export function SliceFiles({
     },
   });
   const reuseMatch = reuse.data && !(reuse.data.orderKeys ?? []).includes(orderKey) ? reuse.data : null;
+  const claimedPending = new Set<number>();
+  const fileRows = files.map((item) => {
+    const pendingItem = pending.find((row) => matchesPending(item, row)) ?? null;
+    if (pendingItem) claimedPending.add(pendingItem.printRecordId);
+    return { item, pendingItem };
+  });
+  const pendingOnly = pending.filter((item) => !claimedPending.has(item.printRecordId));
+
+  function sendPending(item: PlateLibraryPending) {
+    pendingTarget.current = item;
+    const held = heldSliceFile(item.sha256);
+    if (!held) {
+      pendingInput.current?.click();
+      return;
+    }
+    void fingerprintFile(held).then((sha) => {
+      if (sha !== item.sha256) {
+        setLocalError("That file does not match this plate.");
+        return;
+      }
+      void send(held, printer, notes);
+    });
+  }
 
   async function useLibraryFile(match: PlateFileRecord) {
     setLocalError("");
@@ -267,79 +297,85 @@ export function SliceFiles({
         <p className="text-sm text-muted-foreground">No slice files yet.</p>
       ) : null}
       <ul className="space-y-2">
-        {pending.map((item) => (
-          <li key={item.printRecordId} className="min-w-0" data-testid={`slice-library-pending-${item.printRecordId}`}>
-            <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{item.name}</p>
-                <p className="text-xs text-muted-foreground" data-testid={`text-slice-pending-${item.printRecordId}`}>
+        {fileRows.map(({ item, pendingItem }) => (
+          <li
+            key={item.driveFileId}
+            className="slice-file-row"
+            data-testid={pendingItem ? `slice-library-pending-${pendingItem.printRecordId}` : `slice-file-${item.driveFileId}`}
+          >
+            <PlateThumb file={item} headers={headers} onPreview={preview.setPreview} />
+            <div className="min-w-0">
+              <a
+                href={item.webViewLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="slice-file-name text-primary"
+                title={item.name}
+                data-testid="slice-file-name"
+              >
+                {item.name} <ExternalLink className="inline h-3.5 w-3.5 align-text-bottom" />
+              </a>
+              <p className="text-xs text-muted-foreground">
+                <span data-testid="slice-file-size">{formatFileSize(item.sizeBytes)}</span>
+                {" · "}
+                <span data-testid="slice-file-printer">{item.printer || "Printer not set"}</span>
+                {item.modifiedAt ? (
+                  <span data-testid="slice-file-date"> · {formatPacificUpdateStamp(item.modifiedAt)}</span>
+                ) : null}
+              </p>
+              {pendingItem ? (
+                <p className="text-xs text-muted-foreground" data-testid={`text-slice-pending-${pendingItem.printRecordId}`}>
                   Not in Library
                 </p>
-              </div>
-              <button
-                type="button"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label={`Actions for ${item.name}`}
-                aria-expanded={pendingMenu === item.printRecordId}
-                data-testid={`button-pending-menu-${item.printRecordId}`}
-                onClick={() => setPendingMenu((current) => (current === item.printRecordId ? null : item.printRecordId))}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
+              ) : null}
             </div>
+            <PlateFileMenu
+              file={item}
+              headers={headers}
+              onPreview={preview.setPreview}
+              buttonTestId={pendingItem ? `button-pending-menu-${pendingItem.printRecordId}` : undefined}
+              sendToLibrary={
+                pendingItem ? { recordId: pendingItem.printRecordId, onSend: () => sendPending(pendingItem) } : null
+              }
+            />
+          </li>
+        ))}
+        {pendingOnly.map((item) => (
+          <li key={item.printRecordId} className="slice-file-row" data-testid={`slice-library-pending-${item.printRecordId}`}>
+            <span className="plate-thumb" aria-hidden="true">
+              <span className="plate-thumb-empty" />
+            </span>
+            <div className="min-w-0">
+              <p className="slice-file-name">{item.name}</p>
+              <p className="text-xs text-muted-foreground" data-testid={`text-slice-pending-${item.printRecordId}`}>
+                Not in Library
+              </p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={`Actions for ${item.name}`}
+              aria-expanded={pendingMenu === item.printRecordId}
+              data-testid={`button-pending-menu-${item.printRecordId}`}
+              onClick={() => setPendingMenu((current) => (current === item.printRecordId ? null : item.printRecordId))}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
             {pendingMenu === item.printRecordId ? (
-              <div className="mt-1 w-full max-w-[11rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+              <div className="col-span-3 w-full max-w-[11rem] justify-self-end rounded-md border border-border bg-popover p-1 text-sm shadow-md">
                 <button
                   type="button"
                   className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
                   data-testid={`button-send-to-library-${item.printRecordId}`}
                   onClick={() => {
                     setPendingMenu(null);
-                    pendingTarget.current = item;
-                    const held = heldSliceFile(item.sha256);
-                    if (!held) {
-                      pendingInput.current?.click();
-                      return;
-                    }
-                    void fingerprintFile(held).then((sha) => {
-                      if (sha !== item.sha256) {
-                        setLocalError("That file does not match this plate.");
-                        return;
-                      }
-                      void send(held, printer, notes);
-                    });
+                    sendPending(item);
                   }}
                 >
                   Send to Library
                 </button>
               </div>
             ) : null}
-          </li>
-        ))}
-        {files.map((item) => (
-          <li key={item.driveFileId} className="min-w-0" data-testid={`slice-file-${item.driveFileId}`}>
-            <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_4.75rem_1.75rem] items-center gap-2">
-              <PlateThumb file={item} headers={headers} onPreview={preview.setPreview} />
-              <a
-                href={item.webViewLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex min-w-0 items-center gap-1 text-sm font-medium text-primary"
-                title={item.name}
-                data-testid="slice-file-name"
-              >
-                <span className="truncate">{item.name}</span>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-              </a>
-              <span className="w-[4.75rem] text-right text-sm tabular-nums" data-testid="slice-file-size">
-                {formatFileSize(item.sizeBytes)}
-              </span>
-              <PlateFileMenu file={item} headers={headers} onPreview={preview.setPreview} />
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              <span data-testid="slice-file-printer">{item.printer || "Printer not set"}</span>
-              {item.modifiedAt ? <span data-testid="slice-file-date"> · {formatPacificUpdateStamp(item.modifiedAt)}</span> : null}
-            </p>
           </li>
         ))}
         {failures.map((item) => (

@@ -104,10 +104,14 @@ export function PlateFileMenu({
   file,
   headers,
   onPreview,
+  buttonTestId,
+  sendToLibrary,
 }: {
   file: PlateFileRecord;
   headers: Record<string, string>;
   onPreview: (file: PlateFileRecord) => void;
+  buttonTestId?: string;
+  sendToLibrary?: { recordId: number; onSend: () => void } | null;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -117,13 +121,26 @@ export function PlateFileMenu({
         type="button"
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label={`Actions for ${file.name}`}
-        data-testid={`button-plate-menu-${file.driveFileId}`}
+        data-testid={buttonTestId ?? `button-plate-menu-${file.driveFileId}`}
         onClick={() => setOpen((value) => !value)}
       >
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open ? (
         <div className="absolute right-0 z-20 mt-1 w-40 rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+          {sendToLibrary ? (
+            <button
+              type="button"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+              data-testid={`button-send-to-library-${sendToLibrary.recordId}`}
+              onClick={() => {
+                setOpen(false);
+                sendToLibrary.onSend();
+              }}
+            >
+              Send to Library
+            </button>
+          ) : null}
           <button
             type="button"
             className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"

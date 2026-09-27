@@ -329,8 +329,9 @@ export default function PlateLibraryPage() {
                   <span className="library-layers">Layers</span>
                   <span className="library-time">Time</span>
                   <span className="library-resin">Resin</span>
-                  <span>Orders</span>
+                  <span className="library-used">Orders</span>
                   <span className="library-size">Size</span>
+                  <span />
                 </div>
                 {grouped.map(([group, rows]) => (
                   <section key={group} data-testid={`library-kit-${kitSlug(group)}`}>
@@ -359,7 +360,6 @@ export default function PlateLibraryPage() {
                               <span className="truncate">{filePart}</span>
                               <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                             </a>
-                            <PlateFileMenu file={file} headers={headers} onPreview={preview.setPreview} />
                           </div>
                           <span className="library-printer truncate text-sm" data-testid="library-file-printer" title={file.printer || "Printer not set"}>
                             {file.printer || "Printer not set"}
@@ -379,6 +379,9 @@ export default function PlateLibraryPage() {
                           <span className="library-size text-sm" data-testid="library-file-size">
                             {formatFileSize(file.sizeBytes)}
                           </span>
+                          <div className="library-menu">
+                            <PlateFileMenu file={file} headers={headers} onPreview={preview.setPreview} />
+                          </div>
                           <p className="library-meta">
                             {[file.printer || "Printer not set", layers === "—" ? "" : `${layers} layers`, time === "—" ? "" : time, resin === "—" ? "" : resin, used]
                               .filter(Boolean)
