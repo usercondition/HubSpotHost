@@ -2260,6 +2260,13 @@ export interface ProductionQueueItem {
    */
   addressNeedsCleanup?: boolean;
   /**
+   * Last stored ShipEngine check for this normalized address.
+   * Absent when nothing is stored or the address hash changed.
+   * Unchecked (an outage) is not stored.
+   */
+  addressCheckStatus?: "verified" | "corrected" | "unverified" | "error";
+  addressCheckedAt?: string | null;
+  /**
    * False when the buyer chose local pickup on intake (or notes say pickup).
    * Pickup orders do not need HubSpot ship-to or a shipping label.
    */

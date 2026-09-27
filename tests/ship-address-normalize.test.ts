@@ -6,6 +6,14 @@ import { join } from "node:path";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
 import { applyAddressCleanup, gateLabelAddress } from "../server/lib/label-address";
+import {
+  addressBelongsOnAudit,
+  ensureAddressCheck,
+  hashNormalizedAddress,
+  readAddressCheck,
+  resetAddressCheckOutage,
+  saveAddressCheck,
+} from "../server/lib/address-checks";
 import { invalidateDealContactCache, type DealAssociatedContact } from "../server/lib/deal-ops";
 import { listOrderUpdates } from "../server/lib/order-updates";
 import { resetOrderLinkStore } from "../server/lib/order-links";
@@ -286,6 +294,150 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     const overridden = await gateLabelAddress(contact, "override");
     assert.equal(overridden.ok, true);
     if (overridden.ok) assert.equal(overridden.address.street1, "10909 Hannan Rd");
+  });
+
+  test("validation is stored by address hash and skipped until the address changes", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "checks.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return jsonResponse([
+        {
+          status: "verified",
+          matched_address: {
+            address_line1: "10909 Hannan Rd",
+            city_locality: "Romulus",
+            state_province: "MI",
+            postal_code: "48174",
+            country_code: "US",
+          },
+          messages: [],
+        },
+      ]);
+    }) as typeof fetch;
+
+    const contact: DealAssociatedContact = {
+      id: "9001",
+      name: "Wayne Hood",
+      email: "",
+      phone: "",
+      addressLines: [],
+      street1: "10909 Hannan Rd",
+      street2: "",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    const first = await ensureAddressCheck({ dealId: "349919419125", contact });
+    assert.equal(first.status, "verified");
+    assert.equal(first.fromStore, false);
+    assert.equal(calls, 1);
+    const stored = readAddressCheck("349919419125");
+    assert.equal(stored?.status, "verified");
+    assert.ok(stored?.checkedAt);
+    assert.equal(stored?.addressHash, hashNormalizedAddress(first.normalized.normalized));
+
+    const second = await ensureAddressCheck({ dealId: "349919419125", contact });
+    assert.equal(second.fromStore, true);
+    assert.equal(second.status, "verified");
+    assert.equal(calls, 1);
+
+    const changed = await ensureAddressCheck({
+      dealId: "349919419125",
+      contact: { ...contact, street1: "10909 Hannan Road" },
+    });
+    assert.equal(changed.fromStore, false);
+    assert.equal(calls, 2);
+
+    calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw new Error("ShipEngine down");
+    }) as typeof fetch;
+    resetAddressCheckOutage();
+    const outage = await ensureAddressCheck({
+      dealId: "349919419126",
+      contact,
+      force: true,
+    });
+    assert.equal(outage.status, "unchecked");
+    assert.equal(readAddressCheck("349919419126"), null);
+    assert.equal(calls, 1);
+    const duringOutage = await ensureAddressCheck({
+      dealId: "349919419127",
+      contact,
+      force: true,
+    });
+    assert.equal(duringOutage.status, "unchecked");
+    assert.equal(calls, 1);
+
+    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "verified" }), false);
+    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "unchecked" }), false);
+    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "unverified" }), true);
+    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "corrected" }), true);
+    assert.equal(addressBelongsOnAudit({ needsCleanup: true, status: "verified" }), true);
+  });
+
+  test("a corrected suggestion is stored and a stale check is refreshed before a label", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "checks-stale.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return jsonResponse([
+        {
+          status: "verified",
+          matched_address: {
+            address_line1: "10909 Hannan Road",
+            city_locality: "Romulus",
+            state_province: "MI",
+            postal_code: "48174",
+            country_code: "US",
+          },
+          messages: [],
+        },
+      ]);
+    }) as typeof fetch;
+    const contact: DealAssociatedContact = {
+      id: "9001",
+      name: "Wayne Hood",
+      email: "",
+      phone: "",
+      addressLines: [],
+      street1: "10909 Hannan Rd",
+      street2: "",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    const corrected = await ensureAddressCheck({ dealId: "349919419125", contact });
+    assert.equal(corrected.status, "corrected");
+    assert.equal(corrected.matched?.street1, "10909 Hannan Road");
+    const quiet = await ensureAddressCheck({ dealId: "349919419125", contact });
+    assert.equal(quiet.fromStore, true);
+    assert.equal(calls, 1);
+    const held = await gateLabelAddress(contact, undefined, "349919419125");
+    assert.equal(held.ok, false);
+    if (!held.ok) assert.equal(held.status, 409);
+    assert.equal(calls, 1);
+
+    const row = readAddressCheck("349919419125");
+    assert.ok(row);
+    saveAddressCheck({ ...row!, checkedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() });
+    const stillCached = await ensureAddressCheck({ dealId: "349919419125", contact });
+    assert.equal(stillCached.fromStore, true);
+    assert.equal(calls, 1);
+    const refreshed = await gateLabelAddress(contact, undefined, "349919419125");
+    assert.equal(calls, 2);
+    assert.equal(refreshed.ok, false);
+    if (!refreshed.ok) assert.equal(refreshed.status, 409);
   });
 });
 

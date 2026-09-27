@@ -132,7 +132,8 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/shipping-labels/shipengine/status", note: "ShipEngine key + ship-from + carriers" },
   { method: "POST", path: "/api/shipping-labels/shipengine/rates", note: "Quote UPS/USPS rates for a Print Order" },
   { method: "POST", path: "/api/shipping-labels/shipengine/purchase", note: "Buy ShipEngine label → attach tracking" },
-  { method: "GET", path: "/api/shipping-labels/address-audit", note: "Open orders that need address cleanup or failed validation" },
+  { method: "GET", path: "/api/shipping-labels/address-audit", note: "Open orders that need cleanup or are unverified or corrected" },
+  { method: "POST", path: "/api/shipping-labels/address-verify", note: "Run ShipEngine validation now for one Print Order" },
   { method: "POST", path: "/api/shipping-labels/address-cleanup", note: "Write a cleaned address to HubSpot after confirm" },
 ];
 
@@ -191,7 +192,7 @@ function AddressAuditList() {
     <SettingsCard title="Address cleanup" testId="panel-address-audit">
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="text-address-audit-empty">
-          No open orders need address cleanup.
+          No open orders need an address check.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -202,8 +203,18 @@ function AddressAuditList() {
                 {row.contactName ? ` · ${row.contactName}` : ""}
               </p>
               <p className="text-xs text-muted-foreground">
-                {row.needsCleanup ? "Address needs cleanup" : "Address failed validation"}
-                {row.validationStatus !== "unchecked" ? ` · ${row.validationStatus}` : ""}
+                {[
+                  row.needsCleanup ? "Address needs cleanup" : "",
+                  row.validationStatus === "corrected"
+                    ? "Suggested correction"
+                    : row.validationStatus === "unverified"
+                      ? "Unverified"
+                      : row.validationStatus === "error"
+                        ? "Address check failed"
+                        : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             </li>
           ))}

@@ -473,6 +473,8 @@ function labelsQueueBody() {
     addressStatus: order.status,
     addressSummary: order.status === "ready" ? `${order.city}, ${order.state}` : null,
     addressNeedsCleanup: order.needsCleanup,
+    addressCheckStatus: order.needsCleanup ? "corrected" : order.status === "ready" ? "verified" : undefined,
+    addressCheckedAt: order.status === "ready" ? "2026-09-27T18:00:00.000Z" : null,
     chaseDraft: "",
   }));
   return {
@@ -1323,6 +1325,26 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             hasContact: true,
             missing: [],
             needsCleanup: Boolean(order?.needsCleanup),
+            validation: wayne
+              ? {
+                  status: "corrected",
+                  checkedAt: "2026-09-27T18:00:00.000Z",
+                  suggestion: {
+                    street1: "10909 Hannan Rd",
+                    street2: "",
+                    city: "Romulus",
+                    state: "MI",
+                    zip: "48174",
+                    country: "US",
+                  },
+                  messages: [],
+                }
+              : {
+                  status: "verified",
+                  checkedAt: "2026-09-27T18:00:00.000Z",
+                  suggestion: null,
+                  messages: [],
+                },
             original: wayne
               ? {
                   street1: "10909 Hannan Rd, Romulus, Michigan, 48174",
@@ -1387,6 +1409,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const joseText = await joseCard.innerText();
       check(!joseText.includes("Needs address"), `open label card showed Needs address: ${joseText}`);
       check(joseText.includes("Address · San Diego, CA"), `live ship-to did not win: ${joseText}`);
+      check(joseText.includes("Verified"), `Jose ship-to missing Verified mark: ${joseText}`);
       const wayneButton = current().locator("[data-testid='button-shipengine-pick-349919419125']");
       if ((await wayneButton.count()) > 0) await wayneButton.click();
       await page.waitForFunction(() => {
@@ -1399,6 +1422,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const wayneText = await wayneCard.innerText();
       check(!wayneText.includes("Needs address"), `Wayne card showed Needs address: ${wayneText}`);
       check(wayneText.includes("Address needs cleanup"), `Wayne card missing cleanup pill: ${wayneText}`);
+      check(wayneText.includes("Suggested correction"), `Wayne card missing correction pill: ${wayneText}`);
       check(wayneText.includes("Address · Romulus, MI"), `Wayne live address missing: ${wayneText}`);
       await picks.screenshot({ path: file });
     };

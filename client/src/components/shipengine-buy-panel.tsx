@@ -209,6 +209,16 @@ type AddressConfirmation = {
   messages?: string[];
 };
 
+type AddressCheckStatus = "verified" | "corrected" | "unverified" | "error" | "unchecked";
+
+type AddressValidation = {
+  status: AddressCheckStatus;
+  checkedAt: string | null;
+  addressHash?: string;
+  suggestion?: ShipAddressFields | null;
+  messages?: string[];
+};
+
 type ShipToResponse = {
   ok: true;
   dealId: string;
@@ -218,6 +228,7 @@ type ShipToResponse = {
   needsCleanup?: boolean;
   original?: ShipAddressFields;
   normalized?: ShipAddressFields;
+  validation?: AddressValidation;
   contact: {
     id: string | null;
     name: string;
@@ -228,6 +239,17 @@ type ShipToResponse = {
     state?: string;
   };
 };
+
+function formatCheckedDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "America/Los_Angeles",
+  }).format(date);
+}
 
 function formatShipFields(fields: ShipAddressFields | null | undefined): string {
   if (!fields) return "";
@@ -687,6 +709,41 @@ export function ShipEngineBuyPanel({
     },
   });
 
+  const verify = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest(
+        "POST",
+        "/api/shipping-labels/address-verify",
+        { dealId },
+        { headers },
+      );
+      return (await response.json()) as { ok: true; status: AddressCheckStatus };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/ship-to", dealId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/production-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-labels/address-audit"] });
+      toast({
+        title: data.status === "verified" ? "Address verified" : "Address checked",
+        description:
+          data.status === "unchecked"
+            ? "ShipEngine did not answer. The address was not marked failed."
+            : data.status === "corrected"
+              ? "ShipEngine suggested a correction."
+              : data.status === "unverified"
+                ? "ShipEngine could not verify this address."
+                : "ShipEngine confirmed this address.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not verify the address",
+        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        variant: "destructive",
+      });
+    },
+  });
+
   const cleanup = useMutation({
     mutationFn: async () => {
       const response = await apiRequest(
@@ -790,6 +847,26 @@ export function ShipEngineBuyPanel({
               : pill.label
         }
         testId={`status-shipengine-address-${item.dealId}`}
+      />
+    );
+  };
+
+  const checkStatusFor = (item: ProductionQueueItem): AddressCheckStatus | null => {
+    const live = item.dealId === dealId ? shipToQuery.data?.validation?.status : undefined;
+    if (live) return live;
+    return item.addressCheckStatus ?? null;
+  };
+
+  const checkChip = (item: ProductionQueueItem) => {
+    const status = checkStatusFor(item);
+    if (status !== "corrected" && status !== "unverified" && status !== "error") return null;
+    const label = status === "corrected" ? "Suggested correction" : status === "error" ? "Address check failed" : "Unverified";
+    return (
+      <StatusPill
+        tone="warn"
+        icon={AlertTriangle}
+        label={label}
+        testId={`status-address-check-${item.dealId}`}
       />
     );
   };
@@ -932,6 +1009,16 @@ export function ShipEngineBuyPanel({
               Copy chase draft
             </Button>
           </div>
+        ) : null}
+        {shipToQuery.data.validation?.status === "verified" && shipToQuery.data.validation.checkedAt ? (
+          <p className="text-xs text-chart-4" data-testid="text-address-verified">
+            Verified · {formatCheckedDate(shipToQuery.data.validation.checkedAt)}
+          </p>
+        ) : null}
+        {shipToQuery.data.validation?.status === "corrected" && shipToQuery.data.validation.suggestion ? (
+          <p className="text-xs" data-testid="text-address-suggestion-stored">
+            Suggestion: {formatShipFields(shipToQuery.data.validation.suggestion)}
+          </p>
         ) : null}
         {shipToQuery.data.needsCleanup && shipToQuery.data.original && shipToQuery.data.normalized ? (
           <div className="mt-1 space-y-0.5 text-xs" data-testid="panel-address-cleanup-diff">
@@ -1397,6 +1484,7 @@ export function ShipEngineBuyPanel({
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
                             {addressChip(item)}
+                            {checkChip(item)}
                             {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
@@ -1411,16 +1499,22 @@ export function ShipEngineBuyPanel({
                               icon={Ship}
                               label={`Ship ${item.fulfillment.readyPercent}%`}
                             />
-                            {orderNeedsCleanup(item) ? (
-                              <CardMenu label="More actions" testId={`menu-shipengine-order-${item.dealId}`}>
+                            <CardMenu label="More actions" testId={`menu-shipengine-order-${item.dealId}`}>
+                              <DropdownMenuItem
+                                onSelect={() => verify.mutate()}
+                                data-testid={`button-verify-address-${item.dealId}`}
+                              >
+                                Verify now
+                              </DropdownMenuItem>
+                              {orderNeedsCleanup(item) ? (
                                 <DropdownMenuItem
                                   onSelect={() => setCleanupOpen(true)}
                                   data-testid={`button-fix-address-hubspot-${item.dealId}`}
                                 >
                                   Fix in HubSpot
                                 </DropdownMenuItem>
-                              </CardMenu>
-                            ) : null}
+                              ) : null}
+                            </CardMenu>
                             {item.addressStatus !== "ready" &&
                             item.addressStatus !== "pickup" &&
                             item.addressStatus !== "unknown" &&
@@ -1520,6 +1614,7 @@ export function ShipEngineBuyPanel({
                               <StatusPill tone="good" icon={PackageCheck} label="Ready to pack" />
                             ) : null}
                             {addressChip(item)}
+                            {checkChip(item)}
                             {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />

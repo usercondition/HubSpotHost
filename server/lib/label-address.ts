@@ -20,9 +20,12 @@ import { hubspotRequest } from "./hubspot";
 import { appendOrderUpdate } from "./order-updates";
 import { loadProductionQueue } from "./queue-loader";
 import {
-  contactToShipEngineAddress,
+  addressBelongsOnAudit,
+  ensureAddressCheck,
+  type AddressCheckStatus,
+} from "./address-checks";
+import {
   getShipEngineApiKey,
-  validateShipEngineAddress,
   type ShipEngineAddress,
   type ShipEngineAddressCheck,
   type ShipEngineMatchedAddress,
@@ -71,13 +74,30 @@ function addressFromMatch(
   };
 }
 
+function asAddressCheck(ensured: {
+  status: AddressCheckStatus;
+  matched: ShipEngineMatchedAddress | null;
+  messages: string[];
+}): ShipEngineAddressCheck {
+  const differs = ensured.status === "corrected";
+  const status =
+    ensured.status === "corrected" || ensured.status === "verified"
+      ? "verified"
+      : ensured.status === "error"
+        ? "error"
+        : "unverified";
+  return { status, matched: ensured.matched, messages: ensured.messages, differs };
+}
+
 /**
- * Normalize, then require a verified ShipEngine match before quoting or buying.
+ * Normalize, then require a fresh verified ShipEngine check before quoting or buying.
+ * A stored check is reused until it is stale or the address hash changes.
  * A mismatch blocks until the caller accepts the suggestion or overrides it.
  */
 export async function gateLabelAddress(
   contact: DealAssociatedContact,
   decision?: AddressDecision,
+  dealId?: string,
 ): Promise<
   | {
       ok: true;
@@ -87,55 +107,53 @@ export async function gateLabelAddress(
     }
   | { ok: false; status: number; body: Record<string, unknown> }
 > {
-  const normalized = normalizeShipAddress({
-    street1: contact.street1,
-    street2: contact.street2,
-    city: contact.city,
-    state: contact.state,
-    zip: contact.zip,
-    country: contact.country,
+  const ensured = await ensureAddressCheck({
+    dealId,
+    contact,
+    refreshIfStale: true,
   });
-  const address = contactToShipEngineAddress(contact);
-  if (!address) {
+  if (!ensured.address) {
     return {
       ok: false,
       status: 400,
       body: {
         ok: false,
         error: MISSING_ADDRESS,
-        original: normalized.original,
-        normalized: normalized.normalized,
+        original: ensured.normalized.original,
+        normalized: ensured.normalized.normalized,
         contact: { name: contact.name, addressLines: contact.addressLines },
       },
     };
   }
-  if (!getShipEngineApiKey()) {
+  if (ensured.status === "unchecked") {
     return {
       ok: false,
       status: 503,
       body: {
         ok: false,
-        error: "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
+        code: "address_unchecked",
+        error: getShipEngineApiKey()
+          ? "ShipEngine could not check this address. Nothing was bought."
+          : "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
       },
     };
   }
-  const validation = await validateShipEngineAddress(address);
-  const clean = validation.status === "verified" && !validation.differs;
-  if (clean) {
-    return { ok: true, address, normalized, validation };
+  const validation = asAddressCheck(ensured);
+  if (ensured.status === "verified") {
+    return { ok: true, address: ensured.address, normalized: ensured.normalized, validation };
   }
   if (decision === "override") {
-    return { ok: true, address, normalized, validation };
+    return { ok: true, address: ensured.address, normalized: ensured.normalized, validation };
   }
-  if (decision === "accept" && validation.matched) {
+  if (decision === "accept" && ensured.matched) {
     return {
       ok: true,
-      address: addressFromMatch(address, validation.matched),
-      normalized,
+      address: addressFromMatch(ensured.address, ensured.matched),
+      normalized: ensured.normalized,
       validation,
     };
   }
-  return { ok: false, status: 409, body: confirmationBody(normalized, validation) };
+  return { ok: false, status: 409, body: confirmationBody(ensured.normalized, validation) };
 }
 
 function cleanupLogText(result: NormalizedShipAddress): string {
@@ -219,28 +237,14 @@ export type AddressAuditRow = {
   dealName: string;
   contactName: string | null;
   needsCleanup: boolean;
-  validationStatus: ShipEngineAddressCheck["status"] | "unchecked";
+  validationStatus: AddressCheckStatus;
+  checkedAt: string | null;
   messages: string[];
   changes: ShipAddressChange[];
   original: ShipAddressFields;
   normalized: ShipAddressFields;
+  suggestion: ShipEngineMatchedAddress | null;
 };
-
-const VALIDATION_CACHE_MS = 120_000;
-const validationCache = new Map<string, { at: number; result: ShipEngineAddressCheck }>();
-
-function validationCacheKey(address: ShipEngineAddress): string {
-  return [address.street1, address.city, address.state, address.zip, address.country].join("|").toLowerCase();
-}
-
-async function cachedValidation(address: ShipEngineAddress): Promise<ShipEngineAddressCheck> {
-  const key = validationCacheKey(address);
-  const hit = validationCache.get(key);
-  if (hit && Date.now() - hit.at < VALIDATION_CACHE_MS) return hit.result;
-  const result = await validateShipEngineAddress(address);
-  validationCache.set(key, { at: Date.now(), result });
-  return result;
-}
 
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
@@ -256,7 +260,7 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
   return results;
 }
 
-/** Open orders whose address needs cleanup or failed ShipEngine validation. */
+/** Open orders that need cleanup, or whose stored check is unverified, corrected, or error. */
 export async function listAddressAudit(): Promise<AddressAuditRow[]> {
   const queue = await loadProductionQueue({ enrichAddresses: true });
   const items = new Map<string, { dealId: string; dealName: string; contactName: string | null }>();
@@ -272,47 +276,50 @@ export async function listAddressAudit(): Promise<AddressAuditRow[]> {
     items.set(item.dealId, { dealId: item.dealId, dealName: item.dealName, contactName: item.contactName });
   }
 
-  const canValidate = Boolean(getShipEngineApiKey());
   const rows = await mapPool(Array.from(items.values()), 2, async (item) => {
     const contact = peekDealContactCache(item.dealId) ?? (await fetchDealAssociatedContact(item.dealId).catch(() => null));
     if (!contact) return null;
-    const normalized = normalizeShipAddress({
-      street1: contact.street1,
-      street2: contact.street2,
-      city: contact.city,
-      state: contact.state,
-      zip: contact.zip,
-      country: contact.country,
-    });
-    const address = contactToShipEngineAddress(contact);
-    let validationStatus: AddressAuditRow["validationStatus"] = "unchecked";
-    let messages: string[] = [];
-    let validationFailed = false;
-    if (address && canValidate) {
-      try {
-        const validation = await cachedValidation(address);
-        validationStatus = validation.status;
-        messages = validation.messages;
-        validationFailed = validation.status !== "verified" || validation.differs;
-      } catch (error) {
-        validationStatus = "error";
-        messages = [error instanceof Error ? error.message : "Address validation failed"];
-        validationFailed = true;
-      }
-    }
-    if (!normalized.changed && !validationFailed) return null;
+    const ensured = await ensureAddressCheck({ dealId: item.dealId, contact });
+    if (!addressBelongsOnAudit({ needsCleanup: ensured.normalized.changed, status: ensured.status })) return null;
     return {
       dealId: item.dealId,
       dealName: item.dealName,
       contactName: item.contactName,
-      needsCleanup: normalized.changed,
-      validationStatus,
-      messages,
-      changes: normalized.changes,
-      original: normalized.original,
-      normalized: normalized.normalized,
+      needsCleanup: ensured.normalized.changed,
+      validationStatus: ensured.status,
+      checkedAt: ensured.checkedAt,
+      messages: ensured.messages,
+      changes: ensured.normalized.changes,
+      original: ensured.normalized.original,
+      normalized: ensured.normalized.normalized,
+      suggestion: ensured.matched,
     } satisfies AddressAuditRow;
   });
 
   return rows.filter((row): row is AddressAuditRow => Boolean(row));
+}
+
+/** Verify now: always ask ShipEngine, even when the stored hash still matches. */
+export async function verifyAddressNow(dealId: string): Promise<
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; status: number; body: Record<string, unknown> }
+> {
+  const contact = await fetchDealAssociatedContact(dealId);
+  const ensured = await ensureAddressCheck({ dealId, contact, force: true });
+  if (!ensured.address) {
+    return { ok: false, status: 400, body: { ok: false, error: MISSING_ADDRESS } };
+  }
+  return {
+    ok: true,
+    body: {
+      ok: true,
+      dealId,
+      status: ensured.status,
+      checkedAt: ensured.checkedAt,
+      addressHash: ensured.addressHash,
+      suggestion: ensured.matched,
+      messages: ensured.messages,
+      normalized: ensured.normalized.normalized,
+    },
+  };
 }

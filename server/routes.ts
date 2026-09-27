@@ -264,8 +264,8 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
-import { applyAddressCleanup, gateLabelAddress, listAddressAudit } from "./lib/label-address";
-import { normalizeShipAddress } from "../shared/ship-address";
+import { applyAddressCleanup, gateLabelAddress, listAddressAudit, verifyAddressNow } from "./lib/label-address";
+import { ensureAddressCheck } from "./lib/address-checks";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
 import {
@@ -289,7 +289,6 @@ import {
   ShipEngineError,
   addShipEngineCarrierFunds,
   buildShipNotesFromShipEngine,
-  contactToShipEngineAddress,
   createShipEngineRates,
   getShipFromAddress,
   getShipEngineStatus,
@@ -1736,15 +1735,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     try {
       const contact = await fetchDealAssociatedContact(dealId);
-      const cleaned = normalizeShipAddress({
-        street1: contact.street1,
-        street2: contact.street2,
-        city: contact.city,
-        state: contact.state,
-        zip: contact.zip,
-        country: contact.country,
-      });
-      const address = contactToShipEngineAddress(contact);
+      const ensured = await ensureAddressCheck({ dealId, contact });
+      const cleaned = ensured.normalized;
+      const address = ensured.address;
       const missing = address
         ? []
         : [
@@ -1774,6 +1767,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         normalized: cleaned.normalized,
         needsCleanup: cleaned.changed,
         changes: cleaned.changes,
+        validation: {
+          status: ensured.status,
+          checkedAt: ensured.checkedAt,
+          addressHash: ensured.addressHash,
+          suggestion: ensured.matched,
+          messages: ensured.messages,
+        },
         ready: Boolean(address),
         hasContact: Boolean(contact.id),
         missing,
@@ -1827,7 +1827,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     try {
       const contact = await fetchDealAssociatedContact(parsed.data.dealId);
-      const gated = await gateLabelAddress(contact, parsed.data.addressDecision);
+      const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealId);
       if (!gated.ok) {
         return res.status(gated.status).json(gated.body);
       }
@@ -1883,7 +1883,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     try {
       const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
-      const gated = await gateLabelAddress(contact, parsed.data.addressDecision);
+      const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealIds[0]);
       if (!gated.ok) {
         return res.status(gated.status).json(gated.body);
       }
@@ -1945,6 +1945,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not purchase ShipEngine label",
+      });
+    }
+  });
+
+  /** Force a ShipEngine check for this deal, even when the stored hash still matches. */
+  app.post("/api/shipping-labels/address-verify", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
+    if (!/^[0-9]{1,20}$/.test(dealId)) {
+      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
+    }
+    try {
+      const result = await verifyAddressNow(dealId);
+      if (!result.ok) return res.status(result.status).json(result.body);
+      return res.json(result.body);
+    } catch (error) {
+      if (isHubSpotBusyError(error)) {
+        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      }
+      const status = error instanceof HubSpotError ? error.status : 502;
+      return res.status(status).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not verify the address",
       });
     }
   });
