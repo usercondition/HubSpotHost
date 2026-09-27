@@ -431,33 +431,51 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
     await page.locator("[data-testid='library-row-file-castigator']").waitFor();
     await assertKitCatalog();
-    const phoneMetaBox = await page.locator("[data-testid='library-row-file-castigator'] .library-meta").evaluate((el) => ({
-      text: (el.textContent || "").replace(/\s+/g, " ").trim(),
-      wrap: getComputedStyle(el).whiteSpace,
-      scroll: el.scrollWidth,
-      client: el.clientWidth,
-    }));
+    const phoneMetaBox = await page.locator("[data-testid='library-row-file-castigator'] .library-meta").evaluate((el) => {
+      const parts = [];
+      const nodes = el.querySelectorAll(".library-meta-part");
+      for (const node of nodes) {
+        parts.push({
+          text: (node.textContent || "").replace(/\s+/g, " ").trim(),
+          scroll: node.scrollWidth,
+          client: node.clientWidth,
+        });
+      }
+      return {
+        text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+        wrap: getComputedStyle(el).whiteSpace,
+        scroll: el.scrollWidth,
+        client: el.clientWidth,
+        parts,
+      };
+    });
     assert.match(phoneMetaBox.text, /31\.25 ml/, phoneMetaBox.text);
     assert.equal(phoneMetaBox.wrap, "normal");
     assert.ok(phoneMetaBox.scroll <= phoneMetaBox.client + 1, `phone meta still clips (${phoneMetaBox.scroll} > ${phoneMetaBox.client})`);
+    assert.ok(phoneMetaBox.parts.some((part) => part.text === "4h 00m"), phoneMetaBox.text);
+    for (const part of phoneMetaBox.parts) {
+      assert.ok(part.scroll <= part.client + 1, `meta value clipped (${part.text})`);
+    }
     const phoneNames = await page.locator("[data-testid='library-file-name'] span").evaluateAll((nodes) => {
       const rows = [];
       for (const node of nodes) {
         const style = getComputedStyle(node);
         rows.push({
           text: (node.textContent || "").replace(/\s+/g, " ").trim(),
-          clamp: style.webkitLineClamp,
           wrap: style.whiteSpace,
+          scroll: node.scrollHeight,
+          client: node.clientHeight,
         });
       }
       return rows;
     });
     const phoneText = phoneNames.map((row) => row.text).join("\n");
-    assert.match(phoneText, /NEWX2/);
-    assert.match(phoneText, /NEWX3/);
-    assert.match(phoneText, /Bits Plate/);
-    assert.equal(phoneNames[0].clamp, "2");
-    assert.equal(phoneNames[0].wrap, "normal");
+    assert.match(phoneText, /Mighty 8K NEWX2 Knight Castellan Torso/);
+    assert.match(phoneText, /Mighty 8K NEWX3 Knight Castellan Bits Plate/);
+    for (const row of phoneNames) {
+      assert.equal(row.wrap, "normal");
+      assert.ok(row.scroll <= row.client + 1, `phone name clipped (${row.scroll} > ${row.client}): ${row.text}`);
+    }
     const phoneCastSize = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='library-file-size']").boundingBox();
     const phoneRaidSize = await page.locator("[data-testid='library-row-file-raider'] [data-testid='library-file-size']").boundingBox();
     const phoneCastMenu = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='button-plate-menu-file-castigator']").boundingBox();

@@ -1494,6 +1494,18 @@
     .library-resin,
     .library-used { display: none; }
     .library-meta { display: block; }
+    .library-name span {
+      -webkit-line-clamp: 3;
+    }
+  }
+
+  .library-meta-part {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
+  .library-meta-part + .library-meta-part::before {
+    content: " · ";
   }
 
   .plate-preview-stats {

@@ -370,7 +370,11 @@ export default function PlateLibraryPage() {
                           <p className="library-meta">
                             {[file.printer || "Printer not set", layers === "—" ? "" : `${layers} layers`, time === "—" ? "" : time, resin === "—" ? "" : resin, used]
                               .filter(Boolean)
-                              .join(" · ")}
+                              .map((part, index) => (
+                                <span key={index} className="library-meta-part">
+                                  {part}
+                                </span>
+                              ))}
                           </p>
                         </article>
                       );
