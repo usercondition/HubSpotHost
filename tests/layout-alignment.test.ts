@@ -654,6 +654,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     };
     await page.locator("[data-testid='link-nav-performance']").click();
     await assertOneStatsPage();
+    if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
+    for (const route of ["/", "/deals", "/performance", "/printers", "/performance"]) {
+      await page.goto(`${base}/#${route}`, { waitUntil: "domcontentloaded" });
+      if (route === "/performance") await assertOneStatsPage();
+      else assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, `one page transition remains on ${route}`);
+    }
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
@@ -1436,6 +1442,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
     if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
+    if (artifactPath("stats-nav-390.png")) await page.screenshot({ path: artifactPath("stats-nav-390.png")!, fullPage: true });
     if (artifactPath("stats-phone-390-v2.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v2.png")!, fullPage: true });
     if (artifactPath("performance-overhead-390.png")) await page.screenshot({ path: artifactPath("performance-overhead-390.png")!, fullPage: true });
     if (artifactPath("stats-phone-390-v3.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v3.png")!, fullPage: true });
