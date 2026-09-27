@@ -9,6 +9,7 @@ import {
   ExternalLink,
   FileUp,
   LayoutDashboard,
+  Library,
   Link2,
   ListChecks,
   ListOrdered,
@@ -134,6 +135,7 @@ const NAV: Array<{
   { href: "/stack", label: "Stack", title: "This week's priority stack", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
   { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
+  { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "more" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   {

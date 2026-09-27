@@ -262,6 +262,7 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
+import { registerPlateLibraryRoutes } from "./lib/plate-routes";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -1387,6 +1388,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
     return res.status(201).json({ ok: true, entry });
   });
+
+  registerPlateLibraryRoutes(app);
 
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;

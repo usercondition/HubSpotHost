@@ -567,7 +567,9 @@ export function StackRow({
           <DropdownMenuContent align="end">
             {row.kind === "bundle" ? (
               <DropdownMenuItem onClick={onUngroup} data-testid={`button-ungroup-${row.key}`}>Ungroup</DropdownMenuItem>
-            ) : null}
+            ) : (
+              <DropdownMenuItem onClick={onOpen} data-testid={`button-add-slice-${row.key}`}>Add slice file</DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={onDone} data-testid={`button-done-${row.key}`}>
               {row.shippingRequired ? "Done" : "Picked up"}
             </DropdownMenuItem>

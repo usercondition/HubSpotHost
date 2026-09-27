@@ -106,6 +106,152 @@ x-paid-order-access-code: <owner code>
 
 An off-book example uses `"key": "offbook:4"`. The Stack drawer shows these entries under Updates and can add a manual line. Mirroring a copy onto a HubSpot note is intentionally not part of this API.
 
+## Slice files (Google Drive)
+
+Slice files (`.ctb` and the other slicer formats) are stored in Miguel's personal Google Drive, not on Railway. Print Ops keeps a searchable index in the same SQLite file as the Stack (`ORDER_LINKS_DB_FILE`). Nothing in this feature is written to a HubSpot deal property. Off-book orders never write to HubSpot.
+
+`drive.file` can only see files this app created. Existing Drive files are registered by metadata through the owner index API below. The assistant does that with its own Drive access; Print Ops does not list the rest of the Drive.
+
+### Google Cloud setup
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and pick or create a project.
+2. Enable **Google Drive API** (APIs & Services → Library → Google Drive API → Enable).
+3. Configure the OAuth consent screen: User type **External**. Add the scope `https://www.googleapis.com/auth/drive.file` only. Add Miguel as a test user while the app is in testing, then click **Publish app** so the status is **In production**. A testing app expires refresh tokens after 7 days. Production does not.
+4. Create an OAuth client: APIs & Services → Credentials → Create credentials → OAuth client ID → Application type **Web application**.
+5. Authorized JavaScript origin: `https://hubspothost-production.up.railway.app`
+6. Authorized redirect URI, exactly: `https://hubspothost-production.up.railway.app/api/google/oauth/callback`
+7. Set these Railway variables on HubSpotHost. `GOOGLE_OAUTH_REFRESH_TOKEN` is the existing Calendar token. Do not replace it with the Drive token. Drive stores its own refresh token in SQLite, encrypted with `GOOGLE_OAUTH_CLIENT_SECRET`.
+
+| Variable | Purpose |
+| --- | --- |
+| `GOOGLE_OAUTH_CLIENT_ID` | Web client id. Shared with the ship-by calendar client if you want one Cloud client. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Web client secret. Also the key for the encrypted Drive refresh token. |
+| `PUBLIC_BASE_URL` | `https://hubspothost-production.up.railway.app` so the redirect URI matches Google Cloud exactly. |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | Calendar only. Leave it. Drive does not read this variable. |
+
+8. Unlock Print Ops, open Setup, and press **Connect Google Drive**. The browser returns to `/#/setup` after Google consents. Scope is only `drive.file`, with `access_type=offline` and `prompt=consent`.
+
+Uploads land in `Print Ops/<Kit> – <Customer> (<deal id or off-book id>)/`. A revoked token shows a reconnect state on Setup and on the upload. It does not crash the app.
+
+### Owner API
+
+Same header as the Stack: `x-paid-order-access-code`. Missing or wrong code is 401. Unset `PAID_ORDER_INTAKE_ACCESS_CODE_HASH` is 503. Responses never include tokens.
+
+Connection:
+
+```http
+GET /api/google/oauth/start
+x-paid-order-access-code: <owner code>
+```
+
+```json
+{ "ok": true, "url": "https://accounts.google.com/o/oauth2/v2/auth?...", "redirectUri": "https://hubspothost-production.up.railway.app/api/google/oauth/callback" }
+```
+
+The browser then opens `url`. Google redirects to `GET /api/google/oauth/callback?code&state` on this app. That callback is not owner-gated; the one-time `state` is. It stores the refresh token and redirects to `/#/setup`.
+
+```http
+GET /api/google/drive
+POST /api/google/drive/disconnect
+```
+
+```json
+{ "ok": true, "configured": true, "connected": true, "email": "miguel@gmail.com", "reconnect": false }
+```
+
+`reconnect: true` means the stored token was revoked or can no longer be decrypted. Connect again.
+
+Upload one file. The body is the raw bytes (`application/octet-stream`), not JSON. `Content-Length` is required (1 byte through 2 GB). Success is returned only after Drive confirms a file id.
+
+```http
+POST /api/plate-files/upload?orderKey=deal:123&fileName=Castigator_MEGA_8K.ctb&printer=MEGA%208K&notes=&kit=Castigator&customer=Ada
+content-type: application/octet-stream
+content-length: 188743680
+x-paid-order-access-code: <owner code>
+
+<file bytes>
+```
+
+`orderKey` is `deal:<id>` or `offbook:<id>`. Allowed names end in `.ctb`, `.chitubox`, `.cbddlp`, `.goo`, `.prz`, `.lys`, `.stl`, or `.3mf`. Printer is optional: `Mighty 8K`, `Mighty 12K`, `MEGA 8K`, `HeyGears`, or `other`.
+
+`201`:
+
+```json
+{
+  "ok": true,
+  "file": {
+    "driveFileId": "1abc",
+    "name": "Castigator_MEGA_8K.ctb",
+    "webViewLink": "https://drive.google.com/file/d/1abc/view",
+    "sizeBytes": 188743680,
+    "modifiedAt": "2026-09-26T20:00:00.000Z",
+    "mimeType": "application/octet-stream",
+    "extension": ".ctb",
+    "printer": "MEGA 8K",
+    "kit": "Castigator",
+    "customer": "Ada",
+    "kitTags": "Castigator",
+    "notes": "",
+    "source": "upload",
+    "orderKeys": ["deal:123"]
+  }
+}
+```
+
+A failed upload stays in the order's failure list until a later upload of the same name succeeds. `409` with `"reconnect": true` means connect Google Drive again. `502` is any other Drive failure. Neither response inserts a library row.
+
+List and search:
+
+```http
+GET /api/plate-files?q=Castigator&printer=MEGA%208K&orderKey=deal:123
+```
+
+`q` matches name, kit, kit tags, printer, customer, notes, and linked order keys. `printer` is exact. `orderKey` limits the list to that order and includes `failures`. Omit it for the library. Newest modified time first, up to 200.
+
+```json
+{ "ok": true, "files": [], "failures": [] }
+```
+
+Register existing Drive files by metadata. Keyed by `driveFileId`. This does not download the file. Omit `orderKeys` to leave links alone. Send `orderKeys` (including `[]`) to replace that file's links. A file already stored as `source: "upload"` stays `upload`.
+
+```http
+POST /api/plate-files
+content-type: application/json
+x-paid-order-access-code: <owner code>
+
+{
+  "files": [
+    {
+      "driveFileId": "existing-id",
+      "name": "Land_Raider_12K.ctb",
+      "webViewLink": "https://drive.google.com/file/d/existing-id/view",
+      "sizeBytes": 52428800,
+      "modifiedAt": "2026-09-20T18:00:00.000Z",
+      "printer": "Mighty 12K",
+      "kit": "Land Raider",
+      "customer": "Daniel Ortega",
+      "kitTags": "Land Raider",
+      "notes": "Supports already tuned",
+      "orderKeys": ["deal:456"]
+    }
+  ]
+}
+```
+
+`200` `{ "ok": true, "files": [ ...same shape as upload... ] }` with `source: "indexed"` for new rows.
+
+Link or unlink one order without rewriting the rest of the metadata:
+
+```http
+POST /api/plate-files/link
+POST /api/plate-files/unlink
+content-type: application/json
+
+{ "driveFileId": "existing-id", "orderKey": "offbook:4" }
+```
+
+`200` `{ "ok": true, "file": { ... } }`. `404` if that drive file id is not in the index yet.
+
 ## Client order links (primary intake)
 
 **Order links** is the main way a paid Marketplace order enters the system. Nothing reaches HubSpot until you approve it.

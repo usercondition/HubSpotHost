@@ -16,6 +16,7 @@ import OrderLinks from "@/pages/order-links";
 import Performance from "@/pages/performance";
 import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
+import PlateLibraryPage from "@/pages/plate-library";
 import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
 import ShippingLabelsPage from "@/pages/shipping-labels";
@@ -47,6 +48,7 @@ function ShellRoutes() {
           <Route path="/marketplace-brief" component={MarketplaceBriefPage} />
           <Route path="/supplies" component={Supplies} />
           <Route path="/prints" component={Prints} />
+          <Route path="/library" component={PlateLibraryPage} />
           <Route path="/printers" component={PrintersPage} />
           <Route path="/resin" component={ResinInventoryPage} />
           {/*

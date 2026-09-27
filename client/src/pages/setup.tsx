@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
+import { GoogleDriveConnect } from "@/components/google-drive-connect";
 import { CodeLine } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -214,6 +215,7 @@ export default function Setup() {
 
         {section === "overview" ? (
           <div className="space-y-4">
+            <GoogleDriveConnect />
             {health.data?.storage?.warning ? (
               <SettingsCard title="Production data durability" testId="panel-setup-storage">
                 <p className="text-sm text-muted-foreground" data-testid="text-storage-warning">
