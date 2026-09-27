@@ -239,6 +239,22 @@ function bodyFor(pathname: string) {
       hubspotPortalId: "1",
     };
   }
+  if (pathname.startsWith("/api/priority-stack/updates")) {
+    return {
+      ok: true,
+      orderKey: "deal:c1",
+      entries: [
+        {
+          id: 1,
+          orderKey: "deal:c1",
+          createdAt: "2026-09-27T00:31:00.000Z",
+          text: "Left leg supports failed. Reprint that piece before packing.",
+          source: "voice",
+          author: "Miguel",
+        },
+      ],
+    };
+  }
   if (pathname.startsWith("/api/priority-stack")) {
     const committed = stackRow({
       key: "committed",
@@ -654,6 +670,19 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         return titleTop < plates.getBoundingClientRect().top && titleTop < slip.getBoundingClientRect().top;
       });
       check(order, `${label} drawer title is not above Assign plates and Packing slip`);
+      await page.locator("[data-testid='order-updates']").waitFor();
+      const stamp = (await page.locator("[data-testid='order-update-time']").first().innerText()).replace(/\s+/g, " ").trim();
+      check(stamp === "Sep 26, 5:31 PM", `${label} update time was ${stamp}`);
+      const update = await page.locator("[data-testid='order-update-text']").first().innerText();
+      check(/Left leg supports failed/.test(update), `${label} update text was ${update}`);
+      const source = (await page.locator("[data-testid='order-update-source']").first().innerText()).trim().toLowerCase();
+      check(source === "voice", `${label} update source was ${source}`);
+      const updateBox = await page.locator("[data-testid='order-update-text']").first().evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return { right: rect.right, width: window.innerWidth, scroll: el.scrollWidth, client: el.clientWidth };
+      });
+      check(updateBox.right <= updateBox.width + 1, `${label} update text runs off screen`);
+      check(updateBox.scroll <= updateBox.client + 1, `${label} update text is clipped`);
       await page.locator("[data-testid='button-close-deal-ops-drawer']").evaluate((el) => (el as HTMLElement).click());
       await page.locator("[data-testid='drawer-deal-ops']").waitFor({ state: "hidden" });
     };

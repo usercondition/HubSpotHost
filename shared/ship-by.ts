@@ -111,6 +111,23 @@ export function formatShipByShort(date: string): string {
   });
 }
 
+/** Spelled-out Pacific time for an order update, e.g. "Sep 26, 5:31 PM". */
+export function formatPacificUpdateStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHIP_BY_TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const dayPeriod = value("dayPeriod").replace(/[\u202f\u00a0]/g, " ").trim();
+  return `${value("month")} ${value("day")}, ${value("hour")}:${value("minute")} ${dayPeriod}`;
+}
+
 export function formatShipByWeekday(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
 }

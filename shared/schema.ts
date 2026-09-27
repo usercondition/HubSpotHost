@@ -1975,6 +1975,45 @@ export const priorityStackEntries = sqliteTable("priority_stack_entries", {
 
 export type PriorityStackEntryRow = typeof priorityStackEntries.$inferSelect;
 
+/**
+ * Append-only shop notes for a HubSpot deal or an off-book order.
+ * Stored locally. Never written to HubSpot deal properties.
+ */
+export const orderUpdateLog = sqliteTable("order_update_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  orderKey: text("order_key").notNull(),
+  createdAt: text("created_at").notNull(),
+  entryText: text("text").notNull(),
+  source: text("source").notNull(),
+  author: text("author").notNull(),
+});
+
+export type OrderUpdateLogRow = typeof orderUpdateLog.$inferSelect;
+
+export const ORDER_UPDATE_SOURCES = ["voice", "manual", "system"] as const;
+export type OrderUpdateSource = (typeof ORDER_UPDATE_SOURCES)[number];
+
+export const orderUpdateKeySchema = z
+  .string()
+  .trim()
+  .regex(/^(deal:[0-9]{1,20}|offbook:[1-9][0-9]*)$/, "Use a deal or off-book order key");
+
+export const appendOrderUpdateSchema = z.object({
+  key: orderUpdateKeySchema,
+  text: z.string().trim().min(1, "Write an update").max(4000, "Update must be 4000 characters or fewer"),
+  source: z.enum(ORDER_UPDATE_SOURCES).default("manual"),
+  author: z.string().trim().min(1, "Name the author").max(120).default("Miguel"),
+});
+
+export interface OrderUpdateEntry {
+  id: number;
+  orderKey: string;
+  createdAt: string;
+  text: string;
+  source: OrderUpdateSource;
+  author: string;
+}
+
 const stackTierSchema = z.enum(["committed", "stretch", "later"]);
 const stackBlocker = z.string().trim().max(500, "Blocker must be 500 characters or fewer");
 const stackDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date");

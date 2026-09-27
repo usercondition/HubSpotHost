@@ -211,6 +211,8 @@ import {
   updateStackBundleSchema,
   offbookEntrySchema,
   stackDoneSchema,
+  appendOrderUpdateSchema,
+  orderUpdateKeySchema,
   intakeLineExtendedAmount,
   lineItemsForIntake,
   normalizeOrderLineKind,
@@ -259,6 +261,7 @@ import {
   updateOffbook,
   upsertDealStackEntry,
 } from "./lib/priority-stack";
+import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -1363,6 +1366,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     if (!undoStackDone(parsed.data.key)) return res.status(404).json({ ok: false, error: "That stack row is gone." });
     return res.json({ ok: true });
+  });
+
+  app.get("/api/priority-stack/updates", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = orderUpdateKeySchema.safeParse(req.query.key);
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    return res.json({ ok: true, orderKey: parsed.data, entries: listOrderUpdates(parsed.data) });
+  });
+
+  app.post("/api/priority-stack/updates", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const parsed = appendOrderUpdateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const entry = appendOrderUpdate({
+      orderKey: parsed.data.key,
+      text: parsed.data.text,
+      source: parsed.data.source,
+      author: parsed.data.author,
+    });
+    return res.status(201).json({ ok: true, entry });
   });
 
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
