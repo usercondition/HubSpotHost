@@ -114,7 +114,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
     }
     const state = stateValue.get(active.id);
     const name = map.shapes.find((shape) => shape.id === active.id)?.name ?? active.id;
-    return state ? `${name} · ${summary(state.orders, state.revenue, state.priced)}` : name;
+    return state ? `${name} · ${summary(state.orders, state.revenue, state.priced)}` : `${name} · 0 orders`;
   }
 
   const listed = origins.orders.filter((order) => {

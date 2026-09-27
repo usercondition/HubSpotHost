@@ -1387,6 +1387,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
     await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
     await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
+    assert.match(await page.locator("[data-testid='stats-origin-detail']").first().innerText(), /\d+ orders?/);
     if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
     if (artifactPath("stats-map-popover-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-390.png")! });
     await page.evaluate(() => {

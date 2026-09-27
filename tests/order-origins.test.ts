@@ -147,3 +147,13 @@ test("dashboard map follows the same period and bundled ZIP file resolves San Di
   assert.ok(sanDiego && sanDiego.lat > 32 && sanDiego.lat < 33);
   assert.ok(file.byZip.size > 1000);
 });
+
+test("map payload never includes customer or deal names", () => {
+  const origins = buildOrderOrigins({
+    start: null, end: Date.now(), zips: indexZipRows([["70112", "New Orleans", "LA", 29.95, -90.07]]),
+    orders: [{ id: "1", amount: 25, createdAt: new Date().toISOString(), pickup: false, shipTo: { city: "New Orleans", state: "LA", zip: "70112", country: "US" } }],
+  });
+  const payload = JSON.stringify({ ...origins, contactName: undefined, dealName: undefined });
+  assert.doesNotMatch(payload, /Ada|Customer|Deal/);
+  assert.equal("name" in origins.orders[0]!, false);
+});

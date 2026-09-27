@@ -139,6 +139,7 @@ export function collectShopDashboard(input: {
       amount: numberOrNull(props.amount),
       // Entered material cost is actual; slicer totals are a fallback only.
       resinCost: material ?? (plateResin?.any ? Math.round((plateResin.cost + Number.EPSILON) * 100) / 100 : null),
+      materialEstimated: material == null && plateResin?.any === true,
       postage: shipping === "pickup" ? (postage ?? 0) : postage,
       packaging: packagingEntered ?? 0,
       shipBy: day(stack?.target_date) || day(props.print_ship_by) || day(props.ship_by_date),
