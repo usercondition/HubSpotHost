@@ -1113,19 +1113,46 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
     await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
-    await page.locator("[data-testid='stats-headlines']").waitFor();
-    const desktopStats = await page.evaluate(() => ({
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const desktopStats = await current().evaluate((root) => ({
       scroll: document.documentElement.scrollWidth,
       inner: window.innerWidth,
-      text: document.body.innerText,
-      tops: Array.from(document.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
-      align: Array.from(document.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
+      text: root.innerText,
+      tops: Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
+      align: Array.from(root.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
     }));
     check(desktopStats.scroll <= desktopStats.inner + 1, `desktop stats scrolls horizontally (${desktopStats.scroll})`);
     check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
     check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
     check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
     await page.screenshot({ path: "/opt/cursor/artifacts/stats-desktop.png", fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
@@ -1282,9 +1309,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
 
     await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
-    await page.locator("[data-testid='stats-headlines']").waitFor();
-    const phoneStats = await page.evaluate(() => {
-      const headlines = Array.from(document.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const phoneStats = await current().evaluate((root) => {
+      const headlines = Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
       const rects = headlines.map((el) => el.getBoundingClientRect());
       return {
         scroll: document.documentElement.scrollWidth,
@@ -1294,9 +1321,36 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       };
     });
     check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
-    check(phoneStats.tops.length === 2 && Math.abs(phoneStats.tops[0]! - phoneStats.tops[1]!) <= 1, "phone headlines are not in two columns");
-    check(phoneStats.lefts[0]! < phoneStats.lefts[1]!, "phone headline order is wrong");
+    check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
+    check((phoneStats.lefts[0] ?? 0) < (phoneStats.lefts[1] ?? 0), "phone headline order is wrong");
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
     await page.screenshot({ path: "/opt/cursor/artifacts/stats-phone.png", fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });

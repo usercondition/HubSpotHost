@@ -60,7 +60,7 @@ test("booked revenue skips blank amounts and compares the previous window", () =
   const revenue = byId(result.money, "revenue-booked");
   assert.equal(revenue.value, 80);
   assert.equal(revenue.previous, 40);
-  assert.match(revenue.note ?? "", /1 orders missing an amount/);
+  assert.match(revenue.note ?? "", /1 order missing an amount/);
   assert.equal(byId(result.money, "orders").value, 2);
   assert.equal(byId(result.money, "aov").value, 80);
 });
@@ -140,7 +140,7 @@ test("cash in production is open orders only, and lost deals are not shipped rev
   });
   assert.equal(byId(result.money, "cash-in-production").value, 85);
   assert.equal(byId(result.money, "revenue-shipped").value, 0);
-  assert.match(byId(result.money, "waiting-money").note ?? "", /1 open orders with no ship or pickup flag/);
+  assert.match(byId(result.money, "waiting-money").note ?? "", /1 open order with no ship or pickup flag/);
   assert.equal(result.pipeline[0]?.label, "Printing");
   assert.equal(result.pipeline[0]?.count, 2);
 });
@@ -158,7 +158,7 @@ test("production sums real plate fields and leaves utilization empty", () => {
   });
   assert.equal(byId(result.production, "plates").value, 2);
   assert.equal(byId(result.production, "print-hours").value, 2);
-  assert.match(byId(result.production, "print-hours").note ?? "", /1 plates missing print time/);
+  assert.match(byId(result.production, "print-hours").note ?? "", /1 plate missing print time/);
   assert.equal(byId(result.production, "resin-ml").value, 40);
   assert.equal(byId(result.production, "resin-usd").value, 10);
   assert.equal(byId(result.production, "reprint-rate").value, 50);
@@ -183,7 +183,7 @@ test("repeat customers use the recorded name, and empty periods stay empty", () 
     awaitingClient: 3,
   });
   assert.equal(byId(result.channelMetrics, "repeat-rate").value, 50);
-  assert.match(byId(result.channelMetrics, "repeat-rate").note ?? "", /1 orders with no customer name/);
+  assert.match(byId(result.channelMetrics, "repeat-rate").note ?? "", /1 order with no customer name/);
   assert.equal(result.customers[0]?.name, "Ada");
   assert.equal(byId(result.pipelineMetrics, "awaiting-client").value, 3);
   assert.equal(byId(result.pipelineMetrics, "win-rate").value, null);

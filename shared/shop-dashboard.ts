@@ -142,6 +142,10 @@ function inWindow(time: number | null, start: number | null, end: number | null)
   return time <= end;
 }
 
+function units(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -273,8 +277,8 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const priorProfit = profitOf(input.orders, window.previousStart, window.previousEnd);
   const bars = seriesFor(input.orders, window);
 
-  const amountNote = currentBooked.missingAmount > 0 ? `${currentBooked.missingAmount} orders missing an amount` : null;
-  const costNote = currentProfit.missing > 0 ? `${currentProfit.missing} orders missing cost` : null;
+  const amountNote = currentBooked.missingAmount > 0 ? units(currentBooked.missingAmount, "order missing an amount", "orders missing an amount") : null;
+  const costNote = currentProfit.missing > 0 ? units(currentProfit.missing, "order missing cost", "orders missing cost") : null;
 
   const revenue = metric({
     id: "revenue-booked",
@@ -296,7 +300,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "usd",
     previous: compare ? priorShipped.revenue : null,
     compare,
-    note: currentShipped.missingClose > 0 ? `${currentShipped.missingClose} won orders missing a close date` : currentShipped.missingAmount > 0 ? `${currentShipped.missingAmount} shipped orders missing an amount` : null,
+    note: currentShipped.missingClose > 0 ? units(currentShipped.missingClose, "won order missing a close date", "won orders missing a close date") : currentShipped.missingAmount > 0 ? units(currentShipped.missingAmount, "shipped order missing an amount", "shipped orders missing an amount") : null,
   });
 
   const ordersMetric = metric({
@@ -398,7 +402,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     value: cashCount > 0 ? cash : null,
     unit: "usd",
     compare: false,
-    note: cashCount === 0 ? "No open orders with an amount." : cashMissing > 0 ? `${cashMissing} open orders missing an amount` : null,
+    note: cashCount === 0 ? "No open orders with an amount." : cashMissing > 0 ? units(cashMissing, "open order missing an amount", "open orders missing an amount") : null,
   });
 
   const waitingMetric = metric({
@@ -408,7 +412,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     value: waitingCount > 0 ? waiting : unknownShip > 0 && waitingCount === 0 ? null : 0,
     unit: "usd",
     compare: false,
-    note: unknownShip > 0 ? `${unknownShip} open orders with no ship or pickup flag` : waitingMissing > 0 ? `${waitingMissing} waiting orders missing an amount` : null,
+    note: unknownShip > 0 ? units(unknownShip, "open order with no ship or pickup flag", "open orders with no ship or pickup flag") : waitingMissing > 0 ? units(waitingMissing, "waiting order missing an amount", "waiting orders missing an amount") : null,
   });
 
   const medianDays = median(currentShipped.days);
@@ -421,7 +425,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "days",
     previous: compare ? priorMedian : null,
     compare,
-    note: currentShipped.counted === 0 ? "No won orders closed in this period." : currentShipped.days.length < currentShipped.counted ? `${currentShipped.counted - currentShipped.days.length} shipped orders missing a created date` : null,
+    note: currentShipped.counted === 0 ? "No won orders closed in the period." : currentShipped.days.length < currentShipped.counted ? units(currentShipped.counted - currentShipped.days.length, "shipped order missing a created date", "shipped orders missing a created date") : null,
   });
 
   const stageTime = metric({
@@ -525,7 +529,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "hours",
     previous: compare && priorHours.known > 0 ? priorHours.hours : null,
     compare,
-    note: currentHours.missing > 0 ? `${currentHours.missing} plates missing print time` : null,
+    note: currentHours.missing > 0 ? units(currentHours.missing, "plate missing print time", "plates missing print time") : null,
   });
   const resinMl = metric({
     id: "resin-ml",
@@ -535,7 +539,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "ml",
     previous: compare && priorResin.mlKnown > 0 ? priorResin.ml : null,
     compare,
-    note: currentResin.mlMissing > 0 ? `${currentResin.mlMissing} plates missing resin volume` : null,
+    note: currentResin.mlMissing > 0 ? units(currentResin.mlMissing, "plate missing resin volume", "plates missing resin volume") : null,
   });
   const resinUsd = metric({
     id: "resin-usd",
@@ -545,7 +549,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "usd",
     previous: compare && priorResin.usdKnown > 0 ? priorResin.usd : null,
     compare,
-    note: currentResin.usdMissing > 0 ? `${currentResin.usdMissing} plates missing resin cost` : null,
+    note: currentResin.usdMissing > 0 ? units(currentResin.usdMissing, "plate missing resin cost", "plates missing resin cost") : null,
   });
 
   const reprint = input.bits.filter((bit) => bit.status === "reprint").length;
@@ -698,7 +702,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     value: periodCustomers > 0 ? round2((repeatCustomers / periodCustomers) * 100) : null,
     unit: "percent",
     compare: false,
-    note: periodCustomers === 0 ? "No named customers in this period." : unnamed > 0 ? `${unnamed} orders with no customer name` : null,
+    note: periodCustomers === 0 ? "No named customers in this period." : unnamed > 0 ? units(unnamed, "order with no customer name", "orders with no customer name") : null,
   });
   const source = metric({
     id: "revenue-by-source",
