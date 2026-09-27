@@ -612,6 +612,34 @@ function ensureSupplyPurchaseColumns(sqlite: Database.Database): void {
 let db: BetterSQLite3Database | null = null;
 let sqliteConn: Database.Database | null = null;
 
+const CREATE_SHOP_EXPENSES_SQL = `
+CREATE TABLE IF NOT EXISTS shop_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_key TEXT NOT NULL UNIQUE,
+  vendor TEXT NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  cadence TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT,
+  payment_note TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shop_expense_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  expense_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  old_json TEXT,
+  new_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
 function databaseFile(): string {
   const configured = process.env.ORDER_LINKS_DB_FILE?.trim();
   if (configured) return configured === ":memory:" ? configured : path.resolve(configured);
@@ -673,6 +701,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_ORDER_UPDATE_LOG_SQL);
   sqlite.exec(CREATE_PLATE_LIBRARY_SQL);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
+  sqlite.exec(CREATE_SHOP_EXPENSES_SQL);
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);

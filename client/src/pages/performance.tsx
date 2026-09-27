@@ -121,7 +121,7 @@ export default function Performance() {
   const maxPrinter = Math.max(1, ...(dashboard?.printers.map((printer) => printer.hours) ?? [0]));
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-6xl" data-testid="page-performance">
       <PageHeader
         title="Stats"
         subtitle="How the shop did in the period you pick. Tap a figure to see how it is counted."
@@ -193,7 +193,7 @@ export default function Performance() {
                     data-testid={`headline-${item.id}`}
                     onClick={() => setOpenId(openId === item.id ? null : item.id)}
                   >
-                    <p className="rule-label truncate">{item.label}</p>
+                    <p className="rule-label">{item.label}</p>
                     <p className="numeric mt-1 text-right text-lg font-semibold">{formatValue(item)}</p>
                     <p className={cn("numeric mt-1 text-right text-xs", delta ? (up ? "text-accent" : "text-destructive") : "text-muted-foreground")}>
                       {delta ?? item.note ?? (dashboard.period.id === "all" ? "" : "Right now")}

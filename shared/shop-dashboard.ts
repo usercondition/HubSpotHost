@@ -6,6 +6,14 @@
 
 import { buildOrderOrigins, type OrderOrigins, type ShipToFields, type ZipIndex } from "./order-origins";
 import { shipByCalendarDate, SHIP_BY_TIME_ZONE } from "./ship-by";
+import {
+  NET_PROFIT_FORMULA,
+  OVERHEAD_FORMULA,
+  netProfitAfterOverhead,
+  overheadCentsForDates,
+  overheadDollars,
+  type ExpenseSlice,
+} from "./expenses";
 
 export const SHOP_PERIODS = ["7", "30", "90", "ytd", "all"] as const;
 export type ShopPeriodId = (typeof SHOP_PERIODS)[number];
@@ -85,6 +93,8 @@ export interface ShopDashboardInput {
   failures: ShopDashboardFailure[];
   printers: ShopDashboardPrinter[];
   supplyPurchases: Array<{ purchasedAt: string; amount: number }>;
+  /** Shop expenses that are not tied to one order. Empty means overhead is $0. */
+  expenses?: ExpenseSlice[];
   /** Intake links still waiting on the customer. Current queue, not a period. */
   awaitingClient: number;
   /** Bundled ZIP centroids. Omitted in tests that only check money. */
@@ -158,6 +168,13 @@ export function resolveShopWindow(period: ShopPeriodId, now: Date): Window {
   const days = Number(period);
   const span = days * 86_400_000;
   return { start: end - span, end, previousStart: end - span * 2, previousEnd: end - span };
+}
+
+function windowDates(window: Window): { start: string | null; end: string } {
+  return {
+    start: window.start == null ? null : shipByCalendarDate(new Date(window.start)),
+    end: shipByCalendarDate(new Date(window.end)),
+  };
 }
 
 function inWindow(time: number | null, start: number | null, end: number | null): boolean {
@@ -651,6 +668,37 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     note: supplyCount === 0 ? "No supply receipts in this period." : null,
   });
 
+  const expenses = input.expenses ?? [];
+  const currentSpan = windowDates(window);
+  const priorSpan = compare
+    ? windowDates({ start: window.previousStart, end: window.previousEnd ?? window.end, previousStart: null, previousEnd: null })
+    : null;
+  const overheadCents = overheadCentsForDates(expenses, currentSpan.start, currentSpan.end);
+  const priorOverheadCents = priorSpan ? overheadCentsForDates(expenses, priorSpan.start, priorSpan.end) : 0;
+  const overheadValue = overheadDollars(overheadCents);
+  const overheadMetric = metric({
+    id: "overhead",
+    label: "Overhead",
+    formula: OVERHEAD_FORMULA,
+    value: overheadValue,
+    unit: "usd",
+    previous: compare ? overheadDollars(priorOverheadCents) : null,
+    compare,
+    note: overheadCents === 0 ? "No expenses in this period." : null,
+  });
+  const netValue = netProfitAfterOverhead(profit.value, overheadCents);
+  const priorNet = compare ? netProfitAfterOverhead(profit.previous, priorOverheadCents) : null;
+  const netMetric = metric({
+    id: "net-profit",
+    label: "Net profit after overhead",
+    formula: NET_PROFIT_FORMULA,
+    value: netValue,
+    unit: "usd",
+    previous: priorNet,
+    compare,
+    note: profit.value == null ? "Net profit waits until gross profit is known." : overheadCents === 0 ? "No expenses in this period." : "Gross profit minus overhead for this period.",
+  });
+
   let won = 0;
   let lost = 0;
   let priorWon = 0;
@@ -747,7 +795,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     .sort((a, b) => b.revenue - a.revenue || b.orders - a.orders || a.name.localeCompare(b.name))
     .slice(0, 5);
 
-  const headlines = [revenue, shippedRevenue, profit, margin, ordersMetric, lateMetric];
+  const headlines = [revenue, shippedRevenue, profit, margin, ordersMetric, lateMetric, overheadMetric, netMetric];
 
   return {
     period: {
@@ -756,7 +804,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
       compareLabel: input.period === "all" ? "All time is not compared" : input.period === "ytd" ? "vs last year to this date" : `vs the prior ${PERIOD_LABEL[input.period]}`,
     },
     headlines,
-    money: [revenue, shippedRevenue, ordersMetric, aov, profit, margin, costPer, cashMetric, waitingMetric, supplyMetric],
+    money: [revenue, shippedRevenue, ordersMetric, aov, profit, overheadMetric, netMetric, margin, costPer, cashMetric, waitingMetric, supplyMetric],
     speed: [speedMedian, stageTime, onTime, lateMetric, oldestMetric],
     production: [platesMetric, hoursMetric, resinMl, resinUsd, reprintRate, failureMetric, utilization],
     printers: printerRows,

@@ -268,6 +268,7 @@ import {
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
+import { registerExpenseRoutes } from "./lib/expense-routes";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -1398,6 +1399,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   registerPlateLibraryRoutes(app);
+  registerExpenseRoutes(app, rejectUnsecuredIntake);
 
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;

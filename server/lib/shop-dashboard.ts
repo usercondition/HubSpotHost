@@ -16,6 +16,7 @@ import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
 import { getDb, getSqlite, orderLinkCounts } from "./order-links";
 import { ensureDefaultPrinters, listPrinterLifecycleEvents, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
 import { loadUsZipCentroids } from "./zip-centroids";
+import { listExpenseRecords } from "./expenses";
 
 function numberOrNull(value: string | null | undefined): number | null {
   if (value == null) return null;
@@ -244,6 +245,13 @@ export function collectShopDashboard(input: {
       .map((row) => ({ purchasedAt: row.purchased_at, amount: numberOrNull(row.total_amount) }))
       .filter((row): row is { purchasedAt: string; amount: number } => row.amount != null),
     awaitingClient: orderLinkCounts().awaiting_client,
+    expenses: listExpenseRecords().map((expense) => ({
+      amountCents: expense.amountCents,
+      cadence: expense.cadence,
+      startDate: expense.startDate,
+      endDate: expense.endDate,
+      archived: expense.archived,
+    })),
     zips: loadUsZipCentroids(),
   };
   const dashboard = buildShopDashboard(facts);

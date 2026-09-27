@@ -123,6 +123,7 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/deal-ops/:dealId", note: "Costs, stage, packing slip, failures (owner code)" },
   { method: "GET", path: "/api/prints", note: "Print-file candidates and plate history (owner code)" },
   { method: "GET", path: "/api/supplies", note: "Supply ledger (owner code)" },
+  { method: "GET", path: "/api/expenses", note: "Shop expenses and overhead (owner code, Print Ops only)" },
   { method: "GET", path: "/api/performance", note: "Daily performance snapshot (owner code)" },
   { method: "POST", path: "/api/buyers/lookup", note: "Returning-buyer prefill from HubSpot + intake" },
   { method: "GET", path: "/api/contacts", note: "Browse HubSpot contacts (query + recent)" },
@@ -140,6 +141,7 @@ const DAILY_ROUTES = [
   { path: "/#/orders", note: "Paid order intake links and review queue" },
   { path: "/#/prints", note: "Attach Chitubox plates; deep-link with ?dealId=" },
   { path: "/#/supplies", note: "Amazon/receipt supply ledger" },
+  { path: "/#/expenses", note: "Shop expenses that are not tied to one order" },
   { path: "/#/performance", note: "Margins, workload, and attention with next-step links" },
 ];
 

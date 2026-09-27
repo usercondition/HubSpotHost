@@ -1255,7 +1255,8 @@
     }
   }
 
-  .prints-library-switch {
+  .prints-library-switch,
+  .phone-section-switch {
     display: grid;
     grid-template-columns: 1fr 1fr;
     overflow: hidden;
@@ -1264,7 +1265,8 @@
     background: hsl(var(--background));
   }
 
-  .prints-library-switch a {
+  .prints-library-switch a,
+  .phone-section-switch a {
     display: flex;
     height: 36px;
     align-items: center;
@@ -1274,10 +1276,89 @@
     color: hsl(var(--text-2));
   }
 
-  .prints-library-switch a[data-active="true"] {
+  .prints-library-switch a[data-active="true"],
+  .phone-section-switch a[data-active="true"] {
     background: hsl(var(--raised));
     color: hsl(var(--foreground));
     font-weight: 600;
+  }
+
+  .expense-head,
+  .expense-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 9.5rem 5.25rem 5.5rem 6.25rem 6.25rem 6.25rem 1.75rem;
+    column-gap: 0.75rem;
+    align-items: center;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .expense-head {
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .expense-amount,
+  .expense-monthly,
+  .expense-period {
+    width: 6.25rem;
+    min-width: 6.25rem;
+    justify-self: end;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .expense-group {
+    padding: 0.85rem 0.75rem 0.2rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .expense-name {
+    min-width: 0;
+  }
+
+  .expense-menu {
+    position: relative;
+  }
+
+  .expense-menu-panel {
+    position: absolute;
+    right: 0;
+    z-index: 20;
+    margin-top: 0.25rem;
+    width: 10rem;
+  }
+
+  .expense-meta {
+    display: none;
+  }
+
+  @media (max-width: 767px) {
+    .expense-head { display: none; }
+    .expense-row {
+      grid-template-columns: minmax(0, 1fr) 6.25rem 1.75rem;
+      grid-template-areas:
+        "name period menu"
+        "meta period menu";
+      row-gap: 0.1rem;
+    }
+    .expense-name { grid-area: name; }
+    .expense-period { grid-area: period; }
+    .expense-menu { grid-area: menu; }
+    .expense-category,
+    .expense-cadence,
+    .expense-started,
+    .expense-amount,
+    .expense-monthly { display: none; }
+    .expense-meta {
+      display: block;
+      grid-area: meta;
+      min-width: 0;
+      font-size: 0.75rem;
+      line-height: 1.25rem;
+      color: hsl(var(--muted-foreground));
+    }
   }
 
   .library-printer-chips {

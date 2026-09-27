@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Settings2,
   Ship,
+  Receipt,
   ShoppingBag,
   Sun,
 } from "lucide-react";
@@ -28,6 +29,7 @@ import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
 import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
 import { PageTransition } from "@/components/page-transition";
 import { PrintsLibrarySwitch } from "@/components/prints-library-switch";
+import { KeepSpendSwitch } from "@/components/keep-spend-switch";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
@@ -150,6 +152,7 @@ const NAV: Array<{
   },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep", phone: "more" },
+  { href: "/expenses", label: "Expenses", title: "Shop expenses", icon: Receipt, testId: "link-nav-expenses", group: "Keep", phone: "more" },
   { href: "/deals", label: "Orders", title: "HubSpot stage board (mirror)", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
@@ -390,6 +393,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           {pathOnly === "/prints" || pathOnly === "/library" ? (
             <div className="px-4 pt-3 md:hidden">
               <PrintsLibrarySwitch />
+            </div>
+          ) : null}
+          {pathOnly === "/supplies" || pathOnly === "/expenses" ? (
+            <div className="px-4 pt-3 md:hidden">
+              <KeepSpendSwitch />
             </div>
           ) : null}
           <PageTransition routeKey={pathOnly}>{children}</PageTransition>
