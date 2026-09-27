@@ -253,7 +253,8 @@ function bodyFor(input: string | URL) {
       intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
       supplySpend: { total: 0, orders: 0 },
       books: { supplySpend: 0, grossProfit: 0 },
-      dashboard: buildShopDashboard({
+      dashboard: (() => {
+        const dashboard = buildShopDashboard({
         now: "2026-09-25T19:39:00.000Z",
         period: "30",
         awaitingClient: 1,
@@ -337,7 +338,13 @@ function bodyFor(input: string | URL) {
             shipTo: null,
           },
         ],
-      }),
+        });
+        const gross = dashboard.headlines.find((item) => item.id === "gross-profit")?.value ?? 0;
+        const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: 147.33, unit: "usd" as const, previous: null, compare: false, note: null, series: [] };
+        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: null, series: [] };
+        dashboard.headlines.push(overhead, net);
+        return dashboard;
+      })(),
       pipeline: [
         { id: "print", label: "Printing", closed: false },
         { id: "done", label: "Completed", closed: true },
@@ -1453,6 +1460,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.getByRole("button", { name: "Add expense" }).first().waitFor();
     if (artifactPath("expenses-phone-390.png")) await page.screenshot({ path: artifactPath("expenses-phone-390.png")!, fullPage: true });
     await page.getByRole("button", { name: "Add expense" }).first().click();
+    const saveVisible = await page.getByRole("button", { name: "Save" }).evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return rect.top >= 0 && rect.bottom <= innerHeight && (center === el || el.contains(center));
+    });
+    check(saveVisible, "expense drawer Save footer is visible and uncovered");
     if (artifactPath("expenses-drawer-390.png")) await page.screenshot({ path: artifactPath("expenses-drawer-390.png")!, fullPage: true });
 
     await page.setViewportSize({ width: 1440, height: 900 });

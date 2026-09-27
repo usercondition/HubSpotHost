@@ -181,7 +181,7 @@ export default function Performance() {
               {dashboard.period.label}. {dashboard.period.compareLabel}.
             </p>
 
-            <section className="grid grid-cols-2 gap-2 md:grid-cols-3" aria-label="Headline figures" data-testid="stats-headlines">
+            <section className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Headline figures" data-testid="stats-headlines">
               {dashboard.headlines.map((item) => {
                 const delta = formatDelta(item);
                 const up = item.previous != null && item.value != null && item.value >= item.previous;
