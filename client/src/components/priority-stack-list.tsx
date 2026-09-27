@@ -452,6 +452,7 @@ export function StackRow({
   onUngroup,
   onDone,
   onOpen,
+  onOpenMember,
   onMove,
   onDragStart,
   onDragEnd,
@@ -470,6 +471,7 @@ export function StackRow({
   onUngroup: () => void;
   onDone: () => void;
   onOpen: () => void;
+  onOpenMember?: (member: StackRowModel) => void;
   onMove: (direction: -1 | 1 | "top") => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -579,7 +581,14 @@ export function StackRow({
           <article key={member.key} className="stack-row stack-member" data-lane={member.lane} data-testid={`stack-row-${member.key}`}>
             <span className="stack-rank" />
             <span className="stack-name" title={member.contactName ? `${member.name} · ${member.contactName}` : member.name}>
-              <span className="stack-clip text-sm">{orderTitle(member)}</span>
+              <button
+                type="button"
+                className="stack-clip bg-transparent p-0 text-left text-sm"
+                onClick={() => onOpenMember?.(member)}
+                data-testid={`button-open-${member.key}`}
+              >
+                {orderTitle(member)}
+              </button>
             </span>
             <div className="stack-facts">
               <span className="stack-stage stack-desktop-only stack-clip text-sm" title={member.stage}>{member.stage}</span>

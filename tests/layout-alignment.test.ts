@@ -631,12 +631,39 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         check(templates.length === 1, `${label} stack grids differ: ${templates.join(" | ")}`);
       }
     };
-    const checkDrawer = async (label: string) => {
+    const openDrawer = async () => {
       await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
-      await page.locator("[data-testid='text-drawer-checklist-progress']").waitFor({ state: "attached" });
-      const drawerCount = await page.locator("[data-testid='text-drawer-checklist-progress']").innerText();
-      check(/1\/5/.test(drawerCount), `${label} drawer checklist was ${drawerCount}`);
+      await page.waitForFunction(() => {
+        const el = document.querySelector("[data-testid='drawer-deal-ops']");
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const phone = window.innerWidth < 768;
+        const docked = phone
+          ? rect.left <= 1 && rect.top <= 1 && rect.right >= window.innerWidth - 2
+          : rect.right >= window.innerWidth - 2 && rect.right <= window.innerWidth + 2 && rect.left > window.innerWidth * 0.4 && rect.top >= 40;
+        return rect.width > 200 && docked && rect.bottom <= window.innerHeight + 2;
+      });
+    };
+    const checkDrawer = async (label: string) => {
+      await openDrawer();
+      await page.locator("[data-testid='text-drawer-floor']").waitFor();
+      const drawerCount = await page.locator("[data-testid='text-drawer-floor']").innerText();
+      check(/1\/5/.test(drawerCount), `${label} drawer floor status was ${drawerCount}`);
+      const customer = await page.locator("[data-testid='drawer-customer']").innerText();
+      check(/Ada/.test(customer), `${label} drawer customer was ${customer}`);
+      const amount = await page.locator("[data-testid='drawer-amount']").innerText();
+      check(/\$80/.test(amount), `${label} drawer amount was ${amount}`);
+      const stage = await page.locator("[data-testid='drawer-stage']").innerText();
+      check(/Ready to Ship/.test(stage), `${label} drawer stage was ${stage}`);
+      await page.locator("[data-testid='drawer-plates']").getByText("plate.ctb").waitFor();
+      const shipBy = await page.locator("[data-testid='drawer-ship-by']").innerText();
+      check(/Oct 2/.test(shipBy) && !/\d{1,2}\/\d{1,2}/.test(shipBy), `${label} drawer ship-by was ${shipBy}`);
+      const focused = await page.waitForFunction(() => {
+        const drawer = document.querySelector("[data-testid='drawer-deal-ops']");
+        return Boolean(drawer && drawer.contains(document.activeElement));
+      }).then(() => true).catch(() => false);
+      check(focused, `${label} focus did not move into the drawer`);
       const hit = await page.evaluate(() => {
         const buttons = [...document.querySelectorAll("[data-testid='button-close-deal-ops-drawer']")];
         const boxes = buttons.map((el) => {
@@ -662,14 +689,11 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(hit === "ok", `${label} close button is not the element under its center (${hit})`);
       const order = await page.locator("[data-testid='drawer-deal-ops']").evaluate((drawer) => {
         const title = drawer.querySelector("h2");
-        const headings = [...drawer.querySelectorAll("h3")];
-        const plates = headings.find((heading) => /Assign plates/.test(heading.textContent || ""));
-        const slip = headings.find((heading) => /Packing slip/.test(heading.textContent || ""));
-        if (!title || !plates || !slip) return false;
-        const titleTop = title.getBoundingClientRect().top;
-        return titleTop < plates.getBoundingClientRect().top && titleTop < slip.getBoundingClientRect().top;
+        const updates = drawer.querySelector("[data-testid='order-updates']");
+        if (!title || !updates) return false;
+        return title.getBoundingClientRect().top < updates.getBoundingClientRect().top;
       });
-      check(order, `${label} drawer title is not above Assign plates and Packing slip`);
+      check(order, `${label} drawer title is not above Updates`);
       await page.locator("[data-testid='order-updates']").waitFor();
       const stamp = (await page.locator("[data-testid='order-update-time']").first().innerText()).replace(/\s+/g, " ").trim();
       check(stamp === "Sep 26, 5:31 PM", `${label} update time was ${stamp}`);
@@ -683,8 +707,18 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       });
       check(updateBox.right <= updateBox.width + 1, `${label} update text runs off screen`);
       check(updateBox.scroll <= updateBox.client + 1, `${label} update text is clipped`);
+      const drawerText = await page.locator("[data-testid='drawer-deal-ops']").innerText();
+      check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(drawerText), `${label} drawer has dev text`);
       await page.locator("[data-testid='button-close-deal-ops-drawer']").evaluate((el) => (el as HTMLElement).click());
       await page.locator("[data-testid='drawer-deal-ops']").waitFor({ state: "hidden" });
+      await openDrawer();
+      await page.keyboard.press("Escape");
+      await page.locator("[data-testid='drawer-deal-ops']").waitFor({ state: "hidden" });
+      if (label === "desktop") {
+        await openDrawer();
+        await page.locator("[data-testid='button-deal-ops-scrim']").click({ position: { x: 24, y: 160 } });
+        await page.locator("[data-testid='drawer-deal-ops']").waitFor({ state: "hidden" });
+      }
     };
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
