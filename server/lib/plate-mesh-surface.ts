@@ -1,9 +1,16 @@
 /**
- * Surface nets, smoothed normals, and quadric simplification for one plate mesh.
- * The voxel-face mesher is gone. The mesh worker is the only caller.
+ * Surface nets, one crease-preserving smooth, and quadric simplification.
+ * The mesh worker is the only caller. GLBs are meshopt-compressed.
  */
+import { MeshoptEncoder } from "meshoptimizer/encoder";
+
 const CHUNK = 32;
 const CHUNK_STRIDE = 1_000_000;
+/** Faces whose normals differ by more than this stay split, so bolts and panel edges stay crisp. */
+const CREASE_DOT = Math.cos((40 * Math.PI) / 180);
+const SMOOTH_FACTOR = 0.15;
+/** A few million keeps a desktop view sharp without making the viewer struggle. The byte cap still applies. */
+const TARGET_TRIS = 4_000_000;
 
 export interface Occupancy {
   forEach(visit: (x: number, y: number, z: number) => void): void;
@@ -70,24 +77,12 @@ export function occupancyFromChunks(keys: ArrayLike<number>, chunks: Uint32Array
   };
 }
 
-export function meshSurface(
-  occupancy: Occupancy,
-  scale: MeshScale,
-  gx: number,
-  gy: number,
-  gz: number,
-  byteBudget: number,
-): PlateSurface | null {
+export function meshSurface(occupancy: Occupancy, scale: MeshScale, gx: number, gy: number, gz: number): RawMesh | null {
   const raw = surfaceNets(occupancy, gx, gy, gz);
   if (!raw || raw.indices.length < 3) return null;
-  smooth(raw.positions, raw.indices, 3, 0.35);
+  smoothCrease(raw.positions, raw.indices);
   toMillimeters(raw.positions, scale);
-  const budgeted = fitBudget(raw, byteBudget);
-  return {
-    positions: budgeted.positions,
-    indices: budgeted.indices,
-    normals: vertexNormals(budgeted.positions, budgeted.indices),
-  };
+  return raw;
 }
 
 function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): RawMesh | null {
@@ -265,12 +260,36 @@ function windOutward(
   return ordered;
 }
 
-function smooth(positions: Float32Array, indices: Uint32Array, iterations: number, factor: number): void {
+function triangleNormal(positions: Float32Array, indices: Uint32Array, triangle: number): [number, number, number] {
+  const a = indices[triangle * 3]! * 3;
+  const b = indices[triangle * 3 + 1]! * 3;
+  const c = indices[triangle * 3 + 2]! * 3;
+  const abx = (positions[b] ?? 0) - (positions[a] ?? 0);
+  const aby = (positions[b + 1] ?? 0) - (positions[a + 1] ?? 0);
+  const abz = (positions[b + 2] ?? 0) - (positions[a + 2] ?? 0);
+  const acx = (positions[c] ?? 0) - (positions[a] ?? 0);
+  const acy = (positions[c + 1] ?? 0) - (positions[a + 1] ?? 0);
+  const acz = (positions[c + 2] ?? 0) - (positions[a + 2] ?? 0);
+  const nx = aby * acz - abz * acy;
+  const ny = abz * acx - abx * acz;
+  const nz = abx * acy - aby * acx;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  return [nx / len, ny / len, nz / len];
+}
+
+/** One light laplacian pass. Edges sharper than the crease angle are left alone. */
+function smoothCrease(positions: Float32Array, indices: Uint32Array): void {
   const verts = positions.length / 3;
-  const seen = new Set<number>();
-  const edges: Array<[number, number]> = [];
-  for (let i = 0; i < indices.length; i += 3) {
-    const tri = [indices[i]!, indices[i + 1]!, indices[i + 2]!];
+  const tris = indices.length / 3;
+  const face = new Float32Array(tris * 3);
+  const edgeFace = new Map<number, number>();
+  const edgeMate = new Map<number, number>();
+  for (let t = 0; t < tris; t += 1) {
+    const normal = triangleNormal(positions, indices, t);
+    face[t * 3] = normal[0];
+    face[t * 3 + 1] = normal[1];
+    face[t * 3 + 2] = normal[2];
+    const tri = [indices[t * 3]!, indices[t * 3 + 1]!, indices[t * 3 + 2]!];
     for (let e = 0; e < 3; e += 1) {
       let a = tri[e]!;
       let b = tri[(e + 1) % 3]!;
@@ -280,33 +299,37 @@ function smooth(positions: Float32Array, indices: Uint32Array, iterations: numbe
         b = swap;
       }
       const key = a + b * verts;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push([a, b]);
+      if (!edgeFace.has(key)) edgeFace.set(key, t);
+      else edgeMate.set(key, t);
     }
   }
   const acc = new Float32Array(positions.length);
   const counts = new Int32Array(verts);
-  for (let iter = 0; iter < iterations; iter += 1) {
-    acc.fill(0);
-    counts.fill(0);
-    for (const [a, b] of edges) {
-      acc[a * 3] = (acc[a * 3] ?? 0) + (positions[b * 3] ?? 0);
-      acc[a * 3 + 1] = (acc[a * 3 + 1] ?? 0) + (positions[b * 3 + 1] ?? 0);
-      acc[a * 3 + 2] = (acc[a * 3 + 2] ?? 0) + (positions[b * 3 + 2] ?? 0);
-      acc[b * 3] = (acc[b * 3] ?? 0) + (positions[a * 3] ?? 0);
-      acc[b * 3 + 1] = (acc[b * 3 + 1] ?? 0) + (positions[a * 3 + 1] ?? 0);
-      acc[b * 3 + 2] = (acc[b * 3 + 2] ?? 0) + (positions[a * 3 + 2] ?? 0);
-      counts[a] = (counts[a] ?? 0) + 1;
-      counts[b] = (counts[b] ?? 0) + 1;
-    }
-    for (let v = 0; v < verts; v += 1) {
-      const n = counts[v] ?? 0;
-      if (n < 1) continue;
-      positions[v * 3] = (positions[v * 3] ?? 0) * (1 - factor) + ((acc[v * 3] ?? 0) / n) * factor;
-      positions[v * 3 + 1] = (positions[v * 3 + 1] ?? 0) * (1 - factor) + ((acc[v * 3 + 1] ?? 0) / n) * factor;
-      positions[v * 3 + 2] = (positions[v * 3 + 2] ?? 0) * (1 - factor) + ((acc[v * 3 + 2] ?? 0) / n) * factor;
-    }
+  for (const [key, t0] of edgeFace) {
+    const t1 = edgeMate.get(key);
+    if (t1 === undefined) continue;
+    const dot =
+      (face[t0 * 3] ?? 0) * (face[t1 * 3] ?? 0) +
+      (face[t0 * 3 + 1] ?? 0) * (face[t1 * 3 + 1] ?? 0) +
+      (face[t0 * 3 + 2] ?? 0) * (face[t1 * 3 + 2] ?? 0);
+    if (dot < CREASE_DOT) continue;
+    const a = key % verts;
+    const b = (key - a) / verts;
+    acc[a * 3] = (acc[a * 3] ?? 0) + (positions[b * 3] ?? 0);
+    acc[a * 3 + 1] = (acc[a * 3 + 1] ?? 0) + (positions[b * 3 + 1] ?? 0);
+    acc[a * 3 + 2] = (acc[a * 3 + 2] ?? 0) + (positions[b * 3 + 2] ?? 0);
+    acc[b * 3] = (acc[b * 3] ?? 0) + (positions[a * 3] ?? 0);
+    acc[b * 3 + 1] = (acc[b * 3 + 1] ?? 0) + (positions[a * 3 + 1] ?? 0);
+    acc[b * 3 + 2] = (acc[b * 3 + 2] ?? 0) + (positions[a * 3 + 2] ?? 0);
+    counts[a] = (counts[a] ?? 0) + 1;
+    counts[b] = (counts[b] ?? 0) + 1;
+  }
+  for (let v = 0; v < verts; v += 1) {
+    const n = counts[v] ?? 0;
+    if (n < 1) continue;
+    positions[v * 3] = (positions[v * 3] ?? 0) * (1 - SMOOTH_FACTOR) + ((acc[v * 3] ?? 0) / n) * SMOOTH_FACTOR;
+    positions[v * 3 + 1] = (positions[v * 3 + 1] ?? 0) * (1 - SMOOTH_FACTOR) + ((acc[v * 3 + 1] ?? 0) / n) * SMOOTH_FACTOR;
+    positions[v * 3 + 2] = (positions[v * 3 + 2] ?? 0) * (1 - SMOOTH_FACTOR) + ((acc[v * 3 + 2] ?? 0) / n) * SMOOTH_FACTOR;
   }
 }
 
@@ -319,19 +342,6 @@ function toMillimeters(positions: Float32Array, scale: MeshScale): void {
     positions[i + 1] = (scale.originZ + z * scale.step) * scale.layerMm;
     positions[i + 2] = (scale.originY + y * scale.binY) * scale.pixelMmY;
   }
-}
-
-function estimateBytes(tris: number, verts: number): number {
-  return verts * 24 + tris * 12 + 1024;
-}
-
-function targetTriangles(budget: number): number {
-  return Math.max(2_000, Math.floor((budget * 0.85) / 24));
-}
-
-function fitBudget(raw: RawMesh, budget: number): RawMesh {
-  if (estimateBytes(raw.indices.length / 3, raw.positions.length / 3) <= budget) return raw;
-  return quadricDecimate(raw, targetTriangles(budget));
 }
 
 function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
@@ -650,51 +660,139 @@ function quadricDecimate(mesh: RawMesh, targetTris: number): RawMesh {
   return { positions: Float32Array.from(packed), indices: Uint32Array.from(out) };
 }
 
-function vertexNormals(positions: Float32Array, indices: Uint32Array): Float32Array {
-  const normals = new Float32Array(positions.length);
-  for (let i = 0; i < indices.length; i += 3) {
-    const a = indices[i]! * 3;
-    const b = indices[i + 1]! * 3;
-    const c = indices[i + 2]! * 3;
-    const abx = (positions[b] ?? 0) - (positions[a] ?? 0);
-    const aby = (positions[b + 1] ?? 0) - (positions[a + 1] ?? 0);
-    const abz = (positions[b + 2] ?? 0) - (positions[a + 2] ?? 0);
-    const acx = (positions[c] ?? 0) - (positions[a] ?? 0);
-    const acy = (positions[c + 1] ?? 0) - (positions[a + 1] ?? 0);
-    const acz = (positions[c + 2] ?? 0) - (positions[a + 2] ?? 0);
-    const nx = aby * acz - abz * acy;
-    const ny = abz * acx - abx * acz;
-    const nz = abx * acy - aby * acx;
-    normals[a] = (normals[a] ?? 0) + nx;
-    normals[a + 1] = (normals[a + 1] ?? 0) + ny;
-    normals[a + 2] = (normals[a + 2] ?? 0) + nz;
-    normals[b] = (normals[b] ?? 0) + nx;
-    normals[b + 1] = (normals[b + 1] ?? 0) + ny;
-    normals[b + 2] = (normals[b + 2] ?? 0) + nz;
-    normals[c] = (normals[c] ?? 0) + nx;
-    normals[c + 1] = (normals[c + 1] ?? 0) + ny;
-    normals[c + 2] = (normals[c + 2] ?? 0) + nz;
+/** Duplicate vertices where incident faces exceed the crease angle, and give each fan its own normal. */
+function splitCreases(positions: Float32Array, indices: Uint32Array): PlateSurface {
+  const tris = indices.length / 3;
+  const verts = positions.length / 3;
+  const fnx = new Float32Array(tris);
+  const fny = new Float32Array(tris);
+  const fnz = new Float32Array(tris);
+  for (let t = 0; t < tris; t += 1) {
+    const normal = triangleNormal(positions, indices, t);
+    fnx[t] = normal[0];
+    fny[t] = normal[1];
+    fnz[t] = normal[2];
   }
-  for (let i = 0; i < normals.length; i += 3) {
-    const x = normals[i] ?? 0;
-    const y = normals[i + 1] ?? 0;
-    const z = normals[i + 2] ?? 0;
-    const len = Math.hypot(x, y, z);
-    if (len < 1e-8) {
-      normals[i] = 0;
-      normals[i + 1] = 1;
-      normals[i + 2] = 0;
-      continue;
+  const groups: number[][] = Array.from({ length: verts }, () => []);
+  for (let corner = 0; corner < indices.length; corner += 1) groups[indices[corner]!]!.push(corner);
+  const outI = new Uint32Array(indices.length);
+  const px: number[] = [];
+  const py: number[] = [];
+  const pz: number[] = [];
+  const nx: number[] = [];
+  const ny: number[] = [];
+  const nz: number[] = [];
+  for (let v = 0; v < verts; v += 1) {
+    const corners = groups[v]!;
+    if (corners.length < 1) continue;
+    const fans: number[][] = [];
+    const rx: number[] = [];
+    const ry: number[] = [];
+    const rz: number[] = [];
+    for (const corner of corners) {
+      const t = (corner / 3) | 0;
+      let placed = -1;
+      for (let fan = 0; fan < fans.length; fan += 1) {
+        const dot = (fnx[t] ?? 0) * (rx[fan] ?? 0) + (fny[t] ?? 0) * (ry[fan] ?? 0) + (fnz[t] ?? 0) * (rz[fan] ?? 0);
+        if (dot >= CREASE_DOT) {
+          placed = fan;
+          break;
+        }
+      }
+      if (placed < 0) {
+        placed = fans.length;
+        fans.push([]);
+        rx.push(fnx[t] ?? 0);
+        ry.push(fny[t] ?? 0);
+        rz.push(fnz[t] ?? 0);
+      }
+      fans[placed]!.push(corner);
     }
-    normals[i] = x / len;
-    normals[i + 1] = y / len;
-    normals[i + 2] = z / len;
+    const x = positions[v * 3] ?? 0;
+    const y = positions[v * 3 + 1] ?? 0;
+    const z = positions[v * 3 + 2] ?? 0;
+    for (const fan of fans) {
+      const id = px.length;
+      px.push(x);
+      py.push(y);
+      pz.push(z);
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+      for (const corner of fan) {
+        const t = (corner / 3) | 0;
+        sx += fnx[t] ?? 0;
+        sy += fny[t] ?? 0;
+        sz += fnz[t] ?? 0;
+        outI[corner] = id;
+      }
+      const len = Math.hypot(sx, sy, sz) || 1;
+      nx.push(sx / len);
+      ny.push(sy / len);
+      nz.push(sz / len);
+    }
   }
-  return normals;
+  const outPos = new Float32Array(px.length * 3);
+  const outNrm = new Float32Array(nx.length * 3);
+  for (let i = 0; i < px.length; i += 1) {
+    outPos[i * 3] = px[i] ?? 0;
+    outPos[i * 3 + 1] = py[i] ?? 0;
+    outPos[i * 3 + 2] = pz[i] ?? 0;
+    outNrm[i * 3] = nx[i] ?? 0;
+    outNrm[i * 3 + 1] = ny[i] ?? 0;
+    outNrm[i * 3 + 2] = nz[i] ?? 0;
+  }
+  return { positions: outPos, normals: outNrm, indices: outI };
 }
 
-export function glbFromSurface(plateMmX: number, plateMmY: number, surface: PlateSurface): Buffer {
+export async function glbFromSurface(
+  plateMmX: number,
+  plateMmY: number,
+  welded: RawMesh,
+  budget: number,
+  voxelMm: number,
+): Promise<Buffer> {
+  let mesh = welded.indices.length / 3 > TARGET_TRIS ? quadricDecimate(welded, TARGET_TRIS) : welded;
+  let glb = await encodeCompressed(plateMmX, plateMmY, splitCreases(mesh.positions, mesh.indices), voxelMm);
+  for (let attempt = 0; attempt < 3 && glb.length > budget; attempt += 1) {
+    const tris = mesh.indices.length / 3;
+    const next = Math.max(2_000, Math.floor(((tris * budget) / glb.length) * 0.85));
+    if (next >= tris) break;
+    mesh = quadricDecimate(welded, next);
+    glb = await encodeCompressed(plateMmX, plateMmY, splitCreases(mesh.positions, mesh.indices), voxelMm);
+  }
+  return glb;
+}
+
+async function encodeCompressed(plateMmX: number, plateMmY: number, surface: PlateSurface, voxelMm: number): Promise<Buffer> {
+  await MeshoptEncoder.ready;
   const { positions, normals, indices } = surface;
+  const vertices = positions.length / 3;
+  const posPacked = MeshoptEncoder.encodeGltfBuffer(
+    MeshoptEncoder.encodeFilterExp(positions, vertices, 12, 16, "Clamped"),
+    vertices,
+    12,
+    "ATTRIBUTES",
+  );
+  const n4 = new Float32Array(vertices * 4);
+  for (let i = 0; i < vertices; i += 1) {
+    n4[i * 4] = normals[i * 3] ?? 0;
+    n4[i * 4 + 1] = normals[i * 3 + 1] ?? 0;
+    n4[i * 4 + 2] = normals[i * 3 + 2] ?? 0;
+  }
+  const nrmPacked = MeshoptEncoder.encodeGltfBuffer(MeshoptEncoder.encodeFilterOct(n4, vertices, 4, 8), vertices, 4, "ATTRIBUTES");
+  const idxSrc = new Uint8Array(indices.byteLength);
+  idxSrc.set(new Uint8Array(indices.buffer, indices.byteOffset, indices.byteLength));
+  const idxPacked = MeshoptEncoder.encodeGltfBuffer(idxSrc, indices.length, 4, "TRIANGLES");
+  const packed = [posPacked, nrmPacked, idxPacked];
+  let cursor = 0;
+  const offsets = packed.map((chunk) => {
+    const at = cursor;
+    cursor += chunk.length;
+    return at;
+  });
+  const bin = Buffer.alloc(cursor);
+  packed.forEach((chunk, index) => bin.set(chunk, offsets[index]!));
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -712,15 +810,30 @@ export function glbFromSurface(plateMmX: number, plateMmY: number, surface: Plat
     if (y > maxY) maxY = y;
     if (z > maxZ) maxZ = z;
   }
-  const posBytes = Buffer.from(positions.buffer, positions.byteOffset, positions.byteLength);
-  const nrmBytes = Buffer.from(normals.buffer, normals.byteOffset, normals.byteLength);
-  const idxBytes = Buffer.from(indices.buffer, indices.byteOffset, indices.byteLength);
-  const bin = Buffer.concat([posBytes, nrmBytes, idxBytes]);
+  const view = (index: number, stride: number, count: number, mode: string, filter: string | undefined, target: number) => ({
+    buffer: 0,
+    byteOffset: 0,
+    byteLength: 0,
+    target,
+    extensions: {
+      EXT_meshopt_compression: {
+        buffer: 0,
+        byteOffset: offsets[index],
+        byteLength: packed[index]!.length,
+        byteStride: stride,
+        count,
+        mode,
+        ...(filter ? { filter } : {}),
+      },
+    },
+  });
   const json = JSON.stringify({
     asset: { version: "2.0" },
+    extensionsUsed: ["EXT_meshopt_compression"],
+    extensionsRequired: ["EXT_meshopt_compression"],
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0, extras: { plate: [plateMmX, plateMmY] } }],
+    nodes: [{ mesh: 0, extras: { plate: [plateMmX, plateMmY], voxelMm } }],
     meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 }] }],
     materials: [
       {
@@ -736,18 +849,18 @@ export function glbFromSurface(plateMmX: number, plateMmY: number, surface: Plat
       {
         bufferView: 0,
         componentType: 5126,
-        count: positions.length / 3,
+        count: vertices,
         type: "VEC3",
         min: [minX, minY, minZ],
         max: [maxX, maxY, maxZ],
       },
-      { bufferView: 1, componentType: 5126, count: normals.length / 3, type: "VEC3" },
+      { bufferView: 1, componentType: 5120, count: vertices, type: "VEC4", normalized: true },
       { bufferView: 2, componentType: 5125, count: indices.length, type: "SCALAR" },
     ],
     bufferViews: [
-      { buffer: 0, byteOffset: 0, byteLength: posBytes.length, target: 34962 },
-      { buffer: 0, byteOffset: posBytes.length, byteLength: nrmBytes.length, target: 34962 },
-      { buffer: 0, byteOffset: posBytes.length + nrmBytes.length, byteLength: idxBytes.length, target: 34963 },
+      view(0, 12, vertices, "ATTRIBUTES", "EXPONENTIAL", 34962),
+      view(1, 4, vertices, "ATTRIBUTES", "OCTAHEDRAL", 34962),
+      view(2, 4, indices.length, "TRIANGLES", undefined, 34963),
     ],
     buffers: [{ byteLength: bin.length }],
   });

@@ -19,13 +19,15 @@ import {
 } from "./ctb";
 
 const PREFIX_BYTES = 8 * 1024 * 1024;
-/** About 0.35 mm, inside the 0.3–0.4 mm band. Coarsened only if the grid would exceed the chunk budget. */
-export const MESH_VOXEL_MM = 0.35;
-export const MESH_BYTE_BUDGET = 8 * 1024 * 1024;
+/** Sample pitch. Coarsened only if the worst-case chunk grid would exceed the budget. */
+export const MESH_VOXEL_MM = 0.1;
+/** Compressed GLB cap. The desktop viewer is the target; phones only need the file to open. */
+export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
-export const PLATE_MESH_VERSION = 3;
+export const PLATE_MESH_VERSION = 4;
 const CHUNK = 32;
-const CHUNK_BUDGET = 256 * 1024 * 1024;
+/** Pitch gate only. Occupied chunks are what get allocated, and they stay well under this. */
+const CHUNK_BUDGET = 2 * 1024 * 1024 * 1024;
 const CHUNK_STRIDE = 1_000_000;
 
 type RangeRead = (start: number, length: number) => Promise<Buffer | null>;
@@ -37,6 +39,7 @@ interface Grid {
   gx: number;
   gy: number;
   gz: number;
+  voxel: number;
 }
 
 interface Origin {
@@ -120,7 +123,7 @@ function chunkBytes(gx: number, gy: number, gz: number): number {
 
 function chooseGrid(width: number, height: number, layers: number, pixelMmX: number, pixelMmY: number, layerMm: number): Grid {
   let voxel = MESH_VOXEL_MM;
-  let grid: Grid = { binX: 1, binY: 1, step: 1, gx: 1, gy: 1, gz: 1 };
+  let grid: Grid = { binX: 1, binY: 1, step: 1, gx: 1, gy: 1, gz: 1, voxel };
   for (let attempt = 0; attempt < 16; attempt += 1) {
     const binX = Math.max(1, Math.round(voxel / pixelMmX));
     const binY = Math.max(1, Math.round(voxel / pixelMmY));
@@ -128,7 +131,7 @@ function chooseGrid(width: number, height: number, layers: number, pixelMmX: num
     const gx = Math.max(1, Math.ceil(width / binX));
     const gy = Math.max(1, Math.ceil(height / binY));
     const gz = Math.max(1, Math.ceil(layers / step));
-    grid = { binX, binY, step, gx, gy, gz };
+    grid = { binX, binY, step, gx, gy, gz, voxel };
     if (chunkBytes(gx, gy, gz) <= CHUNK_BUDGET) return grid;
     if (binX >= width && binY >= height && step >= layers) return grid;
     voxel *= 1.5;

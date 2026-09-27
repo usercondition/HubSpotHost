@@ -5,6 +5,7 @@
 export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promise<{ dispose: () => void; reset: () => void }> {
   const THREE = await import("three");
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+  const { MeshoptDecoder } = await import("three/examples/jsm/libs/meshopt_decoder.module.js");
   const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
 
   const width = Math.max(1, host.clientWidth);
@@ -22,6 +23,7 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   controls.dampingFactor = 0.08;
 
   const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
   const gltf = await new Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTF>((resolve, reject) => {
     loader.parse(glb, "", resolve, reject);
   });
@@ -111,13 +113,18 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
       target.addScaledVector(right, ((box.minX + box.maxX) / 2) * halfW);
       target.addScaledVector(camUp, ((box.minY + box.maxY) / 2) * halfH);
     }
+    const fitted = projectBox();
+    if (fitted) {
+      const spanNdc = Math.max(fitted.maxX - fitted.minX, fitted.maxY - fitted.minY);
+      if (spanNdc > 0.2) distance *= spanNdc / (fill * 2);
+    }
     camera.position.copy(target).addScaledVector(view, distance);
     camera.near = Math.max(distance / 200, 0.01);
     camera.far = Math.max(distance * 8, plateW + plateD);
     camera.lookAt(target);
     camera.updateProjectionMatrix();
     controls.target.copy(target);
-    controls.minDistance = distance * 0.35;
+    controls.minDistance = distance * 0.08;
     controls.maxDistance = distance * 4;
     controls.update();
     renderer.setSize(nextW, nextH);
