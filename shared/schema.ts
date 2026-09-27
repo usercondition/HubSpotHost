@@ -2236,9 +2236,10 @@ export interface ProductionQueueItem {
   shipByReason: string;
   /**
    * HubSpot contact ship-to readiness for label buy.
-   * Enriched for ship-ready / ready-to-pack rows; others default to missing.
+   * Ship-side rows are enriched from the contact. Before that lookup, and when
+   * it fails with nothing cached, the status is unknown — not missing.
    */
-  addressStatus: "ready" | "partial" | "missing" | "pickup";
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   /** Compact "City, ST" when available; "Local pickup" for pickup orders. */
   addressSummary: string | null;
   /** Copy-only Messenger/email chase when address is incomplete. */
@@ -2378,6 +2379,8 @@ export interface DealOpsDetail {
   stages: Array<{ id: string; label: string; closed: boolean }>;
   printers: Array<{ id: number; name: string; status: string }>;
   hubspotPortalId: string | null;
+  /** unknown when the contact read failed. The drawer still opens. */
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   writeGate: {
     dryRun: boolean;
     allowWrites: boolean;

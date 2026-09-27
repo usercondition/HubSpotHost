@@ -15,6 +15,7 @@ import path from "node:path";
 import express from "express";
 import { eq } from "drizzle-orm";
 import { fulfillmentChecklists, priorityStackEntries } from "../shared/schema";
+import { invalidateDealContactCache } from "../server/lib/deal-ops";
 
 const dbFile = path.join(os.tmpdir(), `print-files-test-${crypto.randomUUID()}.db`);
 const OWNER_CODE = "print-owner-code";
@@ -515,6 +516,7 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";
+  invalidateDealContactCache("701");
   mockDealProperties = {
     print_material_cost: "3.67",
     print_labor_cost: "0",
@@ -565,6 +567,7 @@ test("priced OfferUp label attach queues tracking-only notice on OfferUp", async
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";
+  invalidateDealContactCache("701");
   mockDealProperties = {
     print_material_cost: "3.67",
     print_labor_cost: "0",

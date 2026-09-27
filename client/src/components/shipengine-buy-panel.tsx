@@ -631,6 +631,7 @@ export function ShipEngineBuyPanel({
   const showAddressWarn =
     Boolean(hasActiveDeal) &&
     selectedPick?.addressStatus !== "pickup" &&
+    selectedPick?.addressStatus !== "unknown" &&
     selectedPick?.shippingRequired !== false &&
     ((shipToQuery.data && !shipToReady) ||
       (queueAddressStatus && queueAddressStatus !== "ready" && !shipToReady));
@@ -1218,6 +1219,7 @@ export function ShipEngineBuyPanel({
                             />
                             {item.addressStatus !== "ready" &&
                             item.addressStatus !== "pickup" &&
+                            item.addressStatus !== "unknown" &&
                             item.chaseDraft ? (
                               <Button
                                 type="button"

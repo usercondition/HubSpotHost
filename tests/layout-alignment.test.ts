@@ -24,7 +24,7 @@ const EXPENSE_FIXTURE = [
   { currency: "USD", amount_cents: 8500, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: null, category: "Equipment" },
   { currency: "USD", amount_cents: 4200, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, category: "Materials" },
 ] as any;
-const artifactsDir = process.env.ARTIFACTS_DIR;
+const artifactsDir = process.env.ARTIFACTS_DIR?.trim() || "";
 function artifactPath(name: string) {
   return artifactsDir ? `${artifactsDir}/${name}` : undefined;
 }
@@ -416,6 +416,8 @@ function bodyFor(input: string | URL) {
       amount: 80,
       tier: "committed",
       stage: "Ready to Ship",
+      blocker: "Needs address",
+      blockerSource: "auto",
       fulfillment: {
         dealId: "c1",
         addressVerified: false,
@@ -443,6 +445,8 @@ function bodyFor(input: string | URL) {
       stage: "Printing",
       tentative: true,
       targetDate: "2026-10-02",
+      blocker: "Address unchecked",
+      blockerSource: "auto",
     });
     const offbook = stackRow({
       key: "offbook",
@@ -1009,10 +1013,19 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal(await current().locator("[data-testid='button-bundle-selected']").count(), 0);
     const stackText = await current().getByTestId("stack-list").first().innerText();
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(stackText), false);
+    check(stackText.includes("Address unchecked"), `stack missing Address unchecked: ${stackText}`);
+    check(stackText.includes("Needs address"), `stack missing Needs address: ${stackText}`);
+    if (artifactPath("stack-address-desktop-1440.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
+    }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
     assert.match(cash, /\$1,305/);
+    if (artifactsDir) {
+      mkdirSync(artifactsDir, { recursive: true });
+      await page.screenshot({ path: artifactPath("stack-desktop-1440.png")!, fullPage: true });
+    }
     await checkDrawer("desktop");
     await checkLibrary("desktop");
 
@@ -1169,6 +1182,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(longTitle.text === "Cerastus Chassis - Castigator", `order title was ${longTitle.text}`);
     check(longTitle.lines >= 1 && longTitle.lines <= 2, `order title used ${longTitle.lines} lines`);
     check(longTitle.overflow.length === 0, `order title clipped: ${longTitle.overflow.join("|")}`);
+    if (artifactPath("orders-desktop-1440.png")) {
+      await page.screenshot({ path: artifactPath("orders-desktop-1440.png")!, fullPage: true });
+    }
     await current().locator("[data-testid='toggle-orders-view']").last().getByRole("button", { name: "Table" }).click();
     await current().locator("[data-testid='text-table-profit-b1']").first().waitFor();
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
@@ -1280,6 +1296,15 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='stack-row-committed']").first().waitFor();
+    const phoneStackText = await current().getByTestId("stack-list").first().innerText();
+    check(phoneStackText.includes("Address unchecked"), `phone stack missing Address unchecked: ${phoneStackText}`);
+    check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
+    if (artifactPath("stack-address-phone-390.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
+    if (artifactPath("stack-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
+    }
     await checkStackGrid("phone");
     const phoneRows = await current().locator("[data-testid^='stack-row-']").evaluateAll((els) =>
       els.filter((el) => el.getClientRects().length > 0).map((el) => {
@@ -1386,6 +1411,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-orders-phone']").first().waitFor();
+    if (artifactPath("orders-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("orders-phone-390.png")!, fullPage: true });
+    }
     const dealRefresh = await page.locator("[data-testid='button-refresh-deals']").evaluateAll((els) =>
       els.map((el) => getComputedStyle(el).display),
     );
