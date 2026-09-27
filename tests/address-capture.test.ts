@@ -771,6 +771,80 @@ describe("address capture save", { concurrency: 1 }, () => {
     assert.doesNotMatch(description, /9 First St/);
   });
 
+  test("a reused contact name and phone are filled only when blank", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "reuse-name.db");
+    resetOrderLinkStore();
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    const draft = {
+      paymentConfirmed: true,
+      fullName: "Ada Lovelace",
+      marketplaceUsername: "ada",
+      email: "ada@example.com",
+      phone: "734-555-0199",
+      address: "10909 Hannan Rd",
+      city: "Romulus",
+      state: "MI",
+      postalCode: "48174",
+      country: "US",
+      productName: "Knight",
+      amount: "40",
+      conversationSummary: "paid",
+    };
+    const patches: Array<Record<string, string>> = [];
+    let current: Record<string, string> = {
+      firstname: "",
+      lastname: "",
+      phone: "",
+      address: "9 First St",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as { properties?: Record<string, string> })
+        : {};
+      if (method === "GET" && url.includes("/contacts/")) return jsonResponse({ id: "88", properties: current });
+      if (method === "PATCH" && url.includes("/contacts/")) {
+        patches.push(body.properties ?? {});
+        return jsonResponse({ id: "88" });
+      }
+      throw new Error(`${method} ${url}`);
+    }) as typeof fetch;
+
+    const filled = await updateContact("88", draft);
+    assert.equal(filled, "kept");
+    assert.equal(patches.length, 1);
+    assert.equal(patches[0]?.firstname, "Ada");
+    assert.equal(patches[0]?.lastname, "Lovelace");
+    assert.equal(patches[0]?.phone, "734-555-0199");
+    assert.equal(patches[0]?.address, undefined);
+
+    patches.length = 0;
+    current = {
+      firstname: "Glenn",
+      lastname: "Chandler",
+      phone: "313-555-0101",
+      address: "9 First St",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    const kept = await updateContact("88", draft);
+    assert.equal(kept, "kept");
+    assert.equal(patches.length, 0);
+
+    await assert.rejects(
+      () => updateContact("88", { ...draft, address: "500 Other St" }, { confirmAddressReplace: true }),
+      (error: unknown) => error instanceof PaidOrderAddressConflict,
+    );
+    assert.equal(patches.length, 0);
+  });
+
   test("public address checks are rate limited and cached without tripping the label breaker", async () => {
     resetPublicAddressValidation();
     resetAddressCheckOutage();
