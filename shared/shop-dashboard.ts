@@ -39,6 +39,7 @@ export interface ShopDashboardOrder {
   amount: number | null;
   /** Entered deal material dollars, otherwise a deduplicated slicer plate estimate. */
   resinCost: number | null;
+  materialEstimated?: boolean;
   postage: number | null;
   /** Entered packaging, or 0 when the field is blank (free USPS boxes). */
   packaging: number;
@@ -248,6 +249,7 @@ function profitOf(orders: ShopDashboardOrder[], start: number | null, end: numbe
   let revenue = 0;
   let complete = 0;
   let missing = 0;
+  let estimated = false;
   for (const order of orders) {
     if (!inWindow(parseTime(order.createdAt), start, end)) continue;
     const row = moneyOnce(order);
@@ -256,11 +258,12 @@ function profitOf(orders: ShopDashboardOrder[], start: number | null, end: numbe
       continue;
     }
     complete += 1;
+    estimated ||= order.materialEstimated === true;
     profit = round2(profit + row.profit);
     cost = round2(cost + row.cost);
     revenue = round2(revenue + (order.amount ?? 0));
   }
-  return { profit, cost, revenue, complete, missing };
+  return { profit, cost, revenue, complete, missing, estimated };
 }
 
 function seriesFor(orders: ShopDashboardOrder[], window: Window): number[] {
@@ -356,7 +359,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "usd",
     previous: compare && priorProfit.complete > 0 ? priorProfit.profit : null,
     compare,
-    note: currentProfit.complete === 0 ? costNote || "No orders with a complete cost in this period." : costNote,
+    note: currentProfit.complete === 0 ? costNote || "No orders with a complete cost in this period." : currentProfit.estimated ? "est. Includes slicer resin estimates where material cost is blank." : costNote,
   });
 
   const margin = metric({
@@ -367,7 +370,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "percent",
     previous: compare && priorProfit.revenue > 0 ? round2((priorProfit.profit / priorProfit.revenue) * 100) : null,
     compare,
-    note: currentProfit.complete === 0 ? "Margin waits until at least one order has amount, resin, and postage." : costNote,
+    note: currentProfit.complete === 0 ? "Margin waits until at least one order has amount, resin, and postage." : currentProfit.estimated ? "est. Includes slicer resin estimates where material cost is blank." : costNote,
   });
 
   const costPer = metric({
@@ -378,7 +381,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     unit: "usd",
     previous: compare && priorProfit.complete > 0 ? round2(priorProfit.cost / priorProfit.complete) : null,
     compare,
-    note: currentProfit.complete === 0 ? "No orders with a complete cost in this period." : null,
+    note: currentProfit.complete === 0 ? "No orders with a complete cost in this period." : currentProfit.estimated ? "est. Includes slicer resin estimates where material cost is blank." : null,
   });
 
   let cash = 0;
