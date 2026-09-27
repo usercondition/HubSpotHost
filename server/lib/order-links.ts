@@ -14,6 +14,7 @@
  *   until the owner explicitly approves the intake.
  */
 import crypto from "node:crypto";
+import { cancelPlateMeshes } from "./plate-mesh-gate";
 import path from "node:path";
 import fs from "node:fs";
 import Database from "better-sqlite3";
@@ -458,6 +459,8 @@ CREATE TABLE IF NOT EXISTS plate_files (
   notes TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL,
   sha256 TEXT NOT NULL DEFAULT '',
+  mesh_drive_file_id TEXT NOT NULL DEFAULT '',
+  mesh_state TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -606,6 +609,10 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
     (sqlite.prepare("PRAGMA table_info(plate_files)").all() as Array<{ name: string }>).map((row) => row.name),
   );
   if (!existing.has("sha256")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN sha256 TEXT NOT NULL DEFAULT ''`);
+  if (!existing.has("mesh_drive_file_id")) {
+    sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_drive_file_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!existing.has("mesh_state")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_state TEXT NOT NULL DEFAULT ''`);
 }
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
@@ -781,6 +788,7 @@ export function getSqlite(): Database.Database {
 
 /** Test helper: drop the cached handle so a new DB file can be used. */
 export function resetOrderLinkStore(): void {
+  cancelPlateMeshes();
   sqliteConn?.close();
   sqliteConn = null;
   db = null;

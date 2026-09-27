@@ -1291,17 +1291,23 @@
     background: hsl(var(--background));
   }
 
-  .prints-library-switch a {
+  .prints-library-switch a,
+  .prints-library-switch button {
     display: flex;
+    width: 100%;
     height: 36px;
     align-items: center;
     justify-content: center;
+    border: 0;
+    background: transparent;
     font-size: 14px;
     font-weight: 500;
     color: hsl(var(--text-2));
+    cursor: pointer;
   }
 
-  .prints-library-switch a[data-active="true"] {
+  .prints-library-switch a[data-active="true"],
+  .prints-library-switch button[data-active="true"] {
     background: hsl(var(--raised));
     color: hsl(var(--foreground));
     font-weight: 600;

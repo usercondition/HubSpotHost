@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { plainDriveMessage, startPlateDownload } from "@/lib/plate-library-client";
+import { PlateLayerView } from "@/components/plate-layer-view";
 import { usedOnOrders, type PlateFileRecord, type PlatePreviewStats } from "@shared/plate-files";
 
 function formatDuration(seconds: number | null): string {
@@ -24,6 +25,30 @@ function formatCost(value: number | null): string {
   return `$${value.toFixed(2)}`;
 }
 
+function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Record<string, string> }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !file.meshDriveFileId) return;
+    let cancelled = false;
+    let stop = () => {};
+    void apiRequest("GET", `/api/plate-files/${encodeURIComponent(file.driveFileId)}/mesh`, undefined, { headers })
+      .then((response) => response.arrayBuffer())
+      .then(async (glb) => {
+        if (cancelled) return;
+        const view = await import("@/components/plate-mesh-view");
+        if (cancelled || !host.isConnected) return;
+        stop = await view.mountPlateMesh(host, glb);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [file.driveFileId, file.meshDriveFileId, headers]);
+  return <div ref={hostRef} className="relative mb-3 h-72 w-full overflow-hidden rounded-md bg-black touch-none" data-testid="plate-model-view" />;
+}
+
 function PreviewPanel({
   file,
   headers,
@@ -33,10 +58,14 @@ function PreviewPanel({
   headers: Record<string, string>;
   onClose: () => void;
 }) {
+  const canLayers = /\.ctb$/i.test(file.name);
+  const meshReady = Boolean(file.meshDriveFileId);
+  const [mode, setMode] = useState<"layers" | "model">("layers");
   const [imageUrl, setImageUrl] = useState("");
   const stats: PlatePreviewStats | null = file.stats;
+  const wantFlat = !canLayers || (mode === "model" && !meshReady);
   useEffect(() => {
-    if (!file.hasPreview || !file.sha256) return;
+    if (!wantFlat || !file.hasPreview || !file.sha256) return;
     let cancelled = false;
     let url = "";
     void apiRequest("GET", `/api/plate-previews/${file.sha256}`, undefined, { headers })
@@ -53,7 +82,7 @@ function PreviewPanel({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [file.hasPreview, file.sha256, headers]);
+  }, [wantFlat, file.hasPreview, file.sha256, headers]);
 
   const rows = [
     ["Kit", file.kit || "—"],
@@ -69,7 +98,7 @@ function PreviewPanel({
   return (
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 p-3 md:items-center" data-testid="panel-plate-preview" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-lg border border-border bg-card p-4"
+        className={`max-h-[90vh] w-full overflow-auto rounded-lg border border-border bg-card p-4 ${canLayers ? "max-w-3xl" : "max-w-lg"}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">
@@ -80,7 +109,44 @@ function PreviewPanel({
             Close
           </button>
         </div>
-        {imageUrl ? (
+        {canLayers ? (
+          <div className="prints-library-switch mb-3" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "layers"}
+              data-active={mode === "layers" ? "true" : "false"}
+              data-testid="button-view-layers"
+              onClick={() => setMode("layers")}
+            >
+              Layers
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "model"}
+              data-active={mode === "model" ? "true" : "false"}
+              data-testid="button-view-model"
+              onClick={() => setMode("model")}
+            >
+              3D
+            </button>
+          </div>
+        ) : null}
+        {canLayers && mode === "model" && meshReady ? (
+          <PlateMeshHost file={file} headers={headers} />
+        ) : canLayers && mode === "model" ? (
+          <div className="relative mb-3 grid h-72 place-items-stretch overflow-hidden rounded-md bg-black" data-testid="plate-model-view">
+            {imageUrl ? <img src={imageUrl} alt="" className="h-full w-full object-contain" data-testid="img-plate-preview" /> : null}
+            {file.meshState !== "ready" ? (
+              <p className="absolute bottom-2 left-2 text-xs text-zinc-300" data-testid="text-mesh-preparing">
+                3D preparing
+              </p>
+            ) : null}
+          </div>
+        ) : canLayers ? (
+          <PlateLayerView file={file} headers={headers} />
+        ) : imageUrl ? (
           <img src={imageUrl} alt="" className="mb-3 max-h-48 w-full rounded-md bg-black object-contain md:max-h-80" data-testid="img-plate-preview" />
         ) : (
           <p className="mb-3 text-sm text-muted-foreground" data-testid="text-plate-preview-missing">

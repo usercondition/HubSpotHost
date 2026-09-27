@@ -175,6 +175,10 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     assert.equal(locked.status, 401);
     const lockedStart = await fetch(`${base}/api/google/oauth/start`);
     assert.equal(lockedStart.status, 401);
+    const layersLocked = await fetch(`${base}/api/plate-files/missing/layers`);
+    assert.equal(layersLocked.status, 401);
+    const meshLocked = await fetch(`${base}/api/plate-files/missing/mesh`);
+    assert.equal(meshLocked.status, 401);
 
     const start = await fetch(`${base}/api/google/oauth/start`, { headers });
     assert.equal(start.status, 200);
@@ -212,6 +216,10 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     assert.equal(okBody.file.kit, "Castigator");
     assert.equal(okBody.file.source, "upload");
     assert.deepEqual(okBody.file.orderKeys, ["deal:81"]);
+    assert.equal(okBody.file.meshDriveFileId, "");
+    assert.equal(okBody.file.meshState, "");
+    assert.equal(listPlateFiles({}).files.length, 1);
+    assert.equal(/Ada|Glenn|Wayne|Daniel/.test(JSON.stringify(okBody.file)), false);
 
     mode = "no-id";
     const failed = await upload("Land_Raider_12K.ctb", "deal:81");

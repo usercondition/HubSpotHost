@@ -230,6 +230,16 @@ function bodyFor(url: URL, downloadError: boolean): { status: number; contentTyp
       }),
     };
   }
+  if (/\/api\/plate-files\/[^/]+\/layers\/\d+$/.test(pathname)) {
+    return { status: 200, contentType: "application/octet-stream", body: Buffer.from([0x80 | 0x7f, 4]) };
+  }
+  if (/\/api\/plate-files\/[^/]+\/layers$/.test(pathname)) {
+    return {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, layerCount: 420, width: 4, height: 1 }),
+    };
+  }
   if (pathname === "/api/plate-files/reuse") {
     return { status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, file: REUSE_FILE }) };
   }

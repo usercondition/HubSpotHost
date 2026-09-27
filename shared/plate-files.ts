@@ -202,6 +202,10 @@ export interface PlateFileRecord {
   printRecordIds: number[];
   hasPreview: boolean;
   stats: PlatePreviewStats | null;
+  /** Drive id of the GLB built from this .ctb. Empty until generation finishes. */
+  meshDriveFileId: string;
+  /** "" while missing, "preparing" in flight, "ready" when finished (even if the plate was empty). */
+  meshState: string;
 }
 
 export interface PlateLibraryPending {
