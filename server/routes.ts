@@ -60,6 +60,7 @@ import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyn
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
+import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
@@ -888,6 +889,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         clientLinkWorkflow: "enabled",
       },
       storage: describeOrderLinksStorage(),
+      geo: { zipCentroids: zipCentroidsHealth() },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         callbackToken: process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim()
@@ -1885,6 +1887,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         postageUsd,
         packingDone: parsed.data.packingDone,
         labelBought: true,
+        markComplete: true,
         messageChannel: parsed.data.messageChannel,
         liveWrite: parsed.data.liveWrite,
         shipengine: {
@@ -2162,10 +2165,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!SHOP_PERIODS.includes(period as ShopPeriodId)) {
         return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
       }
-      const shipTos = await loadDealShipTos(deals.map((deal) => deal.id));
+      const shipToLoad = await loadDealShipTos(deals.map((deal) => deal.id));
       return res.json({
         ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos }),
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete }),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
@@ -2413,7 +2416,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
-      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+      return res.json({ ...result, ok: result.ok || Boolean(result.skipped) });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
@@ -2432,7 +2435,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const queue = await loadProductionQueue({ enrichAddresses: false, refreshStages: true });
       const result = await syncShipByGoogleCalendar(queueItemsForShipByGcal(queue), process.env);
-      return res.json({ ok: result.ok || Boolean(result.skipped), ...result });
+      return res.json({ ...result, ok: result.ok || Boolean(result.skipped) });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({

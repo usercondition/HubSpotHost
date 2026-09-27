@@ -311,6 +311,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
       needsReply: deal.needsReply === true,
+      tentative: tentativeDeals.has(deal.dealId),
       fulfillment: checklistForDeal(deal.dealId, checklists.get(deal.dealId), deal.costsComplete),
     };
     const bucket = classifyBucket(base);
@@ -340,7 +341,6 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       bucket,
       readyToPack,
       shippingRequired,
-      tentative: tentativeDeals.has(deal.dealId),
       priorityScore: priorityScore(base),
       // Defaults until attachShipAddressReadiness enriches ship-side rows.
       ...addressDefaults,
