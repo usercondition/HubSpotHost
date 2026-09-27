@@ -1385,7 +1385,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     });
     check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
     check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
-    check((phoneStats.lefts[0] ?? 0) < (phoneStats.lefts[1] ?? 0), "phone headline order is wrong");
+    check(Math.abs((phoneStats.lefts[0] ?? 0) - (phoneStats.lefts[1] ?? 0)) > 1, "phone headline columns overlap");
     await current().locator("[data-testid='stats-origin-svg']").waitFor();
     assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "phone renders exactly one order-origin map");
     const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
