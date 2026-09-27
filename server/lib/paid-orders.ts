@@ -226,10 +226,10 @@ export function keptOrderAddressLine(draft: PaidOrderDraft): string {
 export type ContactAddressWrite = "filled" | "replaced" | "kept" | "unchanged";
 
 /**
- * Refresh name and phone when a contact is reused.
- * Address fields are written only when HubSpot's address is blank.
+ * Name, phone, and address are written only when that HubSpot field is blank.
  * A different non-blank address is replaced only after an explicit confirm,
  * and the previous value is logged before that write.
+ * A non-blank name or phone is left as HubSpot has it.
  */
 export async function updateContact(
   contactId: string,
@@ -241,10 +241,11 @@ export async function updateContact(
   for (const key of ADDRESS_KEYS) delete properties[key];
 
   const currentRecord = await hubspotRequest(
-    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=address,city,state,zip,country`,
+    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,phone,address,city,state,zip,country`,
     { method: "GET" },
   );
-  const current = readRawAddress((currentRecord?.properties ?? {}) as Record<string, string | null>);
+  const rawProps = (currentRecord?.properties ?? {}) as Record<string, string | null>;
+  const current = readRawAddress(rawProps);
   const wantsAddress = nextHasAddress(next);
   const differs = wantsAddress && !rawAddressBlank(current) && addressesDiffer(current, next);
   let mode: ContactAddressWrite = "unchanged";
@@ -273,6 +274,10 @@ export async function updateContact(
   } else if (differs) {
     mode = "kept";
   }
+
+  if (String(rawProps.firstname ?? "").trim()) delete properties.firstname;
+  if (String(rawProps.lastname ?? "").trim()) delete properties.lastname;
+  if (String(rawProps.phone ?? "").trim()) delete properties.phone;
 
   if (Object.keys(properties).length === 0) return mode;
   await hubspotRequest(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
