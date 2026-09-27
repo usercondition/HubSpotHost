@@ -657,6 +657,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
     for (const route of ["/", "/deals", "/performance", "/printers", "/performance"]) {
       await page.goto(`${base}/#${route}`, { waitUntil: "domcontentloaded" });
+      await page.locator("main [data-testid='page-transition']").waitFor();
       if (route === "/performance") await assertOneStatsPage();
       else assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, `one page transition remains on ${route}`);
     }
