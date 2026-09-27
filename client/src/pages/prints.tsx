@@ -254,7 +254,7 @@ export default function Prints() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sliceLogInputRef = useRef<HTMLInputElement>(null);
-  const logsFolderInputRef = useRef<HTMLInputElement>(null);
+  const logsFolderInputRef = useRef<HTMLInputElement | null>(null);
   /** ULTX waiting while the user re-picks Blueprint logs (AppData cannot auto-refresh). */
   const pendingUltxRef = useRef<File | null>(null);
   const awaitingLogsRefreshRef = useRef(false);
@@ -1004,7 +1004,7 @@ export default function Prints() {
                   data-testid="input-slice-log"
                 />
                 <input
-                  ref={(element) => {
+                  ref={(element: HTMLInputElement | null) => {
                     logsFolderInputRef.current = element;
                     if (element) {
                       element.setAttribute("webkitdirectory", "");

@@ -169,7 +169,7 @@ function QueueColumn({
   testId: string;
   lane: "plates" | "fly" | "warn" | "bad" | "good" | "shop";
 }) {
-  const hours = items.reduce((sum, item) => sum + (item.totalPrintTimeSeconds > 0 ? item.totalPrintTimeSeconds : 0), 0);
+  const hours = items.reduce((sum, item) => sum + ((item.totalPrintTimeSeconds ?? 0) > 0 ? item.totalPrintTimeSeconds ?? 0 : 0), 0);
   const dollars = items.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
   return (
     <section className="queue-lane min-w-0" data-lane={lane} data-testid={testId}>
