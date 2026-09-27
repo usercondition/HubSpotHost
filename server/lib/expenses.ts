@@ -43,13 +43,20 @@ export function createExpense(input: ExpenseInput) {
   })();
 }
 
+export function createExpenses(inputs: ExpenseInput[]) {
+  const db = getSqlite();
+  return db.transaction(() => inputs.map(createExpense))();
+}
+
 export function archiveExpense(id: string) {
   const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   if (!before || (before as { archived_at?: string }).archived_at) return null; const now = new Date().toISOString();
+  return db.transaction(() => {
   db.prepare("UPDATE expenses SET archived_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
   const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "archived", JSON.stringify(before), JSON.stringify(after), now);
   return after;
+  })();
 }
 
 export function updateExpense(id: string, input: ExpenseInput) {
@@ -57,11 +64,13 @@ export function updateExpense(id: string, input: ExpenseInput) {
   const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ? AND archived_at IS NULL").get(id);
   if (!before) return null;
   const now = new Date().toISOString();
+  return db.transaction(() => {
   db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,updated_at=? WHERE id=?`)
     .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", now, id);
   const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "updated", JSON.stringify(before), JSON.stringify(after), now);
   return after;
+  })();
 }
 
 export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {

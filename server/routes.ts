@@ -60,7 +60,8 @@ import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyn
 import { telegramConfigured } from "./lib/telegram";
 import { suggestAddresses } from "./lib/address-suggest";
 import { CtbParseError } from "./lib/ctb";
-import { archiveExpense, createExpense, listExpenses, overheadForPeriod, updateExpense, type ExpenseInput } from "./lib/expenses";
+import { listExpenses, overheadForPeriod } from "./lib/expenses";
+import { registerExpenseRoutes } from "./lib/expense-routes";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -1012,43 +1013,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  /** Owner-only Print Ops overhead; never synchronizes to HubSpot. */
-  app.get("/api/expenses", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    return res.json({ expenses: listExpenses(String(req.query.archived ?? "") === "1") });
-  });
-  app.post("/api/expenses", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      return res.status(201).json({ expense: createExpense(req.body as ExpenseInput) });
-    } catch (error) {
-      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Could not save expense." });
-    }
-  });
-  app.post("/api/expenses/bulk", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const rows = Array.isArray(req.body?.expenses) ? req.body.expenses : null;
-    if (!rows) return res.status(400).json({ ok: false, error: "expenses must be an array." });
-    try {
-      return res.status(201).json({ expenses: rows.map((row: unknown) => createExpense(row as ExpenseInput)) });
-    } catch (error) {
-      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Could not save expenses." });
-    }
-  });
-  app.put("/api/expenses/:id", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const expense = updateExpense(String(req.params.id), req.body as ExpenseInput);
-      return expense ? res.json({ expense }) : res.status(404).json({ ok: false, error: "Expense not found." });
-    } catch (error) {
-      return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Could not update expense." });
-    }
-  });
-  app.post("/api/expenses/:id/archive", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const expense = archiveExpense(String(req.params.id));
-    return expense ? res.json({ expense }) : res.status(404).json({ ok: false, error: "Expense not found." });
-  });
+  registerExpenseRoutes(app);
 
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
