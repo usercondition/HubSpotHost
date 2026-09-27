@@ -19,6 +19,7 @@ import {
 import { invalidateDealContactCache, type DealAssociatedContact } from "../server/lib/deal-ops";
 import { listOrderUpdates } from "../server/lib/order-updates";
 import { resetOrderLinkStore } from "../server/lib/order-links";
+import { getFulfillmentChecklist } from "../server/lib/fulfillment";
 import { createOffbook } from "../server/lib/priority-stack";
 
 const WAYNE_STREET = "10909 Hannan Rd, Romulus, Michigan, 48174";
@@ -478,4 +479,44 @@ test("off-book ship save splits a combined street and does not call HubSpot", as
   assert.equal(row.shipCity, "Romulus");
   assert.equal(row.shipState, "MI");
   assert.equal(row.shipZip, "48174");
+});
+
+test("a verified ShipEngine check sets the local address step and does not call HubSpot", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "addr-verified-"));
+  const previousDb = process.env.ORDER_LINKS_DB_FILE;
+  const originalFetch = globalThis.fetch;
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "verified.db");
+  resetOrderLinkStore();
+  globalThis.fetch = (async () => {
+    throw new Error("address verification must not call HubSpot");
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (previousDb === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previousDb;
+    resetOrderLinkStore();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const dealId = "349919419125";
+  saveAddressCheck({
+    dealId,
+    addressHash: "abc",
+    status: "corrected",
+    checkedAt: "2026-09-27T00:00:00.000Z",
+    matched: null,
+    messages: [],
+  });
+  assert.equal(getFulfillmentChecklist(dealId).addressVerified, false);
+  saveAddressCheck({
+    dealId,
+    addressHash: "abc",
+    status: "verified",
+    checkedAt: "2026-09-27T00:00:00.000Z",
+    matched: null,
+    messages: [],
+  });
+  assert.equal(getFulfillmentChecklist(dealId).addressVerified, true);
+  const { getSqlite } = await import("../server/lib/order-links");
+  getSqlite().prepare(`UPDATE fulfillment_checklists SET address_verified = 0 WHERE hubspot_deal_id = ?`).run(dealId);
+  assert.equal(getFulfillmentChecklist(dealId).addressVerified, true);
 });

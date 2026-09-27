@@ -10,6 +10,7 @@ import {
   type FulfillmentChecklistView,
   type UpdateFulfillmentChecklistInput,
 } from "../../shared/schema";
+import { readAddressCheck } from "./address-checks";
 import { getConfig, resolveWriteDecision } from "./config";
 import { ensurePrintFileDealProperties, HubSpotError } from "./hubspot";
 import { getDb } from "./order-links";
@@ -100,11 +101,18 @@ export function withDerivedCostsEntered(
   };
 }
 
+/** A stored verified ShipEngine check counts as the local address step. No HubSpot write. */
+export function withStoredAddressVerification(checklist: FulfillmentChecklistView): FulfillmentChecklistView {
+  if (checklist.addressVerified || !checklist.dealId) return checklist;
+  if (readAddressCheck(checklist.dealId)?.status !== "verified") return checklist;
+  return withDerivedCostsEntered({ ...checklist, addressVerified: true }, checklist.costsEntered);
+}
+
 export function getFulfillmentChecklist(dealId: string): FulfillmentChecklistView {
   const id = dealId.trim();
   if (!id) return emptyChecklist("");
   const row = getDb().select().from(fulfillmentChecklists).where(eq(fulfillmentChecklists.hubspotDealId, id)).get();
-  return toChecklistView(id, row ?? null);
+  return withStoredAddressVerification(toChecklistView(id, row ?? null));
 }
 
 /** Normalize carrier tracking for duplicate checks (case / spaces / dashes). */

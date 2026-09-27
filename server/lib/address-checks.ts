@@ -156,6 +156,24 @@ export function saveAddressCheck(check: StoredAddressCheck): void {
       check.matched ? JSON.stringify(check.matched) : "",
       JSON.stringify(check.messages),
     );
+  if (check.status === "verified") rememberVerifiedAddress(check.dealId);
+}
+
+/** Local checklist only. A verified ShipEngine check never writes HubSpot. */
+function rememberVerifiedAddress(dealId: string): void {
+  if (!/^[0-9]{1,20}$/.test(dealId)) return;
+  const now = new Date().toISOString();
+  getSqlite()
+    .prepare(
+      `INSERT INTO fulfillment_checklists (
+         hubspot_deal_id, address_verified, costs_entered, label_bought, tracking_pasted, packing_done,
+         tracking_number, notes, shipengine_label_id, shipengine_carrier, shipengine_service, updated_at, created_at
+       ) VALUES (?, 1, 0, 0, 0, 0, '', '', '', '', '', ?, ?)
+       ON CONFLICT(hubspot_deal_id) DO UPDATE SET
+         address_verified = 1,
+         updated_at = excluded.updated_at`,
+    )
+    .run(dealId, now, now);
 }
 
 export type EnsuredAddressCheck = {

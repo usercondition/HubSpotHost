@@ -15,7 +15,7 @@ import {
 import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
 import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
-import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
+import { listFulfillmentChecklists, withDerivedCostsEntered, withStoredAddressVerification } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
 import { getDb, listOrderLinks } from "./order-links";
@@ -46,7 +46,7 @@ function checklistForDeal(
   stored: FulfillmentChecklistView | undefined,
   costsComplete: boolean | undefined,
 ): FulfillmentChecklistView {
-  const checklist = stored ?? blankChecklist(dealId);
+  const checklist = withStoredAddressVerification(stored ?? blankChecklist(dealId));
   if (typeof costsComplete !== "boolean") return checklist;
   return withDerivedCostsEntered(checklist, costsComplete);
 }

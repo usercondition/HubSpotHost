@@ -463,6 +463,34 @@ function bodyFor(input: string | URL) {
       lane: "shop",
       steps: [{ label: "Print", done: false }],
     });
+    const overdue = stackRow({
+      key: "overdue",
+      rank: 5,
+      dealId: "c9",
+      name: "Armigers - Jose",
+      contactName: "Jose",
+      amount: 60,
+      tier: "committed",
+      stage: "Printing",
+      targetDate: "2026-09-24",
+      targetSource: "derived",
+      blocker: "Reprint the shoulder",
+      fulfillment: {
+        dealId: "c9",
+        addressVerified: false,
+        costsEntered: false,
+        labelBought: false,
+        trackingPasted: false,
+        packingDone: false,
+        trackingNumber: "",
+        notes: "",
+        completedCount: 1,
+        totalCount: 5,
+        readyPercent: 20,
+        shipReady: false,
+        updatedAt: null,
+      },
+    });
     const bundle = stackRow({
       key: "bundle",
       rank: 4,
@@ -501,7 +529,7 @@ function bodyFor(input: string | URL) {
       generatedAt: "2026-09-25T19:39:00.000Z",
       today: TODAY,
       weekEnd: "2026-10-02",
-      rows: [committed, tentative, offbook, bundle],
+      rows: [committed, tentative, offbook, overdue, bundle],
       outTheDoor: [
         stackRow({
           key: "shipped",
@@ -1338,6 +1366,62 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         };
       }),
     );
+    const phoneActions = await current().locator(".stack-phone-tools").evaluateAll((rows) =>
+      rows
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) => {
+          const selectors = [
+            ".stage-chip",
+            ".stack-prog",
+            "[data-testid^='button-target-']",
+            "[data-testid^='button-up-mobile-']",
+            "[data-testid^='button-down-mobile-']",
+          ];
+          const parts = [];
+          for (const selector of selectors) {
+            const el = row.querySelector(selector);
+            if (!el || el.getClientRects().length === 0) continue;
+            const rect = el.getBoundingClientRect();
+            parts.push({
+              text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+              scroll: el.scrollWidth,
+              client: el.clientWidth,
+            });
+          }
+          const rowBox = row.getBoundingClientRect();
+          return {
+            id: row.closest("[data-testid]")?.getAttribute("data-testid") ?? "",
+            rowLeft: rowBox.left,
+            rowRight: rowBox.right,
+            parts,
+          };
+        }),
+    );
+    check(phoneActions.some((row) => row.parts.some((part) => part.text.includes("Overdue"))), "phone overdue row missing");
+    for (const row of phoneActions) {
+      check(row.parts.length === 5, `${row.id} phone tools missing a pill, count, date, or arrow`);
+      for (const part of row.parts) {
+        check(part.left >= row.rowLeft - 1 && part.right <= row.rowRight + 1, `${row.id} ${part.text} leaves the action row`);
+        check(part.scroll <= part.client + 1, `${row.id} ${part.text} clipped (${part.scroll} > ${part.client})`);
+      }
+      for (let left = 0; left < row.parts.length; left += 1) {
+        for (let right = left + 1; right < row.parts.length; right += 1) {
+          const a = row.parts[left]!;
+          const b = row.parts[right]!;
+          const overlap =
+            Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+            Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+          check(!overlap, `${row.id} ${a.text} overlaps ${b.text}`);
+        }
+      }
+    }
+    if (artifactPath("stack-overdue-phone-390.png")) {
+      await current().locator("[data-testid='stack-row-overdue']").screenshot({ path: artifactPath("stack-overdue-phone-390.png")! });
+    }
     check(phoneRows.length >= 3, "phone stack rows missing");
     check(phoneRows.some((row) => row.id === "stack-row-m3"), "expanded bundle member missing from the phone gate");
     for (const row of phoneRows) {

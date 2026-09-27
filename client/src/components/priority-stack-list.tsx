@@ -537,15 +537,17 @@ export function StackRow({
         <div className="stack-date stack-desktop-only min-w-0">
           <DateEditor row={row} headers={headers} onSaved={onSaved} today={today} />
         </div>
-        <div className="stack-mobile-actions items-center gap-2">
+        <div className="stack-mobile-actions stack-phone-tools">
           <ChecklistPopover row={row} headers={headers} onSaved={onSaved} />
           <DateEditor row={row} headers={headers} onSaved={onSaved} today={today} />
-          <Button type="button" size="icon" variant="ghost" className="ml-auto h-8 w-8" onClick={() => onMove(-1)} data-testid={`button-up-mobile-${row.key}`}>
-            <ArrowUp className="h-4 w-4" />
-          </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onMove(1)} data-testid={`button-down-mobile-${row.key}`}>
-            <ArrowDown className="h-4 w-4" />
-          </Button>
+          <div className="stack-phone-nudge">
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => onMove(-1)} data-testid={`button-up-mobile-${row.key}`}>
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => onMove(1)} data-testid={`button-down-mobile-${row.key}`}>
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
       <span className="stack-money stack-clip text-sm font-medium">{money(row.amount)}</span>
