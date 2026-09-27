@@ -504,6 +504,17 @@ export const orderIntakeLinks = sqliteTable("order_intake_links", {
   shippingState: text("shipping_state").notNull().default(""),
   shippingPostalCode: text("shipping_postal_code").notNull().default(""),
   shippingCountry: text("shipping_country").notNull().default(""),
+  /** ShipEngine result from the client form: verified, corrected, unverified, unchecked, or error. */
+  addressCheckStatus: text("address_check_status").notNull().default(""),
+  addressCheckedAt: text("address_checked_at").notNull().default(""),
+  /** typed or suggested — which version the buyer confirmed for the label. */
+  addressCheckChoice: text("address_check_choice").notNull().default(""),
+  addressCheckMessages: text("address_check_messages").notNull().default(""),
+  /** When the buyer checked the name-and-address acknowledgment. Empty until they do. */
+  addressAckAt: text("address_ack_at").notNull().default(""),
+  addressAckSnapshot: text("address_ack_snapshot").notNull().default(""),
+  addressAckTextVersion: text("address_ack_text_version").notNull().default(""),
+  addressAckForm: text("address_ack_form").notNull().default(""),
   confirmedItem: text("confirmed_item").notNull().default(""),
   quantity: integer("quantity").notNull().default(1),
   clientNotes: text("client_notes").notNull().default(""),
@@ -1969,6 +1980,11 @@ export const priorityStackEntries = sqliteTable("priority_stack_entries", {
   doneAt: text("done_at"),
   doneAmount: text("done_amount").notNull().default(""),
   doneName: text("done_name").notNull().default(""),
+  shipStreet: text("ship_street").notNull().default(""),
+  shipCity: text("ship_city").notNull().default(""),
+  shipState: text("ship_state").notNull().default(""),
+  shipZip: text("ship_zip").notNull().default(""),
+  shipCountry: text("ship_country").notNull().default(""),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -2071,6 +2087,11 @@ export const offbookEntrySchema = z.object({
   tentative: z.boolean().optional(),
   hidden: z.boolean().optional(),
   steps: z.array(offbookStepSchema).max(12).optional(),
+  shipStreet: z.string().trim().max(200).optional().default(""),
+  shipCity: z.string().trim().max(100).optional().default(""),
+  shipState: z.string().trim().max(40).optional().default(""),
+  shipZip: z.string().trim().max(20).optional().default(""),
+  shipCountry: z.string().trim().max(40).optional().default(""),
 });
 
 export const stackDoneSchema = z.object({
@@ -2236,9 +2257,10 @@ export interface ProductionQueueItem {
   shipByReason: string;
   /**
    * HubSpot contact ship-to readiness for label buy.
-   * Enriched for ship-ready / ready-to-pack rows; others default to missing.
+   * Ship-side rows are enriched from the contact. Before that lookup, and when
+   * it fails with nothing cached, the status is unknown — not missing.
    */
-  addressStatus: "ready" | "partial" | "missing" | "pickup";
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   /** Compact "City, ST" when available; "Local pickup" for pickup orders. */
   addressSummary: string | null;
   /** Copy-only Messenger/email chase when address is incomplete. */
@@ -2378,11 +2400,15 @@ export interface DealOpsDetail {
   stages: Array<{ id: string; label: string; closed: boolean }>;
   printers: Array<{ id: number; name: string; status: string }>;
   hubspotPortalId: string | null;
+  /** unknown when the contact read failed. The drawer still opens. */
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   writeGate: {
     dryRun: boolean;
     allowWrites: boolean;
     liveWriteReady: boolean;
   };
+  /** "Client confirmed name and address on <date>" or "Entered by shop". Absent when nobody recorded one. */
+  addressEntryLabel: string | null;
 }
 
 export interface ReturningBuyerProfile {

@@ -20,8 +20,8 @@ import {
 import { getDb } from "./order-links";
 import { CtbParseError, parseCtbFile, parseCtbFileFromPath, parseCtbFileFromPrefix } from "./ctb";
 import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
-import { savePlatePreview } from "./plate-files";
-import type { PlatePreviewStats } from "../../shared/plate-files";
+import { findPlateBySha256, libraryMarksForPrints, linkPlatePrint, savePlatePreview } from "./plate-files";
+import type { PlatePreviewStats, PrintLibraryMark } from "../../shared/plate-files";
 import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
@@ -236,6 +236,8 @@ export function createPrintFileRecord(input: {
   fleetPrinterId?: number | null;
 }): PrintFileRecord {
   const { metrics } = input;
+  const already = findPrintFileByFingerprint(input.hubspotDealId, metrics.sha256);
+  if (already) return already;
   const attachedAt = nowIso();
   return getDb()
     .insert(printFileRecords)
@@ -279,13 +281,21 @@ export function createPrintFileRecord(input: {
     .get();
 }
 
+function attachLibraryMarks(rows: PrintFileRecord[]): PrintFileRecord[] {
+  if (rows.length === 0) return rows;
+  const marks = libraryMarksForPrints(rows.map((row) => row.id));
+  const missing: PrintLibraryMark = { status: "missing", driveFileId: "", error: "" };
+  return rows.map((row) => Object.assign({}, row, { library: marks.get(row.id) ?? missing }));
+}
+
 export function listPrintFileRecords(limit = 100): PrintFileRecord[] {
-  return getDb()
+  const rows = getDb()
     .select()
     .from(printFileRecords)
     .orderBy(desc(printFileRecords.attachedAt), desc(printFileRecords.id))
     .limit(Math.max(1, Math.min(limit, 500)))
     .all();
+  return attachLibraryMarks(rows);
 }
 
 /**
@@ -327,13 +337,16 @@ export function getPrintFileRecord(recordId: number): PrintFileRecord | null {
 export function findPrintFileByFingerprint(hubspotDealId: string, sha256: string): PrintFileRecord | null {
   const fingerprint = sha256.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(fingerprint)) return null;
-  return (
+  const row =
     getDb()
       .select()
       .from(printFileRecords)
       .where(and(eq(printFileRecords.hubspotDealId, hubspotDealId), eq(printFileRecords.sha256, fingerprint)))
-      .get() ?? null
-  );
+      .get() ?? null;
+  if (!row) return null;
+  const libraryFile = findPlateBySha256(`deal:${hubspotDealId}`, fingerprint);
+  if (libraryFile) linkPlatePrint(libraryFile.driveFileId, row.id);
+  return row;
 }
 
 export function deletePrintFileRecord(recordId: number): PrintFileRecord | null {
@@ -469,6 +482,10 @@ export function buildPrintFileOrderSummary(
   hubspotDealId: string,
   latest: PrintFileMetrics,
 ): PrintFileOrderSummary {
+  if (findPrintFileByFingerprint(hubspotDealId, latest.sha256)) {
+    const current = buildPrintFileOrderSummaryFromRecords(hubspotDealId);
+    if (current) return current;
+  }
   const existing = listPrintFileRecordsForDeal(hubspotDealId);
   return {
     plateCount: existing.length + 1,

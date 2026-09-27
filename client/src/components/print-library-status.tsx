@@ -77,16 +77,25 @@ export function useSendPlateToLibrary(headers: Record<string, string>) {
   return { jobs, send };
 }
 
+type LibraryPrintRecord = {
+  id: number;
+  sha256: string;
+  fileName: string;
+  hubspotDealName: string;
+  hubspotDealId: string;
+  library?: PrintLibraryMark;
+};
+
 export function PrintLibraryStatus({
   record,
   job,
   onSend,
   onMismatch,
 }: {
-  record: { id: number; sha256: string; fileName: string; hubspotDealName: string; hubspotDealId: string; library?: PrintLibraryMark };
+  record: LibraryPrintRecord;
   headers: Record<string, string>;
   job?: LibraryJob;
-  onSend: (file: File, record: PrintLibraryStatus["record"], sha256: string) => void;
+  onSend: (file: File, record: LibraryPrintRecord, sha256: string) => void;
   onMismatch: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);

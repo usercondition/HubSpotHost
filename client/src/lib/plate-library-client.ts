@@ -40,8 +40,9 @@ export async function fingerprintFile(file: File): Promise<string> {
 
 export function splitDealTitle(dealName: string): { kit: string; customer: string } {
   const parts = dealName.split(/\s+[–—-]\s+/).map((part) => part.trim()).filter(Boolean);
-  const customer = parts.length >= 2 ? parts[parts.length - 1] ?? "" : "";
-  return { kit: libraryKitName(dealName), customer };
+  const last = parts.length >= 2 ? parts[parts.length - 1] ?? "" : "";
+  const customer = last.split(/\s+/).length >= 2 ? last : "";
+  return { kit: libraryKitName(dealName, customer || undefined), customer };
 }
 
 export type PrepareResult =

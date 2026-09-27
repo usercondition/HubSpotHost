@@ -24,6 +24,14 @@ export const HUBSPOT_WEBHOOK_SUBSCRIPTIONS = [
   "deal.propertyChange: dealstage",
   "deal.creation",
   "deal.deletion",
+  "contact.propertyChange: address",
+  "contact.propertyChange: city",
+  "contact.propertyChange: state",
+  "contact.propertyChange: zip",
+  "contact.propertyChange: firstname",
+  "contact.propertyChange: lastname",
+  "contact.propertyChange: email",
+  "deal.associationChange",
 ] as const;
 
 export interface EventSummary {
@@ -41,6 +49,10 @@ export interface EventSummary {
   ignoredOutputEvents: number;
   /** Events ignored for any other reason (wrong object, other property, no id). */
   ignoredOther: number;
+  /** Deals whose contact cache should drop. Association and lifecycle events. */
+  contactCacheDealIds: string[];
+  /** HubSpot contact ids whose cached deals should drop. */
+  contactIds: string[];
 }
 
 function asArray(payload: unknown): unknown[] {
@@ -107,6 +119,12 @@ function readSubscription(event: Record<string, unknown>): string {
   return typeof raw === "string" ? raw.trim().toLowerCase() : "";
 }
 
+function readLooseId(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return String(Math.trunc(value));
+  if (typeof value === "string" && /^[0-9]{1,20}$/.test(value.trim())) return value.trim();
+  return null;
+}
+
 export function summarizeEvents(payload: unknown): EventSummary {
   const events = asArray(payload);
   const dealIds: string[] = [];
@@ -116,6 +134,10 @@ export function summarizeEvents(payload: unknown): EventSummary {
   let cacheBust = false;
   let ignoredOutputEvents = 0;
   let ignoredOther = 0;
+  const contactCacheDealIds: string[] = [];
+  const contactIds: string[] = [];
+  const seenContactDeals = new Set<string>();
+  const seenContacts = new Set<string>();
 
   for (const raw of events) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -137,6 +159,29 @@ export function summarizeEvents(payload: unknown): EventSummary {
     ) {
       lifecycle += 1;
       cacheBust = true;
+      const dealId = readDealId(event);
+      if (dealId && !seenContactDeals.has(dealId)) {
+        seenContactDeals.add(dealId);
+        contactCacheDealIds.push(dealId);
+      }
+      continue;
+    }
+    // Contact and association changes can move a ship-to without touching deal inputs.
+    // Clear that deal only. These events are subscribed; a full-cache wipe is not.
+    if (subscription.startsWith("contact.") || subscription.includes("association")) {
+      if (subscription.includes("association")) {
+        const dealId = readLooseId(event.fromObjectId ?? event.fromObjectIdString) ?? readDealId(event);
+        if (dealId && !seenContactDeals.has(dealId)) {
+          seenContactDeals.add(dealId);
+          contactCacheDealIds.push(dealId);
+        }
+      } else {
+        const contactId = readLooseId(event.objectId ?? event.objectIdString);
+        if (contactId && !seenContacts.has(contactId)) {
+          seenContacts.add(contactId);
+          contactIds.push(contactId);
+        }
+      }
       continue;
     }
     if (!isDealEvent(event) || !property || !INPUT_SET.has(property)) {
@@ -163,5 +208,7 @@ export function summarizeEvents(payload: unknown): EventSummary {
     lifecycle,
     ignoredOutputEvents,
     ignoredOther,
+    contactCacheDealIds,
+    contactIds,
   };
 }

@@ -7,6 +7,7 @@
  */
 
 import type { PaidOrderAnalysis, PaidOrderDraft } from "../../shared/schema";
+import { normalizeShipAddress } from "../../shared/ship-address";
 
 export type { PaidOrderAnalysis, PaidOrderDraft };
 
@@ -71,6 +72,24 @@ function inferProduct(lines: string[], conversation: string): string {
 function inferAddress(conversation: string) {
   const raw = firstMatch(conversation, ADDRESS_RE);
   if (!raw) return { address: "", city: "", state: "", postalCode: "", country: "" };
+
+  const split = normalizeShipAddress({
+    street1: raw,
+    street2: "",
+    city: "",
+    state: "",
+    zip: "",
+    country: "",
+  }).normalized;
+  if (split.street1 && split.city && split.state && split.zip) {
+    return {
+      address: split.street1,
+      city: split.city,
+      state: split.state,
+      postalCode: split.zip,
+      country: "United States",
+    };
+  }
 
   const postal = raw.match(/\b\d{5}(?:-\d{4})?\b/)?.[0] ?? "";
   const state = raw.match(/\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/i)?.[0] ?? "";

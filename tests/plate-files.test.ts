@@ -11,7 +11,7 @@ import { Readable } from "node:stream";
 import { setDriveFetchForTest, uploadDriveFile } from "../server/lib/google-drive";
 import { listPlateFiles } from "../server/lib/plate-files";
 import { registerRoutes } from "../server/routes";
-import { guessPlatePrinter, isPlateFileName, libraryFolderName, libraryKitName, platePartName, usedOnOrders, DRIVE_FILE_SCOPE } from "../shared/plate-files";
+import { guessPlatePrinter, isPlateFileName, libraryFolderName, libraryKitName, librarySliceName, platePartName, usedOnOrders, DRIVE_FILE_SCOPE } from "../shared/plate-files";
 
 const REFRESH = "REFRESHTOKENMARKER-do-not-log";
 
@@ -30,8 +30,12 @@ test("plate names, kit titles, and printer guesses", () => {
   assert.equal(libraryKitName("Cerastus Chassis - Castigator - Wayne Hood", "Wayne Hood"), "Cerastus Castigator");
   assert.equal(libraryKitName("Ikarus BA LR KIT - Daniel Ortega"), "Ikarus BA LR KIT");
   assert.equal(libraryKitName("Knight - Castellan"), "Knight Castellan");
+  assert.equal(libraryKitName("Knight - Ada", "Ada"), "Knight");
   assert.equal(libraryKitName("Cerastus Chassis - Castigator"), "Cerastus Castigator");
   assert.equal(libraryKitName("Castigator"), "Castigator");
+  assert.equal(librarySliceName("Castigator - Ada.ctb", "Ada"), "Castigator.ctb");
+  assert.equal(librarySliceName("Knight_Castellan_8K - Glenn Casey Chandler.ctb", "Glenn Casey Chandler"), "Knight_Castellan_8K.ctb");
+  assert.equal(librarySliceName("Knight_Castellan_8K.ctb", "Castellan"), "Knight_Castellan_8K.ctb");
   assert.equal(libraryFolderName("Knight Castellan"), "Knight Castellan");
   assert.equal(libraryFolderName("Land/Raider"), "Land Raider");
   assert.equal(platePartName("Castellan_Bits_Plate_1.ctb"), "Castellan Bits Plate 1");
@@ -275,7 +279,7 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const found = await fetch(`${base}/api/plate-files?q=${encodeURIComponent("Land Raider")}`, { headers });
     const foundBody = await found.json();
     assert.equal(foundBody.files.length, 1);
-    assert.equal(foundBody.files[0].customer, "Ada");
+    assert.equal(foundBody.files[0].customer, "");
     const hiddenCustomer = await fetch(`${base}/api/plate-files?q=${encodeURIComponent("Ada")}`, { headers });
     const hiddenCustomerBody = await hiddenCustomer.json();
     assert.equal(hiddenCustomerBody.files.length, 0);
@@ -364,7 +368,7 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     const knightUpload = await fetch(
       `${base}/api/plate-files/upload?${new URLSearchParams({
         orderKey: "deal:90",
-        fileName: "Knight_Castellan_8K.ctb",
+        fileName: "Knight_Castellan_8K - Glenn Casey Chandler.ctb",
         printer: "Mighty 8K",
         kit: "Knight - Castellan - Glenn Casey Chandler",
         customer: "Glenn Casey Chandler",
@@ -378,7 +382,9 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     assert.equal(knightUpload.status, 201);
     const knightBody = await knightUpload.json();
     assert.equal(knightBody.file.kit, "Knight Castellan");
-    assert.equal(knightBody.file.customer, "Glenn Casey Chandler");
+    assert.equal(knightBody.file.name, "Knight_Castellan_8K.ctb");
+    assert.equal(knightBody.file.customer, "");
+    assert.equal(/Glenn|Chandler/.test(JSON.stringify(knightBody.file)), false);
     const reuse = await fetch(
       `${base}/api/plate-files/reuse?${new URLSearchParams({
         kit: "Knight - Castellan - Glenn Casey Chandler",

@@ -11,6 +11,7 @@ import {
   isPlateFileName,
   libraryFolderName,
   libraryKitName,
+  librarySliceName,
   plateDownloadSchema,
   plateKitRenameSchema,
   plateExtension,
@@ -57,6 +58,7 @@ import {
   upsertPlateFiles,
 } from "./plate-files";
 import { getPrintFileRecord } from "./print-files";
+import { firstIssue } from "./validation";
 
 const NOT_IN_LIBRARY = "Not in Library yet.";
 const UPLOAD_UNFINISHED = "The upload did not finish.";
@@ -101,10 +103,6 @@ function queryValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return "";
-}
-
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
 }
 
 function attachmentName(name: string): string {
@@ -262,6 +260,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
     const parsed = platePrepareSchema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     const meta = parsed.data;
+    const sliceName = librarySliceName(meta.fileName, meta.customer);
     if (meta.printRecordId) {
       const record = getPrintFileRecord(meta.printRecordId);
       const dealKey = record ? `deal:${record.hubspotDealId}` : "";
@@ -281,7 +280,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
           printRecordId: meta.printRecordId,
           orderKey: meta.orderKey,
           sha256: meta.sha256,
-          name: meta.fileName,
+          name: sliceName,
           error: NOT_IN_LIBRARY,
         });
       }
@@ -292,7 +291,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
         printRecordId: meta.printRecordId,
         orderKey: meta.orderKey,
         sha256: meta.sha256,
-        name: meta.fileName,
+        name: sliceName,
         error: UPLOAD_UNFINISHED,
       });
     }
@@ -387,6 +386,8 @@ export function registerPlateLibraryRoutes(app: Express): void {
       return res.status(400).json({ ok: false, error: "Send the file with a Content-Length up to 2 GB." });
     }
     const meta = parsed.data;
+    const sliceName = librarySliceName(meta.fileName, meta.customer);
+    const catalogKit = libraryKitName(meta.kit || meta.fileName, meta.customer);
     const printRecordId = printRecordIdOf(meta.printRecordId);
     const clientSha = /^[a-f0-9]{64}$/.test(meta.sha256.toLowerCase()) ? meta.sha256.toLowerCase() : "";
     if (clientSha) {
@@ -403,18 +404,17 @@ export function registerPlateLibraryRoutes(app: Express): void {
           printRecordId,
           orderKey: meta.orderKey,
           sha256: clientSha,
-          name: meta.fileName,
+          name: sliceName,
           error: status === 503 ? NOT_IN_LIBRARY : error,
         });
       } else {
-        recordUploadFailure({ orderKey: meta.orderKey, name: meta.fileName, printer: meta.printer, notes: meta.notes, error });
+        recordUploadFailure({ orderKey: meta.orderKey, name: sliceName, printer: meta.printer, notes: meta.notes, error });
       }
       releaseBody(req);
       return res.status(status).json({ ok: false, error, ...extra });
     };
     if (!googleDriveConfigured()) return fail(503, "Google Drive is not configured");
     try {
-      const catalogKit = libraryKitName(meta.kit || meta.fileName);
       const folder = await ensureLibraryFolder(libraryFolderName(catalogKit));
       const kept: Buffer[] = [];
       let keptBytes = 0;
@@ -422,7 +422,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
       const uploaded = await uploadDriveFile({
         access: folder.access,
         folderId: folder.folderId,
-        name: meta.fileName,
+        name: sliceName,
         size,
         body: req,
         onPrefix: (chunk, offset) => {
@@ -442,7 +442,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
       const linkedRecord = record && record.sha256 === sha256 ? printRecordId : undefined;
       const file = registerUploadedPlate({
         driveFileId: uploaded.id,
-        name: uploaded.name || meta.fileName,
+        name: uploaded.name || sliceName,
         webViewLink: uploaded.webViewLink,
         sizeBytes: uploaded.sizeBytes,
         modifiedAt: uploaded.modifiedAt,
@@ -462,7 +462,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
           printRecordId,
           orderKey: meta.orderKey,
           sha256: clientSha || sha256,
-          name: meta.fileName,
+          name: sliceName,
           error: "That file does not match this plate.",
         });
       }

@@ -378,10 +378,6 @@ export async function sendHealthNudge(
     sent = fallback;
   }
 
-  if (!sent.ok) {
-    return { ok: false, error: sent.error, text: built.text };
-  }
-
   writeNudgeState(
     {
       lastDateKey: dateKey,

@@ -372,6 +372,13 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     await page.locator("[data-testid='library-row-file-raider']").waitFor();
     await assertKitCatalog();
     await shot("library-desktop-1440.png", "[data-testid='page-library']");
+    await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='library-row-file-castigator']").waitFor();
+    await page.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
+    const openKit = await page.locator("[data-testid='page-library']").innerText();
+    assert.match(openKit, /Castigator/);
+    assert.equal(/Land Raider|Ada|Daniel|Wayne|Glenn/.test(openKit), false, openKit);
+    await shot("library-kit-desktop-1440.png", "[data-testid='page-library']");
     await page.locator("[data-testid='button-plate-thumb-file-castigator']").click();
     await page.locator("[data-testid='panel-plate-preview']").waitFor();
     const previewText = await page.locator("[data-testid='panel-plate-preview']").innerText();
@@ -386,6 +393,10 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     await page.locator("[data-testid='library-row-file-castigator']").waitFor();
     await assertKitCatalog();
     await shot("library-phone-390.png", "[data-testid='page-library']");
+    await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='library-row-file-castigator']").waitFor();
+    await page.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
+    await shot("library-kit-phone-390.png", "[data-testid='page-library']");
     await page.locator("[data-testid='button-plate-thumb-file-castigator']").click();
     await page.locator("[data-testid='panel-plate-preview']").waitFor();
     const phonePreview = await page.locator("[data-testid='panel-plate-preview']").innerText();
@@ -461,6 +472,14 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     assert.match(after, /Send to Library/);
     assert.equal(/Connect Drive or retry/i.test(after), false, after);
     await shot("prints-row-desktop-1440.png", "[data-testid='row-print-record-7']");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${base}/#/prints`, { waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const phoneRow = page.locator("[data-testid='row-print-record-7']");
+    await phoneRow.waitFor();
+    await phoneRow.locator("[data-testid='button-print-library-menu-7']").evaluate((el) => (el as HTMLElement).click());
+    await phoneRow.locator("[data-testid='button-send-to-library-7']").waitFor();
+    await shot("prints-row-phone-390.png", "[data-testid='row-print-record-7']");
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();

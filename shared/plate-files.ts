@@ -64,6 +64,38 @@ export function libraryKitName(source: string, contactName?: string | null): str
   return words.join(" ").slice(0, 180) || "Kit";
 }
 
+function customerMatcher(customer: string): RegExp | null {
+  const contact = customer.trim();
+  if (!contact) return null;
+  const body = contact
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[\\s_–—-]+");
+  return new RegExp(`(?:^${body}(?=$|[\\s_–—-]+))|(?:(?:^|[\\s_–—-]+)${body}$)`, "ig");
+}
+
+/** File name stored in Drive and the Library. The contact is not part of the slice. */
+export function librarySliceName(fileName: string, customer?: string | null): string {
+  const ext = plateExtension(fileName);
+  const raw = fileName.trim();
+  let base = ext ? raw.slice(0, -ext.length) : raw;
+  const matcher = customerMatcher(customer ?? "");
+  if (matcher) {
+    base = base.replace(matcher, " ");
+    base = base.replace(/(?:^[\s_\-–—]+)|(?:[\s_\-–—]+$)/g, "");
+  }
+  base = base.replace(/\s+/g, " ").trim();
+  if (!base) base = "plate";
+  return `${base}${ext}`.slice(0, 240);
+}
+
+/** Drop a known contact from notes or other catalog text. */
+export function libraryCatalogText(text: string, customer?: string | null): string {
+  const matcher = customerMatcher(customer ?? "");
+  if (!matcher || !text) return text;
+  return text.replace(matcher, " ").replace(/\s+/g, " ").trim();
+}
+
 /** Drive folder title for a catalog kit. Does not strip a name Miguel typed. */
 export function libraryFolderName(kit: string): string {
   const name = kit.trim().replace(/[\\/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180);
@@ -184,6 +216,19 @@ export interface PrintLibraryMark {
   status: "in_library" | "pending" | "missing";
   driveFileId: string;
   error: string;
+}
+
+/** Catalog row for the Library page. Contact names stay off the response. */
+export function libraryCatalogRecord<T extends PlateFileRecord>(file: T): T {
+  const customer = file.customer;
+  return {
+    ...file,
+    name: librarySliceName(file.name, customer),
+    kit: libraryKitName(file.kit || file.name, customer),
+    kitTags: libraryKitName(file.kitTags || file.kit || file.name, customer),
+    notes: libraryCatalogText(file.notes, customer),
+    customer: "",
+  };
 }
 
 export interface PlateUploadFailure {

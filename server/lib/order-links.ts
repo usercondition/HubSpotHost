@@ -35,6 +35,7 @@ import {
   type PriorClientMatch,
   type ReviewEditInput,
 } from "../../shared/schema";
+import { normalizeShipAddress } from "../../shared/ship-address";
 
 const CREATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS order_intake_links (
@@ -65,6 +66,14 @@ CREATE TABLE IF NOT EXISTS order_intake_links (
   shipping_state TEXT NOT NULL DEFAULT '',
   shipping_postal_code TEXT NOT NULL DEFAULT '',
   shipping_country TEXT NOT NULL DEFAULT '',
+  address_check_status TEXT NOT NULL DEFAULT '',
+  address_checked_at TEXT NOT NULL DEFAULT '',
+  address_check_choice TEXT NOT NULL DEFAULT '',
+  address_check_messages TEXT NOT NULL DEFAULT '',
+  address_ack_at TEXT NOT NULL DEFAULT '',
+  address_ack_snapshot TEXT NOT NULL DEFAULT '',
+  address_ack_text_version TEXT NOT NULL DEFAULT '',
+  address_ack_form TEXT NOT NULL DEFAULT '',
   confirmed_item TEXT NOT NULL DEFAULT '',
   quantity INTEGER NOT NULL DEFAULT 1,
   client_notes TEXT NOT NULL DEFAULT '',
@@ -92,6 +101,18 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
   line_items_json TEXT NOT NULL DEFAULT '[]'
 );
 `;
+const CREATE_EXPENSES_SQL = `
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, vendor TEXT NOT NULL, name TEXT NOT NULL,
+  category TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
+  usd_amount_cents INTEGER, cadence TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT,
+  payment_count INTEGER, payment_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS expense_audit (
+  id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
+  new_values_json TEXT, created_at TEXT NOT NULL
+);`;
 
 const CREATE_ATTENTION_OVERRIDES_SQL = `
 CREATE TABLE IF NOT EXISTS attention_overrides (
@@ -385,6 +406,11 @@ CREATE TABLE IF NOT EXISTS priority_stack_entries (
   done_at TEXT,
   done_amount TEXT NOT NULL DEFAULT '',
   done_name TEXT NOT NULL DEFAULT '',
+  ship_street TEXT NOT NULL DEFAULT '',
+  ship_city TEXT NOT NULL DEFAULT '',
+  ship_state TEXT NOT NULL DEFAULT '',
+  ship_zip TEXT NOT NULL DEFAULT '',
+  ship_country TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -398,7 +424,8 @@ CREATE TABLE IF NOT EXISTS order_update_log (
   created_at TEXT NOT NULL,
   text TEXT NOT NULL,
   source TEXT NOT NULL,
-  author TEXT NOT NULL
+  author TEXT NOT NULL,
+  applied_at TEXT
 );
 CREATE INDEX IF NOT EXISTS order_update_log_order_idx ON order_update_log (order_key, id DESC);
 `;
@@ -598,6 +625,14 @@ const ORDER_INTAKE_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["hubspot_deals_json", "TEXT NOT NULL DEFAULT '[]'"],
   ["shipping_street_2", "TEXT NOT NULL DEFAULT ''"],
   ["share_token", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_status", "TEXT NOT NULL DEFAULT ''"],
+  ["address_checked_at", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_choice", "TEXT NOT NULL DEFAULT ''"],
+  ["address_check_messages", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_at", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_snapshot", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_text_version", "TEXT NOT NULL DEFAULT ''"],
+  ["address_ack_form", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function ensureOrderIntakeColumns(sqlite: Database.Database): void {
@@ -621,6 +656,22 @@ const FULFILLMENT_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["shipengine_carrier", "TEXT NOT NULL DEFAULT ''"],
   ["shipengine_service", "TEXT NOT NULL DEFAULT ''"],
 ];
+
+function ensureOffbookAddressColumns(sqlite: Database.Database): void {
+  const names = new Set(
+    (sqlite.prepare("PRAGMA table_info(priority_stack_entries)").all() as Array<{ name: string }>).map((row) => row.name),
+  );
+  const add: Array<[string, string]> = [
+    ["ship_street", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_city", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_state", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_zip", "TEXT NOT NULL DEFAULT ''"],
+    ["ship_country", "TEXT NOT NULL DEFAULT ''"],
+  ];
+  for (const [name, type] of add) {
+    if (!names.has(name)) sqlite.exec(`ALTER TABLE priority_stack_entries ADD COLUMN ${name} ${type}`);
+  }
+}
 
 function ensureFulfillmentColumns(sqlite: Database.Database): void {
   const existing = new Set(
@@ -689,6 +740,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
+  sqlite.exec(CREATE_EXPENSES_SQL);
   sqlite.exec(CREATE_ATTENTION_OVERRIDES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
@@ -712,6 +764,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
+  ensureOffbookAddressColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
   ensureFulfillmentColumns(sqlite);
   sqliteConn = sqlite;
@@ -1084,9 +1137,38 @@ export type ClientSubmitResult =
  * UPDATE's WHERE clause, so a duplicate or racing submission changes zero rows
  * and is rejected without leaking any order details.
  */
-export function submitClientOrder(token: string, input: ClientOrderSubmission): ClientSubmitResult {
+export type IntakeAddressCheck = {
+  status: string;
+  checkedAt: string;
+  choice: string;
+  messages: string[];
+};
+
+export type IntakeAddressAck = {
+  acknowledgedAt: string;
+  snapshot: string;
+  textVersion: string;
+  formSource: string;
+};
+
+export function submitClientOrder(
+  token: string,
+  input: ClientOrderSubmission,
+  check?: IntakeAddressCheck,
+  ack?: IntakeAddressAck,
+): ClientSubmitResult {
   const lookup = lookupClientOrder(token);
   if (!lookup.ok) return lookup;
+  const cleaned = input.shippingRequired
+    ? normalizeShipAddress({
+        street1: input.shippingStreet,
+        street2: input.shippingStreet2,
+        city: input.shippingCity,
+        state: input.shippingState,
+        zip: input.shippingPostalCode,
+        country: input.shippingCountry,
+      }).normalized
+    : null;
   const changed = getDb()
     .update(orderIntakeLinks)
     .set({
@@ -1098,12 +1180,20 @@ export function submitClientOrder(token: string, input: ClientOrderSubmission): 
       clientEmail: input.clientEmail,
       clientPhone: input.clientPhone,
       shippingRequired: input.shippingRequired,
-      shippingStreet: input.shippingRequired ? input.shippingStreet : "",
-      shippingStreet2: input.shippingRequired ? input.shippingStreet2 : "",
-      shippingCity: input.shippingRequired ? input.shippingCity : "",
-      shippingState: input.shippingRequired ? input.shippingState : "",
-      shippingPostalCode: input.shippingRequired ? input.shippingPostalCode : "",
-      shippingCountry: input.shippingRequired ? input.shippingCountry : "",
+      shippingStreet: cleaned?.street1 ?? "",
+      shippingStreet2: cleaned?.street2 ?? "",
+      shippingCity: cleaned?.city ?? "",
+      shippingState: cleaned?.state ?? "",
+      shippingPostalCode: cleaned?.zip ?? "",
+      shippingCountry: cleaned?.country ?? "",
+      addressCheckStatus: check?.status ?? "",
+      addressCheckedAt: check?.checkedAt ?? "",
+      addressCheckChoice: check?.choice ?? "",
+      addressCheckMessages: JSON.stringify(check?.messages ?? []).slice(0, 4000),
+      addressAckAt: ack?.acknowledgedAt ?? "",
+      addressAckSnapshot: ack?.snapshot ?? "",
+      addressAckTextVersion: ack?.textVersion ?? "",
+      addressAckForm: ack?.formSource ?? "",
       confirmedItem: input.confirmedItem,
       quantity: input.quantity,
       clientNotes: input.clientNotes,

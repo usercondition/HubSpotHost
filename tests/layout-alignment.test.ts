@@ -7,14 +7,27 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { indexZipRows } from "../shared/order-origins";
+import { buildShopDashboard } from "../shared/shop-dashboard";
+import { overheadForPeriod } from "../server/lib/expenses";
 
 const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
+const EXPENSE_FIXTURE = [
+  { currency: "USD", amount_cents: 1200, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, category: "Models/Patreon" },
+  { currency: "USD", amount_cents: 9999, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, category: "Software/AI" },
+  { currency: "USD", amount_cents: 8500, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: null, category: "Equipment" },
+  { currency: "USD", amount_cents: 4200, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, category: "Materials" },
+] as any;
+const artifactsDir = process.env.ARTIFACTS_DIR?.trim() || "";
+function artifactPath(name: string) {
+  return artifactsDir ? `${artifactsDir}/${name}` : undefined;
+}
 
 function queueItem(
   id: string,
@@ -247,6 +260,98 @@ function bodyFor(input: string | URL) {
       intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
       supplySpend: { total: 0, orders: 0 },
       books: { supplySpend: 0, grossProfit: 0 },
+      dashboard: (() => {
+        const dashboard = buildShopDashboard({
+        now: "2026-09-25T19:39:00.000Z",
+        period: "30",
+        awaitingClient: 1,
+        supplyPurchases: [],
+        bits: [{ status: "good" }, { status: "reprint" }],
+        failures: [],
+        printers: [
+          { name: "Mighty 8K New", model: "Mighty 8K", fepChangedAt: "2026-08-01T00:00:00.000Z", hoursSinceFep: 42, recommendedFepHours: 80 },
+          { name: "MEGA 8K", model: "MEGA 8K", fepChangedAt: null, hoursSinceFep: null, recommendedFepHours: null },
+        ],
+        plates: [
+          { attachedAt: "2026-09-20T12:00:00.000Z", printTimeSeconds: 10800, resinVolumeMl: 80, resinCost: 12, printerLabel: "Mighty 8K New" },
+          { attachedAt: "2026-09-18T12:00:00.000Z", printTimeSeconds: 7200, resinVolumeMl: 40, resinCost: 6, printerLabel: "Mighty 12K" },
+        ],
+        zips: indexZipRows([
+          ["92101", "San Diego", "CA", 32.72, -117.16],
+          ["10001", "New York", "NY", 40.75, -73.99],
+        ]),
+        orders: [
+          {
+            id: "ada",
+            name: "Knight - Ada",
+            customer: "Ada",
+            createdAt: "2026-09-10T12:00:00.000Z",
+            closedAt: "2026-09-18T12:00:00.000Z",
+            open: false,
+            won: true,
+            lost: false,
+            stageLabel: "Completed",
+            amount: 180,
+            resinCost: 22,
+            postage: 9,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: false,
+            shipping: "ship",
+            hasTracking: true,
+            shipTo: { city: "San Diego", state: "CA", zip: "92101", country: "United States" },
+          },
+          {
+            id: "bea",
+            name: "Land Raider - Bea",
+            customer: "Bea",
+            createdAt: "2026-09-12T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 240,
+            resinCost: null,
+            postage: null,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: true,
+            shipping: "ship",
+            hasTracking: false,
+            shipTo: { city: "New York", state: "NY", zip: "10001", country: "US" },
+          },
+          {
+            id: "cal",
+            name: "Sword - Cal",
+            customer: "Cal",
+            createdAt: "2026-09-14T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 40,
+            resinCost: 8,
+            postage: 0,
+            packaging: 0,
+            shipBy: null,
+            tentative: false,
+            needsReply: false,
+            shipping: "pickup",
+            hasTracking: false,
+            shipTo: null,
+          },
+        ],
+        });
+        const gross = dashboard.headlines.find((item) => item.id === "gross-profit")?.value ?? 0;
+        const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: overheadForPeriod(EXPENSE_FIXTURE, "2026-08-26", "2026-09-25") / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        dashboard.headlines.push(overhead, net);
+        return dashboard;
+      })(),
       pipeline: [
         { id: "print", label: "Printing", closed: false },
         { id: "done", label: "Completed", closed: true },
@@ -276,6 +381,16 @@ function bodyFor(input: string | URL) {
       hubspotPortalId: "1",
     };
   }
+  if (pathname.startsWith("/api/expenses")) {
+    return {
+      expenses: [
+        { id: "monthly", vendor: "Patreon", name: "Creator membership", category: "Models/Patreon", amount_cents: 1200, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "yearly", vendor: "Google One", name: "Storage", category: "Software/AI", amount_cents: 9999, currency: "USD", usd_amount_cents: null, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "installment", vendor: "Affirm", name: "Printer financing", category: "Equipment", amount_cents: 8500, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: 12, payment_note: "", notes: "" },
+        { id: "one-off", vendor: "Resin supplier", name: "Resin", category: "Materials", amount_cents: 4200, currency: "USD", usd_amount_cents: null, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, payment_note: "", notes: "" },
+      ],
+    };
+  }
   if (pathname.startsWith("/api/priority-stack/updates")) {
     return {
       ok: true,
@@ -301,6 +416,8 @@ function bodyFor(input: string | URL) {
       amount: 80,
       tier: "committed",
       stage: "Ready to Ship",
+      blocker: "Needs address",
+      blockerSource: "auto",
       fulfillment: {
         dealId: "c1",
         addressVerified: false,
@@ -328,6 +445,8 @@ function bodyFor(input: string | URL) {
       stage: "Printing",
       tentative: true,
       targetDate: "2026-10-02",
+      blocker: "Address unchecked",
+      blockerSource: "auto",
     });
     const offbook = stackRow({
       key: "offbook",
@@ -343,6 +462,34 @@ function bodyFor(input: string | URL) {
       shippingRequired: false,
       lane: "shop",
       steps: [{ label: "Print", done: false }],
+    });
+    const overdue = stackRow({
+      key: "overdue",
+      rank: 5,
+      dealId: "c9",
+      name: "Armigers - Jose",
+      contactName: "Jose",
+      amount: 60,
+      tier: "committed",
+      stage: "Printing",
+      targetDate: "2026-09-24",
+      targetSource: "derived",
+      blocker: "Reprint the shoulder",
+      fulfillment: {
+        dealId: "c9",
+        addressVerified: false,
+        costsEntered: false,
+        labelBought: false,
+        trackingPasted: false,
+        packingDone: false,
+        trackingNumber: "",
+        notes: "",
+        completedCount: 1,
+        totalCount: 5,
+        readyPercent: 20,
+        shipReady: false,
+        updatedAt: null,
+      },
     });
     const bundle = stackRow({
       key: "bundle",
@@ -382,7 +529,7 @@ function bodyFor(input: string | URL) {
       generatedAt: "2026-09-25T19:39:00.000Z",
       today: TODAY,
       weekEnd: "2026-10-02",
-      rows: [committed, tentative, offbook, bundle],
+      rows: [committed, tentative, offbook, overdue, bundle],
       outTheDoor: [
         stackRow({
           key: "shipped",
@@ -446,12 +593,69 @@ function bodyFor(input: string | URL) {
       if (orderKey && !file.orderKeys.includes(orderKey)) return false;
       if (printer && file.printer !== printer) return false;
       if (!q) return true;
-      return [file.name, file.kit, file.printer, file.customer, file.kitTags].join(" ").toLowerCase().includes(q);
+      return [file.name, file.kit, file.printer, file.kitTags].join(" ").toLowerCase().includes(q);
     });
     return { ok: true, files, failures: [] };
   }
   if (pathname.startsWith("/api/google/drive")) {
     return { ok: true, configured: true, connected: false, email: "", reconnect: false };
+  }
+  if (pathname.endsWith("/address-capture/preview") || pathname.endsWith("/validate-address")) {
+    return {
+      ok: true,
+      status: "corrected",
+      needsUnit: false,
+      typed: { street1: "10909 Hannan Rd", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      suggestion: { street1: "10909 Hannan Road", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      messages: [],
+      formattedTyped: "10909 Hannan Rd\nRomulus, MI 48174\nUS",
+      formattedSuggestion: "10909 Hannan Road\nRomulus, MI 48174\nUS",
+    };
+  }
+  if (pathname.includes("/shipping-labels/ship-to/")) {
+    return {
+      ok: true,
+      ready: true,
+      hasContact: true,
+      missing: [],
+      contact: { name: "Wayne Hood", addressLines: [] },
+      normalized: { street1: "10909 Hannan Road", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      validation: { status: "unchecked", messages: ["Address unchecked"] },
+    };
+  }
+  if (pathname.endsWith("/shipengine/status")) {
+    return {
+      ok: true,
+      configured: true,
+      hasApiKey: true,
+      hasShipFrom: true,
+      testMode: true,
+      carriers: [{ carrierId: "se-1", carrierCode: "usps", friendlyName: "USPS", nickname: "USPS", balance: 42 }],
+      funds: { availableUsd: 42, lowestBalanceUsd: 42, fundedCarriers: [] },
+    };
+  }
+  if (pathname.endsWith("/shipengine/rates")) {
+    return {
+      ok: true,
+      dealId: "349919419126",
+      testMode: true,
+      messages: [],
+      addressTo: { name: "Wayne Hood", street1: "10909 Hannan Road", city: "Romulus", state: "MI", zip: "48174" },
+      rates: [
+        {
+          rateId: "se-rate-1",
+          amount: "7.20",
+          currency: "usd",
+          carrierId: "se-1",
+          carrierCode: "usps",
+          carrierFriendlyName: "USPS",
+          serviceCode: "usps_ground_advantage",
+          serviceType: "USPS Ground Advantage",
+          deliveryDays: 3,
+          attributes: ["cheapest"],
+        },
+      ],
+    };
   }
   return { ok: true };
 }
@@ -521,7 +725,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     }
 
     browser = await chromium.launch({ channel: "chrome", headless: true });
-    const context = await browser.newContext({ deviceScaleFactor: 1 });
+    const context = await browser.newContext({ deviceScaleFactor: 1, hasTouch: true });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
     });
@@ -546,6 +750,15 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       () => document.querySelector('[data-testid="badge-nav-library"]')?.textContent?.trim() === "2",
     );
     await page.locator("[data-testid='link-nav-library']").waitFor();
+    const assertOneStatsPage = async () => {
+      await page.locator("[data-testid='stats-origin-svg']").waitFor();
+      assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, "one page transition remains after navigation");
+      assert.equal(await page.locator("main [data-testid='stats-origin-svg']").count(), 1, "one origin map remains after navigation");
+    };
+    await page.locator("[data-testid='link-nav-performance']").click();
+    await assertOneStatsPage();
+    if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
+    await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
     assert.ok(nav.length >= 3, "nav count slots rendered");
@@ -682,6 +895,22 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       assert.ok(money.length >= 3, `${label} stack amounts missing`);
       const moneyRight = spread(money.map((box) => box.right));
       check(moneyRight.delta <= 0.5, `${label} stack amount right edges differ by ${moneyRight.delta}`);
+      const addressBlockers = await current().locator("[data-testid^='button-blocker-']").evaluateAll((els) =>
+        els
+          .filter((el) => el.getClientRects().length > 0)
+          .map((el) => ({
+            text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+            scroll: el.scrollWidth,
+            client: el.clientWidth,
+            font: Number.parseFloat(getComputedStyle(el).fontSize),
+          })),
+      );
+      const addressLabels = addressBlockers.filter((row) => /Address unchecked|Needs address/.test(row.text));
+      check(addressLabels.length >= 2, `${label} address blockers missing`);
+      for (const row of addressLabels) {
+        check(row.scroll <= row.client + 1, `${label} ${row.text} clipped (${row.scroll} > ${row.client})`);
+        check(row.font >= 12, `${label} ${row.text} font is ${row.font}px`);
+      }
       if (label === "desktop") {
         const templates = await current().locator(".stack-row").evaluateAll((els) => {
           const visible = els.filter((el) => el.getClientRects().length > 0);
@@ -691,12 +920,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
     };
     const settlePage = () =>
-      page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
+      page.locator("[data-testid='button-open-committed']:visible").last().waitFor({ state: "visible" });
     const openDrawer = async () => {
       // A fast tab change leaves exiting Stack copies in the crossfade. Clicking
       // one of those opens a drawer that unmounts when the copy finishes leaving.
       await settlePage();
-      await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='button-open-committed']:visible").last().click();
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
       await page.waitForFunction(() => {
         const el = document.querySelector("[data-testid='drawer-deal-ops']");
@@ -711,7 +940,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     };
     const checkLibrary = async (label: string) => {
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const root = current();
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
@@ -888,10 +1116,19 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal(await current().locator("[data-testid='button-bundle-selected']").count(), 0);
     const stackText = await current().getByTestId("stack-list").first().innerText();
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(stackText), false);
+    check(stackText.includes("Address unchecked"), `stack missing Address unchecked: ${stackText}`);
+    check(stackText.includes("Needs address"), `stack missing Needs address: ${stackText}`);
+    if (artifactPath("stack-address-desktop-1440.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
+    }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
     assert.match(cash, /\$1,305/);
+    if (artifactsDir) {
+      mkdirSync(artifactsDir, { recursive: true });
+      await page.screenshot({ path: artifactPath("stack-desktop-1440.png")!, fullPage: true });
+    }
     await checkDrawer("desktop");
     await checkLibrary("desktop");
 
@@ -1048,10 +1285,98 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(longTitle.text === "Cerastus Chassis - Castigator", `order title was ${longTitle.text}`);
     check(longTitle.lines >= 1 && longTitle.lines <= 2, `order title used ${longTitle.lines} lines`);
     check(longTitle.overflow.length === 0, `order title clipped: ${longTitle.overflow.join("|")}`);
+    if (artifactPath("orders-desktop-1440.png")) {
+      await page.screenshot({ path: artifactPath("orders-desktop-1440.png")!, fullPage: true });
+    }
     await current().locator("[data-testid='toggle-orders-view']").last().getByRole("button", { name: "Table" }).click();
     await current().locator("[data-testid='text-table-profit-b1']").first().waitFor();
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
     check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
+
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const desktopStats = await current().evaluate((root) => ({
+      scroll: document.documentElement.scrollWidth,
+      inner: window.innerWidth,
+      text: root.innerText,
+      tops: Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
+      align: Array.from(root.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
+    }));
+    check(desktopStats.scroll <= desktopStats.inner + 1, `desktop stats scrolls horizontally (${desktopStats.scroll})`);
+    check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
+    check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
+    check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    assert.match(await current().locator("[data-testid='headline-overhead']").innerText(), /30 days/);
+    assert.match(await current().locator("[data-testid='headline-net-profit']").innerText(), /30 days/);
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "desktop renders exactly one order-origin map");
+    const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+      };
+    });
+    check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
+    check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
+    await page.locator("[data-testid='stats-origin-svg'] path").first().click();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().click();
+    if (artifactPath("stats-map-legend-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-legend-1440.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-desktop-1440.png")) await page.screenshot({ path: artifactPath("stats-desktop-1440.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-1440.png")) await page.screenshot({ path: artifactPath("performance-overhead-1440.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-desktop-1440.png")) await page.screenshot({ path: artifactPath("expenses-desktop-1440.png")!, fullPage: true });
+
+    await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='input-shipengine-deal-id']").fill("349919419126");
+    await page.locator("[data-testid='panel-shipping-address']").waitFor();
+    const labelGrid = await page.evaluate(() => {
+      const ship = document.querySelector("[data-testid='panel-shipping-address']")?.getBoundingClientRect();
+      const weight = document.getElementById("shipengine-weightOz");
+      const parcel = weight?.closest(".grid")?.getBoundingClientRect();
+      return {
+        shipLeft: ship?.left ?? -1,
+        shipWidth: ship?.width ?? -1,
+        parcelLeft: parcel?.left ?? -1,
+        parcelWidth: parcel?.width ?? -1,
+      };
+    });
+    check(Math.abs(labelGrid.shipLeft - labelGrid.parcelLeft) <= 1, `labels ship-to left ${labelGrid.shipLeft} vs package ${labelGrid.parcelLeft}`);
+    check(Math.abs(labelGrid.shipWidth - labelGrid.parcelWidth) <= 1, `labels ship-to width ${labelGrid.shipWidth} vs package ${labelGrid.parcelWidth}`);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
@@ -1091,6 +1416,15 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='stack-row-committed']").first().waitFor();
+    const phoneStackText = await current().getByTestId("stack-list").first().innerText();
+    check(phoneStackText.includes("Address unchecked"), `phone stack missing Address unchecked: ${phoneStackText}`);
+    check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
+    if (artifactPath("stack-address-phone-390.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
+    if (artifactPath("stack-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
+    }
     await checkStackGrid("phone");
     const phoneRows = await current().locator("[data-testid^='stack-row-']").evaluateAll((els) =>
       els.filter((el) => el.getClientRects().length > 0).map((el) => {
@@ -1108,6 +1442,62 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         };
       }),
     );
+    const phoneActions = await current().locator(".stack-phone-tools").evaluateAll((rows) =>
+      rows
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) => {
+          const selectors = [
+            ".stage-chip",
+            ".stack-prog",
+            "[data-testid^='button-target-']",
+            "[data-testid^='button-up-mobile-']",
+            "[data-testid^='button-down-mobile-']",
+          ];
+          const parts = [];
+          for (const selector of selectors) {
+            const el = row.querySelector(selector);
+            if (!el || el.getClientRects().length === 0) continue;
+            const rect = el.getBoundingClientRect();
+            parts.push({
+              text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+              scroll: el.scrollWidth,
+              client: el.clientWidth,
+            });
+          }
+          const rowBox = row.getBoundingClientRect();
+          return {
+            id: row.closest("[data-testid]")?.getAttribute("data-testid") ?? "",
+            rowLeft: rowBox.left,
+            rowRight: rowBox.right,
+            parts,
+          };
+        }),
+    );
+    check(phoneActions.some((row) => row.parts.some((part) => part.text.includes("Overdue"))), "phone overdue row missing");
+    for (const row of phoneActions) {
+      check(row.parts.length === 5, `${row.id} phone tools missing a pill, count, date, or arrow`);
+      for (const part of row.parts) {
+        check(part.left >= row.rowLeft - 1 && part.right <= row.rowRight + 1, `${row.id} ${part.text} leaves the action row`);
+        check(part.scroll <= part.client + 1, `${row.id} ${part.text} clipped (${part.scroll} > ${part.client})`);
+      }
+      for (let left = 0; left < row.parts.length; left += 1) {
+        for (let right = left + 1; right < row.parts.length; right += 1) {
+          const a = row.parts[left]!;
+          const b = row.parts[right]!;
+          const overlap =
+            Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+            Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+          check(!overlap, `${row.id} ${a.text} overlaps ${b.text}`);
+        }
+      }
+    }
+    if (artifactPath("stack-overdue-phone-390.png")) {
+      await current().locator("[data-testid='stack-row-overdue']").screenshot({ path: artifactPath("stack-overdue-phone-390.png")! });
+    }
     check(phoneRows.length >= 3, "phone stack rows missing");
     check(phoneRows.some((row) => row.id === "stack-row-m3"), "expanded bundle member missing from the phone gate");
     for (const row of phoneRows) {
@@ -1197,6 +1587,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-orders-phone']").first().waitFor();
+    if (artifactPath("orders-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("orders-phone-390.png")!, fullPage: true });
+    }
     const dealRefresh = await page.locator("[data-testid='button-refresh-deals']").evaluateAll((els) =>
       els.map((el) => getComputedStyle(el).display),
     );
@@ -1206,6 +1599,158 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     );
     check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
+
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const phoneStats = await current().evaluate((root) => {
+      const headlines = Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
+      const rects = headlines.map((el) => el.getBoundingClientRect());
+      return {
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+        tops: rects.map((rect) => rect.top),
+        lefts: rects.map((rect) => rect.left),
+      };
+    });
+    check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
+    check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
+    check(Math.abs((phoneStats.lefts[0] ?? 0) - (phoneStats.lefts[1] ?? 0)) > 1, "phone headline columns overlap");
+    const periodOverflow = await current().locator("[data-testid='stats-period'] button").evaluateAll((buttons) =>
+      buttons.some((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left < -1 || rect.right > innerWidth + 1;
+      }),
+    );
+    check(!periodOverflow, "phone period chips overflow the viewport");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "phone renders exactly one order-origin map");
+    const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+        inner: window.innerWidth,
+      };
+    });
+    check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
+    check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
+    await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
+    assert.match(await page.locator("[data-testid='stats-origin-detail']").first().innerText(), /\d+ orders?/);
+    if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
+    if (artifactPath("stats-map-popover-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-390.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
+    if (artifactPath("stats-nav-390.png")) await page.screenshot({ path: artifactPath("stats-nav-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v2.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v2.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-390.png")) await page.screenshot({ path: artifactPath("performance-overhead-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v3.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v3.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-phone-390.png")) await page.screenshot({ path: artifactPath("expenses-phone-390.png")!, fullPage: true });
+    await page.getByRole("button", { name: "Add expense" }).first().click();
+    const saveVisible = await page.getByRole("button", { name: "Save" }).last().evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const notes = document.querySelector("textarea[aria-label='Notes']");
+      const scroller = notes?.parentElement ?? null;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      const notesRect = notes?.getBoundingClientRect();
+      const footerTop = el.closest("footer")?.getBoundingClientRect().top ?? innerHeight;
+      return {
+        uncovered: rect.top >= 0 && rect.bottom <= tabTop - 1 && (center === el || el.contains(center)),
+        notesClear: (notesRect?.bottom ?? footerTop) <= footerTop + 1,
+        pad: scroller ? parseFloat(getComputedStyle(scroller).paddingBottom) : 0,
+      };
+    });
+    check(saveVisible.uncovered, "expense drawer Save footer is visible above the bottom menu");
+    check(saveVisible.notesClear, "expense notes sit under the form footer");
+    check(saveVisible.pad >= 64, `expense form scroll padding ${saveVisible.pad} does not clear the bottom menu`);
+    if (artifactPath("expenses-drawer-390.png")) await page.screenshot({ path: artifactPath("expenses-drawer-390.png")!, fullPage: true });
+
+    await page.goto(`${base}/#/paid-orders`, { waitUntil: "domcontentloaded" });
+    const paste = page.locator("[data-testid='panel-paste-address']").last();
+    await paste.waitFor();
+    await paste.locator("[data-testid='input-paste-address']").fill("Wayne Hood\n10909 Hannan Rd\nRomulus, MI 48174\nUnited States");
+    await paste.locator("[data-testid='button-check-pasted-address']").click();
+    await paste.locator("[data-testid='button-keep-typed-address']").waitFor();
+    const pasteClear = await page.locator("[data-testid='button-use-standardized-address']").evaluate((el) => {
+      const pane = document.querySelector("[data-scroll-pane]");
+      el.scrollIntoView({ block: "end" });
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const rect = el.getBoundingClientRect();
+      if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+      const keep = document.querySelector("[data-testid='button-keep-typed-address']")?.getBoundingClientRect();
+      const use = el.getBoundingClientRect();
+      const tabBox = tab?.getBoundingClientRect();
+      const limit = tabBox && tabBox.height > 0 ? tabBox.top : innerHeight;
+      return {
+        keepTop: keep?.top ?? -1,
+        keepBottom: keep?.bottom ?? 0,
+        useTop: use.top,
+        useBottom: use.bottom,
+        limit,
+        pad: pane ? parseFloat(getComputedStyle(pane).paddingBottom) : 0,
+        tabHeight: tabBox?.height ?? 0,
+      };
+    });
+    check(pasteClear.pad + 0.5 >= pasteClear.tabHeight, `phone scroll padding ${pasteClear.pad} is shorter than the bottom menu`);
+    check(pasteClear.keepTop >= 0 && pasteClear.keepBottom <= pasteClear.limit - 1, `Keep what I typed is not fully above the bottom menu (${pasteClear.keepTop}-${pasteClear.keepBottom} / ${pasteClear.limit})`);
+    check(pasteClear.useTop >= 0 && pasteClear.useBottom <= pasteClear.limit - 1, `Use this address is not fully above the bottom menu (${pasteClear.useTop}-${pasteClear.useBottom} / ${pasteClear.limit})`);
+
+    await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='input-shipengine-deal-id']").fill("349919419126");
+    await page.locator("[data-testid='button-shipengine-get-rates']").click();
+    await page.locator("[data-testid='button-shipengine-buy']").waitFor();
+    const buyClear = await page.locator("[data-testid='button-shipengine-buy']").evaluate((el) => {
+      const pane = document.querySelector("[data-scroll-pane]");
+      el.scrollIntoView({ block: "end" });
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const rect = el.getBoundingClientRect();
+      if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+      const next = el.getBoundingClientRect();
+      const tabBox = tab?.getBoundingClientRect();
+      return {
+        bottom: next.bottom,
+        limit: tabBox && tabBox.height > 0 ? tabBox.top : innerHeight,
+      };
+    });
+    check(buyClear.bottom <= buyClear.limit - 1, `Buy label sits under the bottom menu (${buyClear.bottom} > ${buyClear.limit})`);
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });

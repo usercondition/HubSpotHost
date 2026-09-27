@@ -4,7 +4,7 @@
  */
 import crypto from "node:crypto";
 import type { PlateFileRecord, PlateFileSource, PlateLibraryPending, PlatePreviewStats, PlateUploadFailure, PrintLibraryMark } from "../../shared/plate-files";
-import { libraryKitName, plateExtension, platePartName } from "../../shared/plate-files";
+import { libraryCatalogRecord, libraryCatalogText, libraryKitName, librarySliceName, plateExtension, platePartName } from "../../shared/plate-files";
 import { getSqlite } from "./order-links";
 
 type FileRow = {
@@ -91,7 +91,7 @@ function printIdsFor(driveFileId: string): number[] {
 function toRecord(row: FileRow): PlateFileRecord {
   const source: PlateFileSource = row.source === "upload" ? "upload" : "indexed";
   const preview = previewFor(row.sha256 || "");
-  return {
+  return libraryCatalogRecord({
     driveFileId: row.drive_file_id,
     name: row.name,
     webViewLink: driveLink(row.drive_file_id, row.web_view_link),
@@ -110,6 +110,18 @@ function toRecord(row: FileRow): PlateFileRecord {
     printRecordIds: printIdsFor(row.drive_file_id),
     hasPreview: preview.hasPreview,
     stats: preview.stats,
+  });
+}
+
+function catalogInput(file: PlateIndexInput): PlateIndexInput {
+  const customer = file.customer ?? "";
+  return {
+    ...file,
+    name: librarySliceName(file.name, customer),
+    kit: libraryKitName(file.kit || file.name, customer),
+    kitTags: libraryKitName(file.kitTags || file.kit || file.name, customer),
+    notes: libraryCatalogText(file.notes ?? "", customer),
+    customer: "",
   };
 }
 
@@ -197,7 +209,7 @@ export function upsertPlateFiles(files: PlateIndexInput[], source: PlateFileSour
   const now = new Date().toISOString();
   const saved: string[] = [];
   const write = sqlite.transaction((batch: PlateIndexInput[]) => {
-    for (const file of batch) {
+    for (const file of batch.map(catalogInput)) {
       const existing = readFile(file.driveFileId);
       const nextSource: PlateFileSource = existing?.source === "upload" ? "upload" : source;
       const extension = (file.extension || plateExtension(file.name)).slice(0, 20);
@@ -271,11 +283,13 @@ export function unlinkPlateFile(driveFileId: string, orderKey: string): PlateFil
 }
 
 export function registerUploadedPlate(input: PlateIndexInput & { orderKey: string; printRecordId?: number }): PlateFileRecord {
+  const cleaned = catalogInput(input);
   const [file] = upsertPlateFiles(
-    [{ ...input, orderKeys: [input.orderKey], printRecordIds: input.printRecordId ? [input.printRecordId] : undefined }],
+    [{ ...cleaned, orderKeys: [input.orderKey], printRecordIds: input.printRecordId ? [input.printRecordId] : undefined }],
     "upload",
   );
   clearUploadFailure(input.orderKey, input.name);
+  if (cleaned.name !== input.name) clearUploadFailure(input.orderKey, cleaned.name);
   if (input.printRecordId) clearLibraryPending(input.printRecordId);
   return file;
 }

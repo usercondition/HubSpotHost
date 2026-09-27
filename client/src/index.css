@@ -920,6 +920,15 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* Phone tab bar is 64px and fixed over the scroll pane. Last controls need room to sit above it. */
+  @media (max-width: 767px) {
+    .scroll-pane,
+    .scroll-pb-menu {
+      scroll-padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 24px);
+      padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 24px);
+    }
+  }
+
   .rule-label {
     font-size: 0.625rem;
     line-height: 0.875rem;
@@ -1106,7 +1115,7 @@
 
   .stack-row {
     display: grid;
-    grid-template-columns: 52px minmax(0, 2.2fr) 212px minmax(0, 1.5fr) 150px 92px 128px;
+    grid-template-columns: 52px minmax(0, 1.6fr) 200px minmax(188px, 1.8fr) 150px 92px 128px;
     column-gap: 16px;
     align-items: center;
     min-height: 60px;
@@ -1536,7 +1545,7 @@
     .stack-commit-line .stack-actions { display: none; }
     .stack-row > .stack-facts { display: flex; grid-area: facts; flex-direction: column; align-items: stretch; gap: 0.2rem; overflow: hidden; }
     .stack-row .stack-member .stack-date { width: max-content; max-width: none; overflow: visible; }
-    .stack-row .stack-mobile-actions { display: flex; width: 100%; flex-wrap: nowrap; align-items: center; }
+    .stack-row .stack-mobile-actions { display: flex; width: 100%; flex-wrap: nowrap; align-items: center; gap: 6px; }
     .stack-row .stack-mobile-actions > [data-testid^="button-checklist-"],
     .stack-row .stack-mobile-actions > span.stack-clip { min-width: 0; flex: 1 1 auto; }
     .stack-row .stack-mobile-actions > [data-testid^="button-target-"] {
@@ -1544,6 +1553,34 @@
       width: max-content;
       min-width: max-content;
       max-width: none;
+    }
+    /* Pill, progress, date, and arrows each keep their own box. */
+    .stack-row .stack-phone-tools {
+      display: grid;
+      grid-template-columns: max-content minmax(max-content, 1fr) max-content;
+      align-items: center;
+      column-gap: 6px;
+    }
+    .stack-row .stack-phone-tools > [data-testid^="button-checklist-"] {
+      min-width: max-content;
+      max-width: none;
+      overflow: visible;
+      gap: 4px;
+    }
+    .stack-row .stack-phone-tools > [data-testid^="button-target-"] {
+      width: max-content;
+      min-width: max-content;
+      max-width: none;
+      justify-self: start;
+      overflow: visible;
+      text-overflow: clip;
+      font-size: 12px;
+      line-height: 16px;
+    }
+    .stack-phone-nudge {
+      display: flex;
+      flex: none;
+      align-items: center;
     }
     .stack-row .stack-desktop-only { display: none; }
   }

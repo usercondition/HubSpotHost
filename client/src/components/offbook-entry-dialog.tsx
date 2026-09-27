@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ShippingAddressFields, type ShippingFormAddress } from "@/components/shipping-address-fields";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -17,6 +18,14 @@ export function OffbookEntryDialog({
   const [targetDate, setTargetDate] = useState("");
   const [amount, setAmount] = useState("");
   const [blocker, setBlocker] = useState("");
+  const [ship, setShip] = useState<ShippingFormAddress>({
+    street: "",
+    street2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "US",
+  });
   const [error, setError] = useState("");
 
   async function save() {
@@ -32,6 +41,15 @@ export function OffbookEntryDialog({
           targetDate: targetDate || null,
           amount: amount.trim(),
           blocker: blocker.trim(),
+          ...(mode === "ship"
+            ? {
+                shipStreet: [ship.street.trim(), ship.street2.trim()].filter(Boolean).join(", "),
+                shipCity: ship.city.trim(),
+                shipState: ship.state.trim(),
+                shipZip: ship.postalCode.trim(),
+                shipCountry: ship.country.trim() || "US",
+              }
+            : {}),
         },
         { headers },
       );
@@ -58,6 +76,11 @@ export function OffbookEntryDialog({
           <Button type="button" size="sm" variant={mode === "pickup" ? "default" : "outline"} onClick={() => setMode("pickup")}>Pickup</Button>
           <Button type="button" size="sm" variant={mode === "ship" ? "default" : "outline"} onClick={() => setMode("ship")}>Ship</Button>
         </div>
+        {mode === "ship" ? (
+          <div data-testid="panel-offbook-address">
+            <ShippingAddressFields idPrefix="offbook" value={ship} onChange={setShip} />
+          </div>
+        ) : null}
         <input type="date" className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} data-testid="input-offbook-date" />
         <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Amount (optional)" value={amount} onChange={(event) => setAmount(event.target.value)} data-testid="input-offbook-amount" />
         <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Blocker" value={blocker} onChange={(event) => setBlocker(event.target.value)} data-testid="input-offbook-blocker" />
