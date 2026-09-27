@@ -403,6 +403,55 @@ CREATE TABLE IF NOT EXISTS order_update_log (
 CREATE INDEX IF NOT EXISTS order_update_log_order_idx ON order_update_log (order_key, id DESC);
 `;
 
+const CREATE_PLATE_LIBRARY_SQL = `
+CREATE TABLE IF NOT EXISTS google_drive_connection (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  email TEXT NOT NULL DEFAULT '',
+  refresh_token_enc TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'connected',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS google_oauth_states (
+  state TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plate_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  drive_file_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  web_view_link TEXT NOT NULL DEFAULT '',
+  size_bytes INTEGER,
+  modified_at TEXT,
+  mime_type TEXT NOT NULL DEFAULT '',
+  extension TEXT NOT NULL DEFAULT '',
+  printer TEXT NOT NULL DEFAULT '',
+  kit TEXT NOT NULL DEFAULT '',
+  customer TEXT NOT NULL DEFAULT '',
+  kit_tags TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plate_files_modified_idx ON plate_files (modified_at);
+CREATE TABLE IF NOT EXISTS plate_file_orders (
+  drive_file_id TEXT NOT NULL,
+  order_key TEXT NOT NULL,
+  PRIMARY KEY (drive_file_id, order_key)
+);
+CREATE INDEX IF NOT EXISTS plate_file_orders_order_idx ON plate_file_orders (order_key);
+CREATE TABLE IF NOT EXISTS plate_upload_failures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  printer TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plate_upload_failures_order_idx ON plate_upload_failures (order_key, id DESC);
+`;
+
 const CREATE_FULFILLMENT_CHECKLISTS_SQL = `
 CREATE TABLE IF NOT EXISTS fulfillment_checklists (
   hubspot_deal_id TEXT PRIMARY KEY,
@@ -622,6 +671,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_FULFILLMENT_CHECKLISTS_SQL);
   sqlite.exec(CREATE_PRIORITY_STACK_SQL);
   sqlite.exec(CREATE_ORDER_UPDATE_LOG_SQL);
+  sqlite.exec(CREATE_PLATE_LIBRARY_SQL);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);

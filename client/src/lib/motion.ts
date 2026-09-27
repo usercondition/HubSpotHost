@@ -28,7 +28,9 @@ export const pageTransition: Transition = {
 export const pageVariants: Variants = {
   initial: { opacity: 0 },
   enter: { opacity: 1, transition: pageTransition },
-  exit: { opacity: 0, transition: { duration: 0.12, ease: MOTION.ease } },
+  // Exiting copies stay in the DOM for the crossfade. They must not take taps,
+  // or a drawer opened on the copy disappears when the copy unmounts.
+  exit: { opacity: 0, pointerEvents: "none", transition: { duration: 0.12, ease: MOTION.ease } },
 };
 
 export const drawerTransition: Transition = {
@@ -51,5 +53,5 @@ export const drawerScrimVariants: Variants = {
 export const reducedPageVariants: Variants = {
   initial: { opacity: 1 },
   enter: { opacity: 1 },
-  exit: { opacity: 1 },
+  exit: { opacity: 1, pointerEvents: "none" },
 };

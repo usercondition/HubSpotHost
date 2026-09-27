@@ -10,6 +10,7 @@ import { ExternalLink, X } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { OrderUpdates } from "@/components/order-updates";
+import { SliceFiles } from "@/components/slice-files";
 import { targetLabel, type StackRowModel } from "@/components/priority-stack-list";
 import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
@@ -111,18 +112,21 @@ export function StackOrderDrawer({
     },
   });
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const previously = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = panelRef.current;
     const focusables = () => [...(panel?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
     const frame = window.requestAnimationFrame(() => {
-      (panel?.querySelector<HTMLElement>("[data-testid='button-close-deal-ops-drawer']") ?? focusables()[0])?.focus();
+      (panel?.querySelector<HTMLElement>("[data-testid='button-close-deal-ops-drawer']") ?? focusables()[0])?.focus({ preventScroll: true });
     });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -142,9 +146,9 @@ export function StackOrderDrawer({
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", onKey);
-      previously?.focus();
+      previously?.focus({ preventScroll: true });
     };
-  }, [open, onClose, row?.key]);
+  }, [open, row?.key]);
 
   const drawer = (
     <AnimatePresence>
@@ -208,6 +212,12 @@ export function StackOrderDrawer({
                 {" · "}
                 <span data-testid="drawer-stage">{row.kind === "offbook" ? "Off-book" : row.stage || "No stage"}</span>
               </p>
+              <SliceFiles
+                orderKey={row.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : `deal:${row.dealId}`}
+                kit={orderTitle(row.name, row.contactName)}
+                customer={row.contactName?.trim() || ""}
+                headers={headers}
+              />
               <div className="mt-3">
                 <OrderUpdates
                   orderKey={row.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : `deal:${row.dealId}`}

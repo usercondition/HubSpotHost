@@ -183,7 +183,44 @@ function dealOps(dealId: string) {
   };
 }
 
-function bodyFor(pathname: string) {
+const LIBRARY_FILES = [
+  {
+    driveFileId: "file-castigator",
+    name: "Castigator_MEGA_8K.ctb",
+    webViewLink: "https://drive.google.com/file/d/file-castigator/view",
+    sizeBytes: 188743680,
+    modifiedAt: "2026-09-26T20:00:00.000Z",
+    mimeType: "application/octet-stream",
+    extension: ".ctb",
+    printer: "MEGA 8K",
+    kit: "Castigator",
+    customer: "Ada",
+    kitTags: "Castigator",
+    notes: "",
+    source: "upload",
+    orderKeys: ["deal:c1"],
+  },
+  {
+    driveFileId: "file-raider",
+    name: "Land_Raider_12K.ctb",
+    webViewLink: "https://drive.google.com/file/d/file-raider/view",
+    sizeBytes: 52428800,
+    modifiedAt: "2026-09-20T18:00:00.000Z",
+    mimeType: "application/octet-stream",
+    extension: ".ctb",
+    printer: "Mighty 12K",
+    kit: "Land Raider",
+    customer: "Daniel Ortega",
+    kitTags: "Land Raider",
+    notes: "",
+    source: "indexed",
+    orderKeys: ["deal:c2"],
+  },
+];
+
+function bodyFor(input: string | URL) {
+  const url = typeof input === "string" ? new URL(input, "http://layout.local") : input;
+  const pathname = url.pathname;
   if (pathname.startsWith("/api/health")) {
     return {
       status: "ok",
@@ -398,6 +435,21 @@ function bodyFor(pathname: string) {
   }
   if (pathname.startsWith("/api/printers")) return { ok: true, printers: [] };
   if (pathname.startsWith("/api/resin-reorder")) return { buyNow: [], suggestions: [] };
+  if (pathname.startsWith("/api/plate-files")) {
+    const q = (url.searchParams.get("q") || "").toLowerCase();
+    const printer = url.searchParams.get("printer") || "";
+    const orderKey = url.searchParams.get("orderKey") || "";
+    const files = LIBRARY_FILES.filter((file) => {
+      if (orderKey && !file.orderKeys.includes(orderKey)) return false;
+      if (printer && file.printer !== printer) return false;
+      if (!q) return true;
+      return [file.name, file.kit, file.printer, file.customer, file.kitTags].join(" ").toLowerCase().includes(q);
+    });
+    return { ok: true, files, failures: [] };
+  }
+  if (pathname.startsWith("/api/google/drive")) {
+    return { ok: true, configured: true, connected: false, email: "", reconnect: false };
+  }
   return { ok: true };
 }
 
@@ -478,7 +530,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(bodyFor(url.pathname)),
+        body: JSON.stringify(bodyFor(url)),
       });
     });
 
@@ -631,7 +683,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         check(templates.length === 1, `${label} stack grids differ: ${templates.join(" | ")}`);
       }
     };
+    const settlePage = () =>
+      page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
     const openDrawer = async () => {
+      // A fast tab change leaves exiting Stack copies in the crossfade. Clicking
+      // one of those opens a drawer that unmounts when the copy finishes leaving.
+      await settlePage();
       await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
       await page.waitForFunction(() => {
@@ -644,6 +701,38 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
           : rect.right >= window.innerWidth - 2 && rect.right <= window.innerWidth + 2 && rect.left > window.innerWidth * 0.4 && rect.top >= 40;
         return rect.width > 200 && docked && rect.bottom <= window.innerHeight + 2;
       });
+    };
+    const checkLibrary = async (label: string) => {
+      await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
+      await settlePage();
+      const root = current();
+      await root.locator("[data-testid='library-row-file-castigator']").waitFor();
+      await root.locator("[data-testid='library-row-file-raider']").waitFor();
+      const sizes = await root.locator("[data-testid='library-file-size']").evaluateAll((els) =>
+        els.filter((el) => el.getClientRects().length > 0).map((el) => el.getBoundingClientRect().right),
+      );
+      check(sizes.length >= 2, `${label} library sizes missing`);
+      check(spread(sizes).delta <= 0.5, `${label} library size edges differ by ${spread(sizes).delta}`);
+      const pageScroll = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, inner: window.innerWidth }));
+      check(pageScroll.width <= pageScroll.inner + 1, `${label} library scrolls horizontally (${pageScroll.width} > ${pageScroll.inner})`);
+      const listBox = await root.locator("[data-testid='library-list']").evaluate((el) => ({
+        scroll: el.scrollWidth,
+        client: el.clientWidth,
+        right: el.getBoundingClientRect().right,
+      }));
+      check(listBox.scroll <= listBox.client + 1, `${label} library list clipped (${listBox.scroll} > ${listBox.client})`);
+      check(listBox.right <= pageScroll.inner + 1, `${label} library list runs off screen`);
+      const text = await root.locator("[data-testid='page-library']").innerText();
+      check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(text), `${label} library has dev text`);
+      check(/Sep 26/.test(text) && !/\d{1,2}\/\d{1,2}/.test(text), `${label} library date was ${text}`);
+      await root.locator("[data-testid='input-library-search']").fill("Castigator");
+      await root.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
+      await root.locator("[data-testid='library-row-file-castigator']").waitFor();
+      await root.locator("[data-testid='input-library-search']").fill("");
+      await root.locator("[data-testid='library-row-file-raider']").waitFor();
+      await root.locator("[data-testid='select-library-printer']").selectOption("Mighty 12K");
+      await root.locator("[data-testid='library-row-file-castigator']").waitFor({ state: "hidden" });
+      await root.locator("[data-testid='library-row-file-raider']").waitFor();
     };
     const checkDrawer = async (label: string) => {
       await openDrawer();
@@ -707,6 +796,16 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       });
       check(updateBox.right <= updateBox.width + 1, `${label} update text runs off screen`);
       check(updateBox.scroll <= updateBox.client + 1, `${label} update text is clipped`);
+      await page.locator("[data-testid='slice-files']").waitFor();
+      const sliceName = await page.locator("[data-testid='slice-file-name']").first().innerText();
+      check(/Castigator_MEGA_8K\.ctb/.test(sliceName), `${label} slice name was ${sliceName}`);
+      const sliceBox = await page.locator("[data-testid='slice-file-name']").first().evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const drawer = el.closest("[data-testid='drawer-deal-ops']")?.getBoundingClientRect();
+        return { right: rect.right, drawerRight: drawer?.right ?? window.innerWidth, scroll: el.scrollWidth, client: el.clientWidth };
+      });
+      check(sliceBox.right <= sliceBox.drawerRight + 1, `${label} slice name runs off the drawer`);
+      check(sliceBox.scroll <= sliceBox.client + 1, `${label} slice name is clipped`);
       const drawerText = await page.locator("[data-testid='drawer-deal-ops']").innerText();
       check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(drawerText), `${label} drawer has dev text`);
       await page.locator("[data-testid='button-close-deal-ops-drawer']").evaluate((el) => (el as HTMLElement).click());
@@ -739,6 +838,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.match(cash, /\$25/);
     assert.match(cash, /\$1,305/);
     await checkDrawer("desktop");
+    await checkLibrary("desktop");
 
     await page.goto(`${base}/#/queue`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='column-next-print']").first().waitFor();
@@ -1015,6 +1115,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       if (row.afterDot != null) check(row.afterDot >= 2, `${row.client} ·${row.mode} is missing the space after the dot (${row.afterDot.toFixed(1)}px)`);
     }
     await checkDrawer("phone");
+    await checkLibrary("phone");
 
     await page.goto(`${base}/#/queue`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='column-next-print']").first().waitFor();
@@ -1049,6 +1150,25 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     );
     check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='button-connect-google-drive']").waitFor();
+    const connectText = await current().locator("[data-testid='panel-google-drive']").innerText();
+    check(/Connect Google Drive/.test(connectText), `connect copy was ${connectText}`);
+    check(!/refresh|ya29|client_secret/i.test(connectText), "connect panel leaks a secret");
+
+    const lockedContext = await browser!.newContext({ deviceScaleFactor: 1 });
+    const lockedPage = await lockedContext.newPage();
+    await lockedPage.route("**/api/**", async (route) => {
+      const lockedUrl = new URL(route.request().url());
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(bodyFor(lockedUrl)) });
+    });
+    await lockedPage.setViewportSize({ width: 1440, height: 900 });
+    await lockedPage.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });
+    await lockedPage.locator("[data-testid='text-google-drive-locked']").waitFor();
+    check((await lockedPage.locator("[data-testid='button-connect-google-drive']").count()) === 0, "locked setup shows Connect");
+    await lockedContext.close();
 
     check(pageErrors.length === 0, pageErrors.join("\n"));
     assert.deepEqual(failures, []);
