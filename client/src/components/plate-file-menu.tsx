@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { plainDriveMessage, startPlateDownload, uploadPlateBytes } from "@/lib/plate-library-client";
 import { PlateLayerView } from "@/components/plate-layer-view";
+
+const PlateModelPreview = lazy(() => import("@/components/stl-preview").then((mod) => ({ default: mod.StlPreview })));
 import { usedOnOrders, type PlateFileRecord, type PlatePreviewStats } from "@shared/plate-files";
 
 function formatDuration(seconds: number | null): string {
@@ -27,31 +29,24 @@ function formatCost(value: number | null): string {
 }
 
 function PlateModelHost({ file, headers }: { file: PlateFileRecord; headers: Record<string, string> }) {
-  const hostRef = useRef<HTMLDivElement>(null);
+  const [modelFile, setModelFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !file.modelDriveFileId) return;
+    if (!file.modelDriveFileId) return;
     let cancelled = false;
-    let url = "";
-    let dispose = () => {};
+    setModelFile(null);
+    setError("");
     void apiRequest("GET", `/api/plate-files/${encodeURIComponent(file.driveFileId)}/model`, undefined, { headers })
       .then((response) => response.blob())
-      .then(async (blob) => {
+      .then((blob) => {
         if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        const view = await import("./plate-model-view");
-        if (cancelled) return;
-        dispose = await view.mountPlateModel(host, url, file.modelName || "model.stl");
-        if (cancelled) dispose();
+        setModelFile(new File([blob], file.modelName || "model.stl"));
       })
       .catch(() => {
         if (!cancelled) setError("This plate has no 3D model.");
       });
     return () => {
       cancelled = true;
-      dispose();
-      if (url) URL.revokeObjectURL(url);
     };
   }, [file.driveFileId, file.modelDriveFileId, file.modelName, headers]);
   if (error) {
@@ -61,7 +56,15 @@ function PlateModelHost({ file, headers }: { file: PlateFileRecord; headers: Rec
       </p>
     );
   }
-  return <div ref={hostRef} className="plate-model-view" data-testid="plate-model-view" />;
+  return (
+    <div className="plate-model-view" data-testid="plate-model-view">
+      {modelFile ? (
+        <Suspense fallback={null}>
+          <PlateModelPreview file={modelFile} bare />
+        </Suspense>
+      ) : null}
+    </div>
+  );
 }
 
 function PreviewPanel({

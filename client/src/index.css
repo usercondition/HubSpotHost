@@ -1544,7 +1544,14 @@
 
   .plate-model-view {
     height: 18rem;
+    place-items: stretch;
     touch-action: none;
+  }
+
+  .plate-model-view > * {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
   }
 
   .plate-layer-view canvas {

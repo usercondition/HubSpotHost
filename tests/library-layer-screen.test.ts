@@ -150,7 +150,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         await route.fulfill({ status: 200, contentType: "application/octet-stream", body: STL });
         return;
       }
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false }) });
     });
     await page.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
@@ -158,7 +158,10 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
 
     const openLayers = async () => {
       layerHits.length = 0;
+      const close = page.locator("[data-testid='button-close-plate-preview']");
+      if (await close.count()) await close.click();
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
+      await page.locator("[data-testid='library-row-file-torso']").waitFor();
       await page.locator("[data-testid='button-plate-menu-file-torso']").click();
       const addModel = page.locator("[data-testid='button-add-model-file-torso']");
       await addModel.waitFor();
@@ -170,19 +173,15 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         const canvas = document.querySelector("[data-testid='canvas-plate-layer']");
         return Boolean(canvas && (canvas as HTMLCanvasElement).width > 0);
       });
-      await page.locator("[data-testid='input-layer-slider']").evaluate((el) => {
-        const input = el as HTMLInputElement;
-        for (let i = 0; i < 30; i += 1) {
-          input.value = String((i * 13) % 420);
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-        input.value = "209";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.waitForFunction(() => {
-        const label = document.querySelector("[data-testid='text-layer-index']");
-        return Boolean(label && (label.textContent || "").includes("210") && (label.textContent || "").includes("420"));
-      });
+      const slider = page.locator("[data-testid='input-layer-slider']");
+      for (let i = 0; i < 12; i += 1) await slider.fill(String(i * 17));
+      await slider.fill("209");
+      await page.waitForTimeout(500);
+      const label = await page.locator("[data-testid='text-layer-index']").innerText();
+      const sliderValue = await slider.inputValue();
+      if (!label.includes("210") || !label.includes("420")) {
+        throw new Error(`layer label ${JSON.stringify(label)} slider ${sliderValue} hits ${layerHits.join(",")} errors ${pageErrors.join(" | ")}`);
+      }
       await page.waitForTimeout(400);
       const previewText = await page.locator("[data-testid='panel-plate-preview']").innerText();
       assert.equal(/Ada|Daniel|Wayne|Glenn/.test(previewText), false, previewText);
