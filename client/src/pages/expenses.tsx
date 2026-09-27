@@ -7,7 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatMoney } from "@/lib/format";
 import { shipByCalendarDate } from "@shared/ship-by";
-import { EXPENSE_CATEGORIES, monthlyEquivalentCents } from "@shared/expenses";
+import { effectiveExpenseEnd, EXPENSE_CATEGORIES, monthlyEquivalentCents } from "@shared/expenses";
 
 type Expense = { id: string; vendor: string; name: string; category: string; amount_cents: number; currency: "USD" | "EUR"; usd_amount_cents: number | null; cadence: string; start_date: string; end_date: string | null; payment_count: number | null; payment_note: string; notes: string };
 const cents = (value: number) => formatMoney(value / 100, { compact: false });
@@ -20,7 +20,11 @@ export default function Expenses() {
   const recurring = rows.filter((row) => row.cadence === "monthly" || row.cadence === "yearly");
   const oneOff = rows.filter((row) => !recurring.includes(row));
   const total = rows.reduce((sum, row) => sum + row.amount_cents, 0);
-  const monthly = useMemo(() => recurring.reduce((sum, row) => sum + (monthlyEquivalentCents(row) ?? 0), 0), [recurring]);
+  const today = shipByCalendarDate();
+  const monthly = useMemo(() => recurring.reduce((sum, row) => {
+    const end = effectiveExpenseEnd(row);
+    return sum + (end && end < today ? 0 : monthlyEquivalentCents(row) ?? 0);
+  }, 0), [recurring, today]);
   return <div className="mx-auto max-w-6xl pb-24 md:pb-6"><PageHeader title="Expenses" subtitle="Shop overhead stored only in Print Ops." actions={isUnlocked ? <Button size="sm" onClick={() => setDraft("new")}>Add expense</Button> : null} />
     {!isUnlocked ? <OwnerUnlockPanel title="Unlock expenses" description="Enter the owner code to manage shop overhead." buttonLabel="Unlock expenses" testIdPrefix="expenses" pending={unlock.isPending} onUnlock={(code) => unlock.mutate(code)} /> :
       <div className="page-stack"><div className="grid gap-2 sm:grid-cols-[auto_1fr]"><select aria-label="Filter category" value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 rounded border bg-background px-2 text-sm"><option value="">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select></div>

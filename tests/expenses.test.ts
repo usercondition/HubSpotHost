@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { overheadForPeriod } from "../server/lib/expenses";
+import { effectiveExpenseEnd } from "../shared/expenses";
 
 test("recurring expenses prorate and one-off charges count once", () => {
   const rows: any = [
@@ -27,4 +28,8 @@ test("proration uses exclusive day counts for 7/30 days, installments, and all t
 
 test("ended installments do not contribute after their end date", () => {
   assert.equal(overheadForPeriod([{ currency: "USD", amount_cents: 10000, cadence: "monthly", start_date: "2026-01-01", end_date: "2026-03-31" }] as any, "2026-04-01", "2026-04-30"), 0);
+});
+
+test("effective end excludes a cancelled monthly subscription from today's run rate", () => {
+  assert.equal(effectiveExpenseEnd({ start_date: "2026-01-01", cadence: "monthly", end_date: "2026-09-21" }), "2026-09-21");
 });
