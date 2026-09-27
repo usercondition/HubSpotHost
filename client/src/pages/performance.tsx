@@ -117,11 +117,12 @@ export default function Performance() {
   });
 
   const dashboard = performance.data?.dashboard;
+  const headlineIds = new Set(dashboard?.headlines.map((item) => item.id) ?? []);
   const maxStage = Math.max(1, ...(dashboard?.pipeline.map((stage) => stage.count) ?? [0]));
   const maxPrinter = Math.max(1, ...(dashboard?.printers.map((printer) => printer.hours) ?? [0]));
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-6xl pb-24 md:pb-6">
       <PageHeader
         title="Stats"
         subtitle="How the shop did in the period you pick. Tap a figure to see how it is counted."
@@ -169,9 +170,9 @@ export default function Performance() {
           </Panel>
         ) : (
           <>
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Period" data-testid="stats-period">
+            <div className="flex flex-wrap gap-2 pb-1" role="tablist" aria-label="Period" data-testid="stats-period">
               {SHOP_PERIODS.map((id) => (
-                <Button key={id} size="sm" variant={period === id ? "default" : "outline"} onClick={() => setPeriod(id)} data-testid={`button-period-${id}`}>
+                <Button key={id} size="sm" className="shrink-0" variant={period === id ? "default" : "outline"} onClick={() => setPeriod(id)} data-testid={`button-period-${id}`}>
                   {PERIOD_LABEL[id]}
                 </Button>
               ))}
@@ -180,7 +181,7 @@ export default function Performance() {
               {dashboard.period.label}. {dashboard.period.compareLabel}.
             </p>
 
-            <section className="grid grid-cols-2 gap-2 md:grid-cols-3" aria-label="Headline figures" data-testid="stats-headlines">
+            <section className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Headline figures" data-testid="stats-headlines">
               {dashboard.headlines.map((item) => {
                 const delta = formatDelta(item);
                 const up = item.previous != null && item.value != null && item.value >= item.previous;
@@ -215,10 +216,10 @@ export default function Performance() {
 
             <section className="grid gap-4 lg:grid-cols-2">
               <Panel title="Money" description={dashboard.period.compareLabel}>
-                <MetricList metrics={dashboard.money} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.money.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Speed and reliability">
-                <MetricList metrics={dashboard.speed} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.speed.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Production">
                 <MetricList metrics={dashboard.production} openId={openId} setOpenId={setOpenId} />
@@ -270,7 +271,7 @@ export default function Performance() {
                     ))
                   )}
                 </div>
-                <MetricList metrics={dashboard.pipelineMetrics} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.pipelineMetrics.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Customers" className="lg:col-span-2">
                 <MetricList metrics={dashboard.channelMetrics} openId={openId} setOpenId={setOpenId} />

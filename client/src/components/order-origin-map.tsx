@@ -288,7 +288,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
           {origins.pickup.orders > 0 ? (
             <button type="button" className="inline-flex items-center gap-1.5" onClick={() => setSelected((current) => (current === "pickup" ? null : "pickup"))}>
               <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[hsl(158_50%_58%)]" />
-              Local pickup · San Diego · <span className="numeric inline-block w-8 text-right">{origins.pickup.orders}</span>
+              Local pickup · San Diego <span className="numeric inline-block w-8 text-right">({origins.pickup.orders})</span>
             </button>
           ) : null}
           <button type="button" className="inline-flex items-center gap-1 text-left" onClick={() => setSelected((current) => (current === "unknown" ? null : "unknown"))} data-testid="button-origin-unknown">
@@ -300,10 +300,6 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
         {selected ? (
           <ul className="divide-y divide-border/70" data-testid="stats-origin-orders">
             {listed.length === 0 ? <li className="py-1 text-sm text-muted-foreground">No orders in this selection.</li> : null}
-            <li className="grid grid-cols-[minmax(0,1fr)_6.5rem] items-baseline gap-3 py-1.5">
-              <span className="text-sm">Selected location</span>
-              <span className="numeric text-right text-sm">{listed.length} order{listed.length === 1 ? "" : "s"}</span>
-            </li>
           </ul>
         ) : null}
       </div>

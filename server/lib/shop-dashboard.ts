@@ -70,6 +70,7 @@ export function collectShopDashboard(input: {
   now?: Date;
   shipTos?: Map<string, ShipToFields>;
   mapIncomplete?: boolean;
+  overheadCents?: number;
   mapBusy?: boolean;
 }): ShopDashboard {
   const now = input.now ?? new Date();
@@ -247,6 +248,18 @@ export function collectShopDashboard(input: {
     zips: loadUsZipCentroids(),
   };
   const dashboard = buildShopDashboard(facts);
+  const gross = dashboard.money.find((item) => item.id === "gross-profit")?.value;
+  const overhead = input.overheadCents == null ? null : input.overheadCents / 100;
+  dashboard.money.push(
+    { id: "overhead", label: "Overhead", formula: "Recurring shop overhead prorated by days in this period, plus one-off and usage charges dated in the period.", value: overhead, unit: "usd", previous: null, compare: false, note: dashboard.period.label, series: [] },
+    { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus the same selected-period overhead. An order cost and overhead charge are each counted once.", value: gross == null || overhead == null ? null : Math.round((gross - overhead) * 100) / 100, unit: "usd", previous: null, compare: false, note: gross == null ? "Gross profit is not available for this period." : dashboard.period.label, series: [] },
+  );
+  const overheadMetric = dashboard.money.find((item) => item.id === "overhead");
+  const netMetric = dashboard.money.find((item) => item.id === "net-profit");
+  if (overheadMetric && netMetric) {
+    dashboard.headlines.push(overheadMetric, netMetric);
+    dashboard.money = dashboard.money.filter((item) => item.id !== "overhead" && item.id !== "net-profit");
+  }
   dashboard.origins.incomplete = input.mapIncomplete === true;
   dashboard.origins.busy = input.mapBusy === true;
   return dashboard;
