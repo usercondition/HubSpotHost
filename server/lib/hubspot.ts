@@ -186,6 +186,14 @@ const PRINT_FILE_DEAL_PROPERTIES = [
       { label: "No", value: "false", displayOrder: 1, hidden: false },
     ],
   },
+  {
+    name: "print_client_confirmed_address",
+    label: "Client confirmed address",
+    description:
+      "Timestamp and snapshot of the name and shipping address the client confirmed on the order form. Print Ops does not overwrite an existing value.",
+    type: "string",
+    fieldType: "textarea",
+  },
 ] as const;
 
 /** True when a HubSpot bool property is missing the required true/false options. */
@@ -218,6 +226,41 @@ export class HubSpotError extends Error {
   }
 }
 
+/** Shown when a read fails because HubSpot is rate-limiting or unavailable. */
+export const HUBSPOT_BUSY_MESSAGE = "HubSpot busy, retry";
+
+/** Shown when the access token is missing. This is setup, not a busy HubSpot. */
+export const HUBSPOT_SETUP_MESSAGE = "HubSpot is not connected. Add the access token before loading a ship-to.";
+
+export function isHubSpotSetupError(error: unknown): boolean {
+  return error instanceof HubSpotError && /token not configured/i.test(error.message);
+}
+
+/** 429, 5xx, and timeouts. A missing token is a setup error, not a busy read. */
+export function isHubSpotBusyError(error: unknown): boolean {
+  if (!(error instanceof HubSpotError) || isHubSpotSetupError(error)) return false;
+  return error.status === 429 || error.status >= 500;
+}
+
+const READ_RETRY_LIMIT = 2;
+
+function isIdempotentHubSpotRead(method: string, path: string): boolean {
+  const verb = method.toUpperCase();
+  return verb === "GET" || verb === "HEAD" || path.includes("/search");
+}
+
+function waitForRetry(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Spread retry waits so a burst of 429s does not line up on the same instant. */
+function withJitter(ms: number): number {
+  if (ms <= 0) return 0;
+  const spread = Math.max(1, Math.round(ms * 0.25));
+  return Math.max(0, ms + Math.floor(Math.random() * (spread * 2 + 1)) - spread);
+}
+
 function retryAfterMs(header: string | null): number | null {
   if (!header) return null;
   const seconds = Number(header);
@@ -234,20 +277,16 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-export async function hubspotRequest(
+async function hubspotRequestOnce(
+  apiBase: string,
+  token: string,
   path: string,
   init: { method: string; body?: string; readOnly?: boolean },
 ): Promise<any> {
-  const config = getConfig();
-  const token = getToken();
-  if (!token) {
-    throw new HubSpotError("HubSpot token not configured", 503);
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${config.apiBase}${path}`, {
+    const res = await fetch(`${apiBase}${path}`, {
       method: init.method,
       headers: authHeaders(token),
       body: init.body,
@@ -284,6 +323,33 @@ export async function hubspotRequest(
     throw new HubSpotError("HubSpot API request failed", 502);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function hubspotRequest(
+  path: string,
+  init: { method: string; body?: string; readOnly?: boolean },
+): Promise<any> {
+  const config = getConfig();
+  const token = getToken();
+  if (!token) {
+    throw new HubSpotError("HubSpot token not configured", 503);
+  }
+
+  // Reads and searches may be repeated. Writes stay single-shot.
+  const retries = isIdempotentHubSpotRead(init.method, path) ? READ_RETRY_LIMIT : 0;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await hubspotRequestOnce(config.apiBase, token, path, init);
+    } catch (err) {
+      if (!(err instanceof HubSpotError) || err.status !== 429 || attempt >= retries) {
+        throw err;
+      }
+      attempt += 1;
+      const backoff = 250 * 2 ** (attempt - 1);
+      await waitForRetry(withJitter(Math.min(err.retryAfterMs ?? backoff, 8_000)));
+    }
   }
 }
 
@@ -491,6 +557,11 @@ export function invalidatePrintOrderDealsCache(): void {
   printOrderDealsInflight = null;
 }
 
+export function invalidatePrintOrderStagesCache(): void {
+  printOrderStagesCache = null;
+  printOrderStagesInflight = null;
+}
+
 async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
   const deals: HubSpotDealRecord[] = [];
   let after: string | undefined;
@@ -572,6 +643,10 @@ async function overlayLocalTruth(deals: HubSpotDealRecord[]): Promise<HubSpotDea
 
 let cachedPortalId: { value: string; fetchedAt: number } | null = null;
 const PORTAL_ID_CACHE_MS = 60 * 60 * 1000;
+
+export function invalidateHubSpotPortalIdCache(): void {
+  cachedPortalId = null;
+}
 
 /**
  * Resolve the HubSpot portal/account id for deep links into CRM records.

@@ -2,6 +2,7 @@
  * Priority Stack ranking. Pure functions — no database, no HubSpot.
  * priorityScore is only a last tiebreak. Do not change the Queue score.
  */
+import { addressStatusPill, type AddressStatus } from "./ship-address";
 import { addShipByCalendarDays, shipByCalendarDate } from "./ship-by";
 
 export const STACK_STRETCH_DAYS = 1;
@@ -81,8 +82,11 @@ export function suggestedBlocker(signals: StackBlockerSignals): string {
   if (signals.unassignedPlateCount === 1) return "1 plate unassigned";
   if (signals.unassignedPlateCount > 1) return `${signals.unassignedPlateCount} plates unassigned`;
   if (signals.costsIncomplete) return "Needs costs";
-  if (signals.shippingRequired && signals.addressStatus !== "ready" && signals.addressStatus !== "pickup") {
-    return "Address missing";
+  if (
+    signals.shippingRequired &&
+    (signals.addressStatus === "unknown" || signals.addressStatus === "missing" || signals.addressStatus === "partial")
+  ) {
+    return addressStatusPill(signals.addressStatus as AddressStatus).label;
   }
   if (signals.needsReply) return "Waiting on reply";
   if (signals.isStale) return "Stale in HubSpot";

@@ -26,6 +26,11 @@ import { printsDealHref, queueDealHref, hubspotDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
+import { DidYouMeanCard, ReplaceHubSpotCard, UnitPrompt, type RawHubSpotAddress } from "@/components/address-capture-review";
+import { PasteAddressBox } from "@/components/paste-address";
+import { ShippingAddressFields } from "@/components/shipping-address-fields";
+import type { CaptureCheck } from "@shared/address-capture";
+import type { ShipAddressFields } from "@shared/ship-address";
 import { cn } from "@/lib/utils";
 import type {
   PaidOrderAnalysis,
@@ -48,7 +53,7 @@ const EMPTY_CONTACT: ContactDraft = {
   city: "",
   state: "",
   postalCode: "",
-  country: "United States",
+  country: "US",
   conversationSummary: "",
 };
 
@@ -84,6 +89,18 @@ export default function PaidOrders() {
   const [conversation, setConversation] = useState("");
   const [assistHints, setAssistHints] = useState<PaidOrderAnalysis | null>(null);
   const [created, setCreated] = useState<PaidOrderCreateResult | null>(null);
+  const [addressDecision, setAddressDecision] = useState("");
+  const [addressFromPaste, setAddressFromPaste] = useState(false);
+  const [noUnit, setNoUnit] = useState(false);
+  const idempotencyKey = useRef(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `manual-${Date.now().toString(36)}`,
+  );
+  const [addressGate, setAddressGate] = useState<
+    (CaptureCheck & { code?: string; current?: RawHubSpotAddress; next?: ShipAddressFields }) | null
+  >(null);
+  const [unitDraft, setUnitDraft] = useState("");
   const [buyerHint, setBuyerHint] = useState<string | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const bridgeHandled = useRef<string | null>(null);
@@ -261,7 +278,7 @@ export default function PaidOrders() {
   }, [isUnlocked, bridgeStatus]);
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (flags?: { replaceHubspot?: boolean; keepOnOrder?: boolean }) => {
       const cleanedLines = lines
         .map((line) => ({
           productName: line.productName.trim(),
@@ -296,12 +313,22 @@ export default function PaidOrders() {
         {
           ...draft,
           lineItems: cleanedLines,
+          addressDecision,
+          noUnit,
+          addressFormSource: addressFromPaste ? "paste" : "",
+          replaceHubspot: flags?.replaceHubspot === true,
+          keepOnOrder: flags?.keepOnOrder === true,
+          idempotencyKey: idempotencyKey.current,
         },
         { headers },
       );
       return (await response.json()) as { ok: true; result: PaidOrderCreateResult };
     },
     onSuccess: ({ result }) => {
+      idempotencyKey.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `manual-${Date.now().toString(36)}`;
       setCreated(result);
       toast({
         title: "Paid order created in HubSpot",
@@ -313,6 +340,25 @@ export default function PaidOrders() {
     },
     onError: (error: Error) => {
       const message = error.message;
+      const raw = message.replace(/^\d+:\s*/, "");
+      try {
+        const payload = JSON.parse(raw) as CaptureCheck & {
+          code?: string;
+          error?: string;
+          current?: RawHubSpotAddress;
+          next?: ShipAddressFields;
+        };
+        if (payload.code === "address_choice" || payload.code === "needs_unit" || payload.code === "replace_hubspot") {
+          setAddressGate(payload);
+          setUnitDraft(contact.address2 || "");
+          toast({
+            title: payload.error || "Confirm the address before creating the order",
+          });
+          return;
+        }
+      } catch {
+        // fall through to the toast
+      }
       const apiMessage = message.match(/"error":"([^"]+)"/)?.[1];
       toast({
         title: "HubSpot record was not created",
@@ -377,7 +423,7 @@ export default function PaidOrders() {
         ? `${cleaned.length} items totaling ${formatMoney(lineTotal)}`
         : `${cleaned[0]!.productName} at ${formatMoney(parseAmount(cleaned[0]!.amount))}`;
     const proceed = window.confirm(`Create the paid HubSpot order for ${label}?`);
-    if (proceed) create.mutate();
+    if (proceed) create.mutate({});
   };
 
   return (
@@ -596,33 +642,108 @@ export default function PaidOrders() {
                   type="tel"
                 />
                 <div className="sm:col-span-2">
-                  <Field
-                    label="Shipping address"
-                    id="address"
-                    value={contact.address}
-                    onChange={(value) => updateContact("address", value)}
+                  <PasteAddressBox
+                    headers={headers}
+                    applyLabel="Use this address"
+                    onApply={(fields, choice, skippedUnit) => {
+                      setContact((current) => ({
+                        ...current,
+                        address: fields.street1,
+                        address2: fields.street2,
+                        city: fields.city,
+                        state: fields.state,
+                        postalCode: fields.zip,
+                        country: fields.country || "US",
+                      }));
+                      setAddressDecision(choice);
+                      setNoUnit(skippedUnit);
+                      setAddressFromPaste(true);
+                      setCreated(null);
+                    }}
                   />
                 </div>
-                <Field
-                  label="Apt / suite / unit"
-                  id="address2"
-                  value={contact.address2 || ""}
-                  onChange={(value) => updateContact("address2", value)}
-                />
-                <Field label="City" id="city" value={contact.city} onChange={(value) => updateContact("city", value)} />
-                <Field label="State / region" id="state" value={contact.state} onChange={(value) => updateContact("state", value)} />
-                <Field
-                  label="Postal code"
-                  id="postal-code"
-                  value={contact.postalCode}
-                  onChange={(value) => updateContact("postalCode", value)}
-                />
-                <Field
-                  label="Country"
-                  id="country"
-                  value={contact.country}
-                  onChange={(value) => updateContact("country", value)}
-                />
+                <div className="sm:col-span-2">
+                  <ShippingAddressFields
+                    idPrefix="manual"
+                    value={{
+                      street: contact.address,
+                      street2: contact.address2 || "",
+                      city: contact.city,
+                      state: contact.state,
+                      postalCode: contact.postalCode,
+                      country: contact.country || "US",
+                    }}
+                    onChange={(next) => {
+                      setContact((current) => ({
+                        ...current,
+                        address: next.street,
+                        address2: next.street2,
+                        city: next.city,
+                        state: next.state,
+                        postalCode: next.postalCode,
+                        country: next.country,
+                      }));
+                      setAddressDecision("");
+                      setNoUnit(false);
+                      setAddressGate(null);
+                      setCreated(null);
+                    }}
+                  />
+                </div>
+                {addressGate?.code === "needs_unit" ? (
+                  <div className="sm:col-span-2">
+                    <UnitPrompt
+                      unit={unitDraft}
+                      onUnitChange={setUnitDraft}
+                      onRecheck={() => {
+                        updateContact("address2", unitDraft);
+                        setNoUnit(false);
+                        setAddressGate(null);
+                      }}
+                      onNoUnit={() => {
+                        setNoUnit(true);
+                        setAddressGate(null);
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {addressGate?.code === "replace_hubspot" && addressGate.current && addressGate.next ? (
+                  <div className="sm:col-span-2">
+                    <ReplaceHubSpotCard
+                      current={addressGate.current}
+                      next={addressGate.next}
+                      pending={create.isPending}
+                      onReplace={() => create.mutate({ replaceHubspot: true })}
+                      onKeep={() => create.mutate({ keepOnOrder: true })}
+                    />
+                  </div>
+                ) : null}
+                {addressGate?.code === "address_choice" && addressGate.suggestion ? (
+                  <div className="sm:col-span-2">
+                    <DidYouMeanCard
+                      check={addressGate}
+                      onUseSuggestion={() => {
+                        const suggestion = addressGate.suggestion;
+                        if (!suggestion) return;
+                        setContact((current) => ({
+                          ...current,
+                          address: suggestion.street1,
+                          address2: suggestion.street2,
+                          city: suggestion.city,
+                          state: suggestion.state,
+                          postalCode: suggestion.zip,
+                          country: suggestion.country || "US",
+                        }));
+                        setAddressDecision("accept");
+                        setAddressGate(null);
+                      }}
+                      onKeepTyped={() => {
+                        setAddressDecision("override");
+                        setAddressGate(null);
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label htmlFor="draft-summary">Notes for HubSpot deal description</Label>
                   <Textarea

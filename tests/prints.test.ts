@@ -15,6 +15,7 @@ import path from "node:path";
 import express from "express";
 import { eq } from "drizzle-orm";
 import { fulfillmentChecklists, priorityStackEntries } from "../shared/schema";
+import { invalidateDealContactCache } from "../server/lib/deal-ops";
 
 const dbFile = path.join(os.tmpdir(), `print-files-test-${crypto.randomUUID()}.db`);
 const OWNER_CODE = "print-owner-code";
@@ -57,7 +58,7 @@ function listen(server: http.Server): Promise<number> {
   });
 }
 
-function fixtureCtb(): Buffer {
+function fixtureCtb(salt = 0): Buffer {
   const file = Buffer.alloc(0x180);
   file.writeUInt32LE(0x12fd0086, 0x00);
   file.writeUInt32LE(4, 0x04);
@@ -91,6 +92,7 @@ function fixtureCtb(): Buffer {
   file.writeUInt32LE(0x100, 0xdc);
   file.writeUInt32LE(13, 0xe0);
   file.write("ELEGOO SATURN", 0x100, "ascii");
+  if (salt) file.writeUInt8(salt, 0x170);
   return file;
 }
 
@@ -312,7 +314,7 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(firstAttach.body.record.dealStage, "In work");
   assert.equal(firstAttach.body.record.fleetPrinterId, printerId);
 
-  const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb());
+  const second = stagePrintFile("knight-plate-02.ctb", fixtureCtb(2));
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
@@ -372,7 +374,7 @@ test("attach previews and confirmed detach rebuilds only print planning totals",
     printerId,
   });
   assert.equal(firstAttach.status, 201);
-  const second = stagePrintFile("detach-plate-02.ctb", fixtureCtb());
+  const second = stagePrintFile("detach-plate-02.ctb", fixtureCtb(2));
   const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
     analysisId: second.analysisId,
     dealId: "701",
@@ -456,7 +458,7 @@ test("plate attach preserves an existing material actual", async () => {
   process.env.ALLOW_HUBSPOT_WRITES = "true";
   try {
     const fleet = await jsonOwnerRequest("GET", "/api/printers");
-    const staged = stagePrintFile("actual-material.ctb", fixtureCtb());
+    const staged = stagePrintFile("actual-material.ctb", fixtureCtb(4));
     const attached = await jsonOwnerRequest("POST", "/api/prints/attach", {
       analysisId: staged.analysisId,
       dealId: "701",
@@ -515,6 +517,7 @@ test("priced label attach queues one idempotent owner-only Marketplace shipment 
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";
+  invalidateDealContactCache("701");
   mockDealProperties = {
     print_material_cost: "3.67",
     print_labor_cost: "0",
@@ -565,6 +568,7 @@ test("priced OfferUp label attach queues tracking-only notice on OfferUp", async
   clearMarketplaceSendRequest();
   mockCalls = [];
   mockContactName = "Jamie Carter";
+  invalidateDealContactCache("701");
   mockDealProperties = {
     print_material_cost: "3.67",
     print_labor_cost: "0",

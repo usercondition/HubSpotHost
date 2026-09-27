@@ -58,11 +58,28 @@ import {
 } from "./lib/health-nudge";
 import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
 import { telegramConfigured } from "./lib/telegram";
-import { suggestAddresses } from "./lib/address-suggest";
+import {
+  capturePayload,
+  checkCapturedAddress,
+  rememberDealAddressCheck,
+} from "./lib/address-capture";
+import { consumeClientAttempt } from "./lib/client-rate-limit";
+import { claimPaidOrderCreate, releasePaidOrderCreate, savePaidOrderCreate } from "./lib/paid-orders";
+import { resolveCaptureSubmit, type CaptureStatus } from "../shared/address-capture";
+import {
+  CLIENT_ADDRESS_ACK_FORM,
+  SHOP_ADDRESS_FORM_PASTE,
+  buildAddressAckSnapshot,
+} from "../shared/address-capture";
+import { publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-capture";
+import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
 import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
+import { registerPrinterRoutes } from "./lib/printer-routes";
+import { firstIssue } from "./lib/validation";
+import { registerSupplyRoutes } from "./lib/supply-routes";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -162,7 +179,7 @@ import {
   getMarketplaceSendRequest,
   setMarketplaceSendRequest,
 } from "./lib/marketplace-send-request-store";
-import { createPaidOrder } from "./lib/paid-orders";
+import { createPaidOrder, PaidOrderAddressConflict } from "./lib/paid-orders";
 import {
   applyReviewEdits,
   clientLinkPath,
@@ -271,6 +288,7 @@ import {
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
+import { registerLabelAddressRoutes } from "./lib/label-address-routes";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -291,16 +309,9 @@ import { attachShippingLabelToDeals } from "./lib/shipping-label-attach";
 import {
   ShipEngineError,
   addShipEngineCarrierFunds,
-  buildShipNotesFromShipEngine,
-  contactToShipEngineAddress,
-  createShipEngineRates,
-  getShipFromAddress,
   getShipEngineStatus,
   listShipEngineCarriers,
-  purchaseShipEngineLabel,
   shipEngineAddFundsRequestSchema,
-  shipEnginePurchaseRequestSchema,
-  shipEngineRatesRequestSchema,
   summarizeShipEngineFunds,
 } from "./lib/shipengine";
 
@@ -498,6 +509,7 @@ function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
     email: value("email"),
     phone: value("phone"),
     address: value("address"),
+    address2: value("address2"),
     city: value("city"),
     state: value("state"),
     postalCode: value("postalCode"),
@@ -612,10 +624,6 @@ async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
   };
 }
 
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
-}
-
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
@@ -673,24 +681,10 @@ function tokenFromBody(body: unknown): string {
  * Small in-memory throttle. The token space is 256 bits, so this exists to blunt
  * automated probing rather than to be a complete rate limiter.
  */
-const clientAttempts = new Map<string, { count: number; resetAt: number }>();
-const CLIENT_ATTEMPT_WINDOW_MS = 60_000;
-const CLIENT_ATTEMPT_LIMIT = 40;
-
 function tooManyClientAttempts(req: Request, res: Response): boolean {
-  const key = req.ip || "unknown";
-  const now = Date.now();
-  const entry = clientAttempts.get(key);
-  if (!entry || entry.resetAt <= now) {
-    clientAttempts.set(key, { count: 1, resetAt: now + CLIENT_ATTEMPT_WINDOW_MS });
-    return false;
-  }
-  entry.count += 1;
-  if (entry.count > CLIENT_ATTEMPT_LIMIT) {
-    res.status(429).json({ ok: false, reason: "throttled" });
-    return true;
-  }
-  return false;
+  if (!consumeClientAttempt(req.ip || "unknown")) return false;
+  res.status(429).json({ ok: false, reason: "throttled" });
+  return true;
 }
 
 /**
@@ -1003,34 +997,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ ok: true, match: findPriorClientDetails({ username, email }) });
   });
 
-  /**
-   * Owner-only supply ledger. Regular Amazon accounts have no clean, official
-   * order-feed integration, so the owner records receipt totals here. This
-   * remains independent from actual cost fields on a HubSpot deal to prevent
-   * double-counting the same spend in gross-profit calculations.
-   */
-  app.get("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    return res.json({
-      ok: true,
-      purchases: listSupplyPurchases(),
-      summary: buildSupplySpendSummary(),
-    });
-  });
-
-  app.post("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = createSupplyPurchaseSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const purchase = createSupplyPurchase(parsed.data);
-    return res.status(201).json({
-      ok: true,
-      purchase,
-      summary: buildSupplySpendSummary(),
-    });
-  });
+  registerSupplyRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Prefill the supply form from a receipt/invoice file (PDF, CSV, Excel,
@@ -1380,6 +1347,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   registerPlateLibraryRoutes(app);
 
+  registerLabelAddressRoutes(app, rejectUnsecuredIntake);
+
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
     const result = await buildDealOpsDetail(String(req.params.dealId || ""));
@@ -1705,208 +1674,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not add ShipEngine funds",
-      });
-    }
-  });
-
-  /** Structured HubSpot ship-to for rate shopping. */
-  app.get("/api/shipping-labels/ship-to/:dealId", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String(req.params.dealId || "").trim();
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const contact = await fetchDealAssociatedContact(dealId);
-      const address = contactToShipEngineAddress(contact);
-      const missing = address
-        ? []
-        : [
-            !contact.name && "name",
-            !contact.street1 && "street",
-            !contact.city && "city",
-            !contact.state && "state",
-            !contact.zip && "zip",
-          ].filter(Boolean);
-      return res.json({
-        ok: true,
-        dealId,
-        contact: {
-          id: contact.id,
-          name: contact.name,
-          email: contact.email,
-          phone: contact.phone,
-          addressLines: contact.addressLines,
-          street1: contact.street1,
-          street2: contact.street2,
-          city: contact.city,
-          state: contact.state,
-          zip: contact.zip,
-          country: contact.country,
-        },
-        ready: Boolean(address),
-        hasContact: Boolean(contact.id),
-        missing,
-      });
-    } catch (error) {
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load ship-to address",
-      });
-    }
-  });
-
-  /** Quote carrier rates via ShipEngine for a Print Order's HubSpot ship-to. */
-  app.post("/api/shipping-labels/shipengine/rates", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = shipEngineRatesRequestSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const status = getShipEngineStatus();
-    if (!status.hasApiKey) {
-      return res.status(503).json({
-        ok: false,
-        error: "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
-      });
-    }
-    const addressFrom = parsed.data.addressFrom
-      ? {
-          name: parsed.data.addressFrom.name,
-          street1: parsed.data.addressFrom.street1,
-          street2: parsed.data.addressFrom.street2 || undefined,
-          city: parsed.data.addressFrom.city,
-          state: parsed.data.addressFrom.state,
-          zip: parsed.data.addressFrom.zip,
-          country: parsed.data.addressFrom.country || "US",
-          phone: parsed.data.addressFrom.phone || undefined,
-          email: parsed.data.addressFrom.email || undefined,
-        }
-      : getShipFromAddress();
-    if (!addressFrom) {
-      return res.status(503).json({
-        ok: false,
-        error:
-          "Set SHIP_FROM_NAME, SHIP_FROM_STREET1, SHIP_FROM_CITY, SHIP_FROM_STATE, and SHIP_FROM_ZIP on Railway.",
-      });
-    }
-
-    try {
-      const contact = await fetchDealAssociatedContact(parsed.data.dealId);
-      const addressTo = contactToShipEngineAddress(contact);
-      if (!addressTo) {
-        return res.status(400).json({
-          ok: false,
-          error:
-            "HubSpot contact is missing a full ship-to address (name, street, city, state, zip).",
-          contact: {
-            name: contact.name,
-            addressLines: contact.addressLines,
-          },
-        });
-      }
-
-      const quoted = await createShipEngineRates({
-        addressFrom,
-        addressTo,
-        parcel: parsed.data.parcel,
-      });
-      return res.json({
-        ok: true,
-        dealId: parsed.data.dealId,
-        testMode: quoted.testMode,
-        shipmentId: quoted.shipmentId,
-        addressTo: {
-          name: addressTo.name,
-          street1: addressTo.street1,
-          city: addressTo.city,
-          state: addressTo.state,
-          zip: addressTo.zip,
-        },
-        rates: quoted.rates,
-        messages: quoted.messages,
-      });
-    } catch (error) {
-      const statusCode = error instanceof ShipEngineError ? error.status : 502;
-      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not get ShipEngine rates",
-      });
-    }
-  });
-
-  /** Buy a ShipEngine rate, then attach tracking + postage like a PDF label. */
-  app.post("/api/shipping-labels/shipengine/purchase", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = shipEnginePurchaseRequestSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    if (!getShipEngineStatus().hasApiKey) {
-      return res.status(503).json({
-        ok: false,
-        error: "Add SHIPENGINE_API_KEY on Railway before buying labels.",
-      });
-    }
-
-    try {
-      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
-      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
-      const notes = buildShipNotesFromShipEngine({
-        carrierCode: purchase.carrierCode || parsed.data.carrierCode,
-        serviceType: purchase.serviceCode || parsed.data.serviceType,
-        amount: purchase.amount || parsed.data.amount,
-        labelUrl: purchase.labelUrl,
-        recipientName: contact.name || null,
-      });
-      const postageUsd = purchase.amount || parsed.data.amount || "";
-      const attached = await attachShippingLabelToDeals({
-        dealIds: parsed.data.dealIds,
-        trackingNumber: purchase.trackingNumber,
-        notes,
-        postageUsd,
-        packingDone: parsed.data.packingDone,
-        labelBought: true,
-        markComplete: true,
-        messageChannel: parsed.data.messageChannel,
-        liveWrite: parsed.data.liveWrite,
-        shipengine: {
-          labelId: purchase.labelId,
-          carrier: purchase.carrierCode,
-          service: purchase.serviceCode,
-        },
-      });
-      if (!attached.ok) {
-        return res.status(400).json({
-          ...attached,
-          shipengine: {
-            trackingNumber: purchase.trackingNumber,
-            labelUrl: purchase.labelUrl,
-            amount: postageUsd,
-            testMode: purchase.testMode,
-          },
-        });
-      }
-      return res.json({
-        ...attached,
-        shipengine: {
-          labelId: purchase.labelId,
-          trackingNumber: purchase.trackingNumber,
-          trackingUrl: purchase.trackingUrl,
-          labelUrl: purchase.labelUrl,
-          amount: postageUsd,
-          currency: purchase.currency,
-          carrierCode: purchase.carrierCode || parsed.data.carrierCode,
-          serviceCode: purchase.serviceCode || parsed.data.serviceType,
-          testMode: purchase.testMode,
-        },
-      });
-    } catch (error) {
-      const statusCode = error instanceof ShipEngineError ? error.status : 502;
-      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not purchase ShipEngine label",
       });
     }
   });
@@ -2658,14 +2425,14 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     },
     printFileUpload.fields([
       { name: "file", maxCount: 1 },
-      { name: "sliceLog", maxCount: 1 },
+      { name: "sliceLog", maxCount: 1 }, { name: "suffix", maxCount: 1 },
     ]),
     (req: Request, res: Response) => {
       const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
       const file = files?.file?.[0];
-      const sliceLogFile = files?.sliceLog?.[0];
+      const sliceLogFile = files?.sliceLog?.[0], suffixFile = files?.suffix?.[0];
       if (!file?.path) {
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Choose one Chitubox .ctb or HeyGears .ultx slice file to analyze",
@@ -2673,7 +2440,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       }
       if (!isSupportedSliceFileName(file.originalname)) {
         removeTempUpload(file.path);
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
         return res.status(400).json({
           ok: false,
           error: "Only Chitubox .ctb and HeyGears .ultx slice files can be analyzed here",
@@ -2700,7 +2467,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         }
         const staged =
           mode === "ctb-prefix"
-            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize)
+            ? stageCtbFromPrefix(file.originalname, file.path, fullFileSize, suffixFile?.path ? fs.readFileSync(suffixFile.path) : undefined)
             : stagePrintFileFromPath(file.originalname, file.path, { sliceLogText });
         const fleet = ensureDefaultPrinters().filter((printer) => printer.status !== "retired");
         const matchedPrinterId = matchPrinterId(staged.metrics.printerProfile, fleet);
@@ -2732,107 +2499,12 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         return res.status(400).json({ ok: false, error: message });
       } finally {
         removeTempUpload(file.path);
-        removeTempUpload(sliceLogFile?.path);
+        removeTempUpload(sliceLogFile?.path); removeTempUpload(suffixFile?.path);
       }
     },
   );
 
-  /**
-   * Fleet usage + lifecycle for each named printer. Plate hours/layers/resin
-   * roll up from attached CTB/ULTX metrics matched by machine name aliases.
-   */
-  app.get("/api/printers", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      ensureDefaultPrinters();
-      return res.json({ ok: true, ...buildPrinterFleetSnapshot() });
-    } catch (error) {
-      return res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load printer fleet",
-      });
-    }
-  });
-
-  app.patch("/api/printers/:id", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    const parsed = updatePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const printer = updatePrinter(printerId, parsed.data);
-    if (!printer) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.json({ ok: true, printer, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  app.post("/api/printers/:id/events", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    if (!getPrinter(printerId)) {
-      return res.status(404).json({ ok: false, error: "That printer was not found" });
-    }
-    const parsed = createPrinterLifecycleEventSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const event = addPrinterLifecycleEvent(printerId, parsed.data);
-    if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  /**
-   * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
-   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
-   */
-  app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrinterProfileSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrinterProfile(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
-    }
-    const label = parsed.data.profile.trim();
-    const message = result.map
-      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
-      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
-    return res.json({
-      ok: true,
-      map: result.map,
-      stamped: result.stamped,
-      fleet: result.fleet,
-      message,
-    });
-  });
-
-  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
-  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrintFilePrinter(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
-    }
-    return res.json({
-      ok: true,
-      record: result.record,
-      fleet: result.fleet,
-      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
-    });
-  });
+  registerPrinterRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Reapply safe defaults to historical attached plates. This only fills blank
@@ -2969,12 +2641,12 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         /* Inventory should never block plate attach. */
       }
 
-      return res.status(201).json({
-        ok: true,
+      return res.status(record.analysisId !== parsed.data.analysisId ? 200 : 201).json({
+        ok: true, linked: record.analysisId !== parsed.data.analysisId || undefined,
         record,
         summary,
         resinConsumption,
-        message: `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
+        message: record.analysisId !== parsed.data.analysisId ? "This plate is already attached. Linked the existing print record instead of adding it again." : `Plate ${summary.plateCount} is attached to this HubSpot deal and the running production totals are updated.`,
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
@@ -3220,20 +2892,13 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     const validationError = validatePaidOrderDraft(draft);
     if (validationError) return res.status(400).json({ ok: false, error: validationError });
 
+    let result: Awaited<ReturnType<typeof createPaidOrder>>;
+    let updated: ReturnType<typeof markOrderLinkCreated>;
     try {
-      const result = await createPaidOrder(draft, { lineItems, orderGroup });
-      const updated = markOrderLinkCreated(link.id, {
+      result = await createPaidOrder(draft, { lineItems, orderGroup, keepOnOrder: true });
+      updated = markOrderLinkCreated(link.id, {
         contactId: result.contactId,
         deals: result.deals,
-      });
-      return res.status(201).json({
-        ok: true,
-        result,
-        link: updated ? ownerLinkView(updated) : null,
-        message:
-          result.deals.length > 1
-            ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
-            : `Created Contact and Print Order — attach the first plate next.`,
       });
     } catch (error) {
       const status =
@@ -3243,6 +2908,62 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         error: error instanceof Error ? error.message : "Could not create the paid HubSpot order",
       });
     }
+
+    let warning = "";
+    try {
+      const storedStatus = link.addressCheckStatus as CaptureStatus;
+      if (storedStatus === "verified" || storedStatus === "corrected" || storedStatus === "unverified" || storedStatus === "error") {
+        const fields = normalizeShipAddress({
+          street1: link.shippingStreet,
+          street2: link.shippingStreet2,
+          city: link.shippingCity,
+          state: link.shippingState,
+          zip: link.shippingPostalCode,
+          country: link.shippingCountry,
+        }).normalized;
+        let messages: string[] = [];
+        try {
+          const parsedMessages = JSON.parse(link.addressCheckMessages || "[]");
+          messages = Array.isArray(parsedMessages) ? parsedMessages.filter((item) => typeof item === "string") : [];
+        } catch {
+          messages = [];
+        }
+        for (const deal of result.deals) {
+          rememberDealAddressCheck({
+            dealId: deal.dealId,
+            fields,
+            status: storedStatus,
+            messages,
+            suggestion: null,
+            checkedAt: link.addressCheckedAt,
+          });
+        }
+      }
+      if (link.addressAckAt.trim()) {
+        await publishClientAddressAcknowledgments(
+          result.deals.map((deal) => deal.dealId),
+          {
+            acknowledgedAt: link.addressAckAt,
+            snapshot: link.addressAckSnapshot,
+            textVersion: link.addressAckTextVersion,
+            formSource: link.addressAckForm || CLIENT_ADDRESS_ACK_FORM,
+          },
+        );
+      }
+    } catch (error) {
+      warning = error instanceof Error ? error.message : "The address confirmation could not be saved on the deal.";
+      console.error("Address confirmation was not fully saved after the HubSpot order was created:", error);
+    }
+    return res.status(201).json({
+      ok: true,
+      result,
+      link: updated ? ownerLinkView(updated) : null,
+      warning: warning || undefined,
+      message:
+        result.deals.length > 1
+          ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
+          : `Created Contact and Print Order — attach the first plate next.`,
+    });
   });
 
   /** Public: validate a client link. Reveals nothing owner-side. */
@@ -3272,41 +2993,6 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     });
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.json(result);
-  });
-
-  /**
-   * Public address suggestions for the buyer order form. Proxies Photon so the
-   * browser never needs a maps API key. Throttled with the other client routes.
-   */
-  app.post("/api/address-suggest", async (req: Request, res: Response) => {
-    if (tooManyClientAttempts(req, res)) return;
-    const query =
-      req.body && typeof req.body === "object" && typeof (req.body as { query?: unknown }).query === "string"
-        ? String((req.body as { query: string }).query)
-        : "";
-    try {
-      const suggestions = await suggestAddresses(query);
-      return res.json({ ok: true, suggestions });
-    } catch {
-      return res.json({ ok: true, suggestions: [] });
-    }
-  });
-
-  /**
-   * Public: one buyer submission per link. This writes ONLY to the local
-   * SQLite queue — it never calls HubSpot.
-   */
-  app.post("/api/client-order/submit", (req: Request, res: Response) => {
-    if (tooManyClientAttempts(req, res)) return;
-    const token = tokenFromBody(req.body);
-    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
-    const parsed = clientOrderSubmissionSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, reason: "invalid-details", error: firstIssue(parsed.error) });
-    }
-    const result = submitClientOrder(token, parsed.data);
-    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
-    return res.status(201).json({ ok: true });
   });
 
   app.post("/api/paid-orders/analyze", (req: Request, res: Response) => {
@@ -3525,28 +3211,147 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     const validationError = validatePaidOrderDraft(draft);
     if (validationError) return res.status(400).json({ ok: false, error: validationError });
 
+    const paidBody = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+    let addressStatus: CaptureStatus = "unchecked";
+    let addressMessages: string[] = [];
+    let addressCheckedAt = "";
+    let addressSuggestion: ReturnType<typeof normalizeShipAddress>["normalized"] | null = null;
+    if (draft.address.trim()) {
+      const check = await checkCapturedAddress({
+        street1: draft.address,
+        street2: draft.address2,
+        city: draft.city,
+        state: draft.state,
+        zip: draft.postalCode,
+        country: draft.country,
+      });
+      const resolved = resolveCaptureSubmit({
+        check,
+        decision: typeof paidBody.addressDecision === "string" ? paidBody.addressDecision : "",
+        noUnit: paidBody.noUnit === true,
+      });
+      if (!resolved.ok) {
+        return res.status(resolved.status).json({
+          ...capturePayload(check),
+          ok: false,
+          code: resolved.code,
+          error: resolved.error,
+        });
+      }
+      draft.address = resolved.fields.street1;
+      draft.address2 = resolved.fields.street2;
+      draft.city = resolved.fields.city;
+      draft.state = resolved.fields.state;
+      draft.postalCode = resolved.fields.zip;
+      draft.country = resolved.fields.country;
+      addressStatus = resolved.storedStatus;
+      addressMessages = check.messages;
+      addressCheckedAt = check.checkedAt?.trim() ?? "";
+      addressSuggestion = resolved.choice === "suggested" ? resolved.fields : check.suggestion;
+    }
+
+    const idempotencyKey = typeof paidBody.idempotencyKey === "string" ? paidBody.idempotencyKey : "";
+    const claim = idempotencyKey.trim() ? claimPaidOrderCreate(idempotencyKey) : { state: "invalid" as const };
+    if (claim.state === "pending") {
+      return res.status(409).json({
+        ok: false,
+        error: "This order is already being created. Wait a moment and try again.",
+      });
+    }
+
+    const saveManualAddress = (deals: Array<{ dealId: string }>) => {
+      const savedAddress = normalizeShipAddress({
+        street1: draft.address,
+        street2: draft.address2,
+        city: draft.city,
+        state: draft.state,
+        zip: draft.postalCode,
+        country: draft.country,
+      }).normalized;
+      for (const deal of deals) {
+        rememberDealAddressCheck({
+          dealId: deal.dealId,
+          fields: savedAddress,
+          status: addressStatus,
+          messages: addressMessages,
+          suggestion: addressSuggestion,
+          checkedAt: addressCheckedAt,
+        });
+        if (paidBody.addressFormSource === SHOP_ADDRESS_FORM_PASTE && savedAddress.street1) {
+          recordShopAddressEntry({
+            orderKey: `deal:${deal.dealId}`,
+            formSource: SHOP_ADDRESS_FORM_PASTE,
+            snapshot: buildAddressAckSnapshot({
+              fullName: draft.fullName,
+              email: draft.email,
+              phone: draft.phone,
+              address: savedAddress,
+            }),
+            sourceKind: "manual",
+          });
+        }
+      }
+    };
+
+    if (claim.state === "done") {
+      try {
+        saveManualAddress(claim.result.deals);
+      } catch (error) {
+        console.error("Address check status was not saved on the retried order:", error);
+      }
+      return res.status(201).json({
+        ok: true,
+        result: claim.result,
+        idempotent: true,
+        message: "This order was already created.",
+      });
+    }
+
+    let result: Awaited<ReturnType<typeof createPaidOrder>>;
     try {
       const orderGroup =
         lineItems && lineItems.length > 1 ? `manual-${Date.now().toString(36)}` : undefined;
-      const result = await createPaidOrder(draft, {
+      result = await createPaidOrder(draft, {
         lineItems: lineItems ?? undefined,
         orderGroup,
+        replaceHubspot: paidBody.replaceHubspot === true,
+        keepOnOrder: paidBody.keepOnOrder === true,
+        confirmAddressReplace: true,
       });
-      return res.status(201).json({
-        ok: true,
-        result,
-        message:
-          result.deals.length > 1
-            ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
-            : "Created Contact and Print Order — attach the first plate next.",
-      });
+      if (claim.state === "claimed") savePaidOrderCreate(idempotencyKey, result);
     } catch (error) {
+      if (claim.state === "claimed") releasePaidOrderCreate(idempotencyKey);
+      if (error instanceof PaidOrderAddressConflict) {
+        return res.status(409).json({
+          ok: false,
+          code: error.code,
+          error: error.message,
+          current: error.current,
+          next: error.next,
+        });
+      }
       const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;
       return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
         ok: false,
         error: error instanceof Error ? error.message : "Could not create the paid HubSpot order",
       });
     }
+
+    try {
+      saveManualAddress(result.deals);
+    } catch (error) {
+      console.error("Address check status was not saved after the HubSpot order was created:", error);
+    }
+    return res.status(201).json({
+      ok: true,
+      result,
+      message:
+        result.deals.length > 1
+          ? `Created ${result.deals.length} Print Orders on one Contact — attach plates per item next.`
+          : "Created Contact and Print Order — attach the first plate next.",
+    });
   });
 
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {

@@ -16,7 +16,7 @@ import { attachedPrintFileDealIds, syncPrintFileDealStages } from "./print-files
 import { attachShipAddressReadiness, buildProductionQueue } from "./production-queue";
 import { buildSupplySpendSummary } from "./supplies";
 
-export async function loadShopBoards(options?: {
+async function loadShopBoardsOnce(options?: {
   enrichAddresses?: boolean;
   refreshStages?: boolean;
 }): Promise<{ snapshot: PerformanceResponse; queue: ProductionQueueResponse }> {
@@ -51,6 +51,27 @@ export async function loadShopBoards(options?: {
   const built = buildProductionQueue(snapshot);
   const queue = options?.enrichAddresses === false ? built : await attachShipAddressReadiness(built);
   return { snapshot: snapshot as PerformanceResponse, queue };
+}
+
+let enrichedBoardsInflight: Promise<{
+  snapshot: PerformanceResponse;
+  queue: ProductionQueueResponse;
+}> | null = null;
+
+export async function loadShopBoards(options?: {
+  enrichAddresses?: boolean;
+  refreshStages?: boolean;
+}): Promise<{ snapshot: PerformanceResponse; queue: ProductionQueueResponse }> {
+  const share = options?.enrichAddresses !== false && options?.refreshStages !== true;
+  if (share && enrichedBoardsInflight) return enrichedBoardsInflight;
+  const pending = loadShopBoardsOnce(options);
+  if (!share) return pending;
+  let shared: Promise<{ snapshot: PerformanceResponse; queue: ProductionQueueResponse }>;
+  shared = pending.finally(() => {
+    if (enrichedBoardsInflight === shared) enrichedBoardsInflight = null;
+  });
+  enrichedBoardsInflight = shared;
+  return shared;
 }
 
 export async function loadProductionQueue(options?: {

@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { formatMoney as formatUsd } from "@/lib/format";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { parseApiError } from "@/lib/api-error";
 import { describeCtbUploadPlan, isCtbFileName } from "@/lib/ctb-prefix";
@@ -52,6 +53,11 @@ import {
   type PrinterMatchInfo,
 } from "@/lib/print-attach";
 import { readHashQueryParam, queueDealHref } from "@/lib/workflow";
+import { holdSliceFile } from "@/lib/plate-library-client";
+import { PrintLibraryStatus, librarySendInput, useSendPlateToLibrary } from "@/components/print-library-status";
+import { commitSliceToOrder, splitDealTitle } from "@/lib/plate-library-client";
+import { guessPlatePrinter } from "@shared/plate-files";
+import type { PrintLibraryMark } from "@shared/plate-files";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
@@ -89,6 +95,7 @@ interface ResinProfileResponse {
 type PrintFileRecordWithBits = PrintFileRecord & {
   bits: PrintPlateBit[];
   bitSummary: PlateBitSummary;
+  library?: PrintLibraryMark;
 };
 
 interface PrintsResponse {
@@ -144,6 +151,13 @@ function formatNumber(value: number | string | null | undefined, suffix = ""): s
   if (value === null || value === undefined || value === "") return "Not reported";
   const numeric = typeof value === "string" ? Number(value) : value;
   return Number.isFinite(numeric) ? `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}` : "Not reported";
+}
+
+function formatSlicerCost(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "Not reported";
+  const numeric = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(numeric)) return "Not reported";
+  return formatUsd(numeric, { compact: false });
 }
 
 function formatMoney(value: number | string | null | undefined): string {
@@ -257,8 +271,11 @@ export default function Prints() {
   const logsFolderInputRef = useRef<HTMLInputElement | null>(null);
   /** ULTX waiting while the user re-picks Blueprint logs (AppData cannot auto-refresh). */
   const pendingUltxRef = useRef<File | null>(null);
+  const plateFileRef = useRef<File | null>(null);
+  const dealNameRef = useRef("");
   const awaitingLogsRefreshRef = useRef(false);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const librarySend = useSendPlateToLibrary(headers);
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
     successDescription: 'Attach slice plates and seed cost estimates on open Print Orders.',
@@ -272,6 +289,7 @@ export default function Prints() {
   const [linkingLogs, setLinkingLogs] = useState(false);
   const [awaitingLogsRefresh, setAwaitingLogsRefresh] = useState(false);
   const [attachPrinterId, setAttachPrinterId] = useState("");
+  const [attachProgress, setAttachProgress] = useState("");
   const [resinName, setResinName] = useState("ELEGOO ABS-Like 3.0 Space Grey");
   const [resinAsin, setResinAsin] = useState("B0D6Y6JV42");
   const [resinMassG, setResinMassG] = useState("1000");
@@ -425,13 +443,16 @@ export default function Prints() {
 
 
   const analyze = useMutation({
-    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) =>
-      analyzePrintPlate(file, {
+    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
+      plateFileRef.current = file;
+      return analyzePrintPlate(file, {
         headers,
         sliceLog,
         onSliceLogApplied: (name) => setSliceLogName(name),
-      }),
+      });
+    },
     onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
+      if (plateFileRef.current) holdSliceFile(metrics.sha256, plateFileRef.current);
       setAnalyzeStatus("");
       setStaged({ analysisId, metrics, expiresAt, printerMatch });
       setAttachPrinterId(initialAttachPrinterId(printerMatch));
@@ -568,27 +589,49 @@ export default function Prints() {
     mutationFn: async () => {
       if (!staged) throw new Error("Analyze a plate before attaching it");
       assertAttachPrinterReady(staged.printerMatch, attachPrinterId);
-      return attachPrintPlate({
-        analysisId: staged.analysisId,
-        dealId,
-        printerId: attachPrinterId ? Number(attachPrinterId) : null,
+      const plate = plateFileRef.current;
+      const names = splitDealTitle(dealNameRef.current);
+      if (!plate) {
+        const attached = await attachPrintPlate({
+          analysisId: staged.analysisId,
+          dealId,
+          printerId: attachPrinterId ? Number(attachPrinterId) : null,
+          headers,
+        });
+        return { ...attached, linkedRecord: attached.linked === true, libraryError: "" };
+      }
+      return commitSliceToOrder({
+        file: plate,
+        orderKey: `deal:${dealId}`,
         headers,
+        kit: names.kit,
+        customer: names.customer,
+        printer: guessPlatePrinter(plate.name),
+        notes: "",
+        printerId: attachPrinterId ? Number(attachPrinterId) : null,
+        analysis: staged,
+        onProgress: (label, fraction) => {
+          setAttachProgress(label === "Sending to Library" ? `Sending to Library ${Math.round(fraction * 100)}%` : label);
+        },
       });
     },
-    onSuccess: ({ summary, message }) => {
+    onSuccess: ({ summary, message, linkedRecord, libraryError }) => {
       setStaged(null);
       setAttachPrinterId("");
+      setAttachProgress("");
       setIncludeAttached(true);
       setCostPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/prints"] });
       queryClient.invalidateQueries({ queryKey: ["/api/performance"] });
       queryClient.invalidateQueries({ queryKey: ["/api/printers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
       toast({
-        title: `Plate ${summary.plateCount} attached`,
-        description: `${message} Running time: ${formatHours(summary.totalPrintTimeSeconds)}.`,
+        title: linkedRecord ? "Plate already on this order" : `Plate ${summary?.plateCount ?? 1} attached`,
+        description: `${message}${libraryError ? ` ${libraryError}` : ""} Running time: ${formatHours(summary?.totalPrintTimeSeconds ?? null)}.`,
       });
     },
     onError: (error: Error) => {
+      setAttachProgress("");
       toast({
         title: "The plate was not attached",
         description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
@@ -737,6 +780,7 @@ export default function Prints() {
   const archivedBoards = prints.data?.archivedBoards ?? [];
   const archivedRecords = prints.data?.archivedRecords ?? [];
   const selected = candidates.find((candidate) => candidate.dealId === dealId);
+  dealNameRef.current = selected?.dealName ?? "";
   const attachPreview = prints.data?.attachPreview;
   const selectedHasPlates =
     Boolean(selected?.hasPrintFile) ||
@@ -1363,7 +1407,7 @@ export default function Prints() {
                     data-testid="button-attach-print-file"
                   >
                     {attach.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PackageCheck className="mr-2 h-4 w-4" />}
-                    Attach to selected order
+                    {attach.isPending ? attachProgress || "Attaching the plate" : "Attach to selected order"}
                   </Button>
                 </div>
               </section>
@@ -1513,8 +1557,23 @@ export default function Prints() {
                       </div>
                       <div className="mt-3 space-y-2">
                         {board.records.map((record) => (
-                          <div key={record.id} className="flex items-center justify-between gap-3 text-xs">
-                            <span className="min-w-0 truncate text-muted-foreground">{record.fileName}</span>
+                          <div key={record.id} className="flex items-start justify-between gap-3 text-xs">
+                            <div className="min-w-0 flex-1">
+                            <span className="block truncate text-muted-foreground">{record.fileName}</span>
+                            <PrintLibraryStatus
+                              record={record}
+                              headers={headers}
+                              job={librarySend.jobs[record.id]}
+                              onSend={(file, row, sha256) => void librarySend.send(librarySendInput(file, row, sha256))}
+                              onMismatch={() =>
+                                toast({
+                                  title: "That file does not match this plate",
+                                  description: "Choose the same slice file that was attached.",
+                                  variant: "destructive",
+                                })
+                              }
+                            />
+                            </div>
                             <Button
                               type="button"
                               size="sm"
@@ -1647,6 +1706,19 @@ export default function Prints() {
                           <p className="mt-2 truncate text-sm font-medium" title={record.fileName}>
                             {record.fileName}
                           </p>
+                          <PrintLibraryStatus
+                            record={record}
+                            headers={headers}
+                            job={librarySend.jobs[record.id]}
+                            onSend={(file, row, sha256) => void librarySend.send(librarySendInput(file, row, sha256))}
+                            onMismatch={() =>
+                              toast({
+                                title: "That file does not match this plate",
+                                description: "Choose the same slice file that was attached.",
+                                variant: "destructive",
+                              })
+                            }
+                          />
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}
                           </p>
@@ -1664,7 +1736,7 @@ export default function Prints() {
                           </div>
                           <div>
                             <p className="text-muted-foreground">Slicer cost</p>
-                            <p className="numeric font-medium">{formatMoney(record.resinCost)}</p>
+                            <p className="numeric font-medium">{formatSlicerCost(record.resinCost)}</p>
                           </div>
                           <div>
                             <p className="text-muted-foreground">Synced</p>

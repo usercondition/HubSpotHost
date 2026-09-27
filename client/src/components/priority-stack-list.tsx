@@ -514,11 +514,13 @@ export function StackRow({
         <span>{row.rank}</span>
       </span>
       <button type="button" title={who} className="stack-name text-left" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
-        <span className="stack-clip text-sm font-medium">
-          {title}
-          {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
+        <span className="stack-title-line">
+          <span className="stack-clip text-sm font-medium" title={title}>
+            {title}
+            {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
+          </span>
           {row.kind === "offbook" ? <span className="stack-auto">off-book</span> : null}
-          {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
+          {row.kind === "bundle" ? <span className="shrink-0 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
         </span>
         <span className="stack-clip stack-sub">{rowSubtitle(row)}</span>
       </button>
@@ -537,15 +539,17 @@ export function StackRow({
         <div className="stack-date stack-desktop-only min-w-0">
           <DateEditor row={row} headers={headers} onSaved={onSaved} today={today} />
         </div>
-        <div className="stack-mobile-actions items-center gap-2">
+        <div className="stack-mobile-actions stack-phone-tools">
           <ChecklistPopover row={row} headers={headers} onSaved={onSaved} />
           <DateEditor row={row} headers={headers} onSaved={onSaved} today={today} />
-          <Button type="button" size="icon" variant="ghost" className="ml-auto h-8 w-8" onClick={() => onMove(-1)} data-testid={`button-up-mobile-${row.key}`}>
-            <ArrowUp className="h-4 w-4" />
-          </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onMove(1)} data-testid={`button-down-mobile-${row.key}`}>
-            <ArrowDown className="h-4 w-4" />
-          </Button>
+          <div className="stack-phone-nudge">
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => onMove(-1)} data-testid={`button-up-mobile-${row.key}`}>
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => onMove(1)} data-testid={`button-down-mobile-${row.key}`}>
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
       <span className="stack-money stack-clip text-sm font-medium">{money(row.amount)}</span>

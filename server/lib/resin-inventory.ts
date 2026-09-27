@@ -249,6 +249,12 @@ export function consumeResinForAttachedPlate(input: {
 } | null {
   const bottle = getActiveResinBottle();
   if (!bottle) return null;
+  const alreadyCharged = getDb()
+    .select({ id: resinBottleConsumptions.id })
+    .from(resinBottleConsumptions)
+    .where(eq(resinBottleConsumptions.printFileRecordId, input.record.id))
+    .get();
+  if (alreadyCharged) return null;
 
   const mass =
     positive(input.metrics.resinMassG) ??

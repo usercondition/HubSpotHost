@@ -13,9 +13,9 @@ import {
   type ProductionQueueResponse,
 } from "../../shared/schema";
 import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
-import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressIsSatisfied } from "../../shared/ship-address";
-import { fetchDealAssociatedContact } from "./deal-ops";
-import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
+import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
+import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
+import { listFulfillmentChecklists, withDerivedCostsEntered, withStoredAddressVerification } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
 import { getDb, listOrderLinks } from "./order-links";
@@ -46,7 +46,7 @@ function checklistForDeal(
   stored: FulfillmentChecklistView | undefined,
   costsComplete: boolean | undefined,
 ): FulfillmentChecklistView {
-  const checklist = stored ?? blankChecklist(dealId);
+  const checklist = withStoredAddressVerification(stored ?? blankChecklist(dealId));
   if (typeof costsComplete !== "boolean") return checklist;
   return withDerivedCostsEntered(checklist, costsComplete);
 }
@@ -327,12 +327,11 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
         (shippingRequired &&
           (!base.fulfillment.labelBought || !base.fulfillment.trackingPasted)));
     const addressDefaults = shippingRequired
-      ? deriveShipAddressReadiness({
-          dealName: deal.dealName,
-          contactNameHint: deal.contactName,
-          shippingRequired,
-          shipPlanNote: deal.shipPlanNote,
-        })
+      ? {
+          addressStatus: "unknown" as const,
+          addressSummary: null,
+          chaseDraft: "",
+        }
       : pickupAddressReadiness();
     return {
       ...base,
@@ -388,7 +387,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
           (item.bucket === "ship_ready" ||
             item.readyToPack ||
             item.bucket === "in_production") &&
-          !addressIsSatisfied(item.addressStatus),
+          addressNeedsChase(item.addressStatus),
       ).length,
       openOrders: items.length,
     },
@@ -412,9 +411,76 @@ export function queueItemsForShipAddressEnrichment(
   return [...targets.values()];
 }
 
+const ADDRESS_LOOKUP_CONCURRENCY = 3;
+
+const UNCHECKED_ADDRESS = {
+  addressStatus: "unknown" as const,
+  addressSummary: null,
+  chaseDraft: "",
+};
+
+function readinessFromContact(
+  contact: DealAssociatedContact,
+  item: ProductionQueueItem,
+): Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft"> {
+  const engineAddress = contactToShipEngineAddress(contact);
+  const readiness = deriveShipAddressReadiness({
+    name: contact.name,
+    firstName: contact.name.split(/\s+/)[0] || null,
+    street1: contact.street1,
+    city: contact.city,
+    state: contact.state,
+    zip: contact.zip,
+    country: contact.country,
+    dealName: item.dealName,
+    contactNameHint: item.contactName ?? contact.name,
+    shippingRequired: item.shippingRequired,
+    shipPlanNote: item.shipPlanNote,
+  });
+  if (readiness.addressStatus === "pickup") {
+    return {
+      addressStatus: readiness.addressStatus,
+      addressSummary: readiness.addressSummary,
+      chaseDraft: readiness.chaseDraft,
+    };
+  }
+  // Prefer ShipEngine gate: ready only when label buy would accept the address.
+  const addressStatus =
+    engineAddress != null
+      ? ("ready" as const)
+      : readiness.addressStatus === "ready"
+        ? ("partial" as const)
+        : readiness.addressStatus;
+  return {
+    addressStatus,
+    addressSummary:
+      engineAddress != null ? `${engineAddress.city}, ${engineAddress.state}` : readiness.addressSummary,
+    chaseDraft: readiness.chaseDraft,
+  };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 /**
  * Fetch HubSpot ship-to for Labels-visible deals and attach
- * addressStatus / addressSummary / chaseDraft. Other rows keep heuristic defaults.
+ * addressStatus / addressSummary / chaseDraft. A failed lookup keeps the
+ * last cached contact, or unknown — never a false "missing".
  */
 export async function attachShipAddressReadiness(
   queue: ProductionQueueResponse,
@@ -423,51 +489,21 @@ export async function attachShipAddressReadiness(
   const targets = new Map(targetItems.map((item) => [item.dealId, item]));
   if (targets.size === 0) return queue;
 
-  const entries = await Promise.all(
-    [...targets.keys()].map(async (dealId) => {
-      try {
-        const contact = await fetchDealAssociatedContact(dealId);
-        const engineAddress = contactToShipEngineAddress(contact);
-        const item = targets.get(dealId)!;
-        const readiness = deriveShipAddressReadiness({
-          name: contact.name,
-          firstName: contact.name.split(/\s+/)[0] || null,
-          street1: contact.street1,
-          city: contact.city,
-          state: contact.state,
-          zip: contact.zip,
-          country: contact.country,
-          dealName: item.dealName,
-          contactNameHint: item.contactName ?? contact.name,
-          shippingRequired: item.shippingRequired,
-          shipPlanNote: item.shipPlanNote,
-        });
-        if (readiness.addressStatus === "pickup") {
-          return [dealId, readiness] as const;
-        }
-        // Prefer ShipEngine gate: ready only when label buy would accept the address.
-        const addressStatus =
-          engineAddress != null
-            ? ("ready" as const)
-            : readiness.addressStatus === "ready"
-              ? ("partial" as const)
-              : readiness.addressStatus;
-        return [
-          dealId,
-          {
-            addressStatus,
-            addressSummary:
-              engineAddress != null
-                ? `${engineAddress.city}, ${engineAddress.state}`
-                : readiness.addressSummary,
-            chaseDraft: readiness.chaseDraft,
-          },
-        ] as const;
-      } catch {
-        return null;
+  const dealIds = Array.from(targets.keys());
+  const entries = await mapWithConcurrency(dealIds, ADDRESS_LOOKUP_CONCURRENCY, async (dealId) => {
+    const item = targets.get(dealId)!;
+    try {
+      const contact = await fetchDealAssociatedContact(dealId);
+      return [dealId, readinessFromContact(contact, item)] as const;
+    } catch {
+      const cached = peekDealContactCache(dealId);
+      if (cached) {
+        const readiness = readinessFromContact(cached, item);
+        if (readiness.addressStatus === "ready") return [dealId, readiness] as const;
       }
-    }),
-  );
+      return [dealId, UNCHECKED_ADDRESS] as const;
+    }
+  });
 
   const byDeal = new Map<string, Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">>();
   for (const entry of entries) {
@@ -503,7 +539,7 @@ export async function attachShipAddressReadiness(
           (item.bucket === "ship_ready" ||
             item.readyToPack ||
             item.bucket === "in_production") &&
-          !addressIsSatisfied(item.addressStatus),
+          addressNeedsChase(item.addressStatus),
       ).length,
     },
   };

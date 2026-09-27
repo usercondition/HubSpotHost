@@ -8,9 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { Mark } from "@/components/shell";
-import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { DidYouMeanCard, LabelConfirmCard, UnitPrompt, UnverifiedAddressCard } from "@/components/address-capture-review";
+import { ShippingAddressFields, shippingAddressError, type ShippingFormAddress } from "@/components/shipping-address-fields";
 import { cn } from "@/lib/utils";
+import { CUSTOMER_ADDRESS_CHECK_NOTE, type CaptureCheck } from "@shared/address-capture";
 import type { ClientOrderSavedDetails, ClientOrderView } from "@shared/schema";
+import { countryIsUs, normalizeUsStateProvince, type ShipAddressFields } from "@shared/ship-address";
 
 interface LookupOk {
   ok: true;
@@ -33,7 +36,7 @@ const EMPTY = {
   shippingCity: "",
   shippingState: "",
   shippingPostalCode: "",
-  shippingCountry: "United States",
+  shippingCountry: "US",
   confirmedItem: "",
   quantity: "1",
   clientNotes: "",
@@ -55,8 +58,47 @@ function applySavedDetails(
   if (!next.shippingCity) next.shippingCity = saved.shippingCity;
   if (!next.shippingState) next.shippingState = saved.shippingState;
   if (!next.shippingPostalCode) next.shippingPostalCode = saved.shippingPostalCode;
-  if (!next.shippingCountry) next.shippingCountry = saved.shippingCountry || "United States";
+  if (!next.shippingCountry) {
+    next.shippingCountry = countryIsUs(saved.shippingCountry) ? "US" : saved.shippingCountry || "US";
+  }
+  if (next.shippingState && countryIsUs(next.shippingCountry)) {
+    next.shippingState = normalizeUsStateProvince(next.shippingState);
+  }
   return next;
+}
+
+type CapturePhase = "edit" | "unit" | "choice" | "unverified" | "confirm";
+
+type CaptureView = CaptureCheck & { checkToken?: string; suggestionToken?: string | null };
+
+function readCapture(payload: Record<string, unknown>): CaptureView | null {
+  if (!payload.typed || typeof payload.typed !== "object") return null;
+  const status = payload.status;
+  const suggestion = payload.suggestion && typeof payload.suggestion === "object" ? (payload.suggestion as ShipAddressFields) : null;
+  const messages = Array.isArray(payload.messages) ? payload.messages.filter((item) => typeof item === "string") : [];
+  return {
+    status:
+      status === "verified" || status === "corrected" || status === "unverified" || status === "unchecked" || status === "error"
+        ? status
+        : "unchecked",
+    needsUnit: payload.needsUnit === true,
+    typed: payload.typed as ShipAddressFields,
+    suggestion,
+    messages,
+    checkedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : null,
+    checkToken: typeof payload.checkToken === "string" ? payload.checkToken : "",
+    suggestionToken: typeof payload.suggestionToken === "string" ? payload.suggestionToken : null,
+  };
+}
+
+function payloadFromError(error: Error): Record<string, unknown> | null {
+  const raw = error.message.replace(/^\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function ClientOrder() {
@@ -65,9 +107,16 @@ export default function ClientOrder() {
   const [form, setForm] = useState({ ...EMPTY });
   const [shippingRequired, setShippingRequired] = useState(true);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [addressAcknowledged, setAddressAcknowledged] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [identity, setIdentity] = useState({ email: "", username: "" });
+  const [phase, setPhase] = useState<CapturePhase>("edit");
+  const [capture, setCapture] = useState<CaptureView | null>(null);
+  const [labelFields, setLabelFields] = useState<ShipAddressFields | null>(null);
+  const [decision, setDecision] = useState<"accept" | "override" | "confirm">("confirm");
+  const [noUnit, setNoUnit] = useState(false);
+  const [unitDraft, setUnitDraft] = useState("");
 
   /** The token travels in the request body so it never lands in a server log. */
   const lookup = useQuery<LookupOk>({
@@ -92,9 +141,16 @@ export default function ClientOrder() {
     setForm({ ...EMPTY });
     setShippingRequired(true);
     setPaymentConfirmed(false);
+    setAddressAcknowledged(false);
     setError("");
     setSubmitted(false);
     setIdentity({ email: "", username: "" });
+    setPhase("edit");
+    setCapture(null);
+    setLabelFields(null);
+    setDecision("confirm");
+    setNoUnit(false);
+    setUnitDraft("");
   }, [token]);
 
   useEffect(() => {
@@ -161,11 +217,31 @@ export default function ClientOrder() {
         quantity: Number(form.quantity) || 1,
         shippingRequired,
         clientPaymentConfirmed: paymentConfirmed,
+        addressAcknowledged,
+        addressDecision: decision,
+        addressCheckToken: decision === "accept" ? capture?.suggestionToken ?? "" : capture?.checkToken ?? "",
+        noUnit,
       });
       return (await res.json()) as { ok: true };
     },
     onSuccess: () => setSubmitted(true),
     onError: (mutationError: Error) => {
+      const payload = payloadFromError(mutationError);
+      const code = typeof payload?.code === "string" ? payload.code : "";
+      const next = payload ? readCapture(payload) : null;
+      if (code === "needs_unit" && next) {
+        setCapture(next);
+        setUnitDraft(form.shippingStreet2);
+        setPhase("unit");
+        setError("");
+        return;
+      }
+      if (code === "address_choice" && next) {
+        setCapture(next);
+        setPhase("choice");
+        setError("");
+        return;
+      }
       const message = mutationError.message;
       const detail = message.match(/"error":"([^"]+)"/)?.[1];
       setError(
@@ -176,8 +252,50 @@ export default function ClientOrder() {
     },
   });
 
-  const set = (key: keyof typeof EMPTY, value: string) =>
+  const set = (key: keyof typeof EMPTY, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
+    setAddressAcknowledged(false);
+  };
+
+  const showCapture = (check: CaptureView, fields: typeof form, skipUnit = false) => {
+    setCapture(check);
+    if (check.needsUnit && !fields.shippingStreet2.trim() && !skipUnit) {
+      setUnitDraft(fields.shippingStreet2);
+      setPhase("unit");
+      return;
+    }
+    if (check.status === "corrected" && check.suggestion) {
+      setPhase("choice");
+      return;
+    }
+    if (check.status === "unverified" || check.status === "error") {
+      setLabelFields(check.typed);
+      setPhase("unverified");
+      return;
+    }
+    setLabelFields(check.typed);
+    setDecision("confirm");
+    setPhase("confirm");
+  };
+
+  const validateAddress = useMutation({
+    mutationFn: async (fields: typeof form) => {
+      const res = await apiRequest("POST", "/api/client-order/validate-address", {
+        token,
+        ...fields,
+      });
+      return (await res.json()) as Record<string, unknown>;
+    },
+    onSuccess: (payload, fields) => {
+      const check = readCapture(payload);
+      if (!check) {
+        setError("The address could not be checked. Please try again.");
+        return;
+      }
+      showCapture(check, fields);
+    },
+    onError: () => setError("The address could not be checked. Please try again."),
+  });
 
   const startSubmit = () => {
     setError("");
@@ -188,16 +306,33 @@ export default function ClientOrder() {
     if (shippingRequired) {
       if (form.clientPhone.replace(/\D/g, "").length < 7)
         return setError("Please add a phone number for delivery updates.");
-      if (form.shippingStreet.trim().length < 3)
-        return setError("Please add the street address for delivery.");
-      if (form.shippingCity.trim().length < 2) return setError("Please add the city.");
-      if (form.shippingState.trim().length < 2) return setError("Please add the state or province.");
-      if (form.shippingPostalCode.trim().length < 3) return setError("Please add the postal / ZIP code.");
-      if (form.shippingCountry.trim().length < 2) return setError("Please add the country.");
+      const addressError = shippingAddressError({
+        street: form.shippingStreet,
+        street2: form.shippingStreet2,
+        city: form.shippingCity,
+        state: form.shippingState,
+        postalCode: form.shippingPostalCode,
+        country: form.shippingCountry,
+      });
+      if (addressError) return setError(addressError);
     }
     if (!paymentConfirmed)
       return setError("Please tick the box confirming you already paid the seller for this order.");
-    submit.mutate();
+    if (!shippingRequired) {
+      submit.mutate();
+      return;
+    }
+    setNoUnit(false);
+    validateAddress.mutate(form);
+  };
+
+  const addressValue: ShippingFormAddress = {
+    street: form.shippingStreet,
+    street2: form.shippingStreet2,
+    city: form.shippingCity,
+    state: form.shippingState,
+    postalCode: form.shippingPostalCode,
+    country: form.shippingCountry,
   };
 
   return (
@@ -349,7 +484,7 @@ export default function ClientOrder() {
                 </p>
               </fieldset>
 
-              <fieldset className="space-y-4">
+              <fieldset className="space-y-4" data-testid="panel-client-address-flow">
                 <legend className="text-sm font-semibold">Where should it go?</legend>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -359,7 +494,10 @@ export default function ClientOrder() {
                     <button
                       key={option.label}
                       type="button"
-                      onClick={() => setShippingRequired(option.value)}
+                      onClick={() => {
+                        setShippingRequired(option.value);
+                        setAddressAcknowledged(false);
+                      }}
                       aria-pressed={shippingRequired === option.value}
                       data-testid={`button-shipping-${option.value ? "yes" : "no"}`}
                       className={cn(
@@ -375,66 +513,113 @@ export default function ClientOrder() {
                 </div>
 
                 {shippingRequired && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <AddressAutocomplete
-                        street={form.shippingStreet}
-                        onStreetChange={(v) => set("shippingStreet", v)}
-                        onSelect={(address) => {
-                          setForm((current) => ({
-                            ...current,
-                            shippingStreet: address.street,
-                            shippingCity: address.city || current.shippingCity,
-                            shippingState: address.state || current.shippingState,
-                            shippingPostalCode: address.postalCode || current.shippingPostalCode,
-                            shippingCountry: address.country || current.shippingCountry || "United States",
-                          }));
-                        }}
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <ClientField
-                        id="shipping-street-2"
-                        label="Apt / suite / unit"
-                        value={form.shippingStreet2}
-                        onChange={(v) => set("shippingStreet2", v)}
-                        autoComplete="address-line2"
-                      />
-                    </div>
-                    <ClientField
-                      id="shipping-city"
-                      label="City"
-                      value={form.shippingCity}
-                      onChange={(v) => set("shippingCity", v)}
-                      required
-                      autoComplete="address-level2"
-                    />
-                    <ClientField
-                      id="shipping-state"
-                      label="State / province"
-                      value={form.shippingState}
-                      onChange={(v) => set("shippingState", v)}
-                      required
-                      autoComplete="address-level1"
-                    />
-                    <ClientField
-                      id="shipping-postal-code"
-                      label="Postal / ZIP code"
-                      value={form.shippingPostalCode}
-                      onChange={(v) => set("shippingPostalCode", v)}
-                      required
-                      autoComplete="postal-code"
-                    />
-                    <ClientField
-                      id="shipping-country"
-                      label="Country"
-                      value={form.shippingCountry}
-                      onChange={(v) => set("shippingCountry", v)}
-                      required
-                      autoComplete="country-name"
-                    />
-                  </div>
+                  <ShippingAddressFields
+                    value={addressValue}
+                    onChange={(next) => {
+                      setForm((current) => ({
+                        ...current,
+                        shippingStreet: next.street,
+                        shippingStreet2: next.street2,
+                        shippingCity: next.city,
+                        shippingState: next.state,
+                        shippingPostalCode: next.postalCode,
+                        shippingCountry: next.country,
+                      }));
+                      setAddressAcknowledged(false);
+                      setNoUnit(false);
+                      if (phase !== "edit") setPhase("edit");
+                    }}
+                  />
                 )}
+                {shippingRequired && phase === "unit" && capture ? (
+                  <UnitPrompt
+                    unit={unitDraft}
+                    onUnitChange={setUnitDraft}
+                    onRecheck={() => {
+                      const next = { ...form, shippingStreet2: unitDraft };
+                      setForm(next);
+                      setNoUnit(false);
+                      validateAddress.mutate(next);
+                    }}
+                    onNoUnit={() => {
+                      setNoUnit(true);
+                      showCapture(capture, form, true);
+                    }}
+                  />
+                ) : null}
+                {shippingRequired && phase === "choice" && capture ? (
+                  <DidYouMeanCard
+                    check={capture}
+                    acknowledgment={{
+                      checked: addressAcknowledged,
+                      onCheckedChange: setAddressAcknowledged,
+                    }}
+                    onUseSuggestion={() => {
+                      if (!capture.suggestion) return;
+                      const suggestion = capture.suggestion;
+                      setForm((current) => ({
+                        ...current,
+                        shippingStreet: suggestion.street1,
+                        shippingStreet2: suggestion.street2,
+                        shippingCity: suggestion.city,
+                        shippingState: suggestion.state,
+                        shippingPostalCode: suggestion.zip,
+                        shippingCountry: suggestion.country || "US",
+                      }));
+                      setLabelFields(suggestion);
+                      setDecision("accept");
+                      setAddressAcknowledged(false);
+                      setPhase("confirm");
+                    }}
+                    onKeepTyped={() => {
+                      setLabelFields(capture.typed);
+                      setDecision("override");
+                      setAddressAcknowledged(false);
+                      setPhase("confirm");
+                    }}
+                  />
+                ) : null}
+                {shippingRequired && phase === "unverified" && labelFields ? (
+                  <UnverifiedAddressCard
+                    fields={labelFields}
+                    onConfirmCheck={() => {
+                      setDecision("confirm");
+                      setPhase("confirm");
+                    }}
+                  />
+                ) : null}
+                {shippingRequired && phase === "confirm" && labelFields ? (
+                  <LabelConfirmCard
+                    fields={labelFields}
+                    note={
+                      capture?.status === "error" ||
+                      capture?.status === "unchecked" ||
+                      capture?.status === "unverified" ||
+                      decision === "override"
+                        ? CUSTOMER_ADDRESS_CHECK_NOTE
+                        : undefined
+                    }
+                    pending={submit.isPending}
+                    confirmLabel="Send my details to the seller"
+                    identity={{
+                      name: form.clientFullName.trim(),
+                      email: form.clientEmail.trim(),
+                      phone: form.clientPhone.trim(),
+                    }}
+                    acknowledgment={{
+                      checked: addressAcknowledged,
+                      onCheckedChange: setAddressAcknowledged,
+                    }}
+                    onConfirm={() => {
+                      if (!addressAcknowledged) return;
+                      submit.mutate();
+                    }}
+                    onEdit={() => {
+                      setAddressAcknowledged(false);
+                      setPhase("edit");
+                    }}
+                  />
+                ) : null}
               </fieldset>
 
               <fieldset className="space-y-4">
@@ -492,7 +677,10 @@ export default function ClientOrder() {
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 accent-primary"
                   checked={paymentConfirmed}
-                  onChange={(event) => setPaymentConfirmed(event.target.checked)}
+                  onChange={(event) => {
+                    setPaymentConfirmed(event.target.checked);
+                    setAddressAcknowledged(false);
+                  }}
                   data-testid="checkbox-client-payment-confirmed"
                 />
                 <span>
@@ -515,20 +703,22 @@ export default function ClientOrder() {
                 </p>
               )}
 
-              <Button
-                type="button"
-                className="w-full"
-                onClick={startSubmit}
-                disabled={submit.isPending}
-                data-testid="button-submit-client-details"
-              >
-                {submit.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <PackageCheck className="mr-2 h-4 w-4" />
-                )}
-                Send my details to the seller
-              </Button>
+              {phase === "edit" || !shippingRequired ? (
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={startSubmit}
+                  disabled={submit.isPending || validateAddress.isPending}
+                  data-testid="button-submit-client-details"
+                >
+                  {submit.isPending || validateAddress.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <PackageCheck className="mr-2 h-4 w-4" />
+                  )}
+                  {shippingRequired ? "Check this address" : "Send my details to the seller"}
+                </Button>
+              ) : null}
 
               <div className="flex items-start gap-2 text-xs text-muted-foreground">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
