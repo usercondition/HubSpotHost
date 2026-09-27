@@ -4,6 +4,7 @@
  */
 import { desc } from "drizzle-orm";
 import { printFileRecords } from "../../shared/schema";
+import type { ShipToFields } from "../../shared/order-origins";
 import {
   buildShopDashboard,
   type ShopDashboard,
@@ -14,6 +15,7 @@ import {
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
 import { getDb, getSqlite, orderLinkCounts } from "./order-links";
 import { ensureDefaultPrinters, listPrinterLifecycleEvents, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
+import { loadUsZipCentroids } from "./zip-centroids";
 
 function numberOrNull(value: string | null | undefined): number | null {
   if (value == null) return null;
@@ -52,6 +54,7 @@ export function collectShopDashboard(input: {
   stages: HubSpotPipelineStage[];
   period: ShopPeriodId;
   now?: Date;
+  shipTos?: Map<string, ShipToFields>;
 }): ShopDashboard {
   const now = input.now ?? new Date();
   const stageById = new Map(input.stages.map((stage) => [stage.id, stage]));
@@ -135,6 +138,7 @@ export function collectShopDashboard(input: {
       needsReply: truthy(props.print_needs_reply),
       shipping,
       hasTracking: Boolean(String(props.print_tracking_number ?? "").trim()),
+      shipTo: input.shipTos?.get(deal.id) ?? null,
     });
   }
 
@@ -217,6 +221,7 @@ export function collectShopDashboard(input: {
       .map((row) => ({ purchasedAt: row.purchased_at, amount: numberOrNull(row.total_amount) }))
       .filter((row): row is { purchasedAt: string; amount: number } => row.amount != null),
     awaitingClient: orderLinkCounts().awaiting_client,
+    zips: loadUsZipCentroids(),
   };
   return buildShopDashboard(facts);
 }

@@ -33,6 +33,7 @@ import {
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
 import { collectShopDashboard } from "./lib/shop-dashboard";
+import { loadDealShipTos } from "./lib/ship-to-index";
 import { SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
 import {
   activeAttentionOverrideKeys,
@@ -2161,9 +2162,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!SHOP_PERIODS.includes(period as ShopPeriodId)) {
         return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
       }
+      const shipTos = await loadDealShipTos(deals.map((deal) => deal.id));
       return res.json({
         ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId }),
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos }),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;

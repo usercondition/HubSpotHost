@@ -10,6 +10,7 @@ import { Panel } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
 import { SHOP_PERIODS, type ShopDashboard, type ShopMetric, type ShopPeriodId } from "@shared/shop-dashboard";
+import { OrderOriginMap } from "@/components/order-origin-map";
 
 type DashboardResponse = PerformanceResponse & { dashboard?: ShopDashboard };
 
@@ -202,6 +203,14 @@ export default function Performance() {
                 );
               })}
             </section>
+
+            <Panel
+              title="Where orders come from"
+              description="Ship-to city and state for orders opened in this period. Pickup counts as San Diego. Streets are not shown."
+              testId="stats-origin-map"
+            >
+              <OrderOriginMap origins={dashboard.origins} />
+            </Panel>
 
             <section className="grid gap-4 lg:grid-cols-2">
               <Panel title="Money" description={dashboard.period.compareLabel}>

@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { indexZipRows } from "../shared/order-origins";
 import { buildShopDashboard } from "../shared/shop-dashboard";
 
 const { chromium } = playwright;
@@ -263,6 +264,10 @@ function bodyFor(input: string | URL) {
           { attachedAt: "2026-09-20T12:00:00.000Z", printTimeSeconds: 10800, resinVolumeMl: 80, resinCost: 12, printerLabel: "Mighty 8K New" },
           { attachedAt: "2026-09-18T12:00:00.000Z", printTimeSeconds: 7200, resinVolumeMl: 40, resinCost: 6, printerLabel: "Mighty 12K" },
         ],
+        zips: indexZipRows([
+          ["92101", "San Diego", "CA", 32.72, -117.16],
+          ["10001", "New York", "NY", 40.75, -73.99],
+        ]),
         orders: [
           {
             id: "ada",
@@ -283,6 +288,7 @@ function bodyFor(input: string | URL) {
             needsReply: false,
             shipping: "ship",
             hasTracking: true,
+            shipTo: { city: "San Diego", state: "CA", zip: "92101", country: "United States" },
           },
           {
             id: "bea",
@@ -303,6 +309,28 @@ function bodyFor(input: string | URL) {
             needsReply: true,
             shipping: "ship",
             hasTracking: false,
+            shipTo: { city: "New York", state: "NY", zip: "10001", country: "US" },
+          },
+          {
+            id: "cal",
+            name: "Sword - Cal",
+            customer: "Cal",
+            createdAt: "2026-09-14T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 40,
+            resinCost: 8,
+            postage: 0,
+            packaging: 0,
+            shipBy: null,
+            tentative: false,
+            needsReply: false,
+            shipping: "pickup",
+            hasTracking: false,
+            shipTo: null,
           },
         ],
       }),
@@ -1125,6 +1153,21 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
     check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
     check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+      };
+    });
+    check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
+    check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
+    await current().locator("[data-testid='stats-origin-map']").screenshot({ path: "/opt/cursor/artifacts/stats-map-desktop.png" });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1323,6 +1366,22 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
     check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
     check((phoneStats.lefts[0] ?? 0) < (phoneStats.lefts[1] ?? 0), "phone headline order is wrong");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+        inner: window.innerWidth,
+      };
+    });
+    check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
+    check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
+    await current().locator("[data-testid='stats-origin-map']").screenshot({ path: "/opt/cursor/artifacts/stats-map-phone.png" });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));

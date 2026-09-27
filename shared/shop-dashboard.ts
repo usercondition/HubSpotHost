@@ -4,6 +4,8 @@
  * except labor (always $0) and packaging ( $0 unless a packaging amount was entered).
  */
 
+import { buildOrderOrigins, type OrderOrigins, type ShipToFields, type ZipIndex } from "./order-origins";
+
 export const SHOP_PERIODS = ["7", "30", "90", "ytd", "all"] as const;
 export type ShopPeriodId = (typeof SHOP_PERIODS)[number];
 
@@ -44,6 +46,8 @@ export interface ShopDashboardOrder {
   needsReply: boolean;
   shipping: "ship" | "pickup" | "unknown";
   hasTracking: boolean;
+  /** Contact ship-to already on the deal. Street is never included. */
+  shipTo?: ShipToFields | null;
 }
 
 export interface ShopDashboardPlate {
@@ -81,6 +85,8 @@ export interface ShopDashboardInput {
   supplyPurchases: Array<{ purchasedAt: string; amount: number }>;
   /** Intake links still waiting on the customer. Current queue, not a period. */
   awaitingClient: number;
+  /** Bundled ZIP centroids. Omitted in tests that only check money. */
+  zips?: ZipIndex;
 }
 
 export interface ShopDashboard {
@@ -95,6 +101,7 @@ export interface ShopDashboard {
   customers: Array<{ name: string; revenue: number; orders: number }>;
   pipelineMetrics: ShopMetric[];
   channelMetrics: ShopMetric[];
+  origins: OrderOrigins;
 }
 
 const PERIOD_LABEL: Record<ShopPeriodId, string> = {
@@ -738,5 +745,18 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
     customers,
     pipelineMetrics: [newOrders, needsReplyMetric, waitingCustomer, winRate],
     channelMetrics: [source, repeat],
+    origins: buildOrderOrigins({
+      start: window.start,
+      end: window.end,
+      zips: input.zips ?? { byZip: new Map(), byCity: new Map() },
+      orders: input.orders.map((order) => ({
+        id: order.id,
+        name: order.name,
+        amount: order.amount,
+        createdAt: order.createdAt,
+        pickup: order.shipping === "pickup",
+        shipTo: order.shipTo ?? null,
+      })),
+    }),
   };
 }
