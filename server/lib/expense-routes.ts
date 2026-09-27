@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { archiveExpense, createExpense, createExpenses, listExpenses, updateExpense } from "./expenses";
@@ -20,16 +19,7 @@ const expenseSchema = z.object({
   notes: z.string().max(4000).optional(),
 });
 
-function rejectOwner(req: Request, res: Response) {
-  const expected = process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim();
-  const provided = req.get("x-paid-order-access-code")?.trim().replace(/^Bearer\s+/i, "") ?? "";
-  if (!expected || !provided) { res.status(expected ? 401 : 503).json({ ok: false, error: expected ? "Owner access code required." : "Owner access code is not configured." }); return true; }
-  const actual = crypto.createHash("sha256").update(provided).digest("hex");
-  if (actual !== expected) { res.status(401).json({ ok: false, error: "Owner access code is invalid." }); return true; }
-  return false;
-}
-
-export function registerExpenseRoutes(app: Express) {
+export function registerExpenseRoutes(app: Express, rejectOwner: (req: Request, res: Response) => boolean) {
   app.get("/api/expenses", (req, res) => {
     if (rejectOwner(req, res)) return;
     res.json({ expenses: listExpenses(String(req.query.archived ?? "") === "1") });

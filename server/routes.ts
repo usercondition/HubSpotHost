@@ -1013,7 +1013,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  registerExpenseRoutes(app);
+  registerExpenseRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
