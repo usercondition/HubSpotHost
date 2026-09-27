@@ -1106,7 +1106,7 @@
 
   .stack-row {
     display: grid;
-    grid-template-columns: 52px minmax(0, 2.2fr) 212px minmax(0, 1.5fr) 150px 92px 128px;
+    grid-template-columns: 52px minmax(0, 1.6fr) 200px minmax(188px, 1.8fr) 150px 92px 128px;
     column-gap: 16px;
     align-items: center;
     min-height: 60px;

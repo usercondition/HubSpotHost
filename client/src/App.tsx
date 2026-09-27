@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, Router } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -13,7 +14,11 @@ import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
 import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import OrderLinks from "@/pages/order-links";
-import Performance from "@/pages/performance";
+import Expenses from "@/pages/expenses";
+const Performance = lazy(() => import("@/pages/performance"));
+function PerformanceRoute() {
+  return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Stats…</div>}><Performance /></Suspense>;
+}
 import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
 import PlateLibraryPage from "@/pages/plate-library";
@@ -43,6 +48,7 @@ function ShellRoutes() {
           {/* Clients + Marketplace Brief stay routed but off the nav rail (declutter). */}
           <Route path="/clients" component={ClientsPage} />
           <Route path="/orders" component={OrderLinks} />
+          <Route path="/expenses" component={Expenses} />
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />
           <Route path="/marketplace-brief" component={MarketplaceBriefPage} />
@@ -57,7 +63,7 @@ function ShellRoutes() {
             the route until attach uses the same Slice.log + printer + bits path.
           */}
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
-          <Route path="/performance" component={Performance} />
+          <Route path="/performance" component={PerformanceRoute} />
           <Route path="/setup" component={Setup} />
           <Route component={NotFound} />
         </Switch>

@@ -12,8 +12,8 @@ import {
   type ProductionQueueItem,
   type ProductionQueueResponse,
 } from "../../shared/schema";
-import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase, normalizeShipAddress } from "../../shared/ship-address";
-import { hashNormalizedAddress, readAddressCheck } from "./address-checks";
+import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
+import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
 import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists, withDerivedCostsEntered } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
@@ -93,8 +93,6 @@ type QueueItemBase = Omit<
   | "shippingRequired"
 >;
 
-/** Ship-by planning always uses the shop's calendar, never the server's timezone. */
-export const SHIP_BY_TIME_ZONE = "America/Los_Angeles";
 export const SHIP_BY_POST_PROCESS_BUFFER_SECONDS = 24 * 60 * 60;
 /** Default calendar-day SLAs used only when no print-duration estimate exists. */
 export const SHIP_BY_SLA_DAYS = {
@@ -341,7 +339,6 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       bucket,
       readyToPack,
       shippingRequired,
-      tentative: tentativeDeals.has(deal.dealId),
       priorityScore: priorityScore(base),
       // Defaults until attachShipAddressReadiness enriches ship-side rows.
       ...addressDefaults,
@@ -422,40 +419,19 @@ const UNCHECKED_ADDRESS = {
   chaseDraft: "",
 };
 
-function storedCheckFor(
-  dealId: string,
-  fields: { street1: string; street2: string; city: string; state: string; zip: string; country: string },
-): Pick<ProductionQueueItem, "addressCheckStatus" | "addressCheckedAt"> {
-  const stored = readAddressCheck(dealId);
-  const hash = hashNormalizedAddress(fields);
-  if (!stored || stored.addressHash !== hash) return {};
-  return { addressCheckStatus: stored.status, addressCheckedAt: stored.checkedAt };
-}
-
 function readinessFromContact(
   contact: DealAssociatedContact,
   item: ProductionQueueItem,
-): Pick<
-  ProductionQueueItem,
-  "addressStatus" | "addressSummary" | "chaseDraft" | "addressNeedsCleanup" | "addressCheckStatus" | "addressCheckedAt"
-> {
-  const cleaned = normalizeShipAddress({
-    street1: contact.street1,
-    street2: contact.street2,
-    city: contact.city,
-    state: contact.state,
-    zip: contact.zip,
-    country: contact.country,
-  });
+): Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft"> {
   const engineAddress = contactToShipEngineAddress(contact);
   const readiness = deriveShipAddressReadiness({
     name: contact.name,
     firstName: contact.name.split(/\s+/)[0] || null,
-    street1: cleaned.normalized.street1,
-    city: cleaned.normalized.city,
-    state: cleaned.normalized.state,
-    zip: cleaned.normalized.zip,
-    country: cleaned.normalized.country,
+    street1: contact.street1,
+    city: contact.city,
+    state: contact.state,
+    zip: contact.zip,
+    country: contact.country,
     dealName: item.dealName,
     contactNameHint: item.contactName ?? contact.name,
     shippingRequired: item.shippingRequired,
@@ -466,7 +442,6 @@ function readinessFromContact(
       addressStatus: readiness.addressStatus,
       addressSummary: readiness.addressSummary,
       chaseDraft: readiness.chaseDraft,
-      addressNeedsCleanup: false,
     };
   }
   // Prefer ShipEngine gate: ready only when label buy would accept the address.
@@ -481,8 +456,6 @@ function readinessFromContact(
     addressSummary:
       engineAddress != null ? `${engineAddress.city}, ${engineAddress.state}` : readiness.addressSummary,
     chaseDraft: readiness.chaseDraft,
-    addressNeedsCleanup: cleaned.changed,
-    ...storedCheckFor(item.dealId, cleaned.normalized),
   };
 }
 
@@ -524,18 +497,15 @@ export async function attachShipAddressReadiness(
       return [dealId, readinessFromContact(contact, item)] as const;
     } catch {
       const cached = peekDealContactCache(dealId);
-      if (cached) return [dealId, readinessFromContact(cached, item)] as const;
+      if (cached) {
+        const readiness = readinessFromContact(cached, item);
+        if (readiness.addressStatus === "ready") return [dealId, readiness] as const;
+      }
       return [dealId, UNCHECKED_ADDRESS] as const;
     }
   });
 
-  const byDeal = new Map<
-    string,
-    Pick<
-      ProductionQueueItem,
-      "addressStatus" | "addressSummary" | "chaseDraft" | "addressNeedsCleanup" | "addressCheckStatus" | "addressCheckedAt"
-    >
-  >();
+  const byDeal = new Map<string, Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">>();
   for (const entry of entries) {
     if (entry) byDeal.set(entry[0], entry[1]);
   }

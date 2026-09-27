@@ -150,6 +150,7 @@ const NAV: Array<{
   },
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep", phone: "more" },
+  { href: "/expenses", label: "Expenses", title: "Shop overhead", icon: ShoppingBag, testId: "link-nav-expenses", group: "Keep", phone: "more" },
   { href: "/deals", label: "Orders", title: "HubSpot stage board (mirror)", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },

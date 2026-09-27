@@ -17,8 +17,8 @@ import {
   type StackLane,
   type StackTier,
 } from "../../shared/priority-stack";
-import { addShipByCalendarDays, shipByCalendarDate } from "../../shared/ship-by";
 import { normalizeShipAddress } from "../../shared/ship-address";
+import { addShipByCalendarDays, shipByCalendarDate } from "../../shared/ship-by";
 import { getFulfillmentChecklist } from "./fulfillment";
 import {
   priorityStackBundles,

@@ -57,12 +57,14 @@ test("ignores non-deal objects and unrelated properties", () => {
   assert.equal(s.ignoredOther, 4);
 });
 
-test("contact and association events bust the cache without a deal recalculation", () => {
+test("contact and association events name the deal or contact to drop, without a full cache wipe", () => {
   const s = summarizeEvents([
     { objectId: 77, subscriptionType: "contact.propertyChange", propertyName: "address" },
     { subscriptionType: "deal.associationChange", fromObjectId: 88, toObjectId: 77 },
   ]);
-  assert.equal(s.cacheBust, true);
+  assert.equal(s.cacheBust, false);
+  assert.deepEqual(s.contactIds, ["77"]);
+  assert.deepEqual(s.contactCacheDealIds, ["88"]);
   assert.deepEqual(s.dealIds, []);
   assert.equal(s.matched, 0);
   assert.equal(s.ignoredOther, 0);
@@ -76,6 +78,7 @@ test("creation, deletion, and dealstage bust the cache and do not recalculate", 
   ]);
   assert.equal(s.cacheBust, true);
   assert.equal(s.lifecycle, 3);
+  assert.deepEqual(s.contactCacheDealIds, ["8", "9", "10"]);
   assert.deepEqual(s.dealIds, []);
   assert.equal(s.matched, 0);
 });
@@ -90,6 +93,14 @@ test("the subscription list is the handler's exact setup list", () => {
     "deal.propertyChange: dealstage",
     "deal.creation",
     "deal.deletion",
+    "contact.propertyChange: address",
+    "contact.propertyChange: city",
+    "contact.propertyChange: state",
+    "contact.propertyChange: zip",
+    "contact.propertyChange: firstname",
+    "contact.propertyChange: lastname",
+    "contact.propertyChange: email",
+    "deal.associationChange",
   ]);
 });
 

@@ -2,6 +2,7 @@
  * Priority Stack ranking. Pure functions — no database, no HubSpot.
  * priorityScore is only a last tiebreak. Do not change the Queue score.
  */
+import { addressStatusPill, type AddressStatus } from "./ship-address";
 import { addShipByCalendarDays, shipByCalendarDate } from "./ship-by";
 
 export const STACK_STRETCH_DAYS = 1;
@@ -28,7 +29,7 @@ export interface RankableStackRow {
   name: string;
   targetDate: string;
   readiness: number;
-  amount: number;
+  amount: number | null;
   priorityScore: number;
   manualRank: number | null;
 }
@@ -81,8 +82,11 @@ export function suggestedBlocker(signals: StackBlockerSignals): string {
   if (signals.unassignedPlateCount === 1) return "1 plate unassigned";
   if (signals.unassignedPlateCount > 1) return `${signals.unassignedPlateCount} plates unassigned`;
   if (signals.costsIncomplete) return "Needs costs";
-  if (signals.shippingRequired && (signals.addressStatus === "missing" || signals.addressStatus === "partial")) {
-    return "Address missing";
+  if (
+    signals.shippingRequired &&
+    (signals.addressStatus === "unknown" || signals.addressStatus === "missing" || signals.addressStatus === "partial")
+  ) {
+    return addressStatusPill(signals.addressStatus as AddressStatus).label;
   }
   if (signals.needsReply) return "Waiting on reply";
   if (signals.isStale) return "Stale in HubSpot";
@@ -94,7 +98,7 @@ export function suggestedBlocker(signals: StackBlockerSignals): string {
 export function autoCompare(a: RankableStackRow, b: RankableStackRow): number {
   if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
   if (a.readiness !== b.readiness) return b.readiness - a.readiness;
-  if (a.amount !== b.amount) return b.amount - a.amount;
+  if ((a.amount ?? 0) !== (b.amount ?? 0)) return (b.amount ?? 0) - (a.amount ?? 0);
   if (a.priorityScore !== b.priorityScore) return b.priorityScore - a.priorityScore;
   return a.name.localeCompare(b.name);
 }

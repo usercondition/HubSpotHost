@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS supply_purchases (
   line_items_json TEXT NOT NULL DEFAULT '[]'
 );
 `;
+const CREATE_EXPENSES_SQL = `
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, vendor TEXT NOT NULL, name TEXT NOT NULL,
+  category TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
+  usd_amount_cents INTEGER, cadence TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT,
+  payment_count INTEGER, payment_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS expense_audit (
+  id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
+  new_values_json TEXT, created_at TEXT NOT NULL
+);`;
 
 const CREATE_ATTENTION_OVERRIDES_SQL = `
 CREATE TABLE IF NOT EXISTS attention_overrides (
@@ -693,6 +705,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(CREATE_TABLE_SQL);
   sqlite.exec(CREATE_SUPPLY_PURCHASES_SQL);
+  sqlite.exec(CREATE_EXPENSES_SQL);
   sqlite.exec(CREATE_ATTENTION_OVERRIDES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_ANALYSES_SQL);
   sqlite.exec(CREATE_PRINT_FILE_RECORDS_SQL);
@@ -715,9 +728,9 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);
   ensureOrderIntakeColumns(sqlite);
+  ensureOffbookAddressColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
   ensureFulfillmentColumns(sqlite);
-  ensureOffbookAddressColumns(sqlite);
   sqliteConn = sqlite;
   db = drizzle(sqlite);
   return db;
@@ -965,32 +978,6 @@ export function applyReviewEdits(id: number, edits: ReviewEditInput): OrderIntak
   assign("paymentMethod", edits.paymentMethod);
   assign("paymentReference", edits.paymentReference);
   assign("ownerNotes", edits.ownerNotes);
-  const touchesAddress =
-    edits.shippingStreet !== undefined ||
-    edits.shippingStreet2 !== undefined ||
-    edits.shippingCity !== undefined ||
-    edits.shippingState !== undefined ||
-    edits.shippingPostalCode !== undefined ||
-    edits.shippingCountry !== undefined;
-  if (touchesAddress) {
-    const shippingRequired = patch.shippingRequired ?? link.shippingRequired;
-    if (shippingRequired) {
-      const cleaned = normalizeShipAddress({
-        street1: patch.shippingStreet ?? link.shippingStreet,
-        street2: patch.shippingStreet2 ?? link.shippingStreet2,
-        city: patch.shippingCity ?? link.shippingCity,
-        state: patch.shippingState ?? link.shippingState,
-        zip: patch.shippingPostalCode ?? link.shippingPostalCode,
-        country: patch.shippingCountry ?? link.shippingCountry,
-      }).normalized;
-      patch.shippingStreet = cleaned.street1;
-      patch.shippingStreet2 = cleaned.street2;
-      patch.shippingCity = cleaned.city;
-      patch.shippingState = cleaned.state;
-      patch.shippingPostalCode = cleaned.zip;
-      patch.shippingCountry = cleaned.country;
-    }
-  }
   if (Object.keys(patch).length === 0) return link;
   getDb().update(orderIntakeLinks).set(patch).where(eq(orderIntakeLinks.id, id)).run();
   return getOrderLink(id);

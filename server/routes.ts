@@ -26,14 +26,15 @@ import {
   fetchPrintOrderDeals,
   fetchPrintOrderPipelineStages,
   HubSpotError,
-  HUBSPOT_BUSY_MESSAGE,
-  isHubSpotBusyError,
   clearDealPrintFileMetrics,
   patchDealPrintFileMetrics,
   type HubSpotDealRecord,
   type HubSpotPipelineStage,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import { collectShopDashboard } from "./lib/shop-dashboard";
+import { loadDealShipTos } from "./lib/ship-to-index";
+import { resolveShopWindow, SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
 import {
   activeAttentionOverrideKeys,
   clearAttentionOverride,
@@ -57,29 +58,30 @@ import {
 } from "./lib/health-nudge";
 import { getCachedSyncHealth, placeholderSyncSummary, presentSyncSummary, runSyncHealthCheck } from "./lib/sync-health";
 import { telegramConfigured } from "./lib/telegram";
-import { addressProviderStatus, suggestFromProvider } from "./lib/address-provider";
 import {
-  applyCapturedAddress,
   capturePayload,
   checkCapturedAddress,
-  prepareClientAddressSubmit,
-  previewPastedAddress,
   rememberDealAddressCheck,
 } from "./lib/address-capture";
-import { PublicAddressRateLimitError } from "./lib/address-checks";
 import { consumeClientAttempt } from "./lib/client-rate-limit";
-import { publicAddressFieldsSchema } from "../shared/address-capture";
 import { claimPaidOrderCreate, releasePaidOrderCreate, savePaidOrderCreate } from "./lib/paid-orders";
 import { resolveCaptureSubmit, type CaptureStatus } from "../shared/address-capture";
 import {
   CLIENT_ADDRESS_ACK_FORM,
-  CLIENT_ADDRESS_ACK_VERSION,
   SHOP_ADDRESS_FORM_PASTE,
   buildAddressAckSnapshot,
 } from "../shared/address-ack";
-import { addressEntryLabelFor, publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-ack";
+import { publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-ack";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
+import { listExpenses, overheadForPeriod } from "./lib/expenses";
+import { registerExpenseRoutes } from "./lib/expense-routes";
+import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
+import { registerPrinterRoutes } from "./lib/printer-routes";
+import { firstIssue } from "./lib/validation";
+import { registerSupplyRoutes } from "./lib/supply-routes";
+import { shipByCalendarDate } from "../shared/ship-by";
+import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
 import { PRINT_FILE_MAX_BYTES } from "./lib/print-file-limits";
 import {
@@ -103,7 +105,6 @@ import {
   previewAttachSummary,
   stagePrintFileFromPath,
   stageCtbFromPrefix,
-  syncPrintFileDealStages,
 } from "./lib/print-files";
 import {
   addBitsToRecord,
@@ -285,10 +286,9 @@ import {
   upsertDealStackEntry,
 } from "./lib/priority-stack";
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
-import { applyAddressCleanup, gateLabelAddress, listAddressAudit, verifyAddressNow } from "./lib/label-address";
-import { ensureAddressCheck } from "./lib/address-checks";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
+import { registerLabelAddressRoutes } from "./lib/label-address-routes";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -309,15 +309,9 @@ import { attachShippingLabelToDeals } from "./lib/shipping-label-attach";
 import {
   ShipEngineError,
   addShipEngineCarrierFunds,
-  buildShipNotesFromShipEngine,
-  createShipEngineRates,
-  getShipFromAddress,
   getShipEngineStatus,
   listShipEngineCarriers,
-  purchaseShipEngineLabel,
   shipEngineAddFundsRequestSchema,
-  shipEnginePurchaseRequestSchema,
-  shipEngineRatesRequestSchema,
   summarizeShipEngineFunds,
 } from "./lib/shipengine";
 
@@ -630,10 +624,6 @@ async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
   };
 }
 
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
-}
-
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
   const value = stage?.metadata?.isClosed;
   return value === true || value === "true";
@@ -659,30 +649,6 @@ function partitionPrintDealBoards(
 }
 
 /** Map live HubSpot Print Orders → stage label / name for plate-history refresh. */
-function livePrintOrderStageMap(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): Map<string, { stage: string; dealName: string }> {
-  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
-  const map = new Map<string, { stage: string; dealName: string }>();
-  for (const deal of deals) {
-    const stageId = deal.properties.dealstage ?? "";
-    const stage = stageById.get(stageId);
-    map.set(deal.id, {
-      stage: stage?.label || stageId || "No stage",
-      dealName: deal.properties.dealname?.trim() || `Print Order ${deal.id}`,
-    });
-  }
-  return map;
-}
-
-function refreshPrintFileStagesFromHubSpot(
-  deals: HubSpotDealRecord[],
-  stages: HubSpotPipelineStage[],
-): void {
-  syncPrintFileDealStages(livePrintOrderStageMap(deals, stages));
-}
-
 /** The owner-side representation. The hash and raw token never leave as fields; a live form path does. */
 function ownerLinkView(link: OrderIntakeLink): Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
   priorMatch: ReturnType<typeof findPriorClientDetails>;
@@ -720,8 +686,6 @@ function tooManyClientAttempts(req: Request, res: Response): boolean {
   res.status(429).json({ ok: false, reason: "throttled" });
   return true;
 }
-
-const PLACES_SESSION = /^[A-Za-z0-9_-]{16,80}$/;
 
 /**
  * Maps a reviewed intake onto the paid-order draft plus one HubSpot deal per
@@ -898,6 +862,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         clientLinkWorkflow: "enabled",
       },
       storage: describeOrderLinksStorage(),
+      geo: { zipCentroids: zipCentroidsHealth() },
       webhook: {
         verification: config.webhookSecretConfigured ? "configured" : "not-configured",
         callbackToken: process.env.HUBSPOT_CALLBACK_TOKEN_SHA256?.trim()
@@ -1018,6 +983,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  registerExpenseRoutes(app, rejectUnsecuredIntake);
+
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
    * last submitted intake so a new private link can prefill contact/shipping.
@@ -1030,34 +997,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ ok: true, match: findPriorClientDetails({ username, email }) });
   });
 
-  /**
-   * Owner-only supply ledger. Regular Amazon accounts have no clean, official
-   * order-feed integration, so the owner records receipt totals here. This
-   * remains independent from actual cost fields on a HubSpot deal to prevent
-   * double-counting the same spend in gross-profit calculations.
-   */
-  app.get("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    return res.json({
-      ok: true,
-      purchases: listSupplyPurchases(),
-      summary: buildSupplySpendSummary(),
-    });
-  });
-
-  app.post("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = createSupplyPurchaseSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const purchase = createSupplyPurchase(parsed.data);
-    return res.status(201).json({
-      ok: true,
-      purchase,
-      summary: buildSupplySpendSummary(),
-    });
-  });
+  registerSupplyRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Prefill the supply form from a receipt/invoice file (PDF, CSV, Excel,
@@ -1407,14 +1347,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   registerPlateLibraryRoutes(app);
 
-  app.get("/api/address-entry", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const orderKey = typeof req.query.orderKey === "string" ? req.query.orderKey : "";
-    if (!/^(deal|offbook):[0-9]{1,20}$/.test(orderKey)) {
-      return res.status(400).json({ ok: false, error: "Unknown order." });
-    }
-    return res.json({ ok: true, addressEntryLabel: addressEntryLabelFor(orderKey) });
-  });
+  registerLabelAddressRoutes(app, rejectUnsecuredIntake);
 
   app.get("/api/deal-ops/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -1745,296 +1678,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /** Structured HubSpot ship-to for rate shopping. */
-  app.get("/api/shipping-labels/ship-to/:dealId", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String(req.params.dealId || "").trim();
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const contact = await fetchDealAssociatedContact(dealId);
-      const ensured = await ensureAddressCheck({ dealId, contact });
-      const cleaned = ensured.normalized;
-      const address = ensured.address;
-      const missing = address
-        ? []
-        : [
-            !contact.name && "name",
-            !cleaned.normalized.street1 && "street",
-            !cleaned.normalized.city && "city",
-            !cleaned.normalized.state && "state",
-            !cleaned.normalized.zip && "zip",
-          ].filter(Boolean);
-      return res.json({
-        ok: true,
-        dealId,
-        contact: {
-          id: contact.id,
-          name: contact.name,
-          email: contact.email,
-          phone: contact.phone,
-          addressLines: contact.addressLines,
-          street1: contact.street1,
-          street2: contact.street2,
-          city: contact.city,
-          state: contact.state,
-          zip: contact.zip,
-          country: contact.country,
-        },
-        original: cleaned.original,
-        normalized: cleaned.normalized,
-        needsCleanup: cleaned.changed,
-        changes: cleaned.changes,
-        validation: {
-          status: ensured.status,
-          checkedAt: ensured.checkedAt,
-          addressHash: ensured.addressHash,
-          suggestion: ensured.matched,
-          messages: ensured.messages,
-        },
-        addressEntryLabel: addressEntryLabelFor(`deal:${dealId}`),
-        ready: Boolean(address),
-        hasContact: Boolean(contact.id),
-        missing,
-      });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load ship-to address",
-      });
-    }
-  });
-
-  /** Quote carrier rates via ShipEngine for a Print Order's HubSpot ship-to. */
-  app.post("/api/shipping-labels/shipengine/rates", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = shipEngineRatesRequestSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const status = getShipEngineStatus();
-    if (!status.hasApiKey) {
-      return res.status(503).json({
-        ok: false,
-        error: "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
-      });
-    }
-    const addressFrom = parsed.data.addressFrom
-      ? {
-          name: parsed.data.addressFrom.name,
-          street1: parsed.data.addressFrom.street1,
-          street2: parsed.data.addressFrom.street2 || undefined,
-          city: parsed.data.addressFrom.city,
-          state: parsed.data.addressFrom.state,
-          zip: parsed.data.addressFrom.zip,
-          country: parsed.data.addressFrom.country || "US",
-          phone: parsed.data.addressFrom.phone || undefined,
-          email: parsed.data.addressFrom.email || undefined,
-        }
-      : getShipFromAddress();
-    if (!addressFrom) {
-      return res.status(503).json({
-        ok: false,
-        error:
-          "Set SHIP_FROM_NAME, SHIP_FROM_STREET1, SHIP_FROM_CITY, SHIP_FROM_STATE, and SHIP_FROM_ZIP on Railway.",
-      });
-    }
-
-    try {
-      const contact = await fetchDealAssociatedContact(parsed.data.dealId);
-      const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealId);
-      if (!gated.ok) {
-        return res.status(gated.status).json(gated.body);
-      }
-      const addressTo = gated.address;
-
-      const quoted = await createShipEngineRates({
-        addressFrom,
-        addressTo,
-        parcel: parsed.data.parcel,
-      });
-      return res.json({
-        ok: true,
-        dealId: parsed.data.dealId,
-        testMode: quoted.testMode,
-        shipmentId: quoted.shipmentId,
-        addressTo: {
-          name: addressTo.name,
-          street1: addressTo.street1,
-          city: addressTo.city,
-          state: addressTo.state,
-          zip: addressTo.zip,
-        },
-        original: gated.normalized.original,
-        normalized: gated.normalized.normalized,
-        rates: quoted.rates,
-        messages: quoted.messages,
-      });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const statusCode = error instanceof ShipEngineError ? error.status : 502;
-      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not get ShipEngine rates",
-      });
-    }
-  });
-
-  /** Buy a ShipEngine rate, then attach tracking + postage like a PDF label. */
-  app.post("/api/shipping-labels/shipengine/purchase", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = shipEnginePurchaseRequestSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    if (!getShipEngineStatus().hasApiKey) {
-      return res.status(503).json({
-        ok: false,
-        error: "Add SHIPENGINE_API_KEY on Railway before buying labels.",
-      });
-    }
-
-    try {
-      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
-      const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealIds[0]);
-      if (!gated.ok) {
-        return res.status(gated.status).json(gated.body);
-      }
-      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
-      const recipientName = contact.name || null;
-      const notes = buildShipNotesFromShipEngine({
-        carrierCode: purchase.carrierCode || parsed.data.carrierCode,
-        serviceType: purchase.serviceCode || parsed.data.serviceType,
-        amount: purchase.amount || parsed.data.amount,
-        labelUrl: purchase.labelUrl,
-        recipientName,
-      });
-      const postageUsd = purchase.amount || parsed.data.amount || "";
-      const attached = await attachShippingLabelToDeals({
-        dealIds: parsed.data.dealIds,
-        trackingNumber: purchase.trackingNumber,
-        notes,
-        postageUsd,
-        packingDone: parsed.data.packingDone,
-        labelBought: true,
-        markComplete: true,
-        messageChannel: parsed.data.messageChannel,
-        liveWrite: parsed.data.liveWrite,
-        shipengine: {
-          labelId: purchase.labelId,
-          carrier: purchase.carrierCode,
-          service: purchase.serviceCode,
-        },
-      });
-      if (!attached.ok) {
-        return res.status(400).json({
-          ...attached,
-          shipengine: {
-            trackingNumber: purchase.trackingNumber,
-            labelUrl: purchase.labelUrl,
-            amount: postageUsd,
-            testMode: purchase.testMode,
-          },
-        });
-      }
-      return res.json({
-        ...attached,
-        shipengine: {
-          labelId: purchase.labelId,
-          trackingNumber: purchase.trackingNumber,
-          trackingUrl: purchase.trackingUrl,
-          labelUrl: purchase.labelUrl,
-          amount: postageUsd,
-          currency: purchase.currency,
-          carrierCode: purchase.carrierCode || parsed.data.carrierCode,
-          serviceCode: purchase.serviceCode || parsed.data.serviceType,
-          testMode: purchase.testMode,
-        },
-      });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const statusCode = error instanceof ShipEngineError ? error.status : 502;
-      return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not purchase ShipEngine label",
-      });
-    }
-  });
-
-  /** Force a ShipEngine check for this deal, even when the stored hash still matches. */
-  app.post("/api/shipping-labels/address-verify", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const result = await verifyAddressNow(dealId);
-      if (!result.ok) return res.status(result.status).json(result.body);
-      return res.json(result.body);
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not verify the address",
-      });
-    }
-  });
-
-  /** Write cleaned address fields to the HubSpot contact. Confirm is required. */
-  app.post("/api/shipping-labels/address-cleanup", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const dealId = String((req.body as { dealId?: unknown } | null)?.dealId ?? "").trim();
-    const confirm = (req.body as { confirm?: unknown } | null)?.confirm;
-    if (!/^[0-9]{1,20}$/.test(dealId)) {
-      return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
-    }
-    try {
-      const result = await applyAddressCleanup({ dealId, confirm: confirm === true });
-      if (!result.ok) return res.status(result.status).json(result.body);
-      return res.json(result.body);
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not clean up the HubSpot address",
-      });
-    }
-  });
-
-  /** Open orders whose address needs cleanup or failed validation. */
-  app.get("/api/shipping-labels/address-audit", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const rows = await listAddressAudit();
-      return res.json({ ok: true, rows });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not audit addresses",
-      });
-    }
-  });
-
   /** HubSpot contact email/name for a Print Order (Labels draft → mailto). */
   app.get("/api/shipping-labels/contact/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -2054,9 +1697,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
       });
     } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
         ok: false,
@@ -2245,39 +1885,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /**
-   * Owner-only, read-only performance summary. The API token remains server
-   * side and this route deliberately performs no HubSpot writes.
-   */
-  app.get("/api/performance", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      const [deals, stages, hubspotPortalId] = await Promise.all([
-        fetchPrintOrderDeals(),
-        fetchPrintOrderPipelineStages(),
-        fetchHubSpotPortalId(),
-      ]);
-      refreshPrintFileStagesFromHubSpot(deals, stages);
-      return res.json(
-        buildPerformanceSnapshot({
-          deals,
-          stages,
-          intakeCounts: orderLinkCounts(),
-          supplySpend: buildSupplySpendSummary(),
-          attachedPrintDealIds: attachedPrintFileDealIds(),
-          shippingLabelDealIds: attachedShippingLabelDealIds(),
-          dismissedAttentionKeys: activeAttentionOverrideKeys(),
-          hubspotPortalId,
-        }),
-      );
-    } catch (error) {
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load HubSpot performance data",
-      });
-    }
-  });
+  registerPerformanceRoutes(app, rejectUnsecuredIntake);
 
   /** Skip / dismiss one attention alert for an open deal (e.g. legacy order without plates). */
   app.post("/api/attention/dismiss", (req: Request, res: Response) => {
@@ -2896,102 +2504,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     },
   );
 
-  /**
-   * Fleet usage + lifecycle for each named printer. Plate hours/layers/resin
-   * roll up from attached CTB/ULTX metrics matched by machine name aliases.
-   */
-  app.get("/api/printers", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      ensureDefaultPrinters();
-      return res.json({ ok: true, ...buildPrinterFleetSnapshot() });
-    } catch (error) {
-      return res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load printer fleet",
-      });
-    }
-  });
-
-  app.patch("/api/printers/:id", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    const parsed = updatePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const printer = updatePrinter(printerId, parsed.data);
-    if (!printer) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.json({ ok: true, printer, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  app.post("/api/printers/:id/events", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    if (!getPrinter(printerId)) {
-      return res.status(404).json({ ok: false, error: "That printer was not found" });
-    }
-    const parsed = createPrinterLifecycleEventSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const event = addPrinterLifecycleEvent(printerId, parsed.data);
-    if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  /**
-   * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
-   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
-   */
-  app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrinterProfileSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrinterProfile(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
-    }
-    const label = parsed.data.profile.trim();
-    const message = result.map
-      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
-      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
-    return res.json({
-      ok: true,
-      map: result.map,
-      stamped: result.stamped,
-      fleet: result.fleet,
-      message,
-    });
-  });
-
-  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
-  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrintFilePrinter(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
-    }
-    return res.json({
-      ok: true,
-      record: result.record,
-      fleet: result.fleet,
-      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
-    });
-  });
+  registerPrinterRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Reapply safe defaults to historical attached plates. This only fills blank
@@ -3480,202 +2993,6 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     });
     if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
     return res.json(result);
-  });
-
-  /**
-   * Tells the buyer form whether address suggestions are on.
-   * The provider is off unless GOOGLE_PLACES_API_KEY is set. The key is never sent.
-   */
-  app.get("/api/address-provider", (_req: Request, res: Response) => {
-    return res.json({ ok: true, provider: addressProviderStatus() });
-  });
-
-  /**
-   * Public address suggestions. Empty unless the Google Places provider is enabled,
-   * and then only US addresses. Throttled with the other client routes.
-   */
-  app.post("/api/address-suggest", async (req: Request, res: Response) => {
-    if (tooManyClientAttempts(req, res)) return;
-    const token = tokenFromBody(req.body);
-    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
-    const lookup = lookupClientOrder(token);
-    if (!lookup.ok) return res.status(lookup.reason === "invalid" ? 404 : 410).json(lookup);
-    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
-      ? (req.body as Record<string, unknown>)
-      : {};
-    const query = typeof body.query === "string" ? body.query : "";
-    const sessionToken = typeof body.sessionToken === "string" ? body.sessionToken.trim() : "";
-    if (!PLACES_SESSION.test(sessionToken)) {
-      return res.status(400).json({ ok: false, error: "A Places session token is required." });
-    }
-    try {
-      const suggestions = await suggestFromProvider(query.slice(0, 160), process.env, sessionToken);
-      return res.json({ ok: true, suggestions, provider: addressProviderStatus(), sessionToken });
-    } catch {
-      return res.json({ ok: true, suggestions: [], provider: addressProviderStatus(), sessionToken });
-    }
-  });
-
-  /** Public: ShipEngine check for the buyer form. Does not save the order. */
-  app.post("/api/client-order/validate-address", async (req: Request, res: Response) => {
-    if (tooManyClientAttempts(req, res)) return;
-    const token = tokenFromBody(req.body);
-    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
-    const lookup = lookupClientOrder(token);
-    if (!lookup.ok) return res.status(lookup.reason === "invalid" ? 404 : 410).json(lookup);
-    const parsedAddress = publicAddressFieldsSchema.safeParse(req.body ?? {});
-    if (!parsedAddress.success) {
-      return res.status(400).json({ ok: false, reason: "invalid-details", error: firstIssue(parsedAddress.error) });
-    }
-    try {
-      const check = await checkCapturedAddress(
-        {
-          street1: parsedAddress.data.shippingStreet,
-          street2: parsedAddress.data.shippingStreet2,
-          city: parsedAddress.data.shippingCity,
-          state: parsedAddress.data.shippingState,
-          zip: parsedAddress.data.shippingPostalCode,
-          country: parsedAddress.data.shippingCountry,
-        },
-        { audience: "public", rateKey: req.ip || "unknown" },
-      );
-      return res.json(capturePayload(check));
-    } catch (error) {
-      if (error instanceof PublicAddressRateLimitError) {
-        return res.status(429).json({ ok: false, reason: "throttled" });
-      }
-      throw error;
-    }
-  });
-
-  /**
-   * Public: one buyer submission per link. This writes ONLY to the local
-   * SQLite queue — it never calls HubSpot. A shipping address is checked with
-   * ShipEngine first. A correction or a missing unit is not stored until the
-   * buyer picks one.
-   */
-  app.post("/api/client-order/submit", async (req: Request, res: Response) => {
-    if (tooManyClientAttempts(req, res)) return;
-    const token = tokenFromBody(req.body);
-    if (!token) return res.status(404).json({ ok: false, reason: "invalid" });
-    const parsed = clientOrderSubmissionSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, reason: "invalid-details", error: firstIssue(parsed.error) });
-    }
-    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
-      ? (req.body as Record<string, unknown>)
-      : {};
-    let submission = parsed.data;
-    let intakeCheck: { status: string; checkedAt: string; choice: string; messages: string[] } | undefined;
-    if (submission.shippingRequired) {
-      let prepared: Awaited<ReturnType<typeof prepareClientAddressSubmit>>;
-      try {
-        prepared = await prepareClientAddressSubmit({
-          fields: {
-            street1: submission.shippingStreet,
-            street2: submission.shippingStreet2,
-            city: submission.shippingCity,
-            state: submission.shippingState,
-            zip: submission.shippingPostalCode,
-            country: submission.shippingCountry,
-          },
-          decision: typeof body.addressDecision === "string" ? body.addressDecision : "",
-          noUnit: body.noUnit === true,
-          addressCheckToken: typeof body.addressCheckToken === "string" ? body.addressCheckToken : "",
-          addressAcknowledged: body.addressAcknowledged === true,
-          rateKey: req.ip || "unknown",
-        });
-      } catch (error) {
-        if (error instanceof PublicAddressRateLimitError) {
-          return res.status(429).json({ ok: false, reason: "throttled" });
-        }
-        throw error;
-      }
-      if (!prepared.ok) return res.status(prepared.status).json(prepared.body);
-      submission = {
-        ...submission,
-        shippingStreet: prepared.fields.street1,
-        shippingStreet2: prepared.fields.street2,
-        shippingCity: prepared.fields.city,
-        shippingState: prepared.fields.state,
-        shippingPostalCode: prepared.fields.zip,
-        shippingCountry: prepared.fields.country,
-      };
-      intakeCheck = {
-        status: prepared.storedStatus,
-        checkedAt: prepared.checkedAt,
-        choice: prepared.choice,
-        messages: prepared.messages,
-      };
-    }
-    const acknowledgedAt = new Date().toISOString();
-    const intakeAck = submission.shippingRequired
-      ? {
-          acknowledgedAt,
-          snapshot: buildAddressAckSnapshot({
-            fullName: submission.clientFullName,
-            email: submission.clientEmail,
-            phone: submission.clientPhone,
-            address: {
-              street1: submission.shippingStreet,
-              street2: submission.shippingStreet2,
-              city: submission.shippingCity,
-              state: submission.shippingState,
-              zip: submission.shippingPostalCode,
-              country: submission.shippingCountry,
-            },
-          }),
-          textVersion: CLIENT_ADDRESS_ACK_VERSION,
-          formSource: CLIENT_ADDRESS_ACK_FORM,
-        }
-      : undefined;
-    const result = submitClientOrder(token, submission, intakeCheck, intakeAck);
-    if (!result.ok) return res.status(result.reason === "invalid" ? 404 : 410).json(result);
-    return res.status(201).json({ ok: true });
-  });
-
-  /** Owner: parse a pasted address, validate it, and return it for confirmation. Does not save. */
-  app.post("/api/address-capture/preview", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const text =
-      req.body && typeof req.body === "object" && typeof (req.body as { text?: unknown }).text === "string"
-        ? String((req.body as { text: string }).text)
-        : "";
-    if (text.trim().length < 5) {
-      return res.status(400).json({ ok: false, error: "Paste a full address." });
-    }
-    const check = await previewPastedAddress(text);
-    return res.json(capturePayload(check));
-  });
-
-  /** Owner: save a confirmed address onto a deal contact or an off-book row. */
-  app.post("/api/address-capture/apply", async (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
-      ? (req.body as Record<string, unknown>)
-      : {};
-    const fields = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields)
-      ? (body.fields as Record<string, unknown>)
-      : {};
-    const text = (row: Record<string, unknown>, key: string) => (typeof row[key] === "string" ? row[key] : "");
-    const result = await applyCapturedAddress({
-      confirm: body.confirm === true,
-      dealId: typeof body.dealId === "string" ? body.dealId : "",
-      offbookId: typeof body.offbookId === "number" ? body.offbookId : undefined,
-      decision: typeof body.decision === "string" ? body.decision : "",
-      noUnit: body.noUnit === true,
-      replaceHubspot: body.replaceHubspot === true,
-      switchToShip: body.switchToShip === true,
-      fields: {
-        street1: text(fields, "street1"),
-        street2: text(fields, "street2"),
-        city: text(fields, "city"),
-        state: text(fields, "state"),
-        zip: text(fields, "zip"),
-        country: text(fields, "country"),
-      },
-    });
-    return res.status(result.ok ? 200 : result.status).json(result.body);
   });
 
   app.post("/api/paid-orders/analyze", (req: Request, res: Response) => {

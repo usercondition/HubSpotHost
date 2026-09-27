@@ -2266,18 +2266,6 @@ export interface ProductionQueueItem {
   /** Copy-only Messenger/email chase when address is incomplete. */
   chaseDraft: string;
   /**
-   * True when the normalized ship-to differs from the HubSpot contact fields.
-   * Warning only — this is not the red Needs address state.
-   */
-  addressNeedsCleanup?: boolean;
-  /**
-   * Last stored ShipEngine check for this normalized address.
-   * Absent when nothing is stored or the address hash changed.
-   * Unchecked (an outage) is not stored.
-   */
-  addressCheckStatus?: "verified" | "corrected" | "unverified" | "error";
-  addressCheckedAt?: string | null;
-  /**
    * False when the buyer chose local pickup on intake (or notes say pickup).
    * Pickup orders do not need HubSpot ship-to or a shipping label.
    */
@@ -2412,6 +2400,8 @@ export interface DealOpsDetail {
   stages: Array<{ id: string; label: string; closed: boolean }>;
   printers: Array<{ id: number; name: string; status: string }>;
   hubspotPortalId: string | null;
+  /** unknown when the contact read failed. The drawer still opens. */
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   writeGate: {
     dryRun: boolean;
     allowWrites: boolean;

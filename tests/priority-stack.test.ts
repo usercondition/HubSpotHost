@@ -314,11 +314,11 @@ test("suggested blocker uses shop flags and skips address on pickup", () => {
   assert.equal(suggestedBlocker({
     requiresPlates: false, hasPlates: true, kitReprint: 0, unassignedPlateCount: 0,
     costsIncomplete: false, addressStatus: "unknown", needsReply: false, isStale: false, shippingRequired: true,
-  }), "");
+  }), "Address unchecked");
   assert.equal(suggestedBlocker({
     requiresPlates: false, hasPlates: true, kitReprint: 0, unassignedPlateCount: 0,
     costsIncomplete: false, addressStatus: "missing", needsReply: false, isStale: false, shippingRequired: true,
-  }), "Address missing");
+  }), "Needs address");
 });
 
 test("floor strip names this week's cash, an unpriced pickup, and the next action", () => {

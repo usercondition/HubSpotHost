@@ -42,11 +42,11 @@ export interface StackRowModel {
   dealId: string | null;
   offbookId: number | null;
   bundleId: number | null;
+  doneAt?: string | null;
   fulfillment: FulfillmentChecklistView | null;
   steps: StackStep[];
   members: StackRowModel[];
   warning?: string;
-  doneAt?: string | null;
 }
 
 export interface StackView {

@@ -810,8 +810,7 @@ export function ShipEngineBuyPanel({
 
   const orderNeedsCleanup = (item: ProductionQueueItem) => {
     const live = item.dealId === dealId ? shipToQuery.data : undefined;
-    if (live) return Boolean(live.needsCleanup);
-    return Boolean(item.addressNeedsCleanup);
+    return Boolean(live?.needsCleanup);
   };
 
   const addressChip = (item: ProductionQueueItem) => {
@@ -854,8 +853,7 @@ export function ShipEngineBuyPanel({
 
   const checkStatusFor = (item: ProductionQueueItem): AddressCheckStatus | null => {
     const live = item.dealId === dealId ? shipToQuery.data?.validation?.status : undefined;
-    if (live) return live;
-    return item.addressCheckStatus ?? null;
+    return live ?? null;
   };
 
   const checkChip = (item: ProductionQueueItem) => {

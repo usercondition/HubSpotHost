@@ -36,6 +36,7 @@ import {
 } from "./printers";
 import { recalculateDeal } from "./service";
 import { dealCostsCompleteFromFields } from "../../shared/deal-costs";
+import { deriveShipAddressReadiness, type AddressStatus } from "../../shared/ship-address";
 
 function moneyText(value: string | null | undefined): string {
   if (value == null || String(value).trim() === "") return "";
@@ -179,15 +180,54 @@ function contactIdFromAssociationResult(row: unknown): string | null {
   );
 }
 
-const DEAL_CONTACT_CACHE_MS = 90_000;
+/** Happy-path reuse. Ship-to and rates bypass this and read HubSpot live. */
+const DEAL_CONTACT_CACHE_MS = 60_000;
+/** A failed lookup may reuse a ready contact only inside this window. */
+const READY_CACHE_REUSE_MS = 15 * 60 * 1000;
+const DEAL_CONTACT_CACHE_MAX = 200;
 
 type CachedDealContact = { value: DealAssociatedContact; fetchedAt: number };
 const dealContactCache = new Map<string, CachedDealContact>();
 const dealContactInflight = new Map<string, Promise<DealAssociatedContact>>();
 
-/** Last successful contact, including a confirmed empty association, even past the TTL. */
+function rememberDealContact(dealId: string, value: DealAssociatedContact): void {
+  const now = Date.now();
+  for (const [id, row] of Array.from(dealContactCache.entries())) {
+    if (now - row.fetchedAt > READY_CACHE_REUSE_MS) dealContactCache.delete(id);
+  }
+  if (dealContactCache.has(dealId)) dealContactCache.delete(dealId);
+  dealContactCache.set(dealId, { value, fetchedAt: now });
+  while (dealContactCache.size > DEAL_CONTACT_CACHE_MAX) {
+    const oldest = Array.from(dealContactCache.keys())[0];
+    if (!oldest) break;
+    dealContactCache.delete(oldest);
+  }
+}
+
+/**
+ * Last successful contact inside the reuse window.
+ * Callers that failed a live lookup must still refuse anything that is not ready.
+ */
 export function peekDealContactCache(dealId: string): DealAssociatedContact | null {
-  return dealContactCache.get(dealId)?.value ?? null;
+  const row = dealContactCache.get(dealId);
+  if (!row) return null;
+  if (Date.now() - row.fetchedAt > READY_CACHE_REUSE_MS) return null;
+  return row.value;
+}
+
+/** Test helper. Ages a cached contact without deleting it. */
+export function ageDealContactCache(dealId: string, ageMs: number): void {
+  const row = dealContactCache.get(dealId);
+  if (row) row.fetchedAt = Date.now() - ageMs;
+}
+
+/** Drop every cached deal that currently points at this HubSpot contact. */
+export function invalidateDealsForContact(contactId: string): void {
+  const id = contactId.trim();
+  if (!id) return;
+  for (const [dealId, row] of Array.from(dealContactCache.entries())) {
+    if (row.value.id === id) dealContactCache.delete(dealId);
+  }
 }
 
 export function invalidateDealContactCache(dealId?: string): void {
@@ -215,15 +255,17 @@ export async function fetchDealAssociatedContact(
   if (!options?.fresh) {
     const cached = dealContactCache.get(dealId);
     if (cached && Date.now() - cached.fetchedAt < DEAL_CONTACT_CACHE_MS) {
+      dealContactCache.delete(dealId);
+      dealContactCache.set(dealId, cached);
       return cached.value;
     }
-    const inflight = dealContactInflight.get(dealId);
-    if (inflight) return inflight;
   }
+  const inflight = dealContactInflight.get(dealId);
+  if (inflight) return inflight;
 
   const pending = loadDealAssociatedContact(dealId)
     .then((contact) => {
-      dealContactCache.set(dealId, { value: contact, fetchedAt: Date.now() });
+      rememberDealContact(dealId, contact);
       return contact;
     })
     .finally(() => {
@@ -272,9 +314,24 @@ async function loadDealAssociatedContact(dealId: string): Promise<DealAssociated
   };
 }
 
-/** @deprecated use fetchDealAssociatedContact */
-async function fetchAssociatedContact(dealId: string) {
-  return fetchDealAssociatedContact(dealId);
+/** Drawer contact. Any HubSpot error becomes an unchecked placeholder so the drawer still opens. */
+async function fetchAssociatedContact(dealId: string): Promise<{ contact: DealAssociatedContact; addressStatus: AddressStatus }> {
+  try {
+    const contact = await fetchDealAssociatedContact(dealId);
+    if (!contact.id) return { contact, addressStatus: "missing" };
+    const readiness = deriveShipAddressReadiness({
+      name: contact.name,
+      street1: contact.street1,
+      city: contact.city,
+      state: contact.state,
+      zip: contact.zip,
+      country: contact.country,
+      shippingRequired: true,
+    });
+    return { contact, addressStatus: readiness.addressStatus };
+  } catch {
+    return { contact: { ...EMPTY_DEAL_CONTACT }, addressStatus: "unknown" };
+  }
 }
 
 function costsFromProperties(
@@ -542,12 +599,13 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
   if (!/^[0-9]{1,20}$/.test(id)) return { error: "Select a valid Print Order.", status: 400 };
 
   try {
-    const [deal, stages, portalId, contact] = await Promise.all([
+    const [deal, stages, portalId, loadedContact] = await Promise.all([
       fetchDealWithCosts(id),
       fetchPrintOrderPipelineStages(),
       fetchHubSpotPortalId(),
       fetchAssociatedContact(id),
     ]);
+    const contact = loadedContact.contact;
 
     const props = deal.properties;
     const stageId = String(props.dealstage ?? "");
@@ -672,6 +730,7 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
         status: printer.status,
       })),
       hubspotPortalId: portalId,
+      addressStatus: loadedContact.addressStatus,
       writeGate: {
         dryRun: config.dryRun,
         allowWrites: config.allowWrites,

@@ -11,10 +11,23 @@ import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { indexZipRows } from "../shared/order-origins";
+import { buildShopDashboard } from "../shared/shop-dashboard";
+import { overheadForPeriod } from "../server/lib/expenses";
 
 const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
+const EXPENSE_FIXTURE = [
+  { currency: "USD", amount_cents: 1200, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, category: "Models/Patreon" },
+  { currency: "USD", amount_cents: 9999, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, category: "Software/AI" },
+  { currency: "USD", amount_cents: 8500, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: null, category: "Equipment" },
+  { currency: "USD", amount_cents: 4200, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, category: "Materials" },
+] as any;
+const artifactsDir = process.env.ARTIFACTS_DIR?.trim() || "";
+function artifactPath(name: string) {
+  return artifactsDir ? `${artifactsDir}/${name}` : undefined;
+}
 
 function queueItem(
   id: string,
@@ -247,6 +260,98 @@ function bodyFor(input: string | URL) {
       intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
       supplySpend: { total: 0, orders: 0 },
       books: { supplySpend: 0, grossProfit: 0 },
+      dashboard: (() => {
+        const dashboard = buildShopDashboard({
+        now: "2026-09-25T19:39:00.000Z",
+        period: "30",
+        awaitingClient: 1,
+        supplyPurchases: [],
+        bits: [{ status: "good" }, { status: "reprint" }],
+        failures: [],
+        printers: [
+          { name: "Mighty 8K New", model: "Mighty 8K", fepChangedAt: "2026-08-01T00:00:00.000Z", hoursSinceFep: 42, recommendedFepHours: 80 },
+          { name: "MEGA 8K", model: "MEGA 8K", fepChangedAt: null, hoursSinceFep: null, recommendedFepHours: null },
+        ],
+        plates: [
+          { attachedAt: "2026-09-20T12:00:00.000Z", printTimeSeconds: 10800, resinVolumeMl: 80, resinCost: 12, printerLabel: "Mighty 8K New" },
+          { attachedAt: "2026-09-18T12:00:00.000Z", printTimeSeconds: 7200, resinVolumeMl: 40, resinCost: 6, printerLabel: "Mighty 12K" },
+        ],
+        zips: indexZipRows([
+          ["92101", "San Diego", "CA", 32.72, -117.16],
+          ["10001", "New York", "NY", 40.75, -73.99],
+        ]),
+        orders: [
+          {
+            id: "ada",
+            name: "Knight - Ada",
+            customer: "Ada",
+            createdAt: "2026-09-10T12:00:00.000Z",
+            closedAt: "2026-09-18T12:00:00.000Z",
+            open: false,
+            won: true,
+            lost: false,
+            stageLabel: "Completed",
+            amount: 180,
+            resinCost: 22,
+            postage: 9,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: false,
+            shipping: "ship",
+            hasTracking: true,
+            shipTo: { city: "San Diego", state: "CA", zip: "92101", country: "United States" },
+          },
+          {
+            id: "bea",
+            name: "Land Raider - Bea",
+            customer: "Bea",
+            createdAt: "2026-09-12T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 240,
+            resinCost: null,
+            postage: null,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: true,
+            shipping: "ship",
+            hasTracking: false,
+            shipTo: { city: "New York", state: "NY", zip: "10001", country: "US" },
+          },
+          {
+            id: "cal",
+            name: "Sword - Cal",
+            customer: "Cal",
+            createdAt: "2026-09-14T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 40,
+            resinCost: 8,
+            postage: 0,
+            packaging: 0,
+            shipBy: null,
+            tentative: false,
+            needsReply: false,
+            shipping: "pickup",
+            hasTracking: false,
+            shipTo: null,
+          },
+        ],
+        });
+        const gross = dashboard.headlines.find((item) => item.id === "gross-profit")?.value ?? 0;
+        const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: overheadForPeriod(EXPENSE_FIXTURE, "2026-08-26", "2026-09-25") / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        dashboard.headlines.push(overhead, net);
+        return dashboard;
+      })(),
       pipeline: [
         { id: "print", label: "Printing", closed: false },
         { id: "done", label: "Completed", closed: true },
@@ -276,6 +381,16 @@ function bodyFor(input: string | URL) {
       hubspotPortalId: "1",
     };
   }
+  if (pathname.startsWith("/api/expenses")) {
+    return {
+      expenses: [
+        { id: "monthly", vendor: "Patreon", name: "Creator membership", category: "Models/Patreon", amount_cents: 1200, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "yearly", vendor: "Google One", name: "Storage", category: "Software/AI", amount_cents: 9999, currency: "USD", usd_amount_cents: null, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "installment", vendor: "Affirm", name: "Printer financing", category: "Equipment", amount_cents: 8500, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: 12, payment_note: "", notes: "" },
+        { id: "one-off", vendor: "Resin supplier", name: "Resin", category: "Materials", amount_cents: 4200, currency: "USD", usd_amount_cents: null, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, payment_note: "", notes: "" },
+      ],
+    };
+  }
   if (pathname.startsWith("/api/priority-stack/updates")) {
     return {
       ok: true,
@@ -301,6 +416,8 @@ function bodyFor(input: string | URL) {
       amount: 80,
       tier: "committed",
       stage: "Ready to Ship",
+      blocker: "Needs address",
+      blockerSource: "auto",
       fulfillment: {
         dealId: "c1",
         addressVerified: false,
@@ -328,6 +445,8 @@ function bodyFor(input: string | URL) {
       stage: "Printing",
       tentative: true,
       targetDate: "2026-10-02",
+      blocker: "Address unchecked",
+      blockerSource: "auto",
     });
     const offbook = stackRow({
       key: "offbook",
@@ -456,53 +575,6 @@ function bodyFor(input: string | URL) {
   return { ok: true };
 }
 
-const LABEL_ORDERS = [
-  { dealId: "346140673754", name: "Daniel Ortega", city: "Phoenix", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "349919419125", name: "Wayne Hood", city: "Romulus", state: "MI", status: "ready", needsCleanup: true },
-  { dealId: "349912151800", name: "Glenn Chandler", city: "Mesa", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "348746780377", name: "Angel Pineda", city: "Tempe", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "342134173423", name: "Jose", city: "San Diego", state: "CA", status: "unknown", needsCleanup: false },
-];
-
-function labelsQueueBody() {
-  const shipReady = LABEL_ORDERS.map((order) => ({
-    ...queueItem(order.dealId, "ship_ready", 80),
-    dealName: `Print - ${order.name}`,
-    contactName: order.name,
-    stage: "Ready to Ship",
-    addressStatus: order.status,
-    addressSummary: order.status === "ready" ? `${order.city}, ${order.state}` : null,
-    addressNeedsCleanup: order.needsCleanup,
-    addressCheckStatus: order.needsCleanup ? "corrected" : order.status === "ready" ? "verified" : undefined,
-    addressCheckedAt: order.status === "ready" ? "2026-09-27T18:00:00.000Z" : null,
-    chaseDraft: "",
-  }));
-  return {
-    ok: true,
-    generatedAt: "2026-09-25T19:39:00.000Z",
-    hubspotPortalId: "1",
-    stages: [],
-    printers: [],
-    nextPrint: [],
-    inProduction: [],
-    shipReady,
-    blocked: [],
-    needsReply: [],
-    readyToPack: [],
-    recentFailures: [],
-    summary: {
-      nextPrint: 0,
-      inProduction: 0,
-      shipReady: shipReady.length,
-      blocked: 0,
-      needsReply: 0,
-      readyToPack: 0,
-      needsAddress: 0,
-      openOrders: shipReady.length,
-    },
-  };
-}
-
 function spread(values: number[]) {
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -568,7 +640,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     }
 
     browser = await chromium.launch({ channel: "chrome", headless: true });
-    const context = await browser.newContext({ deviceScaleFactor: 1 });
+    const context = await browser.newContext({ deviceScaleFactor: 1, hasTouch: true });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
     });
@@ -593,6 +665,15 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       () => document.querySelector('[data-testid="badge-nav-library"]')?.textContent?.trim() === "2",
     );
     await page.locator("[data-testid='link-nav-library']").waitFor();
+    const assertOneStatsPage = async () => {
+      await page.locator("[data-testid='stats-origin-svg']").waitFor();
+      assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, "one page transition remains after navigation");
+      assert.equal(await page.locator("main [data-testid='stats-origin-svg']").count(), 1, "one origin map remains after navigation");
+    };
+    await page.locator("[data-testid='link-nav-performance']").click();
+    await assertOneStatsPage();
+    if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
+    await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
     assert.ok(nav.length >= 3, "nav count slots rendered");
@@ -729,6 +810,22 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       assert.ok(money.length >= 3, `${label} stack amounts missing`);
       const moneyRight = spread(money.map((box) => box.right));
       check(moneyRight.delta <= 0.5, `${label} stack amount right edges differ by ${moneyRight.delta}`);
+      const addressBlockers = await current().locator("[data-testid^='button-blocker-']").evaluateAll((els) =>
+        els
+          .filter((el) => el.getClientRects().length > 0)
+          .map((el) => ({
+            text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+            scroll: el.scrollWidth,
+            client: el.clientWidth,
+            font: Number.parseFloat(getComputedStyle(el).fontSize),
+          })),
+      );
+      const addressLabels = addressBlockers.filter((row) => /Address unchecked|Needs address/.test(row.text));
+      check(addressLabels.length >= 2, `${label} address blockers missing`);
+      for (const row of addressLabels) {
+        check(row.scroll <= row.client + 1, `${label} ${row.text} clipped (${row.scroll} > ${row.client})`);
+        check(row.font >= 12, `${label} ${row.text} font is ${row.font}px`);
+      }
       if (label === "desktop") {
         const templates = await current().locator(".stack-row").evaluateAll((els) => {
           const visible = els.filter((el) => el.getClientRects().length > 0);
@@ -738,12 +835,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
     };
     const settlePage = () =>
-      page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
+      page.locator("[data-testid='button-open-committed']:visible").last().waitFor({ state: "visible" });
     const openDrawer = async () => {
       // A fast tab change leaves exiting Stack copies in the crossfade. Clicking
       // one of those opens a drawer that unmounts when the copy finishes leaving.
       await settlePage();
-      await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='button-open-committed']:visible").last().click();
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
       await page.waitForFunction(() => {
         const el = document.querySelector("[data-testid='drawer-deal-ops']");
@@ -758,7 +855,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     };
     const checkLibrary = async (label: string) => {
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const root = current();
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
@@ -824,7 +920,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
       await page.goto(`${base}/#/library?orderKey=${encodeURIComponent("deal:c1")}`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const filtered = current();
       await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
       await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
@@ -934,10 +1029,19 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal(await current().locator("[data-testid='button-bundle-selected']").count(), 0);
     const stackText = await current().getByTestId("stack-list").first().innerText();
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(stackText), false);
+    check(stackText.includes("Address unchecked"), `stack missing Address unchecked: ${stackText}`);
+    check(stackText.includes("Needs address"), `stack missing Needs address: ${stackText}`);
+    if (artifactPath("stack-address-desktop-1440.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
+    }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
     assert.match(cash, /\$1,305/);
+    if (artifactsDir) {
+      mkdirSync(artifactsDir, { recursive: true });
+      await page.screenshot({ path: artifactPath("stack-desktop-1440.png")!, fullPage: true });
+    }
     await checkDrawer("desktop");
     await checkLibrary("desktop");
 
@@ -1094,10 +1198,81 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(longTitle.text === "Cerastus Chassis - Castigator", `order title was ${longTitle.text}`);
     check(longTitle.lines >= 1 && longTitle.lines <= 2, `order title used ${longTitle.lines} lines`);
     check(longTitle.overflow.length === 0, `order title clipped: ${longTitle.overflow.join("|")}`);
+    if (artifactPath("orders-desktop-1440.png")) {
+      await page.screenshot({ path: artifactPath("orders-desktop-1440.png")!, fullPage: true });
+    }
     await current().locator("[data-testid='toggle-orders-view']").last().getByRole("button", { name: "Table" }).click();
     await current().locator("[data-testid='text-table-profit-b1']").first().waitFor();
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
     check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
+
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const desktopStats = await current().evaluate((root) => ({
+      scroll: document.documentElement.scrollWidth,
+      inner: window.innerWidth,
+      text: root.innerText,
+      tops: Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
+      align: Array.from(root.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
+    }));
+    check(desktopStats.scroll <= desktopStats.inner + 1, `desktop stats scrolls horizontally (${desktopStats.scroll})`);
+    check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
+    check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
+    check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    assert.match(await current().locator("[data-testid='headline-overhead']").innerText(), /30 days/);
+    assert.match(await current().locator("[data-testid='headline-net-profit']").innerText(), /30 days/);
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "desktop renders exactly one order-origin map");
+    const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+      };
+    });
+    check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
+    check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
+    await page.locator("[data-testid='stats-origin-svg'] path").first().click();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().click();
+    if (artifactPath("stats-map-legend-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-legend-1440.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-desktop-1440.png")) await page.screenshot({ path: artifactPath("stats-desktop-1440.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-1440.png")) await page.screenshot({ path: artifactPath("performance-overhead-1440.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-desktop-1440.png")) await page.screenshot({ path: artifactPath("expenses-desktop-1440.png")!, fullPage: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
@@ -1137,6 +1312,15 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='stack-row-committed']").first().waitFor();
+    const phoneStackText = await current().getByTestId("stack-list").first().innerText();
+    check(phoneStackText.includes("Address unchecked"), `phone stack missing Address unchecked: ${phoneStackText}`);
+    check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
+    if (artifactPath("stack-address-phone-390.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
+    if (artifactPath("stack-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
+    }
     await checkStackGrid("phone");
     const phoneRows = await current().locator("[data-testid^='stack-row-']").evaluateAll((els) =>
       els.filter((el) => el.getClientRects().length > 0).map((el) => {
@@ -1243,6 +1427,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='text-orders-phone']").first().waitFor();
+    if (artifactPath("orders-phone-390.png")) {
+      await page.screenshot({ path: artifactPath("orders-phone-390.png")!, fullPage: true });
+    }
     const dealRefresh = await page.locator("[data-testid='button-refresh-deals']").evaluateAll((els) =>
       els.map((el) => getComputedStyle(el).display),
     );
@@ -1253,182 +1440,100 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
 
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const phoneStats = await current().evaluate((root) => {
+      const headlines = Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
+      const rects = headlines.map((el) => el.getBoundingClientRect());
+      return {
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+        tops: rects.map((rect) => rect.top),
+        lefts: rects.map((rect) => rect.left),
+      };
+    });
+    check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
+    check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
+    check(Math.abs((phoneStats.lefts[0] ?? 0) - (phoneStats.lefts[1] ?? 0)) > 1, "phone headline columns overlap");
+    const periodOverflow = await current().locator("[data-testid='stats-period'] button").evaluateAll((buttons) =>
+      buttons.some((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left < -1 || rect.right > innerWidth + 1;
+      }),
+    );
+    check(!periodOverflow, "phone period chips overflow the viewport");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "phone renders exactly one order-origin map");
+    const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+        inner: window.innerWidth,
+      };
+    });
+    check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
+    check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
+    await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
+    assert.match(await page.locator("[data-testid='stats-origin-detail']").first().innerText(), /\d+ orders?/);
+    if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
+    if (artifactPath("stats-map-popover-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-390.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
+    if (artifactPath("stats-nav-390.png")) await page.screenshot({ path: artifactPath("stats-nav-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v2.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v2.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-390.png")) await page.screenshot({ path: artifactPath("performance-overhead-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v3.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v3.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-phone-390.png")) await page.screenshot({ path: artifactPath("expenses-phone-390.png")!, fullPage: true });
+    await page.getByRole("button", { name: "Add expense" }).first().click();
+    const saveVisible = await page.getByRole("button", { name: "Save" }).last().evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return rect.top >= 0 && rect.bottom <= innerHeight && (center === el || el.contains(center));
+    });
+    check(saveVisible, "expense drawer Save footer is visible and uncovered");
+    if (artifactPath("expenses-drawer-390.png")) await page.screenshot({ path: artifactPath("expenses-drawer-390.png")!, fullPage: true });
+
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='button-connect-google-drive']").waitFor();
     const connectText = await current().locator("[data-testid='panel-google-drive']").innerText();
     check(/Connect Google Drive/.test(connectText), `connect copy was ${connectText}`);
     check(!/refresh|ya29|client_secret/i.test(connectText), "connect panel leaks a secret");
-
-    await page.unroute("**/api/**");
-    await page.route("**/api/**", async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname.startsWith("/api/production-queue")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(labelsQueueBody()),
-        });
-        return;
-      }
-      if (url.pathname.startsWith("/api/shipping-labels/shipengine/status")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            ok: true,
-            configured: true,
-            hasApiKey: true,
-            hasShipFrom: true,
-            testMode: true,
-            shipFrom: {
-              name: "Shop",
-              street1: "1 Main",
-              street2: "",
-              city: "San Diego",
-              state: "CA",
-              zip: "92101",
-              country: "US",
-            },
-            carriers: [
-              {
-                carrierId: "se-1",
-                carrierCode: "ups",
-                friendlyName: "UPS",
-                balance: 42,
-                requiresFundedAmount: true,
-              },
-            ],
-            funds: {
-              availableUsd: 42,
-              sharedWallet: true,
-              lowestBalanceUsd: 42,
-              fundedCarriers: [
-                { carrierId: "se-1", carrierCode: "ups", friendlyName: "UPS", balance: 42 },
-              ],
-            },
-          }),
-        });
-        return;
-      }
-      if (url.pathname.startsWith("/api/shipping-labels/ship-to/")) {
-        const dealId = url.pathname.split("/").pop() || "";
-        const order = LABEL_ORDERS.find((row) => row.dealId === dealId);
-        const wayne = dealId === "349919419125";
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            ok: true,
-            dealId,
-            ready: true,
-            hasContact: true,
-            missing: [],
-            needsCleanup: Boolean(order?.needsCleanup),
-            validation: wayne
-              ? {
-                  status: "corrected",
-                  checkedAt: "2026-09-27T18:00:00.000Z",
-                  suggestion: {
-                    street1: "10909 Hannan Rd",
-                    street2: "",
-                    city: "Romulus",
-                    state: "MI",
-                    zip: "48174",
-                    country: "US",
-                  },
-                  messages: [],
-                }
-              : {
-                  status: "verified",
-                  checkedAt: "2026-09-27T18:00:00.000Z",
-                  suggestion: null,
-                  messages: [],
-                },
-            original: wayne
-              ? {
-                  street1: "10909 Hannan Rd, Romulus, Michigan, 48174",
-                  street2: "",
-                  city: "Romulus",
-                  state: "Michigan",
-                  zip: "48174",
-                  country: "United States",
-                }
-              : undefined,
-            normalized: wayne
-              ? {
-                  street1: "10909 Hannan Rd",
-                  street2: "",
-                  city: "Romulus",
-                  state: "MI",
-                  zip: "48174",
-                  country: "US",
-                }
-              : undefined,
-            contact: {
-              id: "9",
-              name: order?.name ?? "Buyer",
-              email: "buyer@example.com",
-              phone: "",
-              addressLines: wayne
-                ? ["10909 Hannan Rd, Romulus, Michigan, 48174"]
-                : ["123 Main St", `${order?.city ?? "San Diego"}, ${order?.state ?? "CA"} 92101`],
-              city: order?.city ?? "San Diego",
-              state: order?.state ?? "CA",
-            },
-          }),
-        });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(bodyFor(url)),
-      });
-    });
-
-    mkdirSync("/opt/cursor/artifacts", { recursive: true });
-    const shootLabels = async (width: number, height: number, file: string) => {
-      await page.setViewportSize({ width, height });
-      await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
-      const picks = current().locator("[data-testid='panel-shipengine-order-picks']");
-      await picks.waitFor();
-      const listText = await picks.innerText();
-      check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
-      check(listText.includes("Daniel Ortega") && listText.includes("Address · Phoenix, AZ"), `Daniel address missing: ${listText}`);
-      check(listText.includes("Address needs cleanup"), `Wayne cleanup pill missing: ${listText}`);
-      const joseButton = current().locator("[data-testid='button-shipengine-pick-342134173423']");
-      if ((await joseButton.count()) > 0) await joseButton.click();
-      await page.waitForFunction(() => {
-        const nodes = document.querySelectorAll("[data-testid='status-shipengine-address-342134173423']");
-        const node = nodes[nodes.length - 1];
-        const text = node && node.textContent ? node.textContent : "";
-        return text.indexOf("San Diego") >= 0;
-      });
-      const joseCard = current().locator("[data-testid='panel-shipengine-order-card-342134173423']");
-      const joseText = await joseCard.innerText();
-      check(!joseText.includes("Needs address"), `open label card showed Needs address: ${joseText}`);
-      check(joseText.includes("Address · San Diego, CA"), `live ship-to did not win: ${joseText}`);
-      check(joseText.includes("Verified"), `Jose ship-to missing Verified mark: ${joseText}`);
-      const wayneButton = current().locator("[data-testid='button-shipengine-pick-349919419125']");
-      if ((await wayneButton.count()) > 0) await wayneButton.click();
-      await page.waitForFunction(() => {
-        const nodes = document.querySelectorAll("[data-testid='panel-address-cleanup-diff']");
-        const node = nodes[nodes.length - 1];
-        const text = node && node.textContent ? node.textContent : "";
-        return text.indexOf("10909 Hannan Rd") >= 0 && text.indexOf("Before:") >= 0;
-      });
-      const wayneCard = current().locator("[data-testid='panel-shipengine-order-card-349919419125']");
-      const wayneText = await wayneCard.innerText();
-      check(!wayneText.includes("Needs address"), `Wayne card showed Needs address: ${wayneText}`);
-      check(wayneText.includes("Address needs cleanup"), `Wayne card missing cleanup pill: ${wayneText}`);
-      check(wayneText.includes("Suggested correction"), `Wayne card missing correction pill: ${wayneText}`);
-      check(wayneText.includes("Address · Romulus, MI"), `Wayne live address missing: ${wayneText}`);
-      await picks.screenshot({ path: file });
-    };
-    await shootLabels(1440, 900, "/opt/cursor/artifacts/labels-desktop.png");
-    await shootLabels(390, 844, "/opt/cursor/artifacts/labels-phone.png");
-    await page.setViewportSize({ width: 1440, height: 900 });
 
     const lockedContext = await browser!.newContext({ deviceScaleFactor: 1 });
     const lockedPage = await lockedContext.newPage();

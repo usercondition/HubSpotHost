@@ -79,6 +79,11 @@ function bodyFor(url: URL, method: string): unknown {
   if (method === "POST" && url.pathname.endsWith("/lookup")) return LOOKUP;
   if (method === "POST" && url.pathname.endsWith("/saved-details")) return { ok: true, savedDetails: null };
   if (url.pathname.endsWith("/address-provider")) return { ok: true, provider: EMPTY_SHOP.provider };
+  if (url.pathname.includes("/production-queue")) return LABEL_QUEUE;
+  if (url.pathname.includes("/shipping-labels/ship-to/")) return SHIP_TO;
+  if (url.pathname.endsWith("/shipengine/status")) {
+    return { ok: true, hasApiKey: true, testMode: true, carriers: [], funds: null };
+  }
   return EMPTY_SHOP;
 }
 
@@ -124,7 +129,7 @@ const STACK = {
       stage: "Deposit Received",
       bucket: "next_print",
       lane: "plates",
-      blocker: "",
+      blocker: "Address unchecked",
       blockerSource: "auto",
       nextStep: "",
       targetDate: "2026-10-01",
@@ -144,6 +149,98 @@ const STACK = {
   outTheDoor: [],
   totals: { committed: 40, stretch: 0, later: 0, outTheDoor: 0, offBookUnpriced: 0 },
   hiddenCount: 0,
+};
+
+const LABEL_ORDER = {
+  dealId: "349919419125",
+  dealName: "Acastus Knight - Wayne Hood",
+  stageId: "deposit",
+  stage: "Deposit Received",
+  amount: 40,
+  shipBy: "2026-10-02",
+  shipBySource: "derived",
+  tentative: false,
+  shipByReason: "",
+  addressStatus: "unknown",
+  addressSummary: null,
+  chaseDraft: "",
+  shippingRequired: true,
+  closeDate: null,
+  contactName: "Wayne Hood",
+  hasPlates: false,
+  requiresPlates: true,
+  plateCount: 0,
+  totalPrintTimeSeconds: null,
+  assignedPrinterIds: [],
+  assignedPrinterNames: [],
+  unassignedPlateCount: 0,
+  kitNeeded: 0,
+  kitReprint: 0,
+  costsIncomplete: false,
+  isStale: false,
+  needsReply: false,
+  readyToPack: false,
+  fulfillment: {
+    dealId: "349919419125",
+    addressVerified: false,
+    costsEntered: false,
+    labelBought: false,
+    trackingPasted: false,
+    packingDone: false,
+    trackingNumber: "",
+    notes: "",
+    completedCount: 0,
+    totalCount: 5,
+    readyPercent: 0,
+    shipReady: false,
+    updatedAt: null,
+  },
+  bucket: "next_print",
+  priorityScore: 1,
+};
+
+const LABEL_QUEUE = {
+  ok: true,
+  generatedAt: "2026-09-27T18:00:00.000Z",
+  hubspotPortalId: "1",
+  stages: [],
+  printers: [],
+  nextPrint: [LABEL_ORDER],
+  inProduction: [
+    {
+      ...LABEL_ORDER,
+      dealId: "349919419126",
+      dealName: "Ikarus - Daniel Ortega",
+      addressStatus: "missing",
+      bucket: "in_production",
+    },
+  ],
+  shipReady: [],
+  blocked: [],
+  needsReply: [],
+  readyToPack: [],
+};
+
+const SHIP_TO = {
+  ok: true,
+  dealId: "349919419125",
+  contact: {
+    id: "55",
+    name: "Wayne Hood",
+    email: "wayne@example.com",
+    phone: "734-555-0100",
+    addressLines: [],
+    street1: "",
+    street2: "",
+    city: "",
+    state: "",
+    zip: "",
+    country: "US",
+  },
+  ready: false,
+  hasContact: true,
+  missing: ["street", "city", "state", "zip"],
+  validation: { status: "unchecked", checkedAt: null, addressHash: "", suggestion: null, messages: [] },
 };
 
 const REPLACE = {
@@ -297,6 +394,30 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
     await page.locator("[data-testid='drawer-deal-ops']").screenshot({
       path: join(artifactsDir, "drawer-replace-hubspot-confirm-1440.png"),
     });
+
+    const shootLabels = async (width: number, height: number, suffix: string) => {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const panel = page.locator("[data-testid='panel-labels-shipengine']");
+      await panel.waitFor();
+      await panel.screenshot({ path: join(artifactsDir, `labels-panel-${suffix}.png`) });
+    };
+    await shootLabels(1440, 900, "1440");
+    await shootLabels(390, 844, "390");
+
+    const shootStack = async (width: number, height: number, suffix: string) => {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const list = page.locator("[data-testid='stack-list']").last();
+      await list.waitFor();
+      const blocker = await list.innerText();
+      assert.match(blocker, /Address unchecked/);
+      await list.screenshot({ path: join(artifactsDir, `stack-blocker-${suffix}.png`) });
+    };
+    await shootStack(1440, 900, "1440");
+    await shootStack(390, 844, "390");
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();
