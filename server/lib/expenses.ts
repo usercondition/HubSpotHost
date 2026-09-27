@@ -16,19 +16,6 @@ export type ExpenseInput = {
   startDate: string; endDate?: string | null; paymentCount?: number | null; paymentNote?: string; notes?: string;
 };
 
-function ensureTables() {
-  getSqlite().exec(`CREATE TABLE IF NOT EXISTS expenses (
-    id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, vendor TEXT NOT NULL, name TEXT NOT NULL,
-    category TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
-    usd_amount_cents INTEGER, cadence TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT,
-    payment_count INTEGER, payment_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
-    archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  ); CREATE TABLE IF NOT EXISTS expense_audit (
-    id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
-    new_values_json TEXT, created_at TEXT NOT NULL
-  );`);
-}
-
 function validate(input: ExpenseInput) {
   if (!input.idempotencyKey || input.idempotencyKey.length > 160) throw new Error("An idempotency key is required.");
   if (!input.vendor.trim() || !input.name.trim()) throw new Error("Vendor and name are required.");
@@ -39,25 +26,26 @@ function validate(input: ExpenseInput) {
 }
 
 export function listExpenses(includeArchived = false) {
-  ensureTables();
   return getSqlite().prepare(`SELECT * FROM expenses ${includeArchived ? "" : "WHERE archived_at IS NULL"} ORDER BY start_date DESC, created_at DESC`).all();
 }
 
 export function createExpense(input: ExpenseInput) {
-  ensureTables(); validate(input);
+  validate(input);
   const db = getSqlite(); const existing = db.prepare("SELECT * FROM expenses WHERE idempotency_key = ?").get(input.idempotencyKey);
   if (existing) return existing;
   const now = new Date().toISOString(); const id = crypto.randomUUID();
+  return db.transaction(() => {
   db.prepare(`INSERT INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,usd_amount_cents,cadence,start_date,end_date,payment_count,payment_note,notes,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, input.idempotencyKey, input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", now, now);
   const row = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,new_values_json,created_at) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), id, "created", JSON.stringify(row), now);
   return row;
+  })();
 }
 
 export function archiveExpense(id: string) {
-  ensureTables(); const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
-  if (!before) return null; const now = new Date().toISOString();
+  const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
+  if (!before || (before as { archived_at?: string }).archived_at) return null; const now = new Date().toISOString();
   db.prepare("UPDATE expenses SET archived_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
   const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "archived", JSON.stringify(before), JSON.stringify(after), now);
@@ -65,7 +53,7 @@ export function archiveExpense(id: string) {
 }
 
 export function updateExpense(id: string, input: ExpenseInput) {
-  ensureTables(); validate(input);
+  validate(input);
   const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ? AND archived_at IS NULL").get(id);
   if (!before) return null;
   const now = new Date().toISOString();
