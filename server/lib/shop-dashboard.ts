@@ -56,6 +56,7 @@ export function collectShopDashboard(input: {
   now?: Date;
   shipTos?: Map<string, ShipToFields>;
   mapIncomplete?: boolean;
+  mapBusy?: boolean;
 }): ShopDashboard {
   const now = input.now ?? new Date();
   const stageById = new Map(input.stages.map((stage) => [stage.id, stage]));
@@ -232,6 +233,7 @@ export function collectShopDashboard(input: {
   };
   const dashboard = buildShopDashboard(facts);
   dashboard.origins.incomplete = input.mapIncomplete === true;
+  dashboard.origins.busy = input.mapBusy === true;
   return dashboard;
 }
 

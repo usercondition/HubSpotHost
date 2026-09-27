@@ -9,7 +9,8 @@ const CHUNK = 100;
 const MAX_CACHE_ENTRIES = 2_000;
 const CACHE_TTL_MS = 15 * 60_000;
 const BATCH_CONCURRENCY = 2;
-const shipToCache = new Map<string, { value: ShipToFields; expiresAt: number }>();
+const shipToCache = new Map<string, { value: ShipToFields | null; expiresAt: number }>();
+let inflight: Promise<ShipToLoad> | null = null;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,7 +22,7 @@ async function readBatch(path: string, body: object): Promise<any> {
       return await hubspotRequest(path, { method: "POST", body: JSON.stringify(body), readOnly: true });
     } catch (error) {
       if (!(error instanceof HubSpotError) || error.status !== 429 || attempt >= 2) throw error;
-      const base = error.retryAfterMs ?? 500 * 2 ** attempt;
+      const base = Math.min(10_000, error.retryAfterMs ?? 500 * 2 ** attempt);
       await wait(base + Math.floor(Math.random() * 250));
     }
   }
@@ -39,6 +40,7 @@ async function inBatches<T>(items: T[], run: (slice: T[]) => Promise<void>) {
 }
 
 function remember(dealId: string, value: ShipToFields) {
+  shipToCache.delete(dealId);
   if (shipToCache.size >= MAX_CACHE_ENTRIES) shipToCache.delete(shipToCache.keys().next().value!);
   shipToCache.set(dealId, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 }
@@ -48,19 +50,25 @@ function text(value: unknown): string | null {
   return trimmed || null;
 }
 
-export type ShipToLoad = { shipTos: Map<string, ShipToFields>; incomplete: boolean };
+export type ShipToLoad = { shipTos: Map<string, ShipToFields>; incomplete: boolean; busy: boolean };
 
 export async function loadDealShipTos(dealIds: string[]): Promise<ShipToLoad> {
+  if (inflight) return inflight;
+  inflight = load(dealIds).finally(() => { inflight = null; });
+  return inflight;
+}
+async function load(dealIds: string[]): Promise<ShipToLoad> {
   const out = new Map<string, ShipToFields>();
   const ids = Array.from(new Set(dealIds.filter((id) => /^[0-9]{1,20}$/.test(id))));
-  if (ids.length === 0) return { shipTos: out, incomplete: false };
+  if (ids.length === 0) return { shipTos: out, incomplete: false, busy: false };
   const missing = ids.filter((id) => {
     const cached = shipToCache.get(id);
     if (!cached || cached.expiresAt < Date.now()) return true;
-    out.set(id, cached.value);
+    shipToCache.delete(id); shipToCache.set(id, cached);
+    if (cached.value) out.set(id, cached.value);
     return false;
   });
-  if (missing.length === 0) return { shipTos: out, incomplete: false };
+  if (missing.length === 0) return { shipTos: out, incomplete: false, busy: false };
   try {
     const contactByDeal = new Map<string, string>();
     await inBatches(missing, async (slice) => {
@@ -95,15 +103,17 @@ export async function loadDealShipTos(dealIds: string[]): Promise<ShipToLoad> {
       }
     });
 
-    for (const [dealId, contactId] of Array.from(contactByDeal.entries())) {
+    for (const dealId of missing) {
+      const contactId = contactByDeal.get(dealId);
+      if (!contactId) { shipToCache.set(dealId, { value: null, expiresAt: Date.now() + CACHE_TTL_MS }); continue; }
       const shipTo = contacts.get(contactId);
       if (shipTo) {
         remember(dealId, shipTo);
         out.set(dealId, shipTo);
       }
     }
-  } catch {
-    return { shipTos: out, incomplete: true };
+  } catch (error) {
+    return { shipTos: out, incomplete: true, busy: error instanceof HubSpotError && error.status === 429 };
   }
-  return { shipTos: out, incomplete: false };
+  return { shipTos: out, incomplete: false, busy: false };
 }

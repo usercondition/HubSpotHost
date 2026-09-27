@@ -2168,7 +2168,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const shipToLoad = await loadDealShipTos(deals.map((deal) => deal.id));
       return res.json({
         ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete }),
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, mapBusy: shipToLoad.busy }),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
