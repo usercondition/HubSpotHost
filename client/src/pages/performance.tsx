@@ -170,7 +170,7 @@ export default function Performance() {
           </Panel>
         ) : (
           <>
-            <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Period" data-testid="stats-period">
+            <div className="flex flex-wrap gap-2 pb-1" role="tablist" aria-label="Period" data-testid="stats-period">
               {SHOP_PERIODS.map((id) => (
                 <Button key={id} size="sm" className="shrink-0" variant={period === id ? "default" : "outline"} onClick={() => setPeriod(id)} data-testid={`button-period-${id}`}>
                   {PERIOD_LABEL[id]}
