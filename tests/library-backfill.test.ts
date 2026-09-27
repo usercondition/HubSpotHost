@@ -14,6 +14,7 @@ import { encryptCtbSettingsBlock } from "../server/lib/ctb";
 import { saveDriveConnection, setDriveFetchForTest } from "../server/lib/google-drive";
 import { resetOrderLinkStore } from "../server/lib/order-links";
 import { getPlateFile, savePlatePreview, upsertPlateFiles } from "../server/lib/plate-files";
+import { whenPlateMeshesIdle } from "../server/lib/plate-mesh-jobs";
 import { backfillBlankLibraryPlates, registerPlateLibraryRoutes, takeResponseBytes } from "../server/lib/plate-routes";
 
 const FULL = 458_000_000;
@@ -206,12 +207,20 @@ test("library backfill fills blank header fields and does not touch HubSpot or c
     });
     const filled = await fetch(`http://127.0.0.1:${port}/api/plate-files/backfill`, { method: "POST", headers });
     assert.equal(filled.status, 200);
-    const body = (await filled.json()) as { ok: boolean; filled: number };
+    const body = (await filled.json()) as { ok: boolean; filled: number; meshes: number };
     assert.equal(body.ok, true);
     assert.equal(body.filled, 1);
-    assert.equal(ranges.length, 2);
-    assert.ok(ranges.every((range) => range.endsWith(`bytes=0-${8 * 1024 * 1024 - 1}`)));
-    assert.equal(ranges.filter((range) => range.includes("route-plate")).length, 1);
+    assert.ok(body.meshes >= 1);
+    await whenPlateMeshesIdle();
+    const prefixRange = `bytes=0-${8 * 1024 * 1024 - 1}`;
+    assert.ok(ranges.some((range) => range.includes("route-plate") && range.includes(prefixRange)));
+    assert.ok(
+      ranges.every((range) => {
+        const match = /bytes=(\d+)-(\d+)/.exec(range);
+        if (!match) return false;
+        return Number(match[2]) - Number(match[1]) + 1 <= 8 * 1024 * 1024;
+      }),
+    );
     const routed = getPlateFile("route-plate");
     assert.equal(routed?.stats?.layerCount, 900);
     assert.equal(routed?.stats?.resinCost, null);

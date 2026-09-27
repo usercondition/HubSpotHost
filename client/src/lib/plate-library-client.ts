@@ -80,8 +80,6 @@ export function uploadPlateBytes(input: {
   printRecordId?: number;
   headers: Record<string, string>;
   onProgress: (fraction: number) => void;
-  /** Parent plate id when this file is an STL/3MF for that plate, not a new catalog row. */
-  modelFor?: string;
 }): Promise<PlateFileRecord> {
   const params = new URLSearchParams({
     orderKey: input.orderKey,
@@ -93,7 +91,6 @@ export function uploadPlateBytes(input: {
     sha256: input.sha256,
   });
   if (input.printRecordId) params.set("printRecordId", String(input.printRecordId));
-  if (input.modelFor) params.set("modelFor", input.modelFor);
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/plate-files/upload?${params.toString()}`);

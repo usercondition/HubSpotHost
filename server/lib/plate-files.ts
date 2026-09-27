@@ -22,8 +22,8 @@ type FileRow = {
   notes: string;
   source: string;
   sha256: string;
-  model_drive_file_id?: string;
-  model_name?: string;
+  mesh_drive_file_id?: string;
+  mesh_state?: string;
 };
 
 export interface PlateIndexInput {
@@ -112,8 +112,8 @@ function toRecord(row: FileRow): PlateFileRecord {
     printRecordIds: printIdsFor(row.drive_file_id),
     hasPreview: preview.hasPreview,
     stats: preview.stats,
-    modelDriveFileId: row.model_drive_file_id || "",
-    modelName: row.model_name || "",
+    meshDriveFileId: row.mesh_drive_file_id || "",
+    meshState: row.mesh_state || "",
   });
 }
 
@@ -267,15 +267,31 @@ export function upsertPlateFiles(files: PlateIndexInput[], source: PlateFileSour
   return saved.map((id) => toRecord(readFile(id)!));
 }
 
-export function attachPlateModel(
+export function markPlateMesh(
   driveFileId: string,
-  model: { driveFileId: string; name: string },
+  patch: { meshDriveFileId?: string; meshState?: string },
 ): PlateFileRecord | null {
-  if (!readFile(driveFileId)) return null;
+  const row = readFile(driveFileId);
+  if (!row) return null;
+  const meshDriveFileId = patch.meshDriveFileId ?? row.mesh_drive_file_id ?? "";
+  const meshState = patch.meshState ?? row.mesh_state ?? "";
   getSqlite()
-    .prepare(`UPDATE plate_files SET model_drive_file_id = ?, model_name = ?, updated_at = ? WHERE drive_file_id = ?`)
-    .run(model.driveFileId, model.name.slice(0, 240), new Date().toISOString(), driveFileId);
+    .prepare(`UPDATE plate_files SET mesh_drive_file_id = ?, mesh_state = ?, updated_at = ? WHERE drive_file_id = ?`)
+    .run(meshDriveFileId, meshState, new Date().toISOString(), driveFileId);
   return toRecord(readFile(driveFileId)!);
+}
+
+export function listPlateIdsNeedingMesh(): string[] {
+  const rows = getSqlite()
+    .prepare(
+      `SELECT drive_file_id FROM plate_files
+       WHERE (lower(extension) = '.ctb' OR lower(name) LIKE '%.ctb')
+         AND mesh_state != 'ready'
+       ORDER BY id ASC
+       LIMIT 40`,
+    )
+    .all() as Array<{ drive_file_id: string }>;
+  return rows.map((row) => row.drive_file_id);
 }
 
 export function getPlateFile(driveFileId: string): PlateFileRecord | null {

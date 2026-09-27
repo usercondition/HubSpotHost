@@ -1,5 +1,7 @@
 /**
- * Expanded Library plate: layer slider mid-plate, and the 3D view, at 1440 and 390.
+ * Expanded Library plate: layer slider mid-plate, and a 3D mesh built from a test .ctb, at 1440 and 390.
+ * The Knight Castellan Drive files are not readable from this VM, so the mesh is generated here
+ * from a classic CTB pyramid that uses the same layer-table layout.
  */
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -8,6 +10,7 @@ import { mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { buildPlateGlb } from "../server/lib/plate-mesh";
 
 const { chromium } = playwright;
 const ARTIFACTS = process.env.ARTIFACTS_DIR?.trim() || "/opt/cursor/artifacts";
@@ -38,9 +41,53 @@ const FILE = {
     resinVolumeMl: 31.25,
     resinCost: 18.4,
   },
-  modelDriveFileId: "model-torso",
-  modelName: "torso.stl",
+  meshDriveFileId: "mesh-torso",
+  meshState: "ready",
 };
+
+function rle(white: boolean, length: number): number[] {
+  if (length < 1) return [];
+  return [0x80 | (white ? 0x7f : 0), length];
+}
+
+function testPyramidCtb(): Buffer {
+  const width = 48;
+  const height = 48;
+  const layerCount = 16;
+  const tableOffset = 0x80;
+  const layers: Buffer[] = [];
+  for (let layer = 0; layer < layerCount; layer += 1) {
+    const inset = Math.min(18, layer);
+    const bytes: number[] = [];
+    for (let y = 0; y < height; y += 1) {
+      const solid = y >= inset && y < height - inset;
+      if (!solid) {
+        bytes.push(...rle(false, width));
+        continue;
+      }
+      const x0 = inset;
+      const x1 = width - inset;
+      bytes.push(...rle(false, x0), ...rle(true, x1 - x0), ...rle(false, width - x1));
+    }
+    layers.push(Buffer.from(bytes));
+  }
+  const dataStart = tableOffset + layerCount * 36;
+  const file = Buffer.alloc(dataStart + layers.reduce((sum, layer) => sum + layer.length, 0));
+  file.writeUInt32LE(0x12fd0086, 0);
+  file.writeUInt32LE(width, 0x34);
+  file.writeUInt32LE(height, 0x38);
+  file.writeUInt32LE(tableOffset, 0x40);
+  file.writeUInt32LE(layerCount, 0x44);
+  let cursor = dataStart;
+  layers.forEach((layer, index) => {
+    const at = tableOffset + index * 36;
+    file.writeUInt32LE(cursor, at + 12);
+    file.writeUInt32LE(layer.length, at + 16);
+    layer.copy(file, cursor);
+    cursor += layer.length;
+  });
+  return file;
+}
 
 function bandRle(): Buffer {
   const bytes: number[] = [];
@@ -51,37 +98,7 @@ function bandRle(): Buffer {
   return Buffer.from(bytes);
 }
 
-function tetrahedronStl(): Buffer {
-  const vertices: Array<[number, number, number]> = [
-    [0, 0, 0],
-    [1, 0, 0],
-    [0.2, 1, 0],
-    [0.4, 0.3, 1],
-  ];
-  const faces = [
-    [0, 1, 2],
-    [0, 2, 3],
-    [0, 3, 1],
-    [1, 3, 2],
-  ];
-  const body = Buffer.alloc(80 + 4 + faces.length * 50);
-  body.write("public domain tetrahedron", 0, "ascii");
-  body.writeUInt32LE(faces.length, 80);
-  faces.forEach((face, index) => {
-    const at = 84 + index * 50;
-    face.forEach((vertex, corner) => {
-      const [x, y, z] = vertices[vertex]!;
-      const point = at + 12 + corner * 12;
-      body.writeFloatLE(x, point);
-      body.writeFloatLE(y, point + 4);
-      body.writeFloatLE(z, point + 8);
-    });
-  });
-  return body;
-}
-
 const RLE = bandRle();
-const STL = tetrahedronStl();
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -95,6 +112,15 @@ async function freePort(): Promise<number> {
 
 test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, async () => {
   mkdirSync(ARTIFACTS, { recursive: true });
+  const pyramid = testPyramidCtb();
+  const meshStarted = Date.now();
+  const MESH = await buildPlateGlb(
+    async (start, length) => pyramid.subarray(start, Math.min(pyramid.length, start + length)),
+    pyramid.length,
+  );
+  const meshMs = Date.now() - meshStarted;
+  assert.ok(MESH.length > 100 && MESH.length < 4 * 1024 * 1024, `test mesh ${MESH.length} bytes in ${meshMs}ms`);
+  console.log(`[plate-mesh] test ctb pyramid ${MESH.length} bytes in ${meshMs}ms`);
   const port = await freePort();
   const child: ChildProcess = spawn("node", ["dist/index.cjs"], {
     env: { ...process.env, NODE_ENV: "production", PORT: String(port), DRY_RUN: "true" },
@@ -146,8 +172,8 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         });
         return;
       }
-      if (/\/api\/plate-files\/[^/]+\/model$/.test(pathname)) {
-        await route.fulfill({ status: 200, contentType: "application/octet-stream", body: STL });
+      if (/\/api\/plate-files\/[^/]+\/mesh$/.test(pathname)) {
+        await route.fulfill({ status: 200, contentType: "model/gltf-binary", body: MESH });
         return;
       }
       await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false }) });
@@ -163,10 +189,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
       await page.locator("[data-testid='library-row-file-torso']").waitFor();
       await page.locator("[data-testid='button-plate-menu-file-torso']").click();
-      const addModel = page.locator("[data-testid='button-add-model-file-torso']");
-      await addModel.waitFor();
-      const menuText = await addModel.innerText();
-      assert.equal(menuText, "Add 3D model");
+      assert.equal(await page.locator("[data-testid='button-add-model-file-torso']").count(), 0);
       await page.locator("[data-testid='button-preview-plate-file-torso']").click();
       await page.locator("[data-testid='plate-layer-scan']").waitFor();
       await page.waitForFunction(() => {

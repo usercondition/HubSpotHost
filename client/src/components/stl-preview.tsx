@@ -11,8 +11,6 @@ type StlPreviewProps = {
   className?: string;
   canvasClassName?: string;
   emptyHint?: string;
-  /** Expanded plate view: the mesh only, no local-file chrome. */
-  bare?: boolean;
 };
 
 type ViewportTheme = {
@@ -125,7 +123,7 @@ function buildFloorGrid(size: number, theme: ViewportTheme): THREE.Group {
  * Browser-local STL viewer. Loads one File at a time (no server upload).
  * Viewport styling is intentionally slicer-like (Chitubox-adjacent).
  */
-export function StlPreview({ file, label, className, canvasClassName, emptyHint, bare = false }: StlPreviewProps) {
+export function StlPreview({ file, label, className, canvasClassName, emptyHint }: StlPreviewProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +190,6 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
 
     const loader = new STLLoader();
     let mesh: THREE.Mesh | null = null;
-    let held: THREE.Object3D | null = null;
     let meshBox: THREE.Box3 | null = null;
     let frame = 0;
 
@@ -285,27 +282,8 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
 
     file
       .arrayBuffer()
-      .then(async (buffer) => {
+      .then((buffer) => {
         if (disposed) return;
-        if (file.name.toLowerCase().endsWith(".3mf")) {
-          const { ThreeMFLoader } = await import("three/examples/jsm/loaders/3MFLoader.js");
-          if (disposed) return;
-          const url = URL.createObjectURL(new Blob([buffer]));
-          try {
-            const group = await new ThreeMFLoader().loadAsync(url);
-            if (disposed) return;
-            const box = new THREE.Box3().setFromObject(group);
-            group.position.sub(box.getCenter(new THREE.Vector3()));
-            scene.add(group);
-            held = group;
-            meshBox = new THREE.Box3().setFromObject(group);
-            syncSize(true);
-            setStatus("ready");
-          } finally {
-            URL.revokeObjectURL(url);
-          }
-          return;
-        }
         const geometry = loader.parse(buffer);
         geometry.computeVertexNormals();
         geometry.center();
@@ -318,7 +296,6 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
           roughness: 0.62,
         });
         mesh = new THREE.Mesh(geometry, material);
-        held = mesh;
         scene.add(mesh);
 
         geometry.computeBoundingBox();
@@ -351,16 +328,10 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
           }
         });
       }
-      if (held) {
-        held.traverse((obj) => {
-          if (obj instanceof THREE.Mesh) {
-            obj.geometry.dispose();
-            const mat = obj.material;
-            if (Array.isArray(mat)) mat.forEach((item) => item.dispose());
-            else mat.dispose();
-          }
-        });
-        scene.remove(held);
+      if (mesh) {
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+        scene.remove(mesh);
       }
       renderer.dispose();
       mount.replaceChildren();
@@ -382,22 +353,17 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
   }
 
   return (
-    <div className={cn(bare ? "h-full w-full min-h-[14rem]" : "flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-border bg-card", className)}>
-      {bare ? null : (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <p className="truncate text-xs font-medium">{label || file.name}</p>
-          <p className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">Local preview</p>
-        </div>
-      )}
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-border bg-card", className)}>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <p className="truncate text-xs font-medium">{label || file.name}</p>
+        <p className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">Local preview</p>
+      </div>
       {/*
         Keep the WebGL host empty of React children so OrbitControls pointer
         events are never covered by loading/error overlays after replaceChildren.
       */}
       <div
-        className={cn(
-          bare ? "relative h-full min-h-[14rem] bg-[#dce3eb] dark:bg-[#2a2e36]" : "relative min-h-0 flex-1 bg-[#dce3eb] dark:bg-[#2a2e36]",
-          canvasClassName,
-        )}
+        className={cn("relative min-h-0 flex-1 bg-[#dce3eb] dark:bg-[#2a2e36]", canvasClassName)}
         data-testid="stl-preview-canvas"
       >
         <div ref={mountRef} className="absolute inset-0 touch-none" />
@@ -413,11 +379,9 @@ export function StlPreview({ file, label, className, canvasClassName, emptyHint,
           </div>
         ) : null}
       </div>
-      {bare ? null : (
-        <p className="shrink-0 border-t border-border px-3 py-2 text-[0.7rem] text-muted-foreground">
-          Drag to orbit · scroll to zoom · compare to the physical print · file stays in this tab
-        </p>
-      )}
+      <p className="shrink-0 border-t border-border px-3 py-2 text-[0.7rem] text-muted-foreground">
+        Drag to orbit · scroll to zoom · compare to the physical print · file stays in this tab
+      </p>
     </div>
   );
 }

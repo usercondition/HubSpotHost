@@ -63,7 +63,6 @@ import {
   readDownloadTicket,
   readPlatePreviewPng,
   recordUploadFailure,
-  attachPlateModel,
   registerUploadedPlate,
   saveDownloadTicket,
   saveLibraryPending,
@@ -72,13 +71,14 @@ import {
   unlinkPlateFile,
   upsertPlateFiles,
 } from "./plate-files";
+import { enqueueMissingPlateMeshes, enqueuePlateMesh } from "./plate-mesh-jobs";
 import { getPrintFileRecord } from "./print-files";
 import { firstIssue } from "./validation";
 
 const NOT_IN_LIBRARY = "Not in Library yet.";
 const UPLOAD_UNFINISHED = "The upload did not finish.";
 const PREVIEW_PREFIX_BYTES = 8 * 1024 * 1024;
-const MODEL_MAX_BYTES = 64 * 1024 * 1024;
+const MESH_MAX_BYTES = 8 * 1024 * 1024;
 
 interface CachedLayerTable {
   plan: CtbLayerPlan;
@@ -436,7 +436,8 @@ export function registerPlateLibraryRoutes(app: Express): void {
     if (rejectOwner(req, res)) return;
     try {
       const result = await backfillBlankLibraryPlates();
-      return res.json({ ok: true, ...result });
+      const meshes = enqueueMissingPlateMeshes();
+      return res.json({ ok: true, ...result, meshes });
     } catch (error) {
       if (error instanceof DriveReconnectError) return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
       return res.status(502).json({ ok: false, error: "Drive could not read that file." });
@@ -614,24 +615,23 @@ export function registerPlateLibraryRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/plate-files/:driveFileId/model", async (req: Request, res: Response) => {
+  app.get("/api/plate-files/:driveFileId/mesh", async (req: Request, res: Response) => {
     if (rejectOwner(req, res)) return;
     const file = getPlateFile(queryValue(req.params.driveFileId));
-    if (!file?.modelDriveFileId) return res.status(404).json({ ok: false, error: "That plate has no 3D model." });
+    if (!file?.meshDriveFileId) return res.status(404).json({ ok: false, error: "That plate has no 3D view yet." });
     try {
-      const upstream = await openDriveMedia(file.modelDriveFileId, undefined);
+      const upstream = await openDriveMedia(file.meshDriveFileId, undefined);
       if (!upstream.ok && upstream.status !== 206) {
-        return res.status(502).json({ ok: false, error: "Drive could not read that model." });
+        return res.status(502).json({ ok: false, error: "Drive could not read that file." });
       }
-      const bytes = await takeResponseBytes(upstream, MODEL_MAX_BYTES);
-      if (bytes.length < 1) return res.status(404).json({ ok: false, error: "That plate has no 3D model." });
-      res.setHeader("content-type", "application/octet-stream");
-      res.setHeader("content-disposition", attachmentName(file.modelName || "model.stl"));
+      const bytes = await takeResponseBytes(upstream, MESH_MAX_BYTES);
+      if (bytes.length < 1) return res.status(404).json({ ok: false, error: "That plate has no 3D view yet." });
+      res.setHeader("content-type", "model/gltf-binary");
       res.setHeader("cache-control", "private, no-store");
       return res.send(bytes);
     } catch (error) {
       if (error instanceof DriveReconnectError) return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
-      return res.status(502).json({ ok: false, error: "Drive could not read that model." });
+      return res.status(502).json({ ok: false, error: "Drive could not read that file." });
     }
   });
 
@@ -649,7 +649,6 @@ export function registerPlateLibraryRoutes(app: Express): void {
       customer: queryValue(req.query.customer),
       sha256: queryValue(req.query.sha256),
       printRecordId: queryValue(req.query.printRecordId),
-      modelFor: queryValue(req.query.modelFor),
     });
     if (!parsed.success || !isPlateFileName(parsed.success ? parsed.data.fileName : "")) {
       releaseBody(req);
@@ -661,42 +660,6 @@ export function registerPlateLibraryRoutes(app: Express): void {
       return res.status(400).json({ ok: false, error: "Send the file with a Content-Length up to 2 GB." });
     }
     const meta = parsed.data;
-    if (meta.modelFor) {
-      const parent = getPlateFile(meta.modelFor);
-      if (!parent) {
-        releaseBody(req);
-        return res.status(404).json({ ok: false, error: "That plate is not in the library." });
-      }
-      if (!googleDriveConfigured()) {
-        releaseBody(req);
-        return res.status(503).json({ ok: false, error: "Google Drive is not configured" });
-      }
-      try {
-        const folder = await ensureLibraryFolder(libraryFolderName(parent.kit || "Kit"));
-        const modelName = librarySliceName(meta.fileName, "");
-        const uploaded = await uploadDriveFile({
-          access: folder.access,
-          folderId: folder.folderId,
-          name: modelName,
-          size,
-          body: req,
-        });
-        if (!uploaded.id) {
-          releaseBody(req);
-          return res.status(502).json({ ok: false, error: "Drive did not confirm the file." });
-        }
-        const file = attachPlateModel(parent.driveFileId, { driveFileId: uploaded.id, name: uploaded.name || modelName });
-        return res.status(201).json({ ok: true, file });
-      } catch (error) {
-        const raw = error instanceof Error ? error.message : String(error || "");
-        console.error("[drive] model upload failed", raw);
-        releaseBody(req);
-        if (error instanceof DriveReconnectError) {
-          return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
-        }
-        return res.status(502).json({ ok: false, error: "Drive upload failed." });
-      }
-    }
     const sliceName = librarySliceName(meta.fileName, meta.customer);
     const catalogKit = libraryKitName(meta.kit || meta.fileName, meta.customer);
     const printRecordId = printRecordIdOf(meta.printRecordId);
@@ -777,6 +740,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
           error: "That file does not match this plate.",
         });
       }
+      if (/\.ctb$/i.test(file.name)) enqueuePlateMesh(file.driveFileId);
       return res.status(201).json({ ok: true, file });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error || "");
