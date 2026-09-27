@@ -18,17 +18,19 @@ interface MeshJob {
 }
 
 parentPort?.once("message", (job: MeshJob) => {
-  try {
-    const surface = meshSurface(occupancyFromChunks(job.keys, job.chunks), job.scale, job.gx, job.gy, job.gz, job.budget);
-    if (!surface) {
-      parentPort?.postMessage(new Uint8Array(0));
-      return;
+  void (async () => {
+    try {
+      const welded = meshSurface(occupancyFromChunks(job.keys, job.chunks), job.scale, job.gx, job.gy, job.gz);
+      if (!welded) {
+        parentPort?.postMessage(new Uint8Array(0));
+        return;
+      }
+      const glb = await glbFromSurface(job.plateMmX, job.plateMmY, welded, job.budget, job.scale.binX * job.scale.pixelMmX);
+      const bytes = new Uint8Array(glb.byteLength);
+      bytes.set(glb);
+      parentPort?.postMessage(bytes, [bytes.buffer]);
+    } catch (error) {
+      parentPort?.postMessage({ error: error instanceof Error ? error.message : String(error) });
     }
-    const glb = glbFromSurface(job.plateMmX, job.plateMmY, surface);
-    const bytes = new Uint8Array(glb.byteLength);
-    bytes.set(glb);
-    parentPort?.postMessage(bytes, [bytes.buffer]);
-  } catch (error) {
-    parentPort?.postMessage({ error: error instanceof Error ? error.message : String(error) });
-  }
+  })();
 });

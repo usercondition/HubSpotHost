@@ -3,6 +3,7 @@
  * Geometry is several separated parts plus a thin support, at a real pixel pitch.
  * Run directly for peak RSS: `npx tsx tests/plate-mesh-stream.ts`
  */
+import { MeshoptDecoder } from "meshoptimizer/decoder";
 import { buildPlateGlb } from "../server/lib/plate-mesh";
 
 export const STREAM_PLATE_BYTES = 480 * 1024 * 1024;
@@ -22,6 +23,8 @@ export interface StreamMeasure {
   thinSupports: number;
   agreement: number;
   manifold: number;
+  voxelMm: number;
+  maxBlock: number;
   ms: number;
 }
 
@@ -97,31 +100,121 @@ function copyOverlap(dest: Buffer, destStart: number, src: Buffer, srcStart: num
   src.copy(dest, start - destStart, start - srcStart, end - srcStart);
 }
 
-export function inspectGlb(glb: Buffer): {
+interface MeshoptView {
+  byteOffset?: number;
+  byteLength: number;
+  byteStride: number;
+  count: number;
+  mode: string;
+  filter?: string;
+}
+
+interface GlbDoc {
+  nodes?: Array<{ extras?: { voxelMm?: number } }>;
+  meshes: Array<{ primitives: Array<{ attributes: { POSITION: number; NORMAL?: number }; indices: number }> }>;
+  accessors: Array<{ bufferView: number; componentType: number; count: number; type: string }>;
+  bufferViews: Array<{
+    byteOffset?: number;
+    byteLength: number;
+    extensions?: { EXT_meshopt_compression?: MeshoptView };
+  }>;
+}
+
+function glbDoc(glb: Buffer): { doc: GlbDoc; bin: Uint8Array } {
+  const jsonLen = glb.readUInt32LE(12);
+  const doc = JSON.parse(glb.subarray(20, 20 + jsonLen).toString()) as GlbDoc;
+  const binAt = 20 + jsonLen + 8;
+  const binLen = glb.readUInt32LE(20 + jsonLen);
+  return { doc, bin: glb.subarray(binAt, binAt + binLen) };
+}
+
+function decodeView(bin: Uint8Array, view: GlbDoc["bufferViews"][number]): Uint8Array {
+  const ext = view.extensions?.EXT_meshopt_compression;
+  if (!ext) {
+    const start = view.byteOffset ?? 0;
+    const copy = new Uint8Array(view.byteLength);
+    copy.set(bin.subarray(start, start + view.byteLength));
+    return copy;
+  }
+  const packed = new Uint8Array(ext.byteLength);
+  packed.set(bin.subarray(ext.byteOffset ?? 0, (ext.byteOffset ?? 0) + ext.byteLength));
+  const out = new Uint8Array(ext.count * ext.byteStride);
+  MeshoptDecoder.decodeGltfBuffer(out, ext.count, ext.byteStride, packed, ext.mode, ext.filter);
+  return out;
+}
+
+export async function readMesh(glb: Buffer): Promise<{
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+  voxelMm: number;
+}> {
+  await MeshoptDecoder.ready;
+  const { doc, bin } = glbDoc(glb);
+  const primitive = doc.meshes[0]!.primitives[0]!;
+  const position = doc.accessors[primitive.attributes.POSITION]!;
+  const normal = doc.accessors[primitive.attributes.NORMAL ?? 1]!;
+  const index = doc.accessors[primitive.indices]!;
+  const posBytes = decodeView(bin, doc.bufferViews[position.bufferView]!);
+  const idxBytes = decodeView(bin, doc.bufferViews[index.bufferView]!);
+  const nrmBytes = decodeView(bin, doc.bufferViews[normal.bufferView]!);
+  const positions = new Float32Array(posBytes.buffer, posBytes.byteOffset, position.count * 3);
+  const indices = new Uint32Array(idxBytes.buffer, idxBytes.byteOffset, index.count);
+  const normals = new Float32Array(normal.count * 3);
+  if (normal.componentType === 5126) {
+    const floats = new Float32Array(nrmBytes.buffer, nrmBytes.byteOffset, normal.count * 3);
+    normals.set(floats);
+  } else {
+    const bytes = new Int8Array(nrmBytes.buffer, nrmBytes.byteOffset, nrmBytes.byteLength);
+    for (let i = 0; i < normal.count; i += 1) {
+      normals[i * 3] = (bytes[i * 4] ?? 0) / 127;
+      normals[i * 3 + 1] = (bytes[i * 4 + 1] ?? 0) / 127;
+      normals[i * 3 + 2] = (bytes[i * 4 + 2] ?? 0) / 127;
+    }
+  }
+  return {
+    positions: new Float32Array(positions),
+    normals,
+    indices: new Uint32Array(indices),
+    voxelMm: doc.nodes?.[0]?.extras?.voxelMm ?? 0,
+  };
+}
+
+function weld(positions: Float32Array, indices: Uint32Array): { positions: Float32Array; indices: Uint32Array } {
+  const map = new Map<string, number>();
+  const remap = new Int32Array(positions.length / 3);
+  const packed: number[] = [];
+  for (let v = 0; v < remap.length; v += 1) {
+    const key = `${positions[v * 3]},${positions[v * 3 + 1]},${positions[v * 3 + 2]}`;
+    let id = map.get(key);
+    if (id === undefined) {
+      id = packed.length / 3;
+      map.set(key, id);
+      packed.push(positions[v * 3]!, positions[v * 3 + 1]!, positions[v * 3 + 2]!);
+    }
+    remap[v] = id;
+  }
+  const out = new Uint32Array(indices.length);
+  for (let i = 0; i < indices.length; i += 1) out[i] = remap[indices[i]!]!;
+  return { positions: Float32Array.from(packed), indices: out };
+}
+
+export async function inspectGlb(glb: Buffer): Promise<{
   triangles: number;
   components: number;
   thinSupports: number;
   hasNormals: boolean;
   agreement: number;
   manifold: number;
-} {
-  const jsonLen = glb.readUInt32LE(12);
-  const doc = JSON.parse(glb.subarray(20, 20 + jsonLen).toString()) as {
-    meshes: Array<{ primitives: Array<{ attributes: { POSITION: number; NORMAL?: number }; indices: number }> }>;
-    accessors: Array<{ bufferView: number; count: number }>;
-    bufferViews: Array<{ byteOffset?: number; byteLength: number }>;
-  };
+  voxelMm: number;
+}> {
+  const mesh = await readMesh(glb);
+  const welded = weld(mesh.positions, mesh.indices);
+  const positions = welded.positions;
+  const indices = welded.indices;
+  const { doc } = glbDoc(glb);
   const primitive = doc.meshes[0]!.primitives[0]!;
-  const position = doc.accessors[primitive.attributes.POSITION]!;
-  const index = doc.accessors[primitive.indices]!;
-  const indexView = doc.bufferViews[index.bufferView]!;
-  const binAt = 20 + jsonLen + 8;
-  const idxBytes = glb.subarray(binAt + (indexView.byteOffset ?? 0), binAt + (indexView.byteOffset ?? 0) + indexView.byteLength);
-  const indices = new Uint32Array(idxBytes.buffer, idxBytes.byteOffset, index.count);
-  const posView = doc.bufferViews[position.bufferView]!;
-  const posBytes = glb.subarray(binAt + (posView.byteOffset ?? 0), binAt + (posView.byteOffset ?? 0) + posView.byteLength);
-  const positions = new Float32Array(posBytes.buffer, posBytes.byteOffset, position.count * 3);
-  const parent = new Int32Array(position.count);
+  const parent = new Int32Array(positions.length / 3);
   for (let i = 0; i < parent.length; i += 1) parent[i] = i;
   const find = (v: number) => {
     let cursor = v;
@@ -142,7 +235,7 @@ export function inspectGlb(glb: Buffer): {
     parent[c] = a;
   }
   const bounds = new Map<number, { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }>();
-  for (let v = 0; v < position.count; v += 1) {
+  for (let v = 0; v < positions.length / 3; v += 1) {
     const root = find(v);
     const x = positions[v * 3]!;
     const y = positions[v * 3 + 1]!;
@@ -194,12 +287,13 @@ export function inspectGlb(glb: Buffer): {
     }
   }
   return {
-    triangles: index.count / 3,
+    triangles: indices.length / 3,
     components: bounds.size,
     thinSupports,
     hasNormals: primitive.attributes.NORMAL !== undefined,
     agreement: pairs > 0 ? agree / pairs : 0,
     manifold: edges.size > 0 ? closed / edges.size : 0,
+    voxelMm: mesh.voxelMm,
   };
 }
 
@@ -293,6 +387,13 @@ export async function streamLargePlate(): Promise<StreamMeasure> {
     if (rss > peakRss) peakRss = rss;
   };
   const timer = setInterval(sample, 15);
+  let maxBlock = 0;
+  let lastTick = Date.now();
+  const blockTimer = setInterval(() => {
+    const now = Date.now();
+    if (now - lastTick > maxBlock) maxBlock = now - lastTick;
+    lastTick = now;
+  }, 20);
   let maxRead = 0;
   let bytesRead = 0;
   let reads = 0;
@@ -315,7 +416,7 @@ export async function streamLargePlate(): Promise<StreamMeasure> {
     }, STREAM_PLATE_BYTES);
     sample();
     if (glb.length < 100 || glb.subarray(0, 4).toString() !== "glTF") throw new Error("empty mesh");
-    const inspected = inspectGlb(glb);
+    const inspected = await inspectGlb(glb);
     return {
       peakRss,
       startRss,
@@ -328,10 +429,13 @@ export async function streamLargePlate(): Promise<StreamMeasure> {
       thinSupports: inspected.thinSupports,
       agreement: inspected.agreement,
       manifold: inspected.manifold,
+      voxelMm: inspected.voxelMm,
+      maxBlock,
       ms: Date.now() - started,
     };
   } finally {
     clearInterval(timer);
+    clearInterval(blockTimer);
   }
 }
 
