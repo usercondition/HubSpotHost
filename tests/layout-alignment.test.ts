@@ -7,10 +7,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { buildShopDashboard } from "../shared/shop-dashboard";
 
 const { chromium } = playwright;
 
@@ -247,6 +248,64 @@ function bodyFor(input: string | URL) {
       intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
       supplySpend: { total: 0, orders: 0 },
       books: { supplySpend: 0, grossProfit: 0 },
+      dashboard: buildShopDashboard({
+        now: "2026-09-25T19:39:00.000Z",
+        period: "30",
+        awaitingClient: 1,
+        supplyPurchases: [],
+        bits: [{ status: "good" }, { status: "reprint" }],
+        failures: [],
+        printers: [
+          { name: "Mighty 8K New", model: "Mighty 8K", fepChangedAt: "2026-08-01T00:00:00.000Z", hoursSinceFep: 42, recommendedFepHours: 80 },
+          { name: "MEGA 8K", model: "MEGA 8K", fepChangedAt: null, hoursSinceFep: null, recommendedFepHours: null },
+        ],
+        plates: [
+          { attachedAt: "2026-09-20T12:00:00.000Z", printTimeSeconds: 10800, resinVolumeMl: 80, resinCost: 12, printerLabel: "Mighty 8K New" },
+          { attachedAt: "2026-09-18T12:00:00.000Z", printTimeSeconds: 7200, resinVolumeMl: 40, resinCost: 6, printerLabel: "Mighty 12K" },
+        ],
+        orders: [
+          {
+            id: "ada",
+            name: "Knight - Ada",
+            customer: "Ada",
+            createdAt: "2026-09-10T12:00:00.000Z",
+            closedAt: "2026-09-18T12:00:00.000Z",
+            open: false,
+            won: true,
+            lost: false,
+            stageLabel: "Completed",
+            amount: 180,
+            resinCost: 22,
+            postage: 9,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: false,
+            shipping: "ship",
+            hasTracking: true,
+          },
+          {
+            id: "bea",
+            name: "Land Raider - Bea",
+            customer: "Bea",
+            createdAt: "2026-09-12T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 240,
+            resinCost: null,
+            postage: null,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: true,
+            shipping: "ship",
+            hasTracking: false,
+          },
+        ],
+      }),
       pipeline: [
         { id: "print", label: "Printing", closed: false },
         { id: "done", label: "Completed", closed: true },
@@ -1052,6 +1111,22 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
     check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
 
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='stats-headlines']").waitFor();
+    const desktopStats = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      inner: window.innerWidth,
+      text: document.body.innerText,
+      tops: Array.from(document.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
+      align: Array.from(document.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
+    }));
+    check(desktopStats.scroll <= desktopStats.inner + 1, `desktop stats scrolls horizontally (${desktopStats.scroll})`);
+    check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
+    check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
+    check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    await page.screenshot({ path: "/opt/cursor/artifacts/stats-desktop.png", fullPage: true });
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[data-testid='badge-phone-floor']");
@@ -1205,6 +1280,23 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     );
     check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
+
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='stats-headlines']").waitFor();
+    const phoneStats = await page.evaluate(() => {
+      const headlines = Array.from(document.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
+      const rects = headlines.map((el) => el.getBoundingClientRect());
+      return {
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+        tops: rects.map((rect) => rect.top),
+        lefts: rects.map((rect) => rect.left),
+      };
+    });
+    check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
+    check(phoneStats.tops.length === 2 && Math.abs(phoneStats.tops[0]! - phoneStats.tops[1]!) <= 1, "phone headlines are not in two columns");
+    check(phoneStats.lefts[0]! < phoneStats.lefts[1]!, "phone headline order is wrong");
+    await page.screenshot({ path: "/opt/cursor/artifacts/stats-phone.png", fullPage: true });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });

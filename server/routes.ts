@@ -32,6 +32,8 @@ import {
   type HubSpotPipelineStage,
 } from "./lib/hubspot";
 import { buildPerformanceSnapshot } from "./lib/performance";
+import { collectShopDashboard } from "./lib/shop-dashboard";
+import { SHOP_PERIODS, type ShopPeriodId } from "../shared/shop-dashboard";
 import {
   activeAttentionOverrideKeys,
   clearAttentionOverride,
@@ -2144,18 +2146,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fetchHubSpotPortalId(),
       ]);
       refreshPrintFileStagesFromHubSpot(deals, stages);
-      return res.json(
-        buildPerformanceSnapshot({
-          deals,
-          stages,
-          intakeCounts: orderLinkCounts(),
-          supplySpend: buildSupplySpendSummary(),
-          attachedPrintDealIds: attachedPrintFileDealIds(),
-          shippingLabelDealIds: attachedShippingLabelDealIds(),
-          dismissedAttentionKeys: activeAttentionOverrideKeys(),
-          hubspotPortalId,
-        }),
-      );
+      const snapshot = buildPerformanceSnapshot({
+        deals,
+        stages,
+        intakeCounts: orderLinkCounts(),
+        supplySpend: buildSupplySpendSummary(),
+        attachedPrintDealIds: attachedPrintFileDealIds(),
+        shippingLabelDealIds: attachedShippingLabelDealIds(),
+        dismissedAttentionKeys: activeAttentionOverrideKeys(),
+        hubspotPortalId,
+      });
+      if (String(req.query.dashboard ?? "") !== "1") return res.json(snapshot);
+      const period = String(req.query.period ?? "30");
+      if (!SHOP_PERIODS.includes(period as ShopPeriodId)) {
+        return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
+      }
+      return res.json({
+        ...snapshot,
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId }),
+      });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;
       return res.status(status).json({
