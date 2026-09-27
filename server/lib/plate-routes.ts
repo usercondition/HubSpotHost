@@ -20,8 +20,10 @@ import {
   plateOrderKeySchema,
   platePrepareSchema,
   plateUploadQuerySchema,
+  type PlateFileRecord,
   type PlatePreviewStats,
 } from "../../shared/plate-files";
+import { SLICE_FINGERPRINT_CHUNK } from "../../shared/slice-fingerprint";
 import { parseCtbFileFromPrefix, sliceFingerprint } from "./ctb";
 import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
 import {
@@ -54,6 +56,7 @@ import {
   saveDownloadTicket,
   saveLibraryPending,
   savePlatePreview,
+  storeBlankPlatePreview,
   unlinkPlateFile,
   upsertPlateFiles,
 } from "./plate-files";
@@ -109,6 +112,128 @@ function attachmentName(name: string): string {
   const cleaned = name.replace(/[\r\n"]/g, "").replace(/[\\/]/g, " ").trim().slice(0, 180) || "slice-file";
   const ascii = cleaned.replace(/[^\x20-\x7e]/g, "_");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
+}
+
+/** Stop reading once `maxBytes` is in hand, so an ignored Range cannot pull the plate body. */
+export async function takeResponseBytes(response: globalThis.Response, maxBytes: number): Promise<Buffer> {
+  if (!response.body || maxBytes < 1) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const chunk = Buffer.from(value);
+      const room = maxBytes - total;
+      chunks.push(chunk.byteLength > room ? chunk.subarray(0, room) : chunk);
+      total += Math.min(chunk.byteLength, room);
+      if (chunk.byteLength > room) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readDriveBounded(fileId: string, start: number, length: number): Promise<Buffer | null> {
+  if (length < 1) return Buffer.alloc(0);
+  const upstream = await openDriveMedia(fileId, `bytes=${start}-${start + length - 1}`);
+  if (!upstream.ok && upstream.status !== 206) return null;
+  const bytes = await takeResponseBytes(upstream, length);
+  return bytes.length > 0 ? bytes : null;
+}
+
+function plateHeaderBlank(file: PlateFileRecord): boolean {
+  if (!/\.ctb$/i.test(file.name)) return false;
+  const stats = file.stats;
+  return !stats || stats.layerCount == null || stats.printTimeSeconds == null || stats.resinVolumeMl == null;
+}
+
+function statsFromCtbPrefix(name: string, prefix: Buffer, fullSize: number): { png: Buffer | null; stats: PlatePreviewStats } | null {
+  try {
+    const metrics = parseCtbFileFromPrefix(name, prefix, fullSize);
+    return {
+      png: extractCtbPreviewFromPrefix(prefix, fullSize)?.png ?? null,
+      stats: {
+        printerProfile: metrics.printerProfile ?? "",
+        layerCount: metrics.layerCount,
+        layerHeightMm: metrics.layerHeightMm,
+        printTimeSeconds: metrics.printTimeSeconds,
+        resinVolumeMl: metrics.resinVolumeMl,
+        resinCost: null,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fill blank layers, time, resin, and a missing thumbnail from the CTB header.
+ * One ranged read of the first bytes (the same 8 MB preview prefix uploads already use).
+ * A row with no fingerprint also reads the last 1 MB so the existing digest can be stored.
+ * The plate body is never downloaded. HubSpot and resin cost are not touched.
+ */
+export async function backfillBlankLibraryPlates(
+  readRange: (fileId: string, start: number, length: number) => Promise<Buffer | null> = readDriveBounded,
+): Promise<{ filled: number; skipped: number }> {
+  let filled = 0;
+  let skipped = 0;
+  for (const file of listPlateFiles({}).files) {
+    if (!plateHeaderBlank(file)) continue;
+    const size = file.sizeBytes;
+    if (size == null || size < 0x50) {
+      skipped += 1;
+      continue;
+    }
+    const prefixLen = Math.min(PREVIEW_PREFIX_BYTES, size);
+    let prefix: Buffer | null = null;
+    try {
+      prefix = await readRange(file.driveFileId, 0, prefixLen);
+    } catch (error) {
+      if (error instanceof DriveReconnectError) throw error;
+      skipped += 1;
+      continue;
+    }
+    if (!prefix || prefix.length < 0x50) {
+      skipped += 1;
+      continue;
+    }
+    const parsed = statsFromCtbPrefix(file.name, prefix, size);
+    const useful =
+      parsed !== null &&
+      (parsed.stats.layerCount != null ||
+        parsed.stats.printTimeSeconds != null ||
+        parsed.stats.resinVolumeMl != null ||
+        (parsed.png !== null && parsed.png.length > 32));
+    if (!parsed || !useful) {
+      skipped += 1;
+      continue;
+    }
+    let sha = file.sha256.trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(sha)) {
+      const tailLen = Math.min(SLICE_FINGERPRINT_CHUNK, size);
+      let tail: Buffer | null = null;
+      if (prefix.length >= size) tail = prefix.subarray(Math.max(0, size - tailLen), size);
+      else {
+        try {
+          tail = await readRange(file.driveFileId, size - tailLen, tailLen);
+        } catch (error) {
+          if (error instanceof DriveReconnectError) throw error;
+          tail = null;
+        }
+      }
+      if (!tail || tail.length < 1) {
+        skipped += 1;
+        continue;
+      }
+      sha = sliceFingerprint(size, prefix.subarray(0, Math.min(prefix.length, SLICE_FINGERPRINT_CHUNK)), tail);
+    }
+    if (storeBlankPlatePreview(file.driveFileId, sha, parsed.png, parsed.stats)) filled += 1;
+    else skipped += 1;
+  }
+  return { filled, skipped };
 }
 
 function cacheUploadedPreview(name: string, sha256: string, prefix: Buffer, fullSize: number, printer: string): void {
@@ -235,6 +360,17 @@ export function registerPlateLibraryRoutes(app: Express): void {
     if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
     const files = upsertPlateFiles(parsed.data.files, "indexed");
     return res.json({ ok: true, files });
+  });
+
+  app.post("/api/plate-files/backfill", async (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    try {
+      const result = await backfillBlankLibraryPlates();
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof DriveReconnectError) return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
+      return res.status(502).json({ ok: false, error: "Drive could not read that file." });
+    }
   });
 
   app.post("/api/plate-files/link", (req: Request, res: Response) => {

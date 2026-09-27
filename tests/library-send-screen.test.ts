@@ -20,7 +20,7 @@ const PNG = Buffer.from(
 
 const LIBRARY_FILE = {
   driveFileId: "file-castigator",
-  name: "Castigator_MEGA_8K.ctb",
+  name: "Mighty_8K_NEWX2_Knight_Castellan_Torso.ctb",
   webViewLink: "https://drive.google.com/file/d/file-castigator/view",
   sizeBytes: 188743680,
   modifiedAt: "2026-09-26T20:00:00.000Z",
@@ -48,7 +48,7 @@ const LIBRARY_FILE = {
 
 const LIBRARY_RAIDER = {
   driveFileId: "file-raider",
-  name: "Land_Raider_12K.ctb",
+  name: "Mighty_8K_NEWX3_Knight_Castellan_Bits_Plate.ctb",
   webViewLink: "https://drive.google.com/file/d/file-raider/view",
   sizeBytes: 52428800,
   modifiedAt: "2026-09-20T18:00:00.000Z",
@@ -383,6 +383,31 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     assert.ok(partMenu.x > partSize.x, `part menu sits before size (${partMenu.x} <= ${partSize.x})`);
     assert.ok(partSize.x > partName.x + partName.width * 0.4, "part menu is still in the name column");
     assert.ok(Math.abs(partMenu.x + partMenu.width - (kitMenu.x + kitMenu.width)) <= 2, "part menu is not lined up with the kit menu");
+    const desktopNames = await page.locator("[data-testid='library-file-name'] span").evaluateAll((nodes) => {
+      const rows = [];
+      for (const node of nodes) {
+        const style = getComputedStyle(node);
+        rows.push({
+          text: (node.textContent || "").replace(/\s+/g, " ").trim(),
+          clamp: style.webkitLineClamp,
+          wrap: style.whiteSpace,
+        });
+      }
+      return rows;
+    });
+    assert.equal(desktopNames.length, 2);
+    assert.equal(desktopNames[0].clamp, "2");
+    assert.equal(desktopNames[1].clamp, "2");
+    assert.equal(desktopNames[0].wrap, "normal");
+    assert.equal(desktopNames[1].wrap, "normal");
+    const desktopText = desktopNames.map((row) => row.text).join("\n");
+    assert.match(desktopText, /Mighty 8K NEWX2 Knight Castellan Torso/);
+    assert.match(desktopText, /Mighty 8K NEWX3 Knight Castellan Bits Plate/);
+    const raiderSize = await page.locator("[data-testid='library-row-file-raider'] [data-testid='library-file-size']").boundingBox();
+    const raiderMenu = await page.locator("[data-testid='library-row-file-raider'] [data-testid='button-plate-menu-file-raider']").boundingBox();
+    assert.ok(raiderSize && raiderMenu, "second library row slots missing");
+    assert.ok(Math.abs(partSize.x - raiderSize.x) <= 2, "size column moved between rows");
+    assert.ok(Math.abs(partMenu.x - raiderMenu.x) <= 2, "menu column moved between rows");
     await partRow.screenshot({ path: `${ARTIFACTS}/library-part-row-desktop-1440.png` });
     await assertKitCatalog();
     await shot("library-desktop-1440.png", "[data-testid='page-library']");
@@ -415,6 +440,32 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     assert.match(phoneMetaBox.text, /31\.25 ml/, phoneMetaBox.text);
     assert.equal(phoneMetaBox.wrap, "normal");
     assert.ok(phoneMetaBox.scroll <= phoneMetaBox.client + 1, `phone meta still clips (${phoneMetaBox.scroll} > ${phoneMetaBox.client})`);
+    const phoneNames = await page.locator("[data-testid='library-file-name'] span").evaluateAll((nodes) => {
+      const rows = [];
+      for (const node of nodes) {
+        const style = getComputedStyle(node);
+        rows.push({
+          text: (node.textContent || "").replace(/\s+/g, " ").trim(),
+          clamp: style.webkitLineClamp,
+          wrap: style.whiteSpace,
+        });
+      }
+      return rows;
+    });
+    const phoneText = phoneNames.map((row) => row.text).join("\n");
+    assert.match(phoneText, /NEWX2/);
+    assert.match(phoneText, /NEWX3/);
+    assert.match(phoneText, /Bits Plate/);
+    assert.equal(phoneNames[0].clamp, "2");
+    assert.equal(phoneNames[0].wrap, "normal");
+    const phoneCastSize = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='library-file-size']").boundingBox();
+    const phoneRaidSize = await page.locator("[data-testid='library-row-file-raider'] [data-testid='library-file-size']").boundingBox();
+    const phoneCastMenu = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='button-plate-menu-file-castigator']").boundingBox();
+    const phoneRaidMenu = await page.locator("[data-testid='library-row-file-raider'] [data-testid='button-plate-menu-file-raider']").boundingBox();
+    assert.ok(phoneCastSize && phoneRaidSize && phoneCastMenu && phoneRaidMenu, "phone size and menu slots missing");
+    assert.ok(Math.abs(phoneCastSize.x - phoneRaidSize.x) <= 2, "phone size column moved between rows");
+    assert.ok(Math.abs(phoneCastMenu.x - phoneRaidMenu.x) <= 2, "phone menu column moved between rows");
+    assert.ok(phoneCastMenu.x > phoneCastSize.x, "phone menu sits before size");
     await page.locator("[data-testid='library-row-file-castigator']").screenshot({ path: `${ARTIFACTS}/library-part-row-phone-390.png` });
     await shot("library-phone-390.png", "[data-testid='page-library']");
     await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
@@ -464,7 +515,7 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     assert.match(drawerText, /Send to Library/);
     assert.equal(await drawer.locator("[data-testid='slice-file-name']").count(), 1);
     const drawerName = await drawer.locator("[data-testid='slice-file-name']").innerText();
-    assert.match(drawerName, /Castigator_MEGA_8K\.ctb/);
+    assert.match(drawerName, /Mighty_8K_NEWX2_Knight_Castellan_Torso\.ctb/);
     const drawerBoxes = await drawer.locator("[data-testid='slice-library-pending-7']").evaluate((row) => {
       const thumb = row.querySelector(".plate-thumb")?.getBoundingClientRect();
       const name = row.querySelector("[data-testid='slice-file-name']")?.getBoundingClientRect();

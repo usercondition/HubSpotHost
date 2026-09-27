@@ -46,6 +46,14 @@ function kitSlug(kit: string): string {
   return kit.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "kit";
 }
 
+const LIBRARY_BACKFILL_KEY = "library-header-backfill";
+
+function plateNeedsHeaderFill(file: PlateFileRecord): boolean {
+  if (!/\.ctb$/i.test(file.name) || file.stats === undefined) return false;
+  if (file.stats == null) return true;
+  return file.stats.layerCount == null || file.stats.printTimeSeconds == null || file.stats.resinVolumeMl == null;
+}
+
 function KitMenu({
   kit,
   kits,
@@ -169,6 +177,7 @@ function KitMenu({
 }
 
 export default function PlateLibraryPage() {
+  const queryClient = useQueryClient();
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Library unlocked",
@@ -176,14 +185,13 @@ export default function PlateLibraryPage() {
   });
   const [q, setQ] = useState("");
   const [printer, setPrinter] = useState("");
-  const [part, setPart] = useState("");
   const [kit, setKit] = useState(() => readHashQueryParam("kit") ?? "");
   useEffect(() => {
     const sync = () => setKit(readHashQueryParam("kit") ?? "");
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
-  const filtering = Boolean(q.trim() || printer || part || kit);
+  const filtering = Boolean(q.trim() || printer || kit);
   const preview = usePlatePreview();
   const library = useQuery({
     queryKey: ["/api/plate-files", "library", ownerCode],
@@ -194,6 +202,18 @@ export default function PlateLibraryPage() {
       return Array.isArray(body.files) ? body.files : [];
     },
   });
+  useEffect(() => {
+    if (!isUnlocked || !library.data?.some(plateNeedsHeaderFill)) return;
+    try {
+      if (sessionStorage.getItem(LIBRARY_BACKFILL_KEY)) return;
+      sessionStorage.setItem(LIBRARY_BACKFILL_KEY, "1");
+    } catch {
+      return;
+    }
+    void apiRequest("POST", "/api/plate-files/backfill", {}, { headers })
+      .then(() => queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] }))
+      .catch(() => undefined);
+  }, [headers, isUnlocked, library.data, queryClient]);
 
   const files = library.data ?? [];
   const kits = useMemo(() => {
@@ -201,15 +221,6 @@ export default function PlateLibraryPage() {
     for (const file of files) names.add(file.kit.trim() || "Kit");
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [files]);
-  const parts = useMemo(() => {
-    const names = new Set<string>();
-    for (const file of files) {
-      if (kit && (file.kit.trim() || "Kit") !== kit) continue;
-      if (printer && file.printer !== printer) continue;
-      names.add(platePartName(file.name));
-    }
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [files, kit, printer]);
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
     return files.filter((file) => {
@@ -217,11 +228,10 @@ export default function PlateLibraryPage() {
       const filePart = platePartName(file.name);
       if (kit && fileKit !== kit) return false;
       if (printer && file.printer !== printer) return false;
-      if (part && filePart !== part) return false;
       if (!query) return true;
       return [fileKit, filePart, file.name, file.printer].join(" ").toLowerCase().includes(query);
     });
-  }, [files, kit, printer, part, q]);
+  }, [files, kit, printer, q]);
   const grouped = useMemo(() => {
     const groups = new Map<string, PlateFileRecord[]>();
     for (const file of visible) {
@@ -284,31 +294,6 @@ export default function PlateLibraryPage() {
                   </button>
                 ) : null}
               </div>
-              {parts.length > 1 ? (
-                <div className="library-printer-chips" data-testid="library-part-chips">
-                  <button
-                    type="button"
-                    className="library-printer-chip"
-                    data-testid="chip-library-part-all"
-                    data-active={part ? "false" : "true"}
-                    onClick={() => setPart("")}
-                  >
-                    All parts
-                  </button>
-                  {parts.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className="library-printer-chip"
-                      data-testid={`chip-library-part-${kitSlug(option)}`}
-                      data-active={part === option ? "true" : "false"}
-                      onClick={() => setPart(option)}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
             {library.isLoading ? <Skeleton className="h-40 rounded-lg" /> : null}
             {library.isError ? <p className="text-sm text-destructive">Could not load the slice library.</p> : null}
@@ -357,7 +342,7 @@ export default function PlateLibraryPage() {
                               title={filePart}
                               data-testid="library-file-name"
                             >
-                              <span className="truncate">{filePart}</span>
+                              <span>{filePart}</span>
                               <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                             </a>
                           </div>

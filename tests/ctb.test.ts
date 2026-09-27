@@ -214,6 +214,38 @@ test("parseCtbFileFromPrefix analyzes Mega-sized plates from a small sample", ()
 });
 
 
+test("parseCtbFileFromPrefix keeps layers, time, and resin when the printer name sits past the prefix", () => {
+  const settingsPlain = Buffer.alloc(288, 0);
+  settingsPlain.writeFloatLE(44, 104);
+  settingsPlain.writeUInt32LE(18_000, 76);
+  settingsPlain.writeUInt32LE(900, 64);
+  settingsPlain.writeFloatLE(9.5, 112);
+  settingsPlain.writeUInt32LE(50_000_000, 160);
+  settingsPlain.writeUInt32LE(16, 164);
+  const encrypted = encryptCtbSettingsBlock(settingsPlain);
+  const prefix = Buffer.alloc(0x30 + encrypted.length, 0);
+  prefix.writeUInt32LE(0x12fd0107, 0);
+  prefix.writeUInt32LE(encrypted.length, 4);
+  prefix.writeUInt32LE(0x30, 8);
+  prefix.writeUInt32LE(4, 0x10);
+  encrypted.copy(prefix, 0x30);
+
+  const metrics = parseCtbFileFromPrefix("Knight_Castellan.ctb", prefix, 458_000_000);
+  assert.equal(metrics.layerCount, 900);
+  assert.equal(metrics.printTimeSeconds, 18_000);
+  assert.equal(metrics.resinVolumeMl, 44);
+  assert.equal(metrics.printerProfile, null);
+  assert.equal(metrics.fileSizeBytes, 458_000_000);
+});
+
+test("parseCtbFileFromPrefix refuses settings stored past the sampled prefix", () => {
+  const prefix = Buffer.alloc(0x30, 0);
+  prefix.writeUInt32LE(0x12fd0107, 0);
+  prefix.writeUInt32LE(200, 4);
+  prefix.writeUInt32LE(9_000_000, 8);
+  assert.throws(() => parseCtbFileFromPrefix("Knight_Castellan.ctb", prefix, 458_000_000), CtbParseError);
+});
+
 test("parseCtbFile tolerates a truncated ExtConfig without inventing values", () => {
   const file = fixtureClassicCtb();
   file.writeUInt32LE(0x14, 0x58);
