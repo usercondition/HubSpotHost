@@ -1166,6 +1166,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
     check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
     await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "desktop renders exactly one order-origin map");
     const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
       const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
       const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
@@ -1386,6 +1387,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
     check((phoneStats.lefts[0] ?? 0) < (phoneStats.lefts[1] ?? 0), "phone headline order is wrong");
     await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    assert.equal(await current().locator("[data-testid='stats-origin-svg']").count(), 1, "phone renders exactly one order-origin map");
     const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
       const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
       const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
