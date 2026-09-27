@@ -26,37 +26,55 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   });
   scene.add(gltf.scene);
 
-  const box = new THREE.Box3().setFromObject(gltf.scene);
-  const size = box.getSize(new THREE.Vector3());
+  const meshBox = new THREE.Box3().setFromObject(gltf.scene);
   const plate = gltf.scene.children[0]?.userData?.plate as [number, number] | undefined;
-  const plateW = Math.max(plate?.[0] ?? box.max.x, 1);
-  const plateD = Math.max(plate?.[1] ?? box.max.z, 1);
-  const focus = new THREE.Vector3(plateW / 2, (box.min.y + box.max.y) / 2, plateD / 2);
-  const radius = Math.max(plateW, plateD, size.y, 1);
-  camera.near = radius / 200;
-  camera.far = radius * 40;
-  camera.position.set(focus.x + radius * 0.85, focus.y + radius * 0.7, focus.z + radius * 1.2);
-  camera.lookAt(focus);
-  camera.updateProjectionMatrix();
-  controls.target.copy(focus);
-  controls.update();
-
-  const pad = Math.max(radius * 0.03, 0.15);
-  const y = box.min.y - Math.max(radius * 0.012, 0.02);
+  const plateW = Math.max(plate?.[0] ?? meshBox.max.x, 1);
+  const plateD = Math.max(plate?.[1] ?? meshBox.max.z, 1);
+  const span = Math.max(plateW, plateD, meshBox.getSize(new THREE.Vector3()).y, 1);
+  const pad = Math.max(span * 0.03, 0.15);
+  const floorY = meshBox.min.y - Math.max(span * 0.012, 0.02);
+  const fit = meshBox.clone();
+  fit.expandByPoint(new THREE.Vector3(-pad, floorY, -pad));
+  fit.expandByPoint(new THREE.Vector3(plateW + pad, floorY, plateD + pad));
   const outline = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-pad, y, -pad),
-      new THREE.Vector3(plateW + pad, y, -pad),
-      new THREE.Vector3(plateW + pad, y, plateD + pad),
-      new THREE.Vector3(-pad, y, plateD + pad),
+      new THREE.Vector3(-pad, floorY, -pad),
+      new THREE.Vector3(plateW + pad, floorY, -pad),
+      new THREE.Vector3(plateW + pad, floorY, plateD + pad),
+      new THREE.Vector3(-pad, floorY, plateD + pad),
     ]),
     new THREE.LineBasicMaterial({ color: 0x9aa3b2 }),
   );
   scene.add(outline);
   scene.add(new THREE.AmbientLight(0xffffff, 0.72));
   const key = new THREE.DirectionalLight(0xffffff, 1.15);
-  key.position.set(radius, radius * 2, radius);
+  key.position.set(span, span * 2, span);
   scene.add(key);
+
+  const center = fit.getCenter(new THREE.Vector3());
+  const radius = Math.max(fit.getBoundingSphere(new THREE.Sphere()).radius, 0.5);
+  /** Front is +Z. A 3/4 view sits up and to the right of that edge. */
+  const view = new THREE.Vector3(0.75, 0.62, 1).normalize();
+
+  const frameCamera = () => {
+    const nextW = Math.max(1, host.clientWidth);
+    const nextH = Math.max(1, host.clientHeight);
+    camera.aspect = nextW / nextH;
+    const fovV = (camera.fov * Math.PI) / 180;
+    const fovH = 2 * Math.atan(Math.tan(fovV / 2) * camera.aspect);
+    const distance = (radius / Math.sin(Math.min(fovV, fovH) / 2)) * 1.22;
+    camera.position.copy(center).addScaledVector(view, distance);
+    camera.near = Math.max(distance / 200, 0.01);
+    camera.far = distance * 8;
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+    controls.target.copy(center);
+    controls.minDistance = distance * 0.35;
+    controls.maxDistance = distance * 4;
+    controls.update();
+    renderer.setSize(nextW, nextH);
+  };
+  frameCamera();
 
   let frame = 0;
   const draw = () => {
@@ -66,14 +84,7 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   };
   draw();
 
-  const resize = () => {
-    const nextW = Math.max(1, host.clientWidth);
-    const nextH = Math.max(1, host.clientHeight);
-    camera.aspect = nextW / nextH;
-    camera.updateProjectionMatrix();
-    renderer.setSize(nextW, nextH);
-  };
-  const observer = new ResizeObserver(resize);
+  const observer = new ResizeObserver(() => frameCamera());
   observer.observe(host);
 
   return () => {

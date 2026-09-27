@@ -4,8 +4,17 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ENCRYPTED_LAYER_DEF, encryptCtbSettingsBlock, xorCtbLayer } from "../server/lib/ctb";
+import { saveDriveConnection, setDriveFetchForTest } from "../server/lib/google-drive";
+import { resetOrderLinkStore } from "../server/lib/order-links";
+import { upsertPlateFiles } from "../server/lib/plate-files";
+import { enqueuePlateMesh, plateMeshJobPeak, resetPlateMeshJobPeak, whenPlateMeshesIdle } from "../server/lib/plate-mesh-jobs";
 import { MESH_BYTE_BUDGET, buildPlateGlb } from "../server/lib/plate-mesh";
+import { STREAM_PLATE_BYTES, streamLargePlate } from "./plate-mesh-stream";
 
 function rle(white: boolean, length: number): number[] {
   if (length < 1) return [];
@@ -145,4 +154,93 @@ test("a blank plate records no mesh bytes", async () => {
   const file = classicBlank();
   const glb = await buildPlateGlb(reader(file, []), file.length);
   assert.equal(glb.length, 0);
+});
+
+test("a 480MB plate is read as ranges, not as one buffer", async () => {
+  const result = await streamLargePlate();
+  assert.equal(result.maxRead <= 8 * 1024 * 1024, true);
+  assert.ok(result.bytesRead < 32 * 1024 * 1024, `read ${result.bytesRead} of ${STREAM_PLATE_BYTES}`);
+  assert.ok(result.glbBytes > 100);
+  assert.ok(result.reads > 2);
+});
+
+test("mesh jobs run one at a time", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "plate-mesh-queue-"));
+  const previous = {
+    db: process.env.ORDER_LINKS_DB_FILE,
+    client: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+  };
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "test.db");
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "drive-client";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "drive-secret";
+  resetOrderLinkStore();
+  resetPlateMeshJobPeak();
+  let active = 0;
+  let peak = 0;
+  setDriveFetchForTest(async (input) => {
+    const url = String(input);
+    if (url.includes("oauth2.googleapis.com/token")) {
+      return new Response(JSON.stringify({ access_token: "access-ok" }), { status: 200 });
+    }
+    if (url.includes("alt=media")) {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      active -= 1;
+      return new Response(Buffer.alloc(32), { status: 206 });
+    }
+    return new Response("no", { status: 500 });
+  });
+  try {
+    saveDriveConnection({ email: "miguel.plates@gmail.com", refreshToken: "refresh-marker" });
+    upsertPlateFiles(
+      [
+        { driveFileId: "mesh-a", name: "Castellan_A.ctb", webViewLink: "", sizeBytes: 480_000_000, kit: "Knight Castellan" },
+        { driveFileId: "mesh-b", name: "Castellan_B.ctb", webViewLink: "", sizeBytes: 480_000_000, kit: "Knight Castellan" },
+      ],
+      "indexed",
+    );
+    assert.equal(enqueuePlateMesh("mesh-a"), true);
+    assert.equal(enqueuePlateMesh("mesh-b"), true);
+    assert.equal(enqueuePlateMesh("mesh-a"), false);
+    await whenPlateMeshesIdle();
+    assert.equal(peak, 1);
+    assert.equal(plateMeshJobPeak(), 1);
+  } finally {
+    setDriveFetchForTest(null);
+    resetOrderLinkStore();
+    if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previous.db;
+    if (previous.client === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+    else process.env.GOOGLE_OAUTH_CLIENT_ID = previous.client;
+    if (previous.secret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    else process.env.GOOGLE_OAUTH_CLIENT_SECRET = previous.secret;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a 480MB stream stays under 300MB RSS", { timeout: 120_000 }, async () => {
+  const child = spawn("npx", ["tsx", "tests/plate-mesh-stream.ts"], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  let err = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    out += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    err += chunk.toString();
+  });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (status) => resolve(status ?? 1));
+  });
+  assert.equal(code, 0, err || out);
+  const result = JSON.parse(out) as { peakRss: number; startRss: number; ms: number; glbBytes: number; bytesRead: number };
+  console.log(
+    `[plate-mesh] 480MB stream peakRss=${result.peakRss} startRss=${result.startRss} bytesRead=${result.bytesRead} glb=${result.glbBytes} ms=${result.ms}`,
+  );
+  assert.ok(result.peakRss < 300 * 1024 * 1024, `peak RSS ${result.peakRss}`);
 });

@@ -9,11 +9,23 @@ import { getPlateFile, listPlateIdsNeedingMesh, markPlateMesh } from "./plate-fi
 import { plateMeshEpoch, registerPlateMeshGate } from "./plate-mesh-gate";
 import { buildPlateGlb } from "./plate-mesh";
 
+/** One plate at a time. A 480MB decode must not overlap another. */
+const MESH_JOB_CONCURRENCY = 1;
 const pending = new Set<string>();
 const running = new Set<string>();
 registerPlateMeshGate(() => pending.clear());
 let draining = false;
+let activeJobs = 0;
+let peakJobs = 0;
 const idleWaiters: Array<() => void> = [];
+
+export function plateMeshJobPeak(): number {
+  return peakJobs;
+}
+
+export function resetPlateMeshJobPeak(): void {
+  peakJobs = 0;
+}
 
 function settleIdle(): void {
   if (draining || pending.size > 0 || running.size > 0) return;
@@ -71,8 +83,11 @@ async function drain(): Promise<void> {
       if (!id) break;
       pending.delete(id);
       running.add(id);
+      activeJobs += 1;
+      peakJobs = Math.max(peakJobs, activeJobs);
       const epoch = plateMeshEpoch();
       try {
+        if (activeJobs > MESH_JOB_CONCURRENCY) throw new Error("Only one mesh job runs at a time");
         await generateOne(id, epoch);
       } catch (error) {
         if (plateMeshEpoch() !== epoch) continue;
@@ -80,6 +95,7 @@ async function drain(): Promise<void> {
         console.error("[plate-mesh]", id, message);
         markPlateMesh(id, { meshState: "" });
       } finally {
+        activeJobs -= 1;
         running.delete(id);
       }
     }

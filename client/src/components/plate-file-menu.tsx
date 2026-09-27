@@ -46,7 +46,7 @@ function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Reco
       stop();
     };
   }, [file.driveFileId, file.meshDriveFileId, headers]);
-  return <div ref={hostRef} className="plate-model-view" data-testid="plate-model-view" />;
+  return <div ref={hostRef} className="relative mb-3 h-72 w-full overflow-hidden rounded-md bg-black touch-none" data-testid="plate-model-view" />;
 }
 
 function PreviewPanel({
@@ -110,13 +110,13 @@ function PreviewPanel({
           </button>
         </div>
         {canLayers ? (
-          <div className="plate-view-toggle" role="tablist">
+          <div className="prints-library-switch mb-3" role="tablist">
             <button
               type="button"
               role="tab"
               aria-selected={mode === "layers"}
+              data-active={mode === "layers" ? "true" : "false"}
               data-testid="button-view-layers"
-              className={mode === "layers" ? "is-active" : ""}
               onClick={() => setMode("layers")}
             >
               Layers
@@ -125,8 +125,8 @@ function PreviewPanel({
               type="button"
               role="tab"
               aria-selected={mode === "model"}
+              data-active={mode === "model" ? "true" : "false"}
               data-testid="button-view-model"
-              className={mode === "model" ? "is-active" : ""}
               onClick={() => setMode("model")}
             >
               3D
@@ -136,10 +136,12 @@ function PreviewPanel({
         {canLayers && mode === "model" && meshReady ? (
           <PlateMeshHost file={file} headers={headers} />
         ) : canLayers && mode === "model" ? (
-          <div className="plate-model-view plate-mesh-pending" data-testid="plate-model-view">
-            {imageUrl ? <img src={imageUrl} alt="" data-testid="img-plate-preview" /> : null}
+          <div className="relative mb-3 grid h-72 place-items-stretch overflow-hidden rounded-md bg-black" data-testid="plate-model-view">
+            {imageUrl ? <img src={imageUrl} alt="" className="h-full w-full object-contain" data-testid="img-plate-preview" /> : null}
             {file.meshState !== "ready" ? (
-              <p data-testid="text-mesh-preparing">3D preparing</p>
+              <p className="absolute bottom-2 left-2 text-xs text-zinc-300" data-testid="text-mesh-preparing">
+                3D preparing
+              </p>
             ) : null}
           </div>
         ) : canLayers ? (

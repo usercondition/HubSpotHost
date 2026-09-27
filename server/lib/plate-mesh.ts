@@ -243,8 +243,8 @@ async function meshPass(
   return glbFromSurface(gx, gy, surface.positions, surface.indices);
 }
 
-/** Decode sampled layers into a GLB. An empty plate returns a zero-length buffer. */
-export async function buildPlateGlb(readRange: RangeRead, size: number, longSide = MESH_LONG_SIDE): Promise<Buffer> {
+/** Header and layer table only. The prefix buffer is dropped before any layer is decoded. */
+async function loadLayerIndex(readRange: RangeRead, size: number): Promise<{ plan: CtbLayerPlan; entries: CtbLayerEntry[] }> {
   const prefixLen = Math.min(PREFIX_BYTES, Math.max(0, size));
   const prefix = await readRange(0, prefixLen);
   if (!prefix || prefix.length < 0x50) throw new Error("That plate has no layer preview.");
@@ -256,7 +256,12 @@ export async function buildPlateGlb(readRange: RangeRead, size: number, longSide
     if (!fetched || fetched.length < plan.tableBytes) throw new Error("That plate has no layer preview.");
     table = fetched;
   }
-  const entries = ctbLayerEntries(plan, table, size);
+  return { plan, entries: ctbLayerEntries(plan, table, size) };
+}
+
+/** Decode sampled layers into a GLB. An empty plate returns a zero-length buffer. */
+export async function buildPlateGlb(readRange: RangeRead, size: number, longSide = MESH_LONG_SIDE): Promise<Buffer> {
+  const { plan, entries } = await loadLayerIndex(readRange, size);
   const spans = new Map<number, CtbEncryptedSpan>();
   const first = await meshPass(readRange, plan, entries, spans, longSide);
   if (first.length === 0 || first.length <= MESH_BYTE_BUDGET) return first;

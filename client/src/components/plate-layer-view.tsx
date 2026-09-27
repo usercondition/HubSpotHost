@@ -145,14 +145,14 @@ export function PlateLayerView({
   }
 
   return (
-    <div className="plate-layer-scan" data-testid="plate-layer-scan">
-      <div className="plate-layer-view">
-        <canvas ref={canvasRef} data-testid="canvas-plate-layer" />
+    <div className="mb-3 grid gap-2" data-testid="plate-layer-scan">
+      <div className="grid min-h-56 place-items-center overflow-hidden rounded-md bg-black">
+        <canvas ref={canvasRef} className="max-h-72 max-w-full [image-rendering:pixelated]" data-testid="canvas-plate-layer" />
       </div>
-      <div className="plate-layer-controls">
+      <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto_2rem] items-center gap-1.5">
         <button
           type="button"
-          className="plate-layer-step"
+          className="h-8 rounded-md text-xl leading-none text-foreground disabled:opacity-40"
           aria-label="Previous layer"
           data-testid="button-layer-prev"
           disabled={!ready || index <= 0}
@@ -162,6 +162,7 @@ export function PlateLayerView({
         </button>
         <input
           type="range"
+          className="min-w-0"
           min={0}
           max={Math.max(0, count - 1)}
           value={ready ? index : 0}
@@ -170,12 +171,12 @@ export function PlateLayerView({
           data-testid="input-layer-slider"
           onChange={(event) => setIndex(Number(event.target.value))}
         />
-        <span className="plate-layer-index" data-testid="text-layer-index">
+        <span className="min-w-[7.5rem] text-right font-mono text-sm tabular-nums" data-testid="text-layer-index">
           {ready ? layerLabel(shown, count) : "—"}
         </span>
         <button
           type="button"
-          className="plate-layer-step"
+          className="h-8 rounded-md text-xl leading-none text-foreground disabled:opacity-40"
           aria-label="Next layer"
           data-testid="button-layer-next"
           disabled={!ready || index >= count - 1}
