@@ -612,7 +612,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     }
 
     browser = await chromium.launch({ channel: "chrome", headless: true });
-    const context = await browser.newContext({ deviceScaleFactor: 1 });
+    const context = await browser.newContext({ deviceScaleFactor: 1, hasTouch: true });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
     });
@@ -1170,9 +1170,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
     check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
     await page.locator("[data-testid='stats-origin-svg'] path").first().click();
-    await page.locator("[data-testid='stats-origin-detail']:visible").waitFor();
-    await page.locator("[data-testid^='origin-dot-']").first().click();
-    if (artifactPath("stats-map-desktop.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-desktop.png")! });
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().click();
+    if (artifactPath("stats-map-popover-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-1440.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1193,7 +1192,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
-    if (artifactPath("stats-desktop.png")) await page.screenshot({ path: artifactPath("stats-desktop.png")!, fullPage: true });
+    if (artifactPath("stats-desktop-1440.png")) await page.screenshot({ path: artifactPath("stats-desktop-1440.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
@@ -1387,9 +1386,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
     check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
     await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
-    await page.locator("[data-testid='stats-origin-detail']:visible").waitFor();
-    await page.locator("[data-testid^='origin-dot-']").first().tap();
-    if (artifactPath("stats-map-phone.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone.png")! });
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
+    if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1410,7 +1408,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
-    if (artifactPath("stats-phone.png")) await page.screenshot({ path: artifactPath("stats-phone.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
