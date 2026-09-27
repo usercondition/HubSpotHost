@@ -19,6 +19,9 @@ import {
 } from "../../shared/schema";
 import { getDb } from "./order-links";
 import { CtbParseError, parseCtbFile, parseCtbFileFromPath, parseCtbFileFromPrefix } from "./ctb";
+import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
+import { savePlatePreview } from "./plate-files";
+import type { PlatePreviewStats } from "../../shared/plate-files";
 import { UltxParseError, parseUltxFile, parseUltxFileFromPath } from "./ultx";
 import { enrichPrintFileMetricsWithResinCost } from "./resin-pricing";
 
@@ -103,10 +106,9 @@ export function stagePrintFile(
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseSliceBuffer(fileName, buffer, options));
+  rememberSlicePreview(fileName, metrics, buffer, buffer.length);
+  return stageParsedPrintFile(fileName, metrics);
 }
 
 /** Stage a slice file uploaded to a temporary disk path (preferred for large plates). */
@@ -119,10 +121,23 @@ export function stagePrintFileFromPath(
   metrics: PrintFileMetrics;
   expiresAt: string;
 } {
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseSlicePath(fileName, filePath, options));
+  let prefix: Buffer | null = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const length = Math.min(stat.size, 8 * 1024 * 1024);
+    prefix = Buffer.alloc(length);
+    const fd = fs.openSync(filePath, "r");
+    try {
+      fs.readSync(fd, prefix, 0, length, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    prefix = null;
+  }
+  rememberSlicePreview(fileName, metrics, prefix, metrics.fileSizeBytes);
+  return stageParsedPrintFile(fileName, metrics);
 }
 
 /**
@@ -138,10 +153,33 @@ export function stageCtbFromPrefix(fileName: string, prefixPath: string, fullFil
     throw new CtbParseError("Prefix sampling is only supported for Chitubox .ctb plates");
   }
   const prefix = fs.readFileSync(prefixPath);
-  return stageParsedPrintFile(
-    fileName,
-    enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize)),
-  );
+  const metrics = enrichPrintFileMetricsWithResinCost(parseCtbFileFromPrefix(fileName, prefix, fullFileSize));
+  rememberSlicePreview(fileName, metrics, prefix, fullFileSize);
+  return stageParsedPrintFile(fileName, metrics);
+}
+
+function previewStats(metrics: PrintFileMetrics): PlatePreviewStats {
+  return {
+    printerProfile: metrics.printerProfile ?? "",
+    layerCount: metrics.layerCount,
+    layerHeightMm: metrics.layerHeightMm,
+    printTimeSeconds: metrics.printTimeSeconds,
+    resinVolumeMl: metrics.resinVolumeMl,
+    resinCost: metrics.resinCost,
+  };
+}
+
+function rememberSlicePreview(fileName: string, metrics: PrintFileMetrics, bytes: Buffer | null, fullFileSize?: number): void {
+  try {
+    let png: Buffer | null = null;
+    if (bytes && bytes.length > 0) {
+      if (/\.ultx$/i.test(fileName)) png = extractUltxPreviewPng(bytes);
+      else if (/\.ctb$/i.test(fileName)) png = extractCtbPreviewFromPrefix(bytes, fullFileSize ?? bytes.length)?.png ?? null;
+    }
+    savePlatePreview(metrics.sha256, png, previewStats(metrics));
+  } catch {
+    /* A missing thumbnail must not block attaching the plate. */
+  }
 }
 
 function stageParsedPrintFile(

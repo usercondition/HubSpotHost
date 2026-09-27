@@ -17,7 +17,9 @@ const REFRESH = "REFRESHTOKENMARKER-do-not-log";
 
 test("plate names, printer guesses, and Drive folder titles", () => {
   assert.equal(isPlateFileName("Castigator_MEGA_8K.CTB"), true);
+  assert.equal(isPlateFileName("body.ultx"), true);
   assert.equal(isPlateFileName("notes.txt"), false);
+  assert.equal(guessPlatePrinter("body.ultx"), "HeyGears");
   assert.equal(guessPlatePrinter("Castigator_MEGA_8K.ctb"), "MEGA 8K");
   assert.equal(guessPlatePrinter("land-raider-12k.ctb"), "Mighty 12K");
   assert.equal(guessPlatePrinter("helmet-heygears.prz"), "HeyGears");

@@ -52,6 +52,9 @@ import {
   type PrinterMatchInfo,
 } from "@/lib/print-attach";
 import { readHashQueryParam, queueDealHref } from "@/lib/workflow";
+import { holdSliceFile } from "@/lib/plate-library-client";
+import { PrintLibraryStatus, librarySendInput, useSendPlateToLibrary } from "@/components/print-library-status";
+import type { PrintLibraryMark } from "@shared/plate-files";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
@@ -89,6 +92,7 @@ interface ResinProfileResponse {
 type PrintFileRecordWithBits = PrintFileRecord & {
   bits: PrintPlateBit[];
   bitSummary: PlateBitSummary;
+  library?: PrintLibraryMark;
 };
 
 interface PrintsResponse {
@@ -257,8 +261,10 @@ export default function Prints() {
   const logsFolderInputRef = useRef<HTMLInputElement>(null);
   /** ULTX waiting while the user re-picks Blueprint logs (AppData cannot auto-refresh). */
   const pendingUltxRef = useRef<File | null>(null);
+  const plateFileRef = useRef<File | null>(null);
   const awaitingLogsRefreshRef = useRef(false);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const librarySend = useSendPlateToLibrary(headers);
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
     successDescription: 'Attach slice plates and seed cost estimates on open Print Orders.',
@@ -425,13 +431,16 @@ export default function Prints() {
 
 
   const analyze = useMutation({
-    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) =>
-      analyzePrintPlate(file, {
+    mutationFn: async ({ file, sliceLog }: { file: File; sliceLog?: File | null }) => {
+      plateFileRef.current = file;
+      return analyzePrintPlate(file, {
         headers,
         sliceLog,
         onSliceLogApplied: (name) => setSliceLogName(name),
-      }),
+      });
+    },
     onSuccess: ({ analysisId, metrics, expiresAt, sliceLogApplied, printerMatch }) => {
+      if (plateFileRef.current) holdSliceFile(metrics.sha256, plateFileRef.current);
       setAnalyzeStatus("");
       setStaged({ analysisId, metrics, expiresAt, printerMatch });
       setAttachPrinterId(initialAttachPrinterId(printerMatch));
@@ -575,7 +584,9 @@ export default function Prints() {
         headers,
       });
     },
-    onSuccess: ({ summary, message }) => {
+    onSuccess: ({ summary, message, record }) => {
+      const plate = plateFileRef.current;
+      if (plate) void librarySend.send(librarySendInput(plate, record));
       setStaged(null);
       setAttachPrinterId("");
       setIncludeAttached(true);
@@ -1513,8 +1524,23 @@ export default function Prints() {
                       </div>
                       <div className="mt-3 space-y-2">
                         {board.records.map((record) => (
-                          <div key={record.id} className="flex items-center justify-between gap-3 text-xs">
-                            <span className="min-w-0 truncate text-muted-foreground">{record.fileName}</span>
+                          <div key={record.id} className="flex items-start justify-between gap-3 text-xs">
+                            <div className="min-w-0 flex-1">
+                            <span className="block truncate text-muted-foreground">{record.fileName}</span>
+                            <PrintLibraryStatus
+                              record={record}
+                              headers={headers}
+                              job={librarySend.jobs[record.id]}
+                              onSend={(file, row) => void librarySend.send(librarySendInput(file, row))}
+                              onMismatch={() =>
+                                toast({
+                                  title: "That file does not match this plate",
+                                  description: "Choose the same slice file that was attached.",
+                                  variant: "destructive",
+                                })
+                              }
+                            />
+                            </div>
                             <Button
                               type="button"
                               size="sm"
@@ -1647,6 +1673,19 @@ export default function Prints() {
                           <p className="mt-2 truncate text-sm font-medium" title={record.fileName}>
                             {record.fileName}
                           </p>
+                          <PrintLibraryStatus
+                            record={record}
+                            headers={headers}
+                            job={librarySend.jobs[record.id]}
+                            onSend={(file, row) => void librarySend.send(librarySendInput(file, row))}
+                            onMismatch={() =>
+                              toast({
+                                title: "That file does not match this plate",
+                                description: "Choose the same slice file that was attached.",
+                                variant: "destructive",
+                              })
+                            }
+                          />
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {fileSize(record.fileSizeBytes)} · {record.printerProfile || "No printer profile"}
                           </p>

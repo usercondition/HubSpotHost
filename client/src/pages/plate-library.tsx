@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { readHashQueryParam } from "@/lib/workflow";
 import { formatPacificUpdateStamp } from "@shared/ship-by";
 import { PLATE_PRINTERS, type PlateFileRecord } from "@shared/plate-files";
+import { PlateFileMenu, PlatePreviewHost, PlateThumb, usePlatePreview } from "@/components/plate-file-menu";
 
 function formatFileSize(bytes: number | null): string {
   if (bytes == null || !Number.isFinite(bytes)) return "";
@@ -54,6 +55,7 @@ export default function PlateLibraryPage() {
     return () => window.removeEventListener("hashchange", sync);
   }, []);
   const filtering = Boolean(q.trim() || printer || orderKey);
+  const preview = usePlatePreview();
   const library = useQuery({
     queryKey: ["/api/plate-files", "library", ownerCode, q, printer, orderKey],
     enabled: isUnlocked,
@@ -133,6 +135,7 @@ export default function PlateLibraryPage() {
             {library.data && library.data.length > 0 ? (
               <div data-testid="library-list">
                 <div className="library-head" aria-hidden="true">
+                  <span />
                   <span>File</span>
                   <span>Printer</span>
                   <span>Order</span>
@@ -144,6 +147,8 @@ export default function PlateLibraryPage() {
                   const linked = orderLabel(file);
                   return (
                     <article key={file.driveFileId} className="library-row" data-testid={`library-row-${file.driveFileId}`}>
+                      <PlateThumb file={file} headers={headers} onPreview={preview.setPreview} />
+                      <div className="library-name-row">
                       <a
                         className="library-name"
                         href={file.webViewLink}
@@ -155,6 +160,8 @@ export default function PlateLibraryPage() {
                         <span className="truncate">{file.name}</span>
                         <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                       </a>
+                      <PlateFileMenu file={file} headers={headers} onPreview={preview.setPreview} />
+                      </div>
                       <span className="library-printer truncate text-sm" data-testid="library-file-printer" title={file.printer || "Printer not set"}>
                         {file.printer || "Printer not set"}
                       </span>
@@ -175,6 +182,7 @@ export default function PlateLibraryPage() {
                 })}
               </div>
             ) : null}
+            <PlatePreviewHost file={preview.preview} headers={headers} onClose={() => preview.setPreview(null)} />
           </>
         )}
       </div>

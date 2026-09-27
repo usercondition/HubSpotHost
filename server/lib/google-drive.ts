@@ -317,12 +317,32 @@ async function putChunk(session: string, chunk: Buffer, start: number, total: nu
   throw new Error(lastError);
 }
 
+export class DriveUnreadableError extends Error {
+  constructor() {
+    super("Drive could not read that file.");
+    this.name = "DriveUnreadableError";
+  }
+}
+
+/** Stream a file this app created. Forwards Range so large plates are not buffered. */
+export async function openDriveMedia(fileId: string, range: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<Response> {
+  const access = await accessToken(env);
+  const headers: Record<string, string> = { authorization: `Bearer ${access}` };
+  if (range) headers.range = range;
+  const response = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
+  if (response.status === 401 || response.status === 403) throw new DriveReconnectError();
+  if (response.status === 404) throw new DriveUnreadableError();
+  return response;
+}
+
 export async function uploadDriveFile(input: {
   access: string;
   folderId: string;
   name: string;
   size: number;
   body: Readable;
+  /** First bytes, for a thumbnail. Must not retain the whole plate. */
+  onPrefix?: (chunk: Buffer, offset: number) => void;
 }): Promise<DriveUploadedFile> {
   const start = await driveFetch(DRIVE_UPLOAD, {
     method: "POST",
@@ -340,6 +360,7 @@ export async function uploadDriveFile(input: {
   let offset = 0;
   let file: Record<string, unknown> | undefined;
   for await (const chunk of chunksOf(input.body, CHUNK_BYTES)) {
+    input.onPrefix?.(chunk, offset);
     const result = await putChunk(session, chunk, offset, input.size);
     offset += chunk.length;
     if (result.done) file = result.file;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Slice and mesh files Miguel attaches to an order. */
-export const PLATE_FILE_EXTENSIONS = [".ctb", ".chitubox", ".cbddlp", ".goo", ".prz", ".lys", ".stl", ".3mf"] as const;
+export const PLATE_FILE_EXTENSIONS = [".ctb", ".ultx", ".chitubox", ".cbddlp", ".goo", ".prz", ".lys", ".stl", ".3mf"] as const;
 
 export const PLATE_PRINTERS = ["Mighty 8K", "Mighty 12K", "MEGA 8K", "HeyGears", "other"] as const;
 export type PlatePrinter = (typeof PLATE_PRINTERS)[number];
@@ -28,6 +28,7 @@ export function isPlateFileName(fileName: string): boolean {
 
 /** Prefill a printer when the slicer put it in the file name. */
 export function guessPlatePrinter(fileName: string): PlatePrinter | "" {
+  if (plateExtension(fileName) === ".ultx") return "HeyGears";
   const name = fileName.toLowerCase().replace(/[_-]+/g, " ");
   if (name.includes("mega 8k") || name.includes("mega8k")) return "MEGA 8K";
   if (name.includes("12k")) return "Mighty 12K";
@@ -56,6 +57,7 @@ export const plateFileIndexSchema = z.object({
   customer: z.string().trim().max(120).optional().default(""),
   kitTags: z.string().trim().max(240).optional().default(""),
   notes: z.string().trim().max(2000).optional().default(""),
+  sha256: z.string().trim().max(64).optional().default(""),
   orderKeys: z.array(plateOrderKeySchema).max(20).optional(),
 });
 
@@ -66,6 +68,22 @@ export const plateUploadQuerySchema = z.object({
   notes: z.string().trim().max(2000).optional().default(""),
   kit: z.string().trim().max(180).optional().default(""),
   customer: z.string().trim().max(120).optional().default(""),
+  sha256: z.string().trim().max(64).optional().default(""),
+  printRecordId: z.string().trim().max(20).optional().default(""),
+});
+
+export const platePrepareSchema = z.object({
+  orderKey: plateOrderKeySchema,
+  sha256: z.string().trim().regex(/^[a-f0-9]{64}$/, "Use the plate fingerprint"),
+  fileName: z.string().trim().min(1).max(240),
+  printRecordId: z.number().int().positive().optional(),
+  printer: z.string().trim().max(40).optional().default(""),
+  kit: z.string().trim().max(180).optional().default(""),
+  customer: z.string().trim().max(120).optional().default(""),
+});
+
+export const plateDownloadSchema = z.object({
+  driveFileId: z.string().trim().min(1).max(200),
 });
 
 export const plateFileBulkSchema = z.object({
@@ -76,6 +94,15 @@ export const plateFileLinkSchema = z.object({
   driveFileId: z.string().trim().min(1).max(200),
   orderKey: plateOrderKeySchema,
 });
+
+export interface PlatePreviewStats {
+  printerProfile: string;
+  layerCount: number | null;
+  layerHeightMm: number | null;
+  printTimeSeconds: number | null;
+  resinVolumeMl: number | null;
+  resinCost: number | null;
+}
 
 export interface PlateFileRecord {
   driveFileId: string;
@@ -91,7 +118,25 @@ export interface PlateFileRecord {
   kitTags: string;
   notes: string;
   source: PlateFileSource;
+  sha256: string;
   orderKeys: string[];
+  printRecordIds: number[];
+  hasPreview: boolean;
+  stats: PlatePreviewStats | null;
+}
+
+export interface PlateLibraryPending {
+  printRecordId: number;
+  orderKey: string;
+  name: string;
+  sha256: string;
+  error: string;
+}
+
+export interface PrintLibraryMark {
+  status: "in_library" | "pending" | "missing";
+  driveFileId: string;
+  error: string;
 }
 
 export interface PlateUploadFailure {

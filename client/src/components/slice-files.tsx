@@ -4,6 +4,8 @@ import { ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { fingerprintFile, preparePlateUpload, uploadPlateBytes } from "@/lib/plate-library-client";
+import { PlateFileMenu, PlatePreviewHost, PlateThumb, usePlatePreview } from "@/components/plate-file-menu";
 import { formatPacificUpdateStamp } from "@shared/ship-by";
 import {
   PLATE_FILE_EXTENSIONS,
@@ -11,6 +13,7 @@ import {
   guessPlatePrinter,
   isPlateFileName,
   type PlateFileRecord,
+  type PlateLibraryPending,
   type PlateUploadFailure,
 } from "@shared/plate-files";
 
@@ -24,7 +27,7 @@ function formatFileSize(bytes: number | null): string {
   return `${Math.round(bytes)} B`;
 }
 
-type Listed = { ok: true; files: PlateFileRecord[]; failures: PlateUploadFailure[] };
+type Listed = { ok: true; files: PlateFileRecord[]; failures: PlateUploadFailure[]; pending: PlateLibraryPending[] };
 
 export function SliceFiles({
   orderKey,
@@ -45,6 +48,7 @@ export function SliceFiles({
   const [notes, setNotes] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
   const [localError, setLocalError] = useState("");
+  const preview = usePlatePreview();
 
   const listed = useQuery({
     queryKey: ["/api/plate-files", orderKey],
@@ -55,6 +59,7 @@ export function SliceFiles({
         ok: true as const,
         files: Array.isArray(body.files) ? body.files : [],
         failures: Array.isArray(body.failures) ? body.failures : [],
+        pending: Array.isArray(body.pending) ? body.pending : [],
       };
     },
   });
@@ -62,37 +67,28 @@ export function SliceFiles({
   async function send(nextFile: File, nextPrinter: string, nextNotes: string) {
     setLocalError("");
     setProgress(0);
-    const params = new URLSearchParams({
-      orderKey,
-      fileName: nextFile.name,
-      printer: nextPrinter,
-      notes: nextNotes,
-      kit,
-      customer,
-    });
     try {
-      const body = await new Promise<{ ok?: boolean; reconnect?: boolean; error?: string; file?: PlateFileRecord }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `/api/plate-files/upload?${params.toString()}`);
-        xhr.setRequestHeader("content-type", "application/octet-stream");
-        for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable && event.total > 0) setProgress(event.loaded / event.total);
-        };
-        xhr.onload = () => {
-          let parsed: { ok?: boolean; reconnect?: boolean; error?: string; file?: PlateFileRecord } = {};
-          try {
-            parsed = JSON.parse(xhr.responseText) as typeof parsed;
-          } catch {
-            parsed = {};
-          }
-          if (xhr.status >= 200 && xhr.status < 300 && parsed.file?.driveFileId) resolve(parsed);
-          else reject(parsed.error || "Drive upload failed.");
-        };
-        xhr.onerror = () => reject("Drive upload failed.");
-        xhr.send(nextFile);
-      });
-      if (!body.file?.driveFileId) throw new Error("Drive upload failed.");
+      const sha256 = await fingerprintFile(nextFile);
+      const prepared = await preparePlateUpload(
+        { orderKey, sha256, fileName: nextFile.name, printer: nextPrinter, kit, customer },
+        headers,
+      );
+      if (prepared.action === "pending") {
+        throw new Error("Not in Library yet. Connect Drive or retry.");
+      }
+      if (prepared.action !== "linked") {
+        await uploadPlateBytes({
+          file: nextFile,
+          orderKey,
+          printer: nextPrinter,
+          notes: nextNotes,
+          kit,
+          customer,
+          sha256,
+          headers,
+          onProgress: setProgress,
+        });
+      }
       setFile(null);
       setNotes("");
       setOpen(false);
@@ -110,6 +106,7 @@ export function SliceFiles({
 
   const files = listed.data?.files ?? [];
   const failures = listed.data?.failures ?? [];
+  const pending = listed.data?.pending ?? [];
 
   return (
     <section className="mt-3" data-testid="slice-files">
@@ -207,13 +204,20 @@ export function SliceFiles({
           ) : null}
         </p>
       ) : null}
-      {files.length === 0 && failures.length === 0 ? (
+      {files.length === 0 && failures.length === 0 && pending.length === 0 ? (
         <p className="text-sm text-muted-foreground">No slice files yet.</p>
       ) : null}
       <ul className="space-y-2">
+        {pending.map((item) => (
+          <li key={item.printRecordId} className="min-w-0 text-sm" data-testid={`slice-library-pending-${item.printRecordId}`}>
+            <p className="truncate font-medium">{item.name}</p>
+            <p className="text-destructive">{item.error}</p>
+          </li>
+        ))}
         {files.map((item) => (
           <li key={item.driveFileId} className="min-w-0" data-testid={`slice-file-${item.driveFileId}`}>
-            <div className="grid grid-cols-[minmax(0,1fr)_4.75rem] items-baseline gap-2">
+            <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_4.75rem_1.75rem] items-center gap-2">
+              <PlateThumb file={item} headers={headers} onPreview={preview.setPreview} />
               <a
                 href={item.webViewLink}
                 target="_blank"
@@ -228,6 +232,7 @@ export function SliceFiles({
               <span className="w-[4.75rem] text-right text-sm tabular-nums" data-testid="slice-file-size">
                 {formatFileSize(item.sizeBytes)}
               </span>
+              <PlateFileMenu file={item} headers={headers} onPreview={preview.setPreview} />
             </div>
             <p className="truncate text-xs text-muted-foreground">
               <span data-testid="slice-file-printer">{item.printer || "Printer not set"}</span>
@@ -252,6 +257,7 @@ export function SliceFiles({
           </li>
         ))}
       </ul>
+      <PlatePreviewHost file={preview.preview} headers={headers} onClose={() => preview.setPreview(null)} />
     </section>
   );
 }

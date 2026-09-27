@@ -430,6 +430,7 @@ CREATE TABLE IF NOT EXISTS plate_files (
   kit_tags TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL,
+  sha256 TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -450,6 +451,33 @@ CREATE TABLE IF NOT EXISTS plate_upload_failures (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS plate_upload_failures_order_idx ON plate_upload_failures (order_key, id DESC);
+CREATE TABLE IF NOT EXISTS plate_file_prints (
+  drive_file_id TEXT NOT NULL,
+  print_record_id INTEGER NOT NULL,
+  PRIMARY KEY (drive_file_id, print_record_id)
+);
+CREATE INDEX IF NOT EXISTS plate_file_prints_record_idx ON plate_file_prints (print_record_id);
+CREATE TABLE IF NOT EXISTS plate_library_pending (
+  print_record_id INTEGER PRIMARY KEY,
+  order_key TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  name TEXT NOT NULL,
+  error TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plate_library_pending_order_idx ON plate_library_pending (order_key);
+CREATE TABLE IF NOT EXISTS plate_previews (
+  sha256 TEXT PRIMARY KEY,
+  png BLOB NOT NULL,
+  stats_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plate_download_tickets (
+  token TEXT PRIMARY KEY,
+  drive_file_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 `;
 
 const CREATE_FULFILLMENT_CHECKLISTS_SQL = `
@@ -545,6 +573,13 @@ const PRINT_FILE_RECORD_COLUMN_MIGRATIONS: Array<[string, string]> = [
   ["retract_speed_mm_per_min", "TEXT"],
   ["fleet_printer_id", "INTEGER"],
 ];
+
+function ensurePlateFileColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (sqlite.prepare("PRAGMA table_info(plate_files)").all() as Array<{ name: string }>).map((row) => row.name),
+  );
+  if (!existing.has("sha256")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN sha256 TEXT NOT NULL DEFAULT ''`);
+}
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
   const existing = new Set(
@@ -672,6 +707,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_PRIORITY_STACK_SQL);
   sqlite.exec(CREATE_ORDER_UPDATE_LOG_SQL);
   sqlite.exec(CREATE_PLATE_LIBRARY_SQL);
+  ensurePlateFileColumns(sqlite);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);

@@ -15,7 +15,7 @@ import fs from "node:fs";
 import type { PrintFileMetrics } from "../../shared/schema";
 
 const CTB_MAGIC_PREFIX = 0x12fd;
-const CTB_ENCRYPTED_MAGIC = 0x12fd0107;
+export const CTB_ENCRYPTED_MAGIC = 0x12fd0107;
 const HEADER_MIN_BYTES = 0x50;
 const CLASSIC_HEADER_READ = 0x80;
 const EXT_CONFIG_OFFSET = 0x54;
@@ -27,6 +27,16 @@ const MAX_EXT_CONFIG_BYTES = 4_096;
 const ENCRYPTED_HEADER_SIZE = 48;
 const ENCRYPTED_SETTINGS_MIN = 168;
 const HASH_CHUNK_BYTES = 1024 * 1024;
+
+/** Same fingerprint Prints stores: file size plus the first 1 MiB. */
+export function sliceFingerprint(size: number, prefix: Buffer): string {
+  const hash = crypto.createHash("sha256");
+  const sizeBuf = Buffer.alloc(8);
+  sizeBuf.writeBigUInt64LE(BigInt(size));
+  hash.update(sizeBuf);
+  hash.update(prefix.subarray(0, Math.min(prefix.length, HASH_CHUNK_BYTES, size)));
+  return hash.digest("hex");
+}
 
 /**
  * Publicly documented CTB encrypted-settings AES material (community RE /
@@ -102,22 +112,15 @@ export function createFileCtbReader(filePath: string): CtbReader {
       if (closed) return crypto.createHash("sha256").update("").digest("hex");
       // Large Mega 8K plates can be multi-GB. Fingerprint size + a 1 MiB prefix
       // so analysis stays responsive without hashing the entire layer payload.
-      const hash = crypto.createHash("sha256");
-      const sizeBuf = Buffer.alloc(8);
-      sizeBuf.writeBigUInt64LE(BigInt(stat.size));
-      hash.update(sizeBuf);
       const prefixLen = Math.min(stat.size, HASH_CHUNK_BYTES);
-      if (prefixLen > 0) {
-        const prefix = Buffer.allocUnsafe(prefixLen);
-        let read = 0;
-        while (read < prefixLen) {
-          const n = fs.readSync(fd, prefix, read, prefixLen - read, read);
-          if (n <= 0) break;
-          read += n;
-        }
-        hash.update(prefix.subarray(0, read));
+      const prefix = Buffer.alloc(prefixLen);
+      let read = 0;
+      while (read < prefixLen) {
+        const n = fs.readSync(fd, prefix, read, prefixLen - read, read);
+        if (n <= 0) break;
+        read += n;
       }
-      return hash.digest("hex");
+      return sliceFingerprint(stat.size, prefix.subarray(0, read));
     },
     close,
   };
@@ -146,13 +149,8 @@ export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number): Ctb
       return prefix.subarray(offset, offset + length);
     },
     sha256() {
-      const hash = crypto.createHash("sha256");
-      const sizeBuf = Buffer.alloc(8);
-      sizeBuf.writeBigUInt64LE(BigInt(fullFileSize));
-      hash.update(sizeBuf);
       const prefixLen = Math.min(fullFileSize, HASH_CHUNK_BYTES, prefix.length);
-      if (prefixLen > 0) hash.update(prefix.subarray(0, prefixLen));
-      return hash.digest("hex");
+      return sliceFingerprint(fullFileSize, prefix.subarray(0, prefixLen));
     },
     close() {
       /* prefix buffer */

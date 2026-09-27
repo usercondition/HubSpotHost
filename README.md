@@ -112,6 +112,8 @@ Slice files (`.ctb` and the other slicer formats) are stored in Miguel's persona
 
 `drive.file` can only see files this app created. Existing Drive files are registered by metadata through the owner index API below. The assistant does that with its own Drive access; Print Ops does not list the rest of the Drive.
 
+Attaching a `.ctb` or `.ultx` on Prints also uploads that file into `Print Ops/<Kit> – <Customer> (<id>)/` and links it to the print record. The same file (same fingerprint) already on that order is linked instead of uploaded again. If Drive is not connected, the plate still attaches and the row stays retryable with Send to Library. Download streams files this app uploaded, including `Range` for large plates. Files that were only indexed open their Drive link. Preview uses the CTB header thumbnail, cached when the plate is analyzed, so opening it does not download the slice.
+
 ### Google Cloud setup
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and pick or create a project.

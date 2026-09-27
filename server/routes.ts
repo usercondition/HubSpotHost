@@ -264,6 +264,7 @@ import {
 import { appendOrderUpdate, listOrderUpdates } from "./lib/order-updates";
 import { registerLegalPages } from "./lib/legal-pages";
 import { registerPlateLibraryRoutes } from "./lib/plate-routes";
+import { libraryMarksForPrints } from "./lib/plate-files";
 import {
   getShipByGcalConfig,
   queueItemsForShipByGcal,
@@ -2500,16 +2501,21 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
       const records = listPrintFileRecords();
       const bitsByRecord = listBitsForRecords(records.map((row) => row.id));
+      const libraryMarks = libraryMarksForPrints(records.map((record) => record.id));
+      const withLibrary = <T extends { id: number }>(row: T) => ({
+        ...row,
+        library: libraryMarks.get(row.id) ?? { status: "missing" as const, driveFileId: "", error: "" },
+      });
       const recordsWithBits = records.map((record) => {
         const bits = bitsByRecord.get(record.id) ?? [];
-        return {
+        return withLibrary({
           ...record,
           bits,
           bitSummary: summarizeBits(bits),
           archived:
             !activeOpenDealIds.has(record.hubspotDealId) ||
             printOrderStageLooksArchived(record.dealStage),
-        };
+        });
       });
       const activeRecords = recordsWithBits.filter((row) => !row.archived);
       const archivedRecords = recordsWithBits.filter((row) => row.archived);
@@ -2524,8 +2530,8 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         candidates,
         records: activeRecords,
         archivedRecords,
-        boards: activeBoards,
-        archivedBoards,
+        boards: activeBoards.map((board) => ({ ...board, records: board.records.map((record) => withLibrary(record)) })),
+        archivedBoards: archivedBoards.map((board) => ({ ...board, records: board.records.map((record) => withLibrary(record)) })),
         includeAttached,
         lastAttachedDealId: activeBoards[0]?.dealId ?? boards[0]?.dealId ?? null,
         attachPreview,

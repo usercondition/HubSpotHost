@@ -1308,7 +1308,7 @@
   .library-head,
   .library-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.7fr) 6.5rem minmax(0, 1.2fr) 8.5rem 5.75rem;
+    grid-template-columns: 2.75rem minmax(0, 1.7fr) 6.5rem minmax(0, 1.2fr) 8.5rem 5.75rem;
     column-gap: 0.75rem;
     align-items: center;
     padding: 0.55rem 0.75rem;
@@ -1321,13 +1321,41 @@
   }
 
   .library-row {
-    grid-template-areas: "name printer order date size";
+    grid-template-areas: "thumb name printer order date size";
+  }
+
+  .plate-thumb {
+    display: inline-flex;
+    grid-area: thumb;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.25rem;
+    background: hsl(var(--muted));
+  }
+
+  .plate-thumb img,
+  .plate-thumb-empty {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .library-name-row {
+    display: flex;
+    grid-area: name;
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
   }
 
   .library-name {
     display: flex;
-    grid-area: name;
     min-width: 0;
+    flex: 1;
     align-items: center;
     gap: 0.25rem;
     font-size: 0.875rem;
@@ -1369,16 +1397,38 @@
   @media (max-width: 767px) {
     .library-head { display: none; }
     .library-row {
-      grid-template-columns: minmax(0, 1fr) 5.75rem;
+      grid-template-columns: 2.75rem minmax(0, 1fr) 5.75rem;
       grid-template-areas:
-        "name size"
-        "meta size";
+        "thumb name size"
+        "thumb meta size";
       row-gap: 0.1rem;
     }
     .library-printer,
     .library-order,
     .library-date { display: none; }
     .library-meta { display: block; }
+  }
+
+  .plate-preview-stats {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .plate-preview-stats > div {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .plate-preview-stats dt {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .plate-preview-stats dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   .stack-blocker-line {
