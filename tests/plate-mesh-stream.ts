@@ -20,6 +20,8 @@ export interface StreamMeasure {
   triangles: number;
   components: number;
   thinSupports: number;
+  agreement: number;
+  manifold: number;
   ms: number;
 }
 
@@ -95,7 +97,14 @@ function copyOverlap(dest: Buffer, destStart: number, src: Buffer, srcStart: num
   src.copy(dest, start - destStart, start - srcStart, end - srcStart);
 }
 
-export function inspectGlb(glb: Buffer): { triangles: number; components: number; thinSupports: number; hasNormals: boolean } {
+export function inspectGlb(glb: Buffer): {
+  triangles: number;
+  components: number;
+  thinSupports: number;
+  hasNormals: boolean;
+  agreement: number;
+  manifold: number;
+} {
   const jsonLen = glb.readUInt32LE(12);
   const doc = JSON.parse(glb.subarray(20, 20 + jsonLen).toString()) as {
     meshes: Array<{ primitives: Array<{ attributes: { POSITION: number; NORMAL?: number }; indices: number }> }>;
@@ -157,12 +166,101 @@ export function inspectGlb(glb: Buffer): { triangles: number; components: number
     const tall = box.maxY - box.minY;
     if (across < 1.6 && along > 0.35 && tall > 1.4) thinSupports += 1;
   }
+  const edges = new Map<string, { faces: number; forward: number; back: number }>();
+  for (let i = 0; i < indices.length; i += 3) {
+    const tri = [indices[i]!, indices[i + 1]!, indices[i + 2]!];
+    for (let edge = 0; edge < 3; edge += 1) {
+      const u = tri[edge]!;
+      const v = tri[(edge + 1) % 3]!;
+      const key = u < v ? `${u},${v}` : `${v},${u}`;
+      let record = edges.get(key);
+      if (!record) {
+        record = { faces: 0, forward: 0, back: 0 };
+        edges.set(key, record);
+      }
+      record.faces += 1;
+      if (u < v) record.forward += 1;
+      else record.back += 1;
+    }
+  }
+  let pairs = 0;
+  let agree = 0;
+  let closed = 0;
+  for (const record of edges.values()) {
+    if (record.faces === 2) {
+      pairs += 1;
+      closed += 1;
+      if (record.forward === 1 && record.back === 1) agree += 1;
+    }
+  }
   return {
     triangles: index.count / 3,
     components: bounds.size,
     thinSupports,
     hasNormals: primitive.attributes.NORMAL !== undefined,
+    agreement: pairs > 0 ? agree / pairs : 0,
+    manifold: edges.size > 0 ? closed / edges.size : 0,
   };
+}
+
+/** Many separated mini-sized parts, large enough that decimation has to run. */
+export function separatedMinisCtb(): Buffer {
+  const pitch = 11;
+  const cols = 8;
+  const rows = 9;
+  const width = px(cols * pitch);
+  const height = px(rows * pitch);
+  const layers = Math.round(8 / LAYER_MM);
+  const boxes: Box[] = [];
+  for (let i = 0; i < cols * rows; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const size = 8;
+    const x = col * pitch + (pitch - size) / 2;
+    const y = row * pitch + (pitch - size) / 2;
+    boxes.push({
+      x0: px(x),
+      x1: px(x + size),
+      y0: px(y),
+      y1: px(y + size),
+      z0: Math.round(1.2 / LAYER_MM),
+      z1: Math.round((1.2 + size * 0.85) / LAYER_MM),
+    });
+    if (i % 3 !== 0) continue;
+    const pillar = px(0.8);
+    const cx = px(x + size / 2);
+    const cy = px(y + size / 2);
+    boxes.push({
+      x0: cx - (pillar >> 1),
+      x1: cx + Math.max(1, pillar >> 1),
+      y0: cy - (pillar >> 1),
+      y1: cy + Math.max(1, pillar >> 1),
+      z0: 0,
+      z1: Math.round(1.5 / LAYER_MM),
+    });
+  }
+  const tableOffset = 0x80;
+  const payloads = Array.from({ length: layers }, (_, layer) => layerRle(width, height, layer, boxes));
+  const dataStart = tableOffset + layers * 36;
+  const file = Buffer.alloc(dataStart + payloads.reduce((sum, layer) => sum + layer.length, 0));
+  file.writeUInt32LE(0x12fd0086, 0);
+  file.writeFloatLE(width * PIXEL_MM, 0x08);
+  file.writeFloatLE(height * PIXEL_MM, 0x0c);
+  file.writeFloatLE(layers * LAYER_MM, 0x10);
+  file.writeFloatLE(LAYER_MM, 0x20);
+  file.writeUInt32LE(width, 0x34);
+  file.writeUInt32LE(height, 0x38);
+  file.writeUInt32LE(tableOffset, 0x40);
+  file.writeUInt32LE(layers, 0x44);
+  let cursor = dataStart;
+  payloads.forEach((layer, index) => {
+    const at = tableOffset + index * 36;
+    file.writeUInt32LE(cursor, at + 12);
+    file.writeUInt32LE(layer.length, at + 16);
+    layer.copy(file, cursor);
+    cursor += layer.length;
+  });
+  return file;
 }
 
 export async function streamLargePlate(): Promise<StreamMeasure> {
@@ -228,6 +326,8 @@ export async function streamLargePlate(): Promise<StreamMeasure> {
       triangles: inspected.triangles,
       components: inspected.components,
       thinSupports: inspected.thinSupports,
+      agreement: inspected.agreement,
+      manifold: inspected.manifold,
       ms: Date.now() - started,
     };
   } finally {

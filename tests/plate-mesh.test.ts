@@ -14,7 +14,7 @@ import { resetOrderLinkStore } from "../server/lib/order-links";
 import { getPlateFile, markPlateMesh, upsertPlateFiles } from "../server/lib/plate-files";
 import { enqueuePlateMesh, plateMeshJobPeak, resetPlateMeshJobPeak, whenPlateMeshesIdle } from "../server/lib/plate-mesh-jobs";
 import { MESH_BYTE_BUDGET, PLATE_MESH_VERSION, buildPlateGlb } from "../server/lib/plate-mesh";
-import { STREAM_PLATE_BYTES, streamLargePlate } from "./plate-mesh-stream";
+import { STREAM_PLATE_BYTES, inspectGlb, separatedMinisCtb, streamLargePlate } from "./plate-mesh-stream";
 
 function rle(white: boolean, length: number): number[] {
   if (length < 1) return [];
@@ -172,9 +172,42 @@ test("a 480MB plate is read as ranges, not as one buffer", async () => {
   assert.ok(result.components >= 3, `components ${result.components}`);
   assert.ok(result.thinSupports >= 1, `thin supports ${result.thinSupports}`);
   assert.ok(result.reads > 2);
+  assert.ok(result.agreement >= 0.999, `winding agreement ${result.agreement}`);
+  assert.ok(result.manifold >= 0.99, `manifold edges ${result.manifold}`);
   console.log(
-    `[plate-mesh] 480MB parts glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} bytesRead=${result.bytesRead} ms=${result.ms}`,
+    `[plate-mesh] 480MB parts glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} agreement=${result.agreement} manifold=${result.manifold} bytesRead=${result.bytesRead} ms=${result.ms}`,
   );
+});
+
+test("separated minis stay manifold without blocking the event loop", { timeout: 120_000 }, async () => {
+  const file = separatedMinisCtb();
+  let maxBlock = 0;
+  let last = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    if (now - last > maxBlock) maxBlock = now - last;
+    last = now;
+  }, 20);
+  const started = Date.now();
+  try {
+    const glb = await buildPlateGlb(async (start, length) => {
+      if (start < 0 || start + length > file.length) return null;
+      return file.subarray(start, start + length);
+    }, file.length);
+    const ms = Date.now() - started;
+    const inspected = inspectGlb(glb);
+    console.log(
+      `[plate-mesh] minis glb=${glb.length} triangles=${inspected.triangles} components=${inspected.components} agreement=${inspected.agreement} manifold=${inspected.manifold} maxBlock=${maxBlock} ms=${ms}`,
+    );
+    assert.ok(glb.length > 100 && glb.length <= MESH_BYTE_BUDGET, `glb ${glb.length}`);
+    assert.ok(inspected.triangles > 50_000, `triangles ${inspected.triangles}`);
+    assert.ok(inspected.components >= 60, `components ${inspected.components}`);
+    assert.ok(inspected.agreement >= 0.999, `winding agreement ${inspected.agreement}`);
+    assert.ok(inspected.manifold >= 0.99, `manifold edges ${inspected.manifold}`);
+    assert.ok(maxBlock < 250, `event loop blocked ${maxBlock}ms`);
+  } finally {
+    clearInterval(timer);
+  }
 });
 
 test("mesh jobs run one at a time", async () => {
