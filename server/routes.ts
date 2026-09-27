@@ -63,6 +63,8 @@ import { CtbParseError } from "./lib/ctb";
 import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
+import { registerPrinterRoutes } from "./lib/printer-routes";
+import { firstIssue } from "./lib/validation";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -610,10 +612,6 @@ async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
     resin: buildResinInventorySnapshot(),
     recentPlates: listPrintFileRecords(200),
   };
-}
-
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
 }
 
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
@@ -2737,102 +2735,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     },
   );
 
-  /**
-   * Fleet usage + lifecycle for each named printer. Plate hours/layers/resin
-   * roll up from attached CTB/ULTX metrics matched by machine name aliases.
-   */
-  app.get("/api/printers", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    try {
-      ensureDefaultPrinters();
-      return res.json({ ok: true, ...buildPrinterFleetSnapshot() });
-    } catch (error) {
-      return res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load printer fleet",
-      });
-    }
-  });
-
-  app.patch("/api/printers/:id", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    const parsed = updatePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const printer = updatePrinter(printerId, parsed.data);
-    if (!printer) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.json({ ok: true, printer, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  app.post("/api/printers/:id/events", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const printerId = Number(req.params.id);
-    if (!Number.isInteger(printerId) || printerId < 1) {
-      return res.status(400).json({ ok: false, error: "Choose a valid printer" });
-    }
-    if (!getPrinter(printerId)) {
-      return res.status(404).json({ ok: false, error: "That printer was not found" });
-    }
-    const parsed = createPrinterLifecycleEventSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const event = addPrinterLifecycleEvent(printerId, parsed.data);
-    if (!event) return res.status(404).json({ ok: false, error: "That printer was not found" });
-    return res.status(201).json({ ok: true, event, fleet: buildPrinterFleetSnapshot() });
-  });
-
-  /**
-   * Manually map an unmatched CTB/ULTX machine-name string onto a fleet printer.
-   * Unique labels become a lasting map; shared model names (Mighty 8K) only stamp
-   * existing plates so NEWX1/2/3 are not collapsed onto one machine.
-   */
-  app.post("/api/printers/assign-profile", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrinterProfileSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrinterProfile(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That fleet printer was not found" });
-    }
-    const label = parsed.data.profile.trim();
-    const message = result.map
-      ? `Assigned “${label}” to that printer. Matching plates now count toward its usage.`
-      : `Assigned ${result.stamped} existing plate(s) with “${label}” to that printer. Future plates still need a per-plate choice (shared model name).`;
-    return res.json({
-      ok: true,
-      map: result.map,
-      stamped: result.stamped,
-      fleet: result.fleet,
-      message,
-    });
-  });
-
-  /** Assign one historical plate to a physical fleet printer (per-plate, not global). */
-  app.post("/api/printers/assign-plate", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = assignPrintFilePrinterSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const result = assignPrintFilePrinter(parsed.data);
-    if (!result) {
-      return res.status(404).json({ ok: false, error: "That plate or fleet printer was not found" });
-    }
-    return res.json({
-      ok: true,
-      record: result.record,
-      fleet: result.fleet,
-      message: "Plate assigned to that printer. Its hours now count in the fleet breakdown.",
-    });
-  });
+  registerPrinterRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Reapply safe defaults to historical attached plates. This only fills blank
