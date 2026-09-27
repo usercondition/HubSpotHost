@@ -1030,7 +1030,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const rows = Array.isArray(req.body?.expenses) ? req.body.expenses : null;
     if (!rows) return res.status(400).json({ ok: false, error: "expenses must be an array." });
     try {
-      return res.status(201).json({ expenses: rows.map((row) => createExpense(row as ExpenseInput)) });
+      return res.status(201).json({ expenses: rows.map((row: unknown) => createExpense(row as ExpenseInput)) });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Could not save expenses." });
     }

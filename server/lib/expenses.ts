@@ -78,7 +78,7 @@ export function updateExpense(id: string, input: ExpenseInput) {
 
 export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {
   const startAt = new Date(`${start}T00:00:00Z`).getTime(), endAt = new Date(`${end}T23:59:59Z`).getTime();
-  return rows.reduce((sum, row: any) => {
+  return rows.reduce<number>((sum, row: any) => {
     const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
     const installmentEnd = row.payment_count && (row.cadence === "monthly" || row.cadence === "yearly")
       ? addCadence(row.start_date, row.cadence, row.payment_count)
