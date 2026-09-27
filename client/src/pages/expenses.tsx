@@ -4,15 +4,16 @@ import { Button } from "@/components/ui/button";
 import { PageHeader, } from "@/components/shell";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { apiRequest } from "@/lib/queryClient";
+import { formatMoney } from "@/lib/format";
 import { shipByCalendarDate } from "@shared/ship-by";
 import { EXPENSE_CATEGORIES, monthlyEquivalentCents } from "@shared/expenses";
 
 type Expense = { id: string; vendor: string; name: string; category: string; amount_cents: number; currency: "USD" | "EUR"; usd_amount_cents: number | null; cadence: string; start_date: string; end_date: string | null; payment_count: number | null; payment_note: string; notes: string };
-const cents = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value / 100);
+const cents = (value: number) => formatMoney(value / 100, { compact: false });
 const categories = EXPENSE_CATEGORIES;
 export default function Expenses() {
   const { isUnlocked, headers } = useOwnerSession(); const unlock = useOwnerUnlock({ successTitle: "Expenses unlocked", successDescription: "Print Ops-only overhead." });
-  const [category, setCategory] = useState(""); const [period, setPeriod] = useState("all"); const [draft, setDraft] = useState<Expense | "new" | null>(null);
+  const [category, setCategory] = useState(""); const [draft, setDraft] = useState<Expense | "new" | null>(null);
   const query = useQuery<{ expenses: Expense[] }>({ queryKey: ["/api/expenses"], enabled: isUnlocked, queryFn: async () => (await apiRequest("GET", "/api/expenses", undefined, { headers })).json() });
   const rows = (query.data?.expenses ?? []).filter((row) => !category || row.category === category);
   const recurring = rows.filter((row) => row.cadence === "monthly" || row.cadence === "yearly");
@@ -21,7 +22,7 @@ export default function Expenses() {
   const monthly = useMemo(() => recurring.reduce((sum, row) => sum + (monthlyEquivalentCents(row) ?? 0), 0), [recurring]);
   return <div className="mx-auto max-w-6xl pb-24 md:pb-6"><PageHeader title="Expenses" subtitle="Shop overhead stored only in Print Ops." actions={<Button size="sm" onClick={() => setDraft("new")}>Add expense</Button>} />
     {!isUnlocked ? <OwnerUnlockPanel title="Unlock expenses" description="Enter the owner code to manage shop overhead." buttonLabel="Unlock expenses" testIdPrefix="expenses" pending={unlock.isPending} onUnlock={(code) => unlock.mutate(code)} /> :
-      <div className="page-stack"><div className="grid gap-2 sm:grid-cols-[auto_auto_1fr]"><select aria-label="Filter category" value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 rounded border bg-background px-2 text-sm"><option value="">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Filter period" value={period} onChange={(e) => setPeriod(e.target.value)} className="h-9 rounded border bg-background px-2 text-sm"><option value="month">This month</option><option value="last">Last month</option><option value="ytd">Year to date</option><option value="all">All time</option><option value="custom">Custom</option></select></div>
+      <div className="page-stack"><div className="grid gap-2 sm:grid-cols-[auto_1fr]"><select aria-label="Filter category" value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 rounded border bg-background px-2 text-sm"><option value="">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select></div>
       {draft ? <ExpenseForm value={draft === "new" ? undefined : draft} headers={headers} done={() => { setDraft(null); query.refetch(); }} /> : null}
       <Group title="Recurring" rows={recurring} onEdit={setDraft} headers={headers} refresh={() => query.refetch()} /><Group title="One-off" rows={oneOff} onEdit={setDraft} headers={headers} refresh={() => query.refetch()} /><div className="grid grid-cols-[minmax(0,1fr)_5rem_5rem_2rem] gap-3 border-t pt-2 text-sm font-semibold"><span>Totals</span><span className="numeric text-right">{cents(monthly)}</span><span className="numeric text-right">{cents(total)}</span></div></div>}</div>;
 }
