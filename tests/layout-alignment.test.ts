@@ -7,14 +7,20 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
+import { indexZipRows } from "../shared/order-origins";
+import { buildShopDashboard } from "../shared/shop-dashboard";
 
 const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
+const artifactsDir = process.env.ARTIFACTS_DIR;
+function artifactPath(name: string) {
+  return artifactsDir ? `${artifactsDir}/${name}` : undefined;
+}
 
 function queueItem(
   id: string,
@@ -247,6 +253,91 @@ function bodyFor(input: string | URL) {
       intake: { awaitingClient: 0, pendingReview: 0, approved: 0 },
       supplySpend: { total: 0, orders: 0 },
       books: { supplySpend: 0, grossProfit: 0 },
+      dashboard: buildShopDashboard({
+        now: "2026-09-25T19:39:00.000Z",
+        period: "30",
+        awaitingClient: 1,
+        supplyPurchases: [],
+        bits: [{ status: "good" }, { status: "reprint" }],
+        failures: [],
+        printers: [
+          { name: "Mighty 8K New", model: "Mighty 8K", fepChangedAt: "2026-08-01T00:00:00.000Z", hoursSinceFep: 42, recommendedFepHours: 80 },
+          { name: "MEGA 8K", model: "MEGA 8K", fepChangedAt: null, hoursSinceFep: null, recommendedFepHours: null },
+        ],
+        plates: [
+          { attachedAt: "2026-09-20T12:00:00.000Z", printTimeSeconds: 10800, resinVolumeMl: 80, resinCost: 12, printerLabel: "Mighty 8K New" },
+          { attachedAt: "2026-09-18T12:00:00.000Z", printTimeSeconds: 7200, resinVolumeMl: 40, resinCost: 6, printerLabel: "Mighty 12K" },
+        ],
+        zips: indexZipRows([
+          ["92101", "San Diego", "CA", 32.72, -117.16],
+          ["10001", "New York", "NY", 40.75, -73.99],
+        ]),
+        orders: [
+          {
+            id: "ada",
+            name: "Knight - Ada",
+            customer: "Ada",
+            createdAt: "2026-09-10T12:00:00.000Z",
+            closedAt: "2026-09-18T12:00:00.000Z",
+            open: false,
+            won: true,
+            lost: false,
+            stageLabel: "Completed",
+            amount: 180,
+            resinCost: 22,
+            postage: 9,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: false,
+            shipping: "ship",
+            hasTracking: true,
+            shipTo: { city: "San Diego", state: "CA", zip: "92101", country: "United States" },
+          },
+          {
+            id: "bea",
+            name: "Land Raider - Bea",
+            customer: "Bea",
+            createdAt: "2026-09-12T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 240,
+            resinCost: null,
+            postage: null,
+            packaging: 0,
+            shipBy: "2026-09-20",
+            tentative: false,
+            needsReply: true,
+            shipping: "ship",
+            hasTracking: false,
+            shipTo: { city: "New York", state: "NY", zip: "10001", country: "US" },
+          },
+          {
+            id: "cal",
+            name: "Sword - Cal",
+            customer: "Cal",
+            createdAt: "2026-09-14T12:00:00.000Z",
+            closedAt: null,
+            open: true,
+            won: false,
+            lost: false,
+            stageLabel: "Printing",
+            amount: 40,
+            resinCost: 8,
+            postage: 0,
+            packaging: 0,
+            shipBy: null,
+            tentative: false,
+            needsReply: false,
+            shipping: "pickup",
+            hasTracking: false,
+            shipTo: null,
+          },
+        ],
+      }),
       pipeline: [
         { id: "print", label: "Printing", closed: false },
         { id: "done", label: "Completed", closed: true },
@@ -521,7 +612,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     }
 
     browser = await chromium.launch({ channel: "chrome", headless: true });
-    const context = await browser.newContext({ deviceScaleFactor: 1 });
+    const context = await browser.newContext({ deviceScaleFactor: 1, hasTouch: true });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
     });
@@ -691,12 +782,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
     };
     const settlePage = () =>
-      page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
+      page.locator("[data-testid='button-open-committed']:visible").last().waitFor({ state: "visible" });
     const openDrawer = async () => {
       // A fast tab change leaves exiting Stack copies in the crossfade. Clicking
       // one of those opens a drawer that unmounts when the copy finishes leaving.
       await settlePage();
-      await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='button-open-committed']:visible").last().click();
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
       await page.waitForFunction(() => {
         const el = document.querySelector("[data-testid='drawer-deal-ops']");
@@ -711,7 +802,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     };
     const checkLibrary = async (label: string) => {
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const root = current();
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
@@ -777,7 +867,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
       await page.goto(`${base}/#/library?orderKey=${encodeURIComponent("deal:c1")}`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const filtered = current();
       await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
       await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
@@ -1052,6 +1141,66 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
     check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
 
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const desktopStats = await current().evaluate((root) => ({
+      scroll: document.documentElement.scrollWidth,
+      inner: window.innerWidth,
+      text: root.innerText,
+      tops: Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 3).map((el) => el.getBoundingClientRect().top),
+      align: Array.from(root.querySelectorAll("[data-testid^='headline-'] .numeric")).map((el) => getComputedStyle(el).textAlign),
+    }));
+    check(desktopStats.scroll <= desktopStats.inner + 1, `desktop stats scrolls horizontally (${desktopStats.scroll})`);
+    check(!/\bundefined\b|\bNaN\b/.test(desktopStats.text), "stats page shows a blank number");
+    check(desktopStats.tops.length === 3 && Math.max(...desktopStats.tops) - Math.min(...desktopStats.tops) <= 1, "desktop headlines are not in one row");
+    check(desktopStats.align.every((align) => align === "right"), "headline numbers are not right aligned");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    const desktopOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+      };
+    });
+    check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
+    check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
+    await page.locator("[data-testid='stats-origin-svg'] path").first().click();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().click();
+    if (artifactPath("stats-map-popover-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-1440.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-desktop-1440.png")) await page.screenshot({ path: artifactPath("stats-desktop-1440.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[data-testid='badge-phone-floor']");
@@ -1205,6 +1354,71 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     );
     check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
+
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
+    await current().locator("[data-testid='stats-headlines']").waitFor();
+    const phoneStats = await current().evaluate((root) => {
+      const headlines = Array.from(root.querySelectorAll("[data-testid^='headline-']")).slice(0, 2);
+      const rects = headlines.map((el) => el.getBoundingClientRect());
+      return {
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+        tops: rects.map((rect) => rect.top),
+        lefts: rects.map((rect) => rect.left),
+      };
+    });
+    check(phoneStats.scroll <= phoneStats.inner + 1, `phone stats scrolls horizontally (${phoneStats.scroll})`);
+    check(phoneStats.tops.length === 2 && Math.abs((phoneStats.tops[0] ?? 0) - (phoneStats.tops[1] ?? 0)) <= 1, "phone headlines are not in two columns");
+    check((phoneStats.lefts[0] ?? 0) < (phoneStats.lefts[1] ?? 0), "phone headline order is wrong");
+    await current().locator("[data-testid='stats-origin-svg']").waitFor();
+    const phoneOrigin = await current().locator("[data-testid='stats-origin-map']").evaluate((card) => {
+      const svg = card.querySelector("[data-testid='stats-origin-svg']")?.getBoundingClientRect();
+      const legend = card.querySelector("[data-testid='stats-origin-legend']")?.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        svgBottom: svg?.bottom ?? 0,
+        svgWidth: svg?.width ?? 0,
+        legendTop: legend?.top ?? 0,
+        cardWidth: cardRect.width,
+        inner: window.innerWidth,
+      };
+    });
+    check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
+    check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
+    await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
+    await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
+    assert.match(await page.locator("[data-testid='stats-origin-detail']").first().innerText(), /\d+ orders?/);
+    if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
+    if (artifactPath("stats-map-popover-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-390.png")! });
+    await page.evaluate(() => {
+      const saved: Array<[HTMLElement, string]> = [];
+      const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
+      for (let index = 0; index < nodes.length; index += 1) {
+        const el = nodes[index] as HTMLElement;
+        if (index < nodes.length - 1) {
+          saved.push([el, el.getAttribute("style") ?? ""]);
+          el.style.display = "none";
+        }
+      }
+      let node = (nodes[nodes.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (node) {
+        saved.push([node, node.getAttribute("style") ?? ""]);
+        node.style.overflow = "visible";
+        node.style.height = "auto";
+        node.style.maxHeight = "none";
+        node = node.parentElement;
+      }
+      (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
+    });
+    if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v3.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v3.png")!, fullPage: true });
+    await page.evaluate(() => {
+      const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
+      for (const [el, css] of saved) {
+        if (css) el.setAttribute("style", css);
+        else el.removeAttribute("style");
+      }
+    });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });
