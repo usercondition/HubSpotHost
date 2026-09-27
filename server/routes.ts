@@ -2210,7 +2210,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const overhead = overheadForPeriod(listExpenses(), window.start == null ? "0000-01-01" : shipByCalendarDate(new Date(window.start)), shipByCalendarDate(new Date(window.end)));
       return res.json({
         ...snapshot,
-        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, overheadCents: overhead }),
+        dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, mapBusy: shipToLoad.busy, overheadCents: overhead }),
       });
     } catch (error) {
       const status = error instanceof HubSpotError ? error.status : 502;

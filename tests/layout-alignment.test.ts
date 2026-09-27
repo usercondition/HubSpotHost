@@ -1403,6 +1403,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
     await page.locator("[data-testid='stats-origin-svg'] circle").last().tap();
     if (artifactPath("stats-map-phone-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone-390.png")! });
+    if (artifactPath("stats-map-popover-390.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-390.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1426,6 +1427,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
     if (artifactPath("stats-phone-390-v2.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v2.png")!, fullPage: true });
     if (artifactPath("performance-overhead-390.png")) await page.screenshot({ path: artifactPath("performance-overhead-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v3.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v3.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {

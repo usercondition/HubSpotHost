@@ -69,6 +69,7 @@ export type OriginOrderRow = {
 
 export type OrderOrigins = {
   incomplete?: boolean;
+  busy?: boolean;
   unknown: number;
   pickup: OriginTotals;
   states: OriginState[];

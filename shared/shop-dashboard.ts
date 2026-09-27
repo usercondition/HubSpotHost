@@ -37,7 +37,7 @@ export interface ShopDashboardOrder {
   lost: boolean;
   stageLabel: string;
   amount: number | null;
-  /** Plate resin dollars when a plate recorded a cost; otherwise the deal material field. */
+  /** Entered deal material dollars, otherwise a deduplicated slicer plate estimate. */
   resinCost: number | null;
   postage: number | null;
   /** Entered packaging, or 0 when the field is blank (free USPS boxes). */
@@ -351,7 +351,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const profit = metric({
     id: "gross-profit",
     label: "Gross profit",
-    formula: "Amount minus plate resin (or the material field when no plate cost is stored), packaging, and postage. Labor is $0. Packaging is $0 unless an amount was entered. Postage comes from the label amount on the deal, or $0 for pickup. Orders missing an amount, resin, or postage are left out.",
+    formula: "Amount minus entered material cost (or plate resin estimate when material is blank), packaging, and postage. Labor is $0. Packaging is $0 unless an amount was entered. Postage comes from the label amount on the deal, or $0 for pickup. Orders missing an amount, resin, or postage are left out.",
     value: currentProfit.complete > 0 ? currentProfit.profit : null,
     unit: "usd",
     previous: compare && priorProfit.complete > 0 ? priorProfit.profit : null,

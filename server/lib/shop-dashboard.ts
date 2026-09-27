@@ -57,6 +57,7 @@ export function collectShopDashboard(input: {
   shipTos?: Map<string, ShipToFields>;
   mapIncomplete?: boolean;
   overheadCents?: number;
+  mapBusy?: boolean;
 }): ShopDashboard {
   const now = input.now ?? new Date();
   const stageById = new Map(input.stages.map((stage) => [stage.id, stage]));
@@ -239,6 +240,7 @@ export function collectShopDashboard(input: {
     { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus the same selected-period overhead. An order cost and overhead charge are each counted once.", value: gross == null || overhead == null ? null : Math.round((gross - overhead) * 100) / 100, unit: "usd", previous: null, compare: false, note: gross == null ? "Gross profit is not available for this period." : null, series: [] },
   );
   dashboard.origins.incomplete = input.mapIncomplete === true;
+  dashboard.origins.busy = input.mapBusy === true;
   return dashboard;
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { geoAlbersUsa, geoNaturalEarth1, geoPath, type GeoPermissibleObjects } from "d3-geo";
 import { feature } from "topojson-client";
 import statesAtlas from "us-atlas/states-10m.json";
@@ -69,6 +69,12 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
   const pinch = useRef<{ distance: number; k: number } | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const moved = useRef(false);
+  useEffect(() => {
+    const clear = () => { pointers.current.clear(); pinch.current = null; drag.current = null; };
+    window.addEventListener("pointerup", clear);
+    window.addEventListener("pointercancel", clear);
+    return () => { window.removeEventListener("pointerup", clear); window.removeEventListener("pointercancel", clear); };
+  }, []);
 
   const map = useMemo(
     () => (world ? shapes(worldAtlas as never, "countries", 960, 480, true) : shapes(statesAtlas as never, "states", 960, 500, false)),
@@ -190,6 +196,8 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
             if (pointers.current.size < 2) pinch.current = null;
             drag.current = null;
           }}
+          onPointerCancel={() => { pointers.current.clear(); pinch.current = null; drag.current = null; }}
+          onLostPointerCapture={() => { pointers.current.clear(); pinch.current = null; drag.current = null; }}
           onPointerLeave={() => setFocus(null)}
         >
           <rect width="960" height="500" fill="hsl(240 4% 5%)" onClick={() => { setSelected(null); setLocked(null); }} />
@@ -227,7 +235,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
               const radius = 4 + Math.sqrt(place.orders / placeMax) * 11;
               return (
                 <g key={place.id} onMouseEnter={() => setFocus({ kind: "place", id: place.id })} onMouseLeave={() => setFocus(null)}>
-                  <circle cx={point[0]} cy={point[1]} r={radius + 8} fill="transparent" />
+                  <circle cx={point[0]} cy={point[1]} r={radius + 8} fill="transparent" onClick={(event) => { event.stopPropagation(); setLocked({ kind: "place", id: place.id }); setSelected(place.state); }} />
                   <circle
                     data-testid={`origin-dot-${place.id}`}
                     cx={point[0]}
@@ -287,7 +295,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
             Unknown location <span className="numeric inline-block w-8 text-right">({origins.unknown})</span>
           </button>
         </div>
-        {origins.incomplete ? <p className="text-sm text-amber-700 dark:text-amber-300" data-testid="stats-origin-busy">HubSpot busy, map may be incomplete.</p> : null}
+        {origins.incomplete ? <p className="text-sm text-amber-700 dark:text-amber-300" data-testid="stats-origin-busy">{origins.busy ? "HubSpot busy, map may be incomplete." : "Map data incomplete, retry."}</p> : null}
         <p className="text-sm" data-testid="stats-origin-detail">{detail()}</p>
         {selected ? (
           <ul className="divide-y divide-border/70" data-testid="stats-origin-orders">
