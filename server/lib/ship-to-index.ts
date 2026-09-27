@@ -13,7 +13,7 @@ const shipToCache = new Map<string, { value: ShipToFields | null; expiresAt: num
 let inflight: Promise<ShipToLoad> | null = null;
 
 function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 async function readBatch(path: string, body: object, sleep: (ms: number) => Promise<void> = wait): Promise<any> {
