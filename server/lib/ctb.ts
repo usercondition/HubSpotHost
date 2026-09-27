@@ -142,6 +142,9 @@ export function createFileCtbReader(filePath: string): CtbReader {
  * Analyze a CTB using only an uploaded prefix of the real plate file.
  * `fullFileSize` is the on-disk plate size from the owner's machine; the
  * fingerprint matches `createFileCtbReader` (size, first 1 MiB, last 1 MiB, header tags).
+ * Bytes past the prefix are missing, not an error: layers, time, and resin still
+ * parse when the settings block is inside the prefix. A printer name or thumbnail
+ * past that prefix stays blank.
  */
 export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number, tail?: Buffer): CtbReader {
   if (!Number.isFinite(fullFileSize) || fullFileSize < prefix.length || fullFileSize < HEADER_MIN_BYTES) {
@@ -153,11 +156,7 @@ export function createPrefixCtbReader(prefix: Buffer, fullFileSize: number, tail
     read(offset, length) {
       if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length < 0) return null;
       if (offset + length > fullFileSize) return null;
-      if (offset + length > prefix.length) {
-        throw new CtbParseError(
-          "That CTB stores planning settings past the sampled prefix. Re-export from Chitubox or upload the full plate on a direct host.",
-        );
-      }
+      if (offset + length > prefix.length) return null;
       return prefix.subarray(offset, offset + length);
     },
     sha256() {

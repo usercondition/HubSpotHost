@@ -451,6 +451,24 @@ export function mergePreviewStats(existing: PlatePreviewStats | null, incoming: 
   return merged;
 }
 
+/** Fill a library preview from a header read. A blank fingerprint may be stored; a different one is left alone. Cost is never written. */
+export function storeBlankPlatePreview(driveFileId: string, sha256: string, png: Buffer | null, stats: PlatePreviewStats): boolean {
+  const fingerprint = sha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) return false;
+  const row = readFile(driveFileId);
+  if (!row) return false;
+  const current = (row.sha256 || "").trim().toLowerCase();
+  if (current && current !== fingerprint) return false;
+  if (!current) {
+    const updated = getSqlite()
+      .prepare(`UPDATE plate_files SET sha256 = ? WHERE drive_file_id = ? AND sha256 = ''`)
+      .run(fingerprint, driveFileId);
+    if (Number(updated.changes) !== 1) return false;
+  }
+  savePlatePreview(fingerprint, png, { ...stats, resinCost: null });
+  return true;
+}
+
 export function savePlatePreview(sha256: string, png: Buffer | null, stats: PlatePreviewStats): void {
   const fingerprint = sha256.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(fingerprint)) return;

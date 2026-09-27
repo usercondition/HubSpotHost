@@ -1386,7 +1386,7 @@
     display: flex;
     grid-area: name;
     min-width: 0;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.25rem;
   }
 
@@ -1394,7 +1394,7 @@
     display: flex;
     min-width: 0;
     flex: 1;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.25rem;
     font-size: 0.875rem;
     font-weight: 600;
@@ -1402,10 +1402,15 @@
   }
 
   .library-name span {
+    display: -webkit-box;
+    flex: 1;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: break-word;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1.35;
   }
 
   .library-row .library-printer,
@@ -1489,6 +1494,18 @@
     .library-resin,
     .library-used { display: none; }
     .library-meta { display: block; }
+    .library-name span {
+      -webkit-line-clamp: 3;
+    }
+  }
+
+  .library-meta-part {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
+  .library-meta-part + .library-meta-part::before {
+    content: " · ";
   }
 
   .plate-preview-stats {
