@@ -46,6 +46,55 @@ const LIBRARY_FILE = {
   },
 };
 
+const LIBRARY_RAIDER = {
+  driveFileId: "file-raider",
+  name: "Land_Raider_12K.ctb",
+  webViewLink: "https://drive.google.com/file/d/file-raider/view",
+  sizeBytes: 52428800,
+  modifiedAt: "2026-09-20T18:00:00.000Z",
+  mimeType: "application/octet-stream",
+  extension: ".ctb",
+  printer: "Mighty 12K",
+  kit: "Land Raider",
+  customer: "Daniel Ortega",
+  kitTags: "Land Raider",
+  notes: "",
+  source: "indexed",
+  sha256: "cd".repeat(32),
+  orderKeys: ["deal:c2", "deal:c9"],
+  printRecordIds: [],
+  hasPreview: false,
+  stats: {
+    printerProfile: "Mighty 12K",
+    layerCount: 800,
+    layerHeightMm: 0.05,
+    printTimeSeconds: 7200,
+    resinVolumeMl: 40.5,
+    resinCost: 22,
+  },
+};
+
+const REUSE_FILE = {
+  driveFileId: "file-bits",
+  name: "Castellan_Bits_Plate_1.ctb",
+  webViewLink: "https://drive.google.com/file/d/file-bits/view",
+  sizeBytes: 4096,
+  modifiedAt: "2026-09-26T20:00:00.000Z",
+  mimeType: "application/octet-stream",
+  extension: ".ctb",
+  printer: "Mighty 8K",
+  kit: "Cerastus Castigator",
+  customer: "Wayne Hood",
+  kitTags: "Cerastus Castigator",
+  notes: "",
+  source: "upload",
+  sha256: "ef".repeat(32),
+  orderKeys: ["deal:99"],
+  printRecordIds: [],
+  hasPreview: false,
+  stats: null,
+};
+
 const PRINT_RECORD = {
   id: 7,
   analysisId: "analysis-7",
@@ -181,18 +230,22 @@ function bodyFor(url: URL, downloadError: boolean): { status: number; contentTyp
       }),
     };
   }
+  if (pathname === "/api/plate-files/reuse") {
+    return { status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, file: REUSE_FILE }) };
+  }
   if (pathname.startsWith("/api/plate-files")) {
     if (url.searchParams.get("summary") === "1") {
-      return { status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, total: 1, files: [], failures: [] }) };
+      return { status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, total: 2, files: [], failures: [] }) };
     }
     const orderKey = url.searchParams.get("orderKey") || "";
+    const catalog = orderKey ? [LIBRARY_FILE].filter((file) => file.orderKeys.includes(orderKey)) : [LIBRARY_FILE, LIBRARY_RAIDER];
     const pending = orderKey
       ? [{ printRecordId: 7, orderKey, sha256: "ab".repeat(32), name: "Castigator_MEGA_8K.ctb", error: "Not in Library yet." }]
       : [];
     return {
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true, files: [LIBRARY_FILE], failures: [], pending }),
+      body: JSON.stringify({ ok: true, files: catalog, failures: [], pending }),
     };
   }
   if (pathname.startsWith("/api/prints")) {
@@ -287,22 +340,56 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
       await target.waitFor();
       await target.screenshot({ path: `${ARTIFACTS}/${name}` });
     };
+    const assertKitCatalog = async () => {
+      const libraryText = await page.locator("[data-testid='page-library']").innerText();
+      assert.equal(/Ada|Daniel|Wayne|Glenn/.test(libraryText), false, libraryText);
+      assert.match(libraryText, /Castigator/);
+      assert.match(libraryText, /Land Raider/);
+      assert.match(libraryText, /Used on 1 order/);
+      assert.match(libraryText, /Used on 2 orders/);
+      assert.match(libraryText, /420/);
+      assert.match(libraryText, /31\.25 ml/);
+    };
+    const showReuse = async (drawer: playwright.Locator) => {
+      await drawer.locator("[data-testid='button-add-slice-file']").evaluate((el) => (el as HTMLElement).click());
+      await drawer.locator("[data-testid='input-slice-file']").setInputFiles({
+        name: "Castellan_Bits_Plate_1.ctb",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from("plate"),
+      });
+      await drawer.locator("[data-testid='select-slice-printer']").selectOption("Mighty 8K");
+      const reuse = drawer.locator("[data-testid='text-library-reuse']");
+      await reuse.waitFor();
+      const reuseText = (await reuse.innerText()).replace(/\s+/g, " ").trim();
+      assert.match(reuseText, /^Already in Library: Castellan Bits Plate 1, Mighty 8K/);
+      assert.match(reuseText, /Use this/);
+      assert.equal(/Wayne|Ada|Daniel|Glenn/.test(reuseText), false, reuseText);
+    };
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
     await page.locator("[data-testid='library-row-file-castigator']").waitFor();
+    await page.locator("[data-testid='library-row-file-raider']").waitFor();
+    await assertKitCatalog();
     await shot("library-desktop-1440.png", "[data-testid='page-library']");
     await page.locator("[data-testid='button-plate-thumb-file-castigator']").click();
     await page.locator("[data-testid='panel-plate-preview']").waitFor();
+    const previewText = await page.locator("[data-testid='panel-plate-preview']").innerText();
+    assert.equal(/Ada|Daniel|Wayne|Glenn/.test(previewText), false, previewText);
+    assert.match(previewText, /Used on 1 order/);
+    assert.match(previewText, /Castigator/);
     await shot("preview-desktop-1440.png", "[data-testid='panel-plate-preview']");
     await page.locator("[data-testid='button-close-plate-preview']").click();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
     await page.locator("[data-testid='library-row-file-castigator']").waitFor();
+    await assertKitCatalog();
     await shot("library-phone-390.png", "[data-testid='page-library']");
     await page.locator("[data-testid='button-plate-thumb-file-castigator']").click();
     await page.locator("[data-testid='panel-plate-preview']").waitFor();
+    const phonePreview = await page.locator("[data-testid='panel-plate-preview']").innerText();
+    assert.equal(/Ada|Daniel|Wayne|Glenn/.test(phonePreview), false, phonePreview);
     await shot("preview-phone-390.png", "[data-testid='panel-plate-preview']");
     await page.locator("[data-testid='button-close-plate-preview']").click();
 
@@ -333,6 +420,7 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     await drawer.locator("[data-testid='slice-files']").waitFor();
     await drawer.locator("[data-testid='text-slice-pending-7']").waitFor();
     assert.equal(await drawer.locator("[data-testid='button-send-to-library-7']").count(), 0);
+    await showReuse(drawer);
     await drawer.locator("[data-testid='button-pending-menu-7']").evaluate((el) => (el as HTMLElement).click());
     await drawer.locator("[data-testid='button-send-to-library-7']").waitFor();
     const drawerText = await drawer.locator("[data-testid='slice-files']").innerText();
@@ -353,6 +441,7 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
       return rect.top <= 2 && rect.left <= 2 && rect.height > 400;
     });
     await phoneDrawer.locator("[data-testid='slice-library-pending-7']").scrollIntoViewIfNeeded();
+    await showReuse(phoneDrawer);
     await phoneDrawer.locator("[data-testid='button-pending-menu-7']").evaluate((el) => (el as HTMLElement).click());
     await phoneDrawer.locator("[data-testid='button-send-to-library-7']").waitFor();
     await phoneDrawer.locator("[data-testid='slice-files']").screenshot({ path: `${ARTIFACTS}/drawer-files-phone-390.png` });

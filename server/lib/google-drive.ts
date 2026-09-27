@@ -264,11 +264,29 @@ async function ensureFolder(access: string, name: string, parentId: string | nul
   return job;
 }
 
-export async function ensureOrderFolder(folderName: string, env: NodeJS.ProcessEnv = process.env): Promise<{ access: string; folderId: string }> {
+export async function ensureLibraryFolder(kitName: string, env: NodeJS.ProcessEnv = process.env): Promise<{ access: string; folderId: string }> {
   const access = await accessToken(env);
   const root = await ensureFolder(access, "Print Ops", null);
-  const folderId = await ensureFolder(access, folderName, root);
+  const library = await ensureFolder(access, "Library", root);
+  const folderId = await ensureFolder(access, kitName, library);
   return { access, folderId };
+}
+
+/** Rename a kit folder when the new name is not already a folder. Merge leaves the old folder in place. */
+export async function renameLibraryFolder(from: string, to: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const access = await accessToken(env);
+  const root = await ensureFolder(access, "Print Ops", null);
+  const library = await ensureFolder(access, "Library", root);
+  const source = await findFolder(access, from, library);
+  if (!source) return;
+  const target = await findFolder(access, to, library);
+  if (target) return;
+  const response = await driveFetch(`${DRIVE_API}/files/${encodeURIComponent(source)}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
+    body: JSON.stringify({ name: to }),
+  });
+  if (!response.ok) throw new Error("Could not rename the Library folder in Drive.");
 }
 
 export interface DriveUploadedFile {

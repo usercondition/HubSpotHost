@@ -1305,10 +1305,18 @@
     font-weight: 600;
   }
 
+  .library-kit {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.85rem 0.75rem 0.2rem;
+  }
+
   .library-head,
   .library-row {
     display: grid;
-    grid-template-columns: 2.75rem minmax(0, 1.7fr) 6.5rem minmax(0, 1.2fr) 8.5rem 5.75rem;
+    grid-template-columns: 2.75rem minmax(0, 1.4fr) 6.25rem 4.25rem 5.25rem 5rem minmax(7.25rem, 8.5rem) 5.75rem;
     column-gap: 0.75rem;
     align-items: center;
     padding: 0.55rem 0.75rem;
@@ -1321,7 +1329,7 @@
   }
 
   .library-row {
-    grid-template-areas: "thumb name printer order date size";
+    grid-template-areas: "thumb name printer layers time resin used size";
   }
 
   .plate-thumb {
@@ -1370,9 +1378,33 @@
     white-space: nowrap;
   }
 
+  .library-row .library-printer,
+  .library-row .library-layers,
+  .library-row .library-time,
+  .library-row .library-resin,
+  .library-row .library-used {
+    min-width: 0;
+    overflow: hidden;
+  }
   .library-row .library-printer { grid-area: printer; }
-  .library-row .library-order { grid-area: order; }
-  .library-row .library-date { grid-area: date; }
+  .library-row .library-layers,
+  .library-row .library-time,
+  .library-row .library-resin {
+    justify-self: end;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .library-row .library-layers { grid-area: layers; }
+  .library-row .library-time { grid-area: time; }
+  .library-row .library-resin { grid-area: resin; }
+  .library-row .library-used { grid-area: used; }
+  .library-head .library-layers,
+  .library-head .library-time,
+  .library-head .library-resin,
+  .library-head .library-size {
+    justify-self: end;
+    text-align: right;
+  }
 
   .library-size {
     width: 5.75rem;
@@ -1404,8 +1436,10 @@
       row-gap: 0.1rem;
     }
     .library-printer,
-    .library-order,
-    .library-date { display: none; }
+    .library-layers,
+    .library-time,
+    .library-resin,
+    .library-used { display: none; }
     .library-meta { display: block; }
   }
 

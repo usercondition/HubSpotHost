@@ -26,6 +26,55 @@ export function isPlateFileName(fileName: string): boolean {
   return (PLATE_FILE_EXTENSIONS as readonly string[]).includes(plateExtension(fileName));
 }
 
+/** Printers Miguel filters the Library by. */
+export const LIBRARY_PRINTER_FILTERS = ["Mighty 8K", "Mighty 12K", "MEGA 8K", "HeyGears"] as const;
+
+/** Plate label without the extension, for kit search and reuse. */
+export function platePartName(fileName: string): string {
+  const base = fileName.trim().replace(/\.[^.]+$/, "");
+  const cleaned = base.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned || fileName.trim() || "Plate";
+}
+
+/**
+ * Catalog name for a sliced kit. The buyer is not part of the library.
+ * "Knight - Castellan - Glenn Casey Chandler" → "Knight Castellan".
+ * "Cerastus Chassis - Castigator - Wayne Hood" → "Cerastus Castigator".
+ */
+export function libraryKitName(source: string, contactName?: string | null): string {
+  let title = source.trim();
+  const contact = contactName?.trim();
+  if (contact) {
+    for (const suffix of [` - ${contact}`, ` – ${contact}`, ` — ${contact}`, ` · ${contact}`]) {
+      if (title.toLowerCase().endsWith(suffix.toLowerCase())) {
+        const cut = title.slice(0, -suffix.length).trim();
+        if (cut) title = cut;
+        break;
+      }
+    }
+  } else {
+    const parts = title.split(/\s+[–—-]\s+/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 3) title = parts.slice(0, -1).join(" - ");
+    else if (parts.length === 2 && (parts[1]?.split(/\s+/).length ?? 0) >= 2) title = parts[0] ?? title;
+  }
+  const words = title
+    .split(/\s+[–—-]\s+|\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 0 && word.toLowerCase() !== "chassis");
+  return words.join(" ").slice(0, 180) || "Kit";
+}
+
+/** Drive folder title for a catalog kit. Does not strip a name Miguel typed. */
+export function libraryFolderName(kit: string): string {
+  const name = kit.trim().replace(/[\\/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180);
+  return name || "Kit";
+}
+
+export function usedOnOrders(count: number): string {
+  const n = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  return n === 1 ? "Used on 1 order" : `Used on ${n} orders`;
+}
+
 /** Prefill a printer when the slicer put it in the file name. */
 export function guessPlatePrinter(fileName: string): PlatePrinter | "" {
   if (plateExtension(fileName) === ".ultx") return "HeyGears";
@@ -37,12 +86,10 @@ export function guessPlatePrinter(fileName: string): PlatePrinter | "" {
   return "";
 }
 
-export function orderFolderName(kit: string, customer: string, orderKeyValue: string): string {
-  const title = kit.trim() || "Order";
-  const who = customer.trim() || "No customer";
-  const id = orderKeyValue.startsWith("deal:") ? orderKeyValue.slice("deal:".length) : orderKeyValue;
-  return `${title} \u2013 ${who} (${id})`.replace(/[\\/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180);
-}
+export const plateKitRenameSchema = z.object({
+  from: z.string().trim().min(1).max(180),
+  to: z.string().trim().min(1).max(180),
+});
 
 export const plateFileIndexSchema = z.object({
   driveFileId: z.string().trim().min(1).max(200),

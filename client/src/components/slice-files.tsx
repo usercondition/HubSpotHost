@@ -12,6 +12,8 @@ import {
   PLATE_PRINTERS,
   guessPlatePrinter,
   isPlateFileName,
+  libraryKitName,
+  platePartName,
   type PlateFileRecord,
   type PlateLibraryPending,
   type PlateUploadFailure,
@@ -119,13 +121,40 @@ export function SliceFiles({
   const files = listed.data?.files ?? [];
   const failures = listed.data?.failures ?? [];
   const pending = listed.data?.pending ?? [];
+  const catalogKit = libraryKitName(kit);
+  const chosenPart = file ? platePartName(file.name) : "";
+  const chosenPrinter = printer || (file ? guessPlatePrinter(file.name) : "");
+  const reuse = useQuery({
+    queryKey: ["/api/plate-files/reuse", orderKey, catalogKit, chosenPart, chosenPrinter],
+    enabled: Boolean(file && catalogKit && chosenPart && chosenPrinter),
+    queryFn: async () => {
+      const params = new URLSearchParams({ kit: catalogKit, part: file?.name || chosenPart, printer: chosenPrinter });
+      const response = await apiRequest("GET", `/api/plate-files/reuse?${params.toString()}`, undefined, { headers });
+      const body = (await response.json()) as { file?: PlateFileRecord | null };
+      return body.file ?? null;
+    },
+  });
+  const reuseMatch = reuse.data && !(reuse.data.orderKeys ?? []).includes(orderKey) ? reuse.data : null;
+
+  async function useLibraryFile(match: PlateFileRecord) {
+    setLocalError("");
+    try {
+      await apiRequest("POST", "/api/plate-files/link", { driveFileId: match.driveFileId, orderKey }, { headers });
+      setFile(null);
+      setNotes("");
+      setOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
+    } catch (error) {
+      setLocalError(plainDriveMessage(error instanceof Error ? error.message : ""));
+    }
+  }
 
   return (
     <section className="mt-3" data-testid="slice-files">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Files</h3>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link href={`/library?orderKey=${encodeURIComponent(orderKey)}`} className="text-xs font-medium text-primary" data-testid="link-see-in-library">
+          <Link href={`/library?kit=${encodeURIComponent(libraryKitName(kit))}`} className="text-xs font-medium text-primary" data-testid="link-see-in-library">
             See in library
           </Link>
           <Button type="button" size="sm" variant="outline" onClick={() => setOpen((value) => !value)} data-testid="button-add-slice-file">
@@ -189,6 +218,19 @@ export function SliceFiles({
                 </option>
               ))}
             </select>
+          ) : null}
+          {reuseMatch ? (
+            <p className="text-sm" data-testid="text-library-reuse">
+              Already in Library: {platePartName(reuseMatch.name)}, {reuseMatch.printer || chosenPrinter}{" "}
+              <button
+                type="button"
+                className="font-medium text-primary underline"
+                data-testid="button-use-library-file"
+                onClick={() => void useLibraryFile(reuseMatch)}
+              >
+                Use this
+              </button>
+            </p>
           ) : null}
           <Button
             type="button"

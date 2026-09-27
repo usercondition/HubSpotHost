@@ -9,8 +9,10 @@ import { pipeline } from "node:stream/promises";
 import type { Express, Request, Response } from "express";
 import {
   isPlateFileName,
-  orderFolderName,
+  libraryFolderName,
+  libraryKitName,
   plateDownloadSchema,
+  plateKitRenameSchema,
   plateExtension,
   plateFileBulkSchema,
   plateFileLinkSchema,
@@ -27,7 +29,8 @@ import {
   beginGoogleOauth,
   disconnectDrive,
   driveConnectionStatus,
-  ensureOrderFolder,
+  ensureLibraryFolder,
+  renameLibraryFolder,
   finishGoogleOauth,
   googleDriveConfigured,
   googleRedirectUri,
@@ -37,6 +40,8 @@ import {
 import {
   countPlateFiles,
   findPlateBySha256,
+  findReusablePlate,
+  renameLibraryKit,
   getPlateFile,
   linkPlateFile,
   linkPlatePrint,
@@ -185,6 +190,28 @@ export function registerPlateLibraryRoutes(app: Express): void {
     if (rejectOwner(req, res)) return;
     disconnectDrive();
     return res.json({ ok: true, ...driveConnectionStatus() });
+  });
+
+  app.get("/api/plate-files/reuse", (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const file = findReusablePlate(queryValue(req.query.kit), queryValue(req.query.part), queryValue(req.query.printer));
+    return res.json({ ok: true, file });
+  });
+
+  app.post("/api/plate-files/kit", async (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = plateKitRenameSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const to = parsed.data.to.replace(/\s+/g, " ").trim();
+    const changed = renameLibraryKit(parsed.data.from, to);
+    if (changed < 1) return res.status(404).json({ ok: false, error: "That kit is not in the Library." });
+    try {
+      await renameLibraryFolder(libraryFolderName(parsed.data.from), libraryFolderName(to));
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error || "");
+      console.error("[drive] kit rename failed", raw);
+    }
+    return res.json({ ok: true, from: parsed.data.from, to, changed });
   });
 
   app.get("/api/plate-files", (req: Request, res: Response) => {
@@ -387,7 +414,8 @@ export function registerPlateLibraryRoutes(app: Express): void {
     };
     if (!googleDriveConfigured()) return fail(503, "Google Drive is not configured");
     try {
-      const folder = await ensureOrderFolder(orderFolderName(meta.kit, meta.customer, meta.orderKey));
+      const catalogKit = libraryKitName(meta.kit || meta.fileName);
+      const folder = await ensureLibraryFolder(libraryFolderName(catalogKit));
       const kept: Buffer[] = [];
       let keptBytes = 0;
       let uploadTail = Buffer.alloc(0);
@@ -421,9 +449,9 @@ export function registerPlateLibraryRoutes(app: Express): void {
         mimeType: uploaded.mimeType,
         extension: plateExtension(meta.fileName),
         printer: meta.printer,
-        kit: meta.kit,
+        kit: catalogKit,
         customer: meta.customer,
-        kitTags: meta.kit,
+        kitTags: catalogKit,
         notes: meta.notes,
         sha256,
         orderKey: meta.orderKey,

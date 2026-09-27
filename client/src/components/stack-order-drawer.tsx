@@ -14,6 +14,7 @@ import { SliceFiles } from "@/components/slice-files";
 import { targetLabel, type StackRowModel } from "@/components/priority-stack-list";
 import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
+import { libraryKitName } from "@shared/plate-files";
 import { drawerPanelVariants, drawerScrimVariants, drawerTransition } from "@/lib/motion";
 import { apiRequest } from "@/lib/queryClient";
 import { hubspotDealHref, labelsDealHref, printsDealHref } from "@/lib/workflow";
@@ -214,7 +215,7 @@ export function StackOrderDrawer({
               </p>
               <SliceFiles
                 orderKey={row.kind === "offbook" && row.offbookId ? `offbook:${row.offbookId}` : `deal:${row.dealId}`}
-                kit={orderTitle(row.name, row.contactName)}
+                kit={libraryKitName(row.name, row.contactName)}
                 customer={row.contactName?.trim() || ""}
                 headers={headers}
               />

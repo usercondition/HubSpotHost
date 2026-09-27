@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { plainDriveMessage, startPlateDownload } from "@/lib/plate-library-client";
-import type { PlateFileRecord, PlatePreviewStats } from "@shared/plate-files";
+import { usedOnOrders, type PlateFileRecord, type PlatePreviewStats } from "@shared/plate-files";
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";
@@ -56,6 +56,8 @@ function PreviewPanel({
   }, [file.hasPreview, file.sha256, headers]);
 
   const rows = [
+    ["Kit", file.kit || "—"],
+    ["Orders", usedOnOrders(file.orderKeys.length)],
     ["Printer", stats?.printerProfile || file.printer || "—"],
     ["Layers", stats?.layerCount != null ? String(stats.layerCount) : "—"],
     ["Layer height", formatMeasure(stats?.layerHeightMm ?? null, " mm", 3)],

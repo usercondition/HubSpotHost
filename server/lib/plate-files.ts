@@ -4,7 +4,7 @@
  */
 import crypto from "node:crypto";
 import type { PlateFileRecord, PlateFileSource, PlateLibraryPending, PlatePreviewStats, PlateUploadFailure, PrintLibraryMark } from "../../shared/plate-files";
-import { plateExtension } from "../../shared/plate-files";
+import { libraryKitName, plateExtension, platePartName } from "../../shared/plate-files";
 import { getSqlite } from "./order-links";
 
 type FileRow = {
@@ -129,6 +129,30 @@ function likePattern(value: string): string {
   return `%${value.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
+export function findReusablePlate(kit: string, part: string, printer: string): PlateFileRecord | null {
+  const wantedKit = libraryKitName(kit).toLowerCase();
+  const wantedPart = platePartName(part).toLowerCase();
+  const wantedPrinter = printer.trim().toLowerCase();
+  if (!wantedKit || !wantedPart || !wantedPrinter) return null;
+  const rows = getSqlite()
+    .prepare(`SELECT * FROM plate_files WHERE lower(kit) = ? AND lower(printer) = ? ORDER BY id DESC LIMIT 50`)
+    .all(wantedKit, wantedPrinter) as FileRow[];
+  for (const row of rows) {
+    if (platePartName(row.name).toLowerCase() === wantedPart) return toRecord(row);
+  }
+  return null;
+}
+
+export function renameLibraryKit(from: string, to: string): number {
+  const source = from.trim();
+  const target = to.trim().replace(/\s+/g, " ").slice(0, 180);
+  if (!source || !target || source.toLowerCase() === target.toLowerCase()) return 0;
+  const result = getSqlite()
+    .prepare(`UPDATE plate_files SET kit = ?, kit_tags = ?, updated_at = ? WHERE lower(kit) = lower(?)`)
+    .run(target, target, new Date().toISOString(), source);
+  return Number(result.changes);
+}
+
 export function countPlateFiles(): number {
   const row = getSqlite().prepare(`SELECT COUNT(*) AS n FROM plate_files`).get() as { n: number };
   return row?.n ?? 0;
@@ -147,9 +171,9 @@ export function listPlateFiles(query: { q?: string; printer?: string; orderKey?:
   if (q) {
     const pattern = likePattern(q);
     where.push(
-      `(name LIKE ? ESCAPE '\\' OR kit LIKE ? ESCAPE '\\' OR printer LIKE ? ESCAPE '\\' OR customer LIKE ? ESCAPE '\\' OR kit_tags LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\' OR drive_file_id IN (SELECT drive_file_id FROM plate_file_orders WHERE order_key LIKE ? ESCAPE '\\'))`,
+      `(name LIKE ? ESCAPE '\\' OR kit LIKE ? ESCAPE '\\' OR printer LIKE ? ESCAPE '\\' OR kit_tags LIKE ? ESCAPE '\\')`,
     );
-    params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+    params.push(pattern, pattern, pattern, pattern);
   }
   if (printer) {
     where.push(`printer = ?`);

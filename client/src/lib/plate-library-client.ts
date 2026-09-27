@@ -1,6 +1,6 @@
 import { apiRequest } from "@/lib/queryClient";
 import { analyzePrintPlate, attachPrintPlate, isPlateFile, type PrinterMatchInfo } from "@/lib/print-attach";
-import { guessPlatePrinter, type PlateFileRecord } from "@shared/plate-files";
+import { guessPlatePrinter, libraryKitName, type PlateFileRecord } from "@shared/plate-files";
 import { SLICE_FINGERPRINT_CHUNK, fingerprintPayload } from "@shared/slice-fingerprint";
 import type { PrintFileMetrics, PrintFileOrderSummary, PrintFileRecord } from "@shared/schema";
 
@@ -39,9 +39,9 @@ export async function fingerprintFile(file: File): Promise<string> {
 }
 
 export function splitDealTitle(dealName: string): { kit: string; customer: string } {
-  const parts = dealName.split(/\s+[–-]\s+/);
-  if (parts.length >= 2 && parts[0] && parts[1]) return { kit: parts[0], customer: parts.slice(1).join(" - ") };
-  return { kit: dealName.trim() || "Order", customer: "" };
+  const parts = dealName.split(/\s+[–—-]\s+/).map((part) => part.trim()).filter(Boolean);
+  const customer = parts.length >= 2 ? parts[parts.length - 1] ?? "" : "";
+  return { kit: libraryKitName(dealName), customer };
 }
 
 export type PrepareResult =
