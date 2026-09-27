@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CUSTOMER_ADDRESS_CHECK_NOTE, formatLabelAddress, type CaptureCheck } from "@shared/address-capture";
-import { CLIENT_ADDRESS_ACK_TEXT } from "@shared/address-ack";
+import { CLIENT_ADDRESS_ACK_TEXT } from "@shared/address-capture";
 import type { ShipAddressFields } from "@shared/ship-address";
 
 function AddressBlock({ label, fields, testId }: { label: string; fields: ShipAddressFields; testId: string }) {
@@ -17,10 +17,12 @@ export function DidYouMeanCard({
   check,
   onUseSuggestion,
   onKeepTyped,
+  acknowledgment,
 }: {
   check: CaptureCheck;
   onUseSuggestion: () => void;
   onKeepTyped: () => void;
+  acknowledgment?: { checked: boolean; onCheckedChange: (checked: boolean) => void };
 }) {
   if (!check.suggestion) return null;
   return (
@@ -40,6 +42,18 @@ export function DidYouMeanCard({
           </Button>
         </div>
       </div>
+      {acknowledgment ? (
+        <label className="flex cursor-pointer items-start gap-3" data-testid="control-client-address-ack">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-primary"
+            checked={acknowledgment.checked}
+            onChange={(event) => acknowledgment.onCheckedChange(event.target.checked)}
+            data-testid="checkbox-client-address-ack"
+          />
+          <span className="text-sm">{CLIENT_ADDRESS_ACK_TEXT}</span>
+        </label>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ShippingAddressFields, type ShippingFormAddress } from "@/components/shipping-address-fields";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -17,10 +18,14 @@ export function OffbookEntryDialog({
   const [targetDate, setTargetDate] = useState("");
   const [amount, setAmount] = useState("");
   const [blocker, setBlocker] = useState("");
-  const [shipStreet, setShipStreet] = useState("");
-  const [shipCity, setShipCity] = useState("");
-  const [shipState, setShipState] = useState("");
-  const [shipZip, setShipZip] = useState("");
+  const [ship, setShip] = useState<ShippingFormAddress>({
+    street: "",
+    street2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "US",
+  });
   const [error, setError] = useState("");
 
   async function save() {
@@ -38,11 +43,11 @@ export function OffbookEntryDialog({
           blocker: blocker.trim(),
           ...(mode === "ship"
             ? {
-                shipStreet: shipStreet.trim(),
-                shipCity: shipCity.trim(),
-                shipState: shipState.trim(),
-                shipZip: shipZip.trim(),
-                shipCountry: "US",
+                shipStreet: [ship.street.trim(), ship.street2.trim()].filter(Boolean).join(", "),
+                shipCity: ship.city.trim(),
+                shipState: ship.state.trim(),
+                shipZip: ship.postalCode.trim(),
+                shipCountry: ship.country.trim() || "US",
               }
             : {}),
         },
@@ -72,13 +77,8 @@ export function OffbookEntryDialog({
           <Button type="button" size="sm" variant={mode === "ship" ? "default" : "outline"} onClick={() => setMode("ship")}>Ship</Button>
         </div>
         {mode === "ship" ? (
-          <div className="space-y-2" data-testid="panel-offbook-address">
-            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Street" value={shipStreet} onChange={(event) => setShipStreet(event.target.value)} data-testid="input-offbook-street" />
-            <div className="grid grid-cols-3 gap-2">
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="City" value={shipCity} onChange={(event) => setShipCity(event.target.value)} data-testid="input-offbook-city" />
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="State" value={shipState} onChange={(event) => setShipState(event.target.value)} data-testid="input-offbook-state" />
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="ZIP" value={shipZip} onChange={(event) => setShipZip(event.target.value)} data-testid="input-offbook-zip" />
-            </div>
+          <div data-testid="panel-offbook-address">
+            <ShippingAddressFields idPrefix="offbook" value={ship} onChange={setShip} />
           </div>
         ) : null}
         <input type="date" className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} data-testid="input-offbook-date" />

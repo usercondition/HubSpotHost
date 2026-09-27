@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,40 +17,21 @@ type Suggestion = AddressFill & {
   label: string;
 };
 
-function newSessionToken(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  return `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
 export function AddressAutocomplete({
   street,
   onStreetChange,
   onSelect,
   id = "shipping-street",
-  linkToken = "",
+  readOnly = false,
 }: {
   street: string;
   onStreetChange: (value: string) => void;
   onSelect: (value: AddressFill) => void;
   id?: string;
-  /** Open client-order link. Suggestions stay off without one. */
-  linkToken?: string;
+  readOnly?: boolean;
 }) {
-  const provider = useQuery({
-    queryKey: ["/api/address-provider"],
-    queryFn: async () => {
-      const response = await fetch("/api/address-provider");
-      if (!response.ok) return { enabled: false };
-      const data = (await response.json()) as { provider?: { enabled?: boolean } };
-      return { enabled: data.provider?.enabled === true };
-    },
-    staleTime: 60_000,
-    retry: false,
-  });
-  const suggestionsOn = provider.data?.enabled === true && linkToken.trim().length > 0;
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const sessionToken = useRef(newSessionToken());
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -59,7 +39,7 @@ export function AddressAutocomplete({
 
   useEffect(() => {
     const query = street.trim();
-    if (!suggestionsOn || query.length < 3) {
+    if (readOnly || query.length < 3) {
       setSuggestions([]);
       setOpen(false);
       setLoading(false);
@@ -73,11 +53,7 @@ export function AddressAutocomplete({
         const response = await fetch("/api/address-suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query,
-            token: linkToken,
-            sessionToken: sessionToken.current,
-          }),
+          body: JSON.stringify({ query }),
         });
         if (!response.ok) throw new Error("suggest failed");
         const data = (await response.json()) as { ok: true; suggestions: Suggestion[] };
@@ -99,7 +75,7 @@ export function AddressAutocomplete({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [street, suggestionsOn, linkToken]);
+  }, [street, readOnly]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -120,23 +96,21 @@ export function AddressAutocomplete({
     setSuggestions([]);
     setOpen(false);
     setActiveIndex(-1);
-    sessionToken.current = newSessionToken();
   };
 
   return (
-    <div ref={rootRef} className="relative space-y-1.5">
-      <Label htmlFor={id}>
-        Street
+    <div ref={rootRef} className="relative space-y-1.5 sm:col-span-2">
+      <Label htmlFor="shipping-street">
+        Street address
         <span className="text-primary"> *</span>
       </Label>
       <div className="relative">
         <Input
           id={id}
-          name="address-line1"
           type="text"
-          autoComplete="address-line1"
-          autoCapitalize="words"
+          autoComplete="street-address"
           value={street}
+          readOnly={readOnly}
           onChange={(event) => onStreetChange(event.target.value)}
           onFocus={() => {
             if (suggestions.length > 0) setOpen(true);
@@ -162,16 +136,12 @@ export function AddressAutocomplete({
           aria-autocomplete="list"
           data-testid="input-shipping-street"
         />
-        {suggestionsOn ? (
-          <MapPin className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        ) : null}
+        <MapPin className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       </div>
-      {suggestionsOn ? (
-        <p className="text-xs text-muted-foreground">
-          Start typing and pick a suggestion to fill city, state, and ZIP.
-          {loading ? " Looking up addresses…" : ""}
-        </p>
-      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Start typing and pick a suggestion to fill city, region, and postal code.
+        {loading ? " Looking up addresses…" : ""}
+      </p>
 
       {open && suggestions.length > 0 ? (
         <ul

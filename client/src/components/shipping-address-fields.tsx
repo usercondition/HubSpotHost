@@ -41,12 +41,12 @@ export function ShippingAddressFields({
   value,
   onChange,
   idPrefix = "shipping",
-  linkToken = "",
+  readOnly = false,
 }: {
   value: ShippingFormAddress;
   onChange: (next: ShippingFormAddress) => void;
   idPrefix?: string;
-  linkToken?: string;
+  readOnly?: boolean;
 }) {
   const us = countryIsUs(value.country);
   const stateCode = us ? normalizeUsStateProvince(value.state) : value.state;
@@ -57,7 +57,7 @@ export function ShippingAddressFields({
       <div className="sm:col-span-2">
         <AddressAutocomplete
           id={`${idPrefix}-street`}
-          linkToken={linkToken}
+          readOnly={readOnly}
           street={value.street}
           onStreetChange={(street) => set({ street })}
           onSelect={(address: AddressFill) =>
@@ -79,6 +79,7 @@ export function ShippingAddressFields({
           name="address-line2"
           autoComplete="address-line2"
           value={value.street2}
+          readOnly={readOnly}
           onChange={(event) => set({ street2: event.target.value })}
           placeholder="Optional"
           data-testid="input-shipping-street-2"
@@ -95,6 +96,7 @@ export function ShippingAddressFields({
           autoComplete="address-level2"
           autoCapitalize="words"
           value={value.city}
+          readOnly={readOnly}
           onChange={(event) => set({ city: event.target.value })}
           data-testid="input-shipping-city"
         />
@@ -111,6 +113,7 @@ export function ShippingAddressFields({
             autoComplete="address-level1"
             className={FIELD_CLASS}
             value={STATES.some((option) => option.code === stateCode) ? stateCode : ""}
+            disabled={readOnly}
             onChange={(event) => set({ state: event.target.value })}
             data-testid="input-shipping-state"
           >
@@ -127,6 +130,7 @@ export function ShippingAddressFields({
             name="address-level1"
             autoComplete="address-level1"
             value={value.state}
+            readOnly={readOnly}
             onChange={(event) => set({ state: event.target.value })}
             data-testid="input-shipping-state"
           />
@@ -146,6 +150,7 @@ export function ShippingAddressFields({
           maxLength={us ? 10 : 12}
           placeholder={us ? "12345 or 12345-6789" : ""}
           value={value.postalCode}
+          readOnly={readOnly}
           onChange={(event) => set({ postalCode: zipDraft(event.target.value, us) })}
           data-testid="input-shipping-postal-code"
         />
@@ -161,6 +166,7 @@ export function ShippingAddressFields({
           autoComplete="country"
           autoCapitalize="characters"
           value={value.country}
+          readOnly={readOnly}
           onChange={(event) => set({ country: event.target.value })}
           data-testid="input-shipping-country"
         />

@@ -5,11 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
-import { applyAddressCleanup, gateLabelAddress } from "../server/lib/label-address";
-import { readAddressAcknowledgment } from "../server/lib/address-ack";
-import { formatAddressEntryLabel } from "../shared/address-ack";
+import { applyAddressCleanup, gateLabelAddress, readAddressAcknowledgment } from "../server/lib/address-capture";
+import { formatAddressEntryLabel } from "../shared/address-capture";
 import {
-  addressBelongsOnAudit,
   ensureAddressCheck,
   hashNormalizedAddress,
   readAddressCheck,
@@ -386,12 +384,6 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     });
     assert.equal(duringOutage.status, "unchecked");
     assert.equal(calls, 1);
-
-    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "verified" }), false);
-    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "unchecked" }), false);
-    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "unverified" }), true);
-    assert.equal(addressBelongsOnAudit({ needsCleanup: false, status: "corrected" }), true);
-    assert.equal(addressBelongsOnAudit({ needsCleanup: true, status: "verified" }), true);
   });
 
   test("a corrected suggestion is stored and a stale check is refreshed before a label", async () => {

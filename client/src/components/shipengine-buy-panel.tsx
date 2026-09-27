@@ -41,6 +41,7 @@ import {
   isShopUsualBoxRate,
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
+import { ShippingAddressFields } from "@/components/shipping-address-fields";
 import { addressStatusPill, type AddressStatus } from "@shared/ship-address";
 import { labelMatchContactKey } from "@shared/shipping-label-select";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
@@ -982,11 +983,23 @@ export function ShipEngineBuyPanel({
               ? "No HubSpot contact linked to this deal"
               : "Ship-to incomplete on HubSpot contact"}
         </p>
-        {shipToReady && (shipToQuery.data.normalized || shipToQuery.data.contact.addressLines.length) ? (
+        {shipToQuery.data.normalized ? (
+          <ShippingAddressFields
+            idPrefix="label-ship"
+            readOnly
+            value={{
+              street: shipToQuery.data.normalized.street1,
+              street2: shipToQuery.data.normalized.street2,
+              city: shipToQuery.data.normalized.city,
+              state: shipToQuery.data.normalized.state,
+              postalCode: shipToQuery.data.normalized.zip,
+              country: shipToQuery.data.normalized.country || "US",
+            }}
+            onChange={() => undefined}
+          />
+        ) : shipToReady && shipToQuery.data.contact.addressLines.length ? (
           <p className="text-sm text-muted-foreground">
-            {shipToQuery.data.normalized
-              ? [shipToQuery.data.contact.name, formatShipFields(shipToQuery.data.normalized)].filter(Boolean).join(" · ")
-              : [shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines].filter(Boolean).join(" · ")}
+            {[shipToQuery.data.contact.name, ...shipToQuery.data.contact.addressLines].filter(Boolean).join(" · ")}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">

@@ -484,7 +484,7 @@ export default function ClientOrder() {
                 </p>
               </fieldset>
 
-              <fieldset className="space-y-4">
+              <fieldset className="space-y-4" data-testid="panel-client-address-flow">
                 <legend className="text-sm font-semibold">Where should it go?</legend>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -515,7 +515,6 @@ export default function ClientOrder() {
                 {shippingRequired && (
                   <ShippingAddressFields
                     value={addressValue}
-                    linkToken={token}
                     onChange={(next) => {
                       setForm((current) => ({
                         ...current,
@@ -551,6 +550,10 @@ export default function ClientOrder() {
                 {shippingRequired && phase === "choice" && capture ? (
                   <DidYouMeanCard
                     check={capture}
+                    acknowledgment={{
+                      checked: addressAcknowledged,
+                      onCheckedChange: setAddressAcknowledged,
+                    }}
                     onUseSuggestion={() => {
                       if (!capture.suggestion) return;
                       const suggestion = capture.suggestion;

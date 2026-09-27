@@ -9,6 +9,7 @@ import {
   UnitPrompt,
   type RawHubSpotAddress,
 } from "@/components/address-capture-review";
+import { ShippingAddressFields, type ShippingFormAddress } from "@/components/shipping-address-fields";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,6 +62,28 @@ function readRaw(value: unknown): RawHubSpotAddress | null {
     state: text("state"),
     zip: text("zip"),
     country: text("country"),
+  };
+}
+
+function fieldsToForm(fields: ShipAddressFields): ShippingFormAddress {
+  return {
+    street: fields.street1,
+    street2: fields.street2,
+    city: fields.city,
+    state: fields.state,
+    postalCode: fields.zip,
+    country: fields.country || "US",
+  };
+}
+
+function formToFields(value: ShippingFormAddress): ShipAddressFields {
+  return {
+    street1: value.street,
+    street2: value.street2,
+    city: value.city,
+    state: value.state,
+    zip: value.postalCode,
+    country: value.country || "US",
   };
 }
 
@@ -237,6 +260,17 @@ export function PasteAddressBox({
           data-testid="input-paste-address"
         />
       </div>
+      {preview ? (
+        <ShippingAddressFields
+          idPrefix="paste"
+          value={fieldsToForm(chosen ?? preview.typed)}
+          onChange={(next) => {
+            setChosen(formToFields(next));
+            setDecision("confirm");
+            setSaved("");
+          }}
+        />
+      ) : null}
       {phase === "paste" ? (
         <Button
           type="button"

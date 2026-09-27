@@ -47,7 +47,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { printsDealHref } from "@/lib/workflow";
-import { formatAckDate } from "@shared/address-ack";
+import { formatAckDate } from "@shared/address-capture";
 
 /** Owner-side rows never carry the token hash or the raw share token. */
 type QueueLink = Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {

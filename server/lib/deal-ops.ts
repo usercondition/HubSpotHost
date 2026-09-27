@@ -28,7 +28,6 @@ import {
 } from "./hubspot";
 import { getKitForDeal } from "./kits";
 import { getDb } from "./order-links";
-import { addressEntryLabelFor } from "./address-ack";
 import {
   ensureDefaultPrinters,
   listPrinterProfileMaps,
@@ -736,7 +735,7 @@ export async function buildDealOpsDetail(dealId: string): Promise<DealOpsDetail 
         allowWrites: config.allowWrites,
         liveWriteReady: decision.write,
       },
-      addressEntryLabel: addressEntryLabelFor(`deal:${id}`),
+      addressEntryLabel: (await import("./address-capture")).addressEntryLabelFor(`deal:${id}`),
     };
   } catch (error) {
     const message = error instanceof HubSpotError ? error.message : "Could not load deal ops.";

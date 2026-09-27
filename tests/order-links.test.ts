@@ -829,9 +829,9 @@ test("a shipping submit records the name and address acknowledgment, and pickup 
   });
   assert.equal(approved.status, 201);
   const dealId: string = approved.body.result.dealId;
-  const { readAddressAcknowledgment } = await import("../server/lib/address-ack");
+  const { readAddressAcknowledgment } = await import("../server/lib/address-capture");
   const { listOrderUpdates } = await import("../server/lib/order-updates");
-  const { formatAddressEntryLabel } = await import("../shared/address-ack");
+  const { formatAddressEntryLabel } = await import("../shared/address-capture");
   const ack = readAddressAcknowledgment(`deal:${dealId}`);
   assert.equal(ack?.source, "client");
   assert.equal(ack?.textVersion, "v1");

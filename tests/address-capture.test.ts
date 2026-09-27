@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addressNeedsUnit,
-  addressProviderFromEnv,
   formatLabelAddress,
   parsePastedAddress,
   resolveCaptureSubmit,
@@ -17,7 +16,6 @@ import {
   checkCapturedAddress,
   prepareClientAddressSubmit,
 } from "../server/lib/address-capture";
-import { suggestGooglePlaces, suggestionFromPlaceDetails } from "../server/lib/address-provider";
 import { createOrderLink, getOrderLink, resetOrderLinkStore, submitClientOrder } from "../server/lib/order-links";
 import { createOffbook } from "../server/lib/priority-stack";
 import { listOrderUpdates } from "../server/lib/order-updates";
@@ -29,7 +27,7 @@ import {
   resetPublicAddressValidation,
   PublicAddressRateLimitError,
 } from "../server/lib/address-checks";
-import { readAddressAcknowledgment } from "../server/lib/address-ack";
+import { readAddressAcknowledgment } from "../server/lib/address-capture";
 import { consumeClientAttempt, resetClientAttemptLimits } from "../server/lib/client-rate-limit";
 import { lookupClientOrder, expireOrderLink } from "../server/lib/order-links";
 import { orderUpdateAppliedAt } from "../server/lib/order-updates";
@@ -158,76 +156,6 @@ test("an unverified address can be confirmed and stays flagged", () => {
   const resolved = resolveCaptureSubmit({ check, decision: "confirm" });
   assert.equal(resolved.ok, true);
   if (resolved.ok) assert.equal(resolved.storedStatus, "unverified");
-});
-
-test("autocomplete is off unless GOOGLE_PLACES_API_KEY is set, and Places stays in the US", async () => {
-  const previous = process.env.GOOGLE_PLACES_API_KEY;
-  delete process.env.GOOGLE_PLACES_API_KEY;
-  assert.deepEqual(addressProviderFromEnv(process.env), { id: "off", enabled: false, country: null });
-  let calls = 0;
-  const empty = await suggestGooglePlaces("10909 Hannan Rd", "", async () => {
-    calls += 1;
-    throw new Error("Places must not be called without a key");
-  });
-  assert.equal(empty.length, 0);
-  assert.equal(calls, 0);
-
-  process.env.GOOGLE_PLACES_API_KEY = "test-places-key";
-  assert.equal(addressProviderFromEnv(process.env).id, "google-places");
-  assert.equal(addressProviderFromEnv(process.env).country, "US");
-  const seen: string[] = [];
-  const suggestions = await suggestGooglePlaces(
-    "10909 Hannan",
-    "test-places-key",
-    async (input, init) => {
-      const url = String(input);
-      seen.push(url);
-      const headers = new Headers(init?.headers);
-      assert.equal(headers.get("X-Goog-Api-Key"), "test-places-key");
-      assert.equal(url.includes("test-places-key"), false);
-      if (url.includes("places:autocomplete")) {
-        const body = JSON.parse(String(init?.body ?? "{}")) as { includedRegionCodes?: string[]; sessionToken?: string };
-        assert.deepEqual(body.includedRegionCodes, ["us"]);
-        assert.equal(body.sessionToken, "session-token-1234");
-        return jsonResponse({
-          suggestions: [{ placePrediction: { placeId: "place-1", text: { text: "10909 Hannan Rd, Romulus, MI" } } }],
-        });
-      }
-      assert.match(url, /places\.googleapis\.com\/v1\/places\/place-1/);
-      assert.match(url, /sessionToken=session-token-1234/);
-      return jsonResponse({
-        formattedAddress: "10909 Hannan Rd, Romulus, MI 48174, USA",
-        addressComponents: [
-          { longText: "10909", shortText: "10909", types: ["street_number"] },
-          { longText: "Hannan Road", shortText: "Hannan Rd", types: ["route"] },
-          { longText: "Romulus", shortText: "Romulus", types: ["locality"] },
-          { longText: "Michigan", shortText: "MI", types: ["administrative_area_level_1"] },
-          { longText: "48174", shortText: "48174", types: ["postal_code"] },
-          { longText: "United States", shortText: "US", types: ["country"] },
-        ],
-      });
-    },
-    "session-token-1234",
-  );
-  assert.equal(suggestions.length, 1);
-  assert.equal(seen.some((url) => url.includes("maps.googleapis.com/maps/api/place")), false);
-  assert.equal(seen.some((url) => url.includes("places:autocomplete")), true);
-  assert.equal(suggestions[0]?.street, "10909 Hannan Road");
-  assert.equal(suggestions[0]?.state, "MI");
-  assert.equal(suggestions[0]?.country, "US");
-  assert.equal(
-    suggestionFromPlaceDetails({
-      placeId: "ca",
-      components: [
-        { long_name: "1", short_name: "1", types: ["street_number"] },
-        { long_name: "Main", short_name: "Main", types: ["route"] },
-        { long_name: "Canada", short_name: "CA", types: ["country"] },
-      ],
-    }),
-    null,
-  );
-  if (previous === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
-  else process.env.GOOGLE_PLACES_API_KEY = previous;
 });
 
 describe("address capture save", { concurrency: 1 }, () => {

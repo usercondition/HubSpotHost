@@ -70,8 +70,8 @@ import {
   CLIENT_ADDRESS_ACK_FORM,
   SHOP_ADDRESS_FORM_PASTE,
   buildAddressAckSnapshot,
-} from "../shared/address-ack";
-import { publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-ack";
+} from "../shared/address-capture";
+import { publishClientAddressAcknowledgments, recordShopAddressEntry } from "./lib/address-capture";
 import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
 import { listExpenses, overheadForPeriod } from "./lib/expenses";

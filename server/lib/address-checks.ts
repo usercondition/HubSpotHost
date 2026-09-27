@@ -76,11 +76,6 @@ export function classifyStoredStatus(check: ShipEngineAddressCheck): StoredAddre
   return "unverified";
 }
 
-export function addressBelongsOnAudit(input: { needsCleanup: boolean; status: AddressCheckStatus }): boolean {
-  if (input.needsCleanup) return true;
-  return input.status === "unverified" || input.status === "corrected" || input.status === "error";
-}
-
 export function isAddressCheckStale(checkedAt: string, now = Date.now()): boolean {
   const at = Date.parse(checkedAt);
   if (!Number.isFinite(at)) return true;

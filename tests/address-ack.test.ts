@@ -10,8 +10,8 @@ import {
   CLIENT_ADDRESS_ACK_TEXT,
   formatAddressEntryLabel,
   formatClientConfirmedProperty,
-} from "../shared/address-ack";
-import { writeClientConfirmedAddressIfEmpty } from "../server/lib/address-ack";
+} from "../shared/address-capture";
+import { writeClientConfirmedAddressIfEmpty } from "../server/lib/address-capture";
 import { resetOrderLinkStore } from "../server/lib/order-links";
 
 test("the acknowledgment line names the client date or the shop", () => {

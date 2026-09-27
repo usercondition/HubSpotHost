@@ -321,8 +321,10 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
       });
       await page.locator("[data-testid='button-submit-client-details']").click();
       await page.locator("[data-testid='panel-did-you-mean']").waitFor();
-      await page.locator("[data-testid='panel-did-you-mean']").screenshot({
-        path: join(artifactsDir, `address-did-you-mean-${suffix}.png`),
+      await page.locator("[data-testid='checkbox-client-address-ack']").waitFor();
+      const flowName = suffix === "phone" ? "client-address-form-390.png" : "client-address-form-1440.png";
+      await page.locator("[data-testid='panel-client-address-flow']").screenshot({
+        path: join(artifactsDir, flowName),
       });
       await page.locator("[data-testid='button-use-standardized-address']").click();
       await page.locator("[data-testid='panel-label-confirm']").waitFor();
@@ -361,7 +363,8 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
       const checkPaste = paste.locator("[data-testid='button-check-pasted-address']");
       await checkPaste.click({ force: true });
       await paste.locator("[data-testid='panel-did-you-mean']").waitFor();
-      await paste.screenshot({ path: join(artifactsDir, `address-paste-${suffix}.png`) });
+      const pasteName = suffix === "phone" ? "address-paste-390.png" : "address-paste-1440.png";
+      await paste.screenshot({ path: join(artifactsDir, pasteName) });
     };
 
     await shootClient(1440, 900, "desktop");
