@@ -9,8 +9,8 @@ const CHUNK_STRIDE = 1_000_000;
 /** Faces whose normals differ by more than this stay split, so bolts and panel edges stay crisp. */
 const CREASE_DOT = Math.cos((40 * Math.PI) / 180);
 const SMOOTH_FACTOR = 0.15;
-/** Compressed GLBs land near 8 MB around this count. A later pass shrinks further if they do not. */
-const TARGET_TRIS = 1_200_000;
+/** A few million keeps a desktop view sharp without making the viewer struggle. The byte cap still applies. */
+const TARGET_TRIS = 4_000_000;
 
 export interface Occupancy {
   forEach(visit: (x: number, y: number, z: number) => void): void;

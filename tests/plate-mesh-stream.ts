@@ -444,12 +444,12 @@ if (direct) {
   streamLargePlate()
     .then((result) => {
       console.log(JSON.stringify(result));
-      const budget = 1024 * 1024 * 1024;
+      const budget = 3.5 * 1024 * 1024 * 1024;
       if (
         result.peakRss > budget ||
         result.maxRead > RANGE_CAP ||
         result.bytesRead > 32 * 1024 * 1024 ||
-        result.glbBytes > 8 * 1024 * 1024 ||
+        result.glbBytes > 40 * 1024 * 1024 ||
         result.triangles < 1_000 ||
         result.components < 3 ||
         result.thinSupports < 1

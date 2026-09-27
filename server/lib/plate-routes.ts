@@ -71,6 +71,7 @@ import {
   unlinkPlateFile,
   upsertPlateFiles,
 } from "./plate-files";
+import { MESH_BYTE_BUDGET } from "./plate-mesh";
 import { enqueueMissingPlateMeshes, enqueuePlateMesh } from "./plate-mesh-jobs";
 import { getPrintFileRecord } from "./print-files";
 import { firstIssue } from "./validation";
@@ -78,7 +79,7 @@ import { firstIssue } from "./validation";
 const NOT_IN_LIBRARY = "Not in Library yet.";
 const UPLOAD_UNFINISHED = "The upload did not finish.";
 const PREVIEW_PREFIX_BYTES = 8 * 1024 * 1024;
-const MESH_MAX_BYTES = 8 * 1024 * 1024;
+const MESH_MAX_BYTES = MESH_BYTE_BUDGET;
 
 interface CachedLayerTable {
   plan: CtbLayerPlan;

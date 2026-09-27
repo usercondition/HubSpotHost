@@ -20,13 +20,14 @@ import {
 
 const PREFIX_BYTES = 8 * 1024 * 1024;
 /** Sample pitch. Coarsened only if the worst-case chunk grid would exceed the budget. */
-export const MESH_VOXEL_MM = 0.15;
-export const MESH_BYTE_BUDGET = 8 * 1024 * 1024;
+export const MESH_VOXEL_MM = 0.1;
+/** Compressed GLB cap. The desktop viewer is the target; phones only need the file to open. */
+export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
 export const PLATE_MESH_VERSION = 4;
 const CHUNK = 32;
 /** Pitch gate only. Occupied chunks are what get allocated, and they stay well under this. */
-const CHUNK_BUDGET = 512 * 1024 * 1024;
+const CHUNK_BUDGET = 2 * 1024 * 1024 * 1024;
 const CHUNK_STRIDE = 1_000_000;
 
 type RangeRead = (start: number, length: number) => Promise<Buffer | null>;
