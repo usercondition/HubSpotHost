@@ -385,6 +385,16 @@ export function createOffbook(input: {
     .get();
 }
 
+export function offbookMode(id: number): "pickup" | "ship" | null {
+  const row = getDb()
+    .select({ fulfillmentMode: priorityStackEntries.fulfillmentMode })
+    .from(priorityStackEntries)
+    .where(and(eq(priorityStackEntries.id, id), eq(priorityStackEntries.kind, "offbook")))
+    .get();
+  if (!row) return null;
+  return row.fulfillmentMode === "pickup" ? "pickup" : "ship";
+}
+
 export function updateOffbook(
   id: number,
   patch: Partial<{
@@ -869,7 +879,11 @@ export function buildPriorityStack(
   }
 
   const rankedKeys = new Set(loose.filter((row) => row.manualRank != null).map((row) => row.key));
-  const ordered = rankPriorityStack(loose);
+  const amountByKey = new Map(loose.map((row) => [row.key, row.amount]));
+  const ordered = rankPriorityStack(loose.map((row) => ({ ...row, amount: row.amount ?? 0 }))).map((row) => ({
+    ...row,
+    amount: amountByKey.get(row.key) ?? null,
+  }));
   const rows = ordered.map((row, index) => ({
     ...row,
     rank: index + 1,

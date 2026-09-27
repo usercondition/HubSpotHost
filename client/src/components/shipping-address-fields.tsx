@@ -41,10 +41,12 @@ export function ShippingAddressFields({
   value,
   onChange,
   idPrefix = "shipping",
+  linkToken = "",
 }: {
   value: ShippingFormAddress;
   onChange: (next: ShippingFormAddress) => void;
   idPrefix?: string;
+  linkToken?: string;
 }) {
   const us = countryIsUs(value.country);
   const stateCode = us ? normalizeUsStateProvince(value.state) : value.state;
@@ -55,6 +57,7 @@ export function ShippingAddressFields({
       <div className="sm:col-span-2">
         <AddressAutocomplete
           id={`${idPrefix}-street`}
+          linkToken={linkToken}
           street={value.street}
           onStreetChange={(street) => set({ street })}
           onSelect={(address: AddressFill) =>

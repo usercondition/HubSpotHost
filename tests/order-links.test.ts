@@ -5,7 +5,7 @@
  * transitions, and the hard rule that a client submission never reaches HubSpot.
  * A throwaway SQLite file and a localhost mock HubSpot API keep the run offline.
  */
-import test, { after, before } from "node:test";
+import test, { after, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -23,6 +23,9 @@ process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = crypto
   .digest("hex");
 
 const store = await import("../server/lib/order-links");
+const { addressCheckToken } = await import("../server/lib/address-capture");
+const { resetPublicAddressValidation } = await import("../server/lib/address-checks");
+const { resetClientAttemptLimits } = await import("../server/lib/client-rate-limit");
 const { registerRoutes } = await import("../server/routes");
 const { orderIntakeLinks } = await import("../shared/schema");
 const { eq } = await import("drizzle-orm");
@@ -57,14 +60,39 @@ async function ownerRequest(method: string, url: string, body?: unknown) {
   return { status: res.status, body: (await res.json()) as any };
 }
 
+function withAddressCheckToken(body: Record<string, unknown>): Record<string, unknown> {
+  if (typeof body.addressCheckToken === "string" && body.addressCheckToken.trim()) return body;
+  if (body.shippingRequired === false) return body;
+  return {
+    ...body,
+    addressCheckToken: addressCheckToken({
+      street1: String(body.shippingStreet ?? ""),
+      street2: String(body.shippingStreet2 ?? ""),
+      city: String(body.shippingCity ?? ""),
+      state: String(body.shippingState ?? ""),
+      zip: String(body.shippingPostalCode ?? ""),
+      country: String(body.shippingCountry ?? ""),
+    }),
+  };
+}
+
 async function publicRequest(url: string, body: unknown) {
+  const payload =
+    url.endsWith("/submit") && body && typeof body === "object" && !Array.isArray(body)
+      ? withAddressCheckToken(body as Record<string, unknown>)
+      : body;
   const res = await fetch(`${appBase}${url}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   return { status: res.status, body: (await res.json()) as any };
 }
+
+beforeEach(() => {
+  resetPublicAddressValidation();
+  resetClientAttemptLimits();
+});
 
 const submission = {
   clientFullName: "Jane Smith",

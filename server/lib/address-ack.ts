@@ -8,6 +8,7 @@ import { ensurePrintFileDealProperties, hubspotRequest } from "./hubspot";
 import { getSqlite } from "./order-links";
 import { appendOrderUpdate } from "./order-updates";
 import {
+  CLIENT_ADDRESS_ACK_TEXT,
   PRINT_CLIENT_CONFIRMED_ADDRESS_PROPERTY,
   formatAddressEntryLabel,
   formatClientConfirmedProperty,
@@ -137,14 +138,27 @@ export async function publishClientAddressAcknowledgments(
     });
     appendOrderUpdate({
       orderKey,
-      text: `Client confirmed name and address.\n${input.snapshot}\ncheckbox ${input.textVersion} · form ${input.formSource}`,
+      text: [
+        "Client confirmed name and address.",
+        "Confirmed by customer.",
+        input.acknowledgedAt,
+        input.snapshot,
+        `checkbox ${input.textVersion} · form ${input.formSource}`,
+        CLIENT_ADDRESS_ACK_TEXT,
+      ].join("\n"),
       source: "system",
       author: "Client",
     });
-    try {
-      await writeClientConfirmedAddressIfEmpty(dealId, propertyValue);
-    } catch {
-      // The intake row, the local acknowledgment, and the update log already hold the proof.
+    const decision = resolveWriteDecision(getConfig(), true);
+    if (!decision.write) continue;
+    const outcome = await writeClientConfirmedAddressIfEmpty(dealId, propertyValue);
+    if (outcome === "kept") {
+      appendOrderUpdate({
+        orderKey,
+        text: "print_client_confirmed_address already had a value. The newer confirmation stayed in this log and was not copied over HubSpot.",
+        source: "system",
+        author: "Client",
+      });
     }
   }
 }

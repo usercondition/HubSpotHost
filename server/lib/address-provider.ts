@@ -55,47 +55,82 @@ export function suggestionFromPlaceDetails(input: {
 
 type FetchLike = typeof fetch;
 
+type NewAddressComponent = {
+  longText?: string;
+  shortText?: string;
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+};
+
+function asLegacyComponent(part: NewAddressComponent): AddressComponent {
+  return {
+    long_name: part.longText ?? part.long_name,
+    short_name: part.shortText ?? part.short_name,
+    types: part.types,
+  };
+}
+
 /**
- * Places Autocomplete restricted to US addresses.
+ * Places API (New) autocomplete, restricted to US addresses.
+ * A session token groups the autocomplete call and the following details call.
  * Failures return an empty list so the form still works by hand.
- * The API key is never included in thrown errors.
+ * The API key is sent as a header and is never included in thrown errors.
  */
 export async function suggestGooglePlaces(
   query: string,
   apiKey: string,
   fetchImpl: FetchLike = fetch,
+  sessionToken = "",
 ): Promise<AddressSuggestion[]> {
   const key = apiKey.trim();
   const cleaned = query.trim().replace(/\s+/g, " ").slice(0, 160);
-  if (!key || cleaned.length < 3) return [];
+  const session = sessionToken.trim();
+  if (!key || cleaned.length < 3 || !session) return [];
 
   try {
-    const autoUrl = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
-    autoUrl.searchParams.set("input", cleaned);
-    autoUrl.searchParams.set("types", "address");
-    autoUrl.searchParams.set("components", "country:us");
-    autoUrl.searchParams.set("key", key);
-    const autoResponse = await fetchImpl(autoUrl, { signal: AbortSignal.timeout(6_000) });
+    const autoResponse = await fetchImpl("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask": "suggestions.placePrediction.placeId,suggestions.placePrediction.text",
+      },
+      body: JSON.stringify({
+        input: cleaned,
+        includedRegionCodes: ["us"],
+        sessionToken: session,
+        languageCode: "en",
+      }),
+      signal: AbortSignal.timeout(6_000),
+    });
     if (!autoResponse.ok) return [];
-    const autoBody = (await autoResponse.json()) as { predictions?: Array<{ place_id?: string; description?: string }> };
-    const predictions = Array.isArray(autoBody.predictions) ? autoBody.predictions.slice(0, 5) : [];
+    const autoBody = (await autoResponse.json()) as {
+      suggestions?: Array<{ placePrediction?: { placeId?: string; text?: { text?: string } } }>;
+    };
+    const predictions = Array.isArray(autoBody.suggestions) ? autoBody.suggestions.slice(0, 5) : [];
     const suggestions: AddressSuggestion[] = [];
     for (const prediction of predictions) {
-      const placeId = typeof prediction.place_id === "string" ? prediction.place_id : "";
+      const placeId = typeof prediction.placePrediction?.placeId === "string" ? prediction.placePrediction.placeId : "";
       if (!placeId) continue;
-      const detailUrl = new URL("https://maps.googleapis.com/maps/api/place/details/json");
-      detailUrl.searchParams.set("place_id", placeId);
-      detailUrl.searchParams.set("fields", "address_component,formatted_address");
-      detailUrl.searchParams.set("key", key);
-      const detailResponse = await fetchImpl(detailUrl, { signal: AbortSignal.timeout(6_000) });
+      const detailUrl = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
+      detailUrl.searchParams.set("sessionToken", session);
+      const detailResponse = await fetchImpl(detailUrl, {
+        headers: {
+          "X-Goog-Api-Key": key,
+          "X-Goog-FieldMask": "formattedAddress,addressComponents",
+        },
+        signal: AbortSignal.timeout(6_000),
+      });
       if (!detailResponse.ok) continue;
       const detailBody = (await detailResponse.json()) as {
-        result?: { formatted_address?: string; address_components?: AddressComponent[] };
+        formattedAddress?: string;
+        addressComponents?: NewAddressComponent[];
       };
       const suggestion = suggestionFromPlaceDetails({
         placeId,
-        formatted: detailBody.result?.formatted_address || prediction.description,
-        components: detailBody.result?.address_components,
+        formatted: detailBody.formattedAddress || prediction.placePrediction?.text?.text,
+        components: (detailBody.addressComponents ?? []).map(asLegacyComponent),
       });
       if (suggestion) suggestions.push(suggestion);
     }
@@ -105,9 +140,13 @@ export async function suggestGooglePlaces(
   }
 }
 
-export async function suggestFromProvider(query: string, env: NodeJS.ProcessEnv = process.env): Promise<AddressSuggestion[]> {
+export async function suggestFromProvider(
+  query: string,
+  env: NodeJS.ProcessEnv = process.env,
+  sessionToken = "",
+): Promise<AddressSuggestion[]> {
   const status = addressProviderStatus(env);
   if (!status.enabled) return [];
   const key = env.GOOGLE_PLACES_API_KEY?.trim() ?? "";
-  return suggestGooglePlaces(query, key);
+  return suggestGooglePlaces(query, key, fetch, sessionToken);
 }

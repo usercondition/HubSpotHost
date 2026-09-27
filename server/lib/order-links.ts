@@ -412,7 +412,8 @@ CREATE TABLE IF NOT EXISTS order_update_log (
   created_at TEXT NOT NULL,
   text TEXT NOT NULL,
   source TEXT NOT NULL,
-  author TEXT NOT NULL
+  author TEXT NOT NULL,
+  applied_at TEXT
 );
 CREATE INDEX IF NOT EXISTS order_update_log_order_idx ON order_update_log (order_key, id DESC);
 `;

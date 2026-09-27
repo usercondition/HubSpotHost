@@ -11,13 +11,32 @@ import {
   resolveCaptureSubmit,
   type CaptureCheck,
 } from "../shared/address-capture";
-import { applyCapturedAddress } from "../server/lib/address-capture";
+import {
+  addressCheckToken,
+  applyCapturedAddress,
+  checkCapturedAddress,
+  prepareClientAddressSubmit,
+} from "../server/lib/address-capture";
 import { suggestGooglePlaces, suggestionFromPlaceDetails } from "../server/lib/address-provider";
 import { createOrderLink, getOrderLink, resetOrderLinkStore, submitClientOrder } from "../server/lib/order-links";
 import { createOffbook } from "../server/lib/priority-stack";
 import { listOrderUpdates } from "../server/lib/order-updates";
-import { resetAddressCheckOutage } from "../server/lib/address-checks";
+import {
+  ensureAddressCheck,
+  labelAddressOutageActive,
+  publicAddressOutageActive,
+  resetAddressCheckOutage,
+  resetPublicAddressValidation,
+  PublicAddressRateLimitError,
+} from "../server/lib/address-checks";
 import { readAddressAcknowledgment } from "../server/lib/address-ack";
+import { consumeClientAttempt, resetClientAttemptLimits } from "../server/lib/client-rate-limit";
+import { lookupClientOrder, expireOrderLink } from "../server/lib/order-links";
+import { orderUpdateAppliedAt } from "../server/lib/order-updates";
+import { reusedContactAddressAppliedAt, updateContact } from "../server/lib/paid-orders";
+import { publicAddressFieldsSchema } from "../shared/address-capture";
+import { configureTrustProxy } from "../server/lib/trust-proxy";
+import { HUBSPOT_WRITES_OFF_MESSAGE } from "../shared/address-capture";
 import type { ClientOrderSubmission } from "../shared/schema";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -157,29 +176,42 @@ test("autocomplete is off unless GOOGLE_PLACES_API_KEY is set, and Places stays 
   assert.equal(addressProviderFromEnv(process.env).id, "google-places");
   assert.equal(addressProviderFromEnv(process.env).country, "US");
   const seen: string[] = [];
-  const suggestions = await suggestGooglePlaces("10909 Hannan", "test-places-key", async (input) => {
-    const url = String(input);
-    seen.push(url);
-    assert.equal(url.includes("test-places-key") ? "key-present" : "missing", "key-present");
-    if (url.includes("/autocomplete/")) {
-      assert.match(url, /components=country%3Aus|components=country:us/);
-      return jsonResponse({ predictions: [{ place_id: "place-1", description: "10909 Hannan Rd, Romulus, MI" }] });
-    }
-    return jsonResponse({
-      result: {
-        formatted_address: "10909 Hannan Rd, Romulus, MI 48174, USA",
-        address_components: [
-          { long_name: "10909", short_name: "10909", types: ["street_number"] },
-          { long_name: "Hannan Road", short_name: "Hannan Rd", types: ["route"] },
-          { long_name: "Romulus", short_name: "Romulus", types: ["locality"] },
-          { long_name: "Michigan", short_name: "MI", types: ["administrative_area_level_1"] },
-          { long_name: "48174", short_name: "48174", types: ["postal_code"] },
-          { long_name: "United States", short_name: "US", types: ["country"] },
+  const suggestions = await suggestGooglePlaces(
+    "10909 Hannan",
+    "test-places-key",
+    async (input, init) => {
+      const url = String(input);
+      seen.push(url);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("X-Goog-Api-Key"), "test-places-key");
+      assert.equal(url.includes("test-places-key"), false);
+      if (url.includes("places:autocomplete")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { includedRegionCodes?: string[]; sessionToken?: string };
+        assert.deepEqual(body.includedRegionCodes, ["us"]);
+        assert.equal(body.sessionToken, "session-token-1234");
+        return jsonResponse({
+          suggestions: [{ placePrediction: { placeId: "place-1", text: { text: "10909 Hannan Rd, Romulus, MI" } } }],
+        });
+      }
+      assert.match(url, /places\.googleapis\.com\/v1\/places\/place-1/);
+      assert.match(url, /sessionToken=session-token-1234/);
+      return jsonResponse({
+        formattedAddress: "10909 Hannan Rd, Romulus, MI 48174, USA",
+        addressComponents: [
+          { longText: "10909", shortText: "10909", types: ["street_number"] },
+          { longText: "Hannan Road", shortText: "Hannan Rd", types: ["route"] },
+          { longText: "Romulus", shortText: "Romulus", types: ["locality"] },
+          { longText: "Michigan", shortText: "MI", types: ["administrative_area_level_1"] },
+          { longText: "48174", shortText: "48174", types: ["postal_code"] },
+          { longText: "United States", shortText: "US", types: ["country"] },
         ],
-      },
-    });
-  });
+      });
+    },
+    "session-token-1234",
+  );
   assert.equal(suggestions.length, 1);
+  assert.equal(seen.some((url) => url.includes("maps.googleapis.com/maps/api/place")), false);
+  assert.equal(seen.some((url) => url.includes("places:autocomplete")), true);
   assert.equal(suggestions[0]?.street, "10909 Hannan Road");
   assert.equal(suggestions[0]?.state, "MI");
   assert.equal(suggestions[0]?.country, "US");
@@ -205,8 +237,10 @@ describe("address capture save", { concurrency: 1 }, () => {
   const previousToken = process.env.HUBSPOT_ACCESS_TOKEN;
   const previousDry = process.env.DRY_RUN;
   const previousWrites = process.env.ALLOW_HUBSPOT_WRITES;
+  const previousFetch = globalThis.fetch;
 
   test.after(() => {
+    globalThis.fetch = previousFetch;
     if (previousDb === undefined) delete process.env.ORDER_LINKS_DB_FILE;
     else process.env.ORDER_LINKS_DB_FILE = previousDb;
     if (previousShip === undefined) delete process.env.SHIPENGINE_API_KEY;
@@ -218,6 +252,8 @@ describe("address capture save", { concurrency: 1 }, () => {
     if (previousWrites === undefined) delete process.env.ALLOW_HUBSPOT_WRITES;
     else process.env.ALLOW_HUBSPOT_WRITES = previousWrites;
     resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    resetClientAttemptLimits();
     resetOrderLinkStore();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -263,9 +299,18 @@ describe("address capture save", { concurrency: 1 }, () => {
       throw new Error("off-book must not call HubSpot");
     }) as typeof fetch;
     const row = createOffbook({ title: "Messenger order", mode: "pickup" });
+    const asked = await applyCapturedAddress({
+      confirm: true,
+      offbookId: row.id,
+      fields: parsePastedAddress("10909 Hannan Rd, Romulus, Michigan, 48174"),
+    });
+    assert.equal(asked.ok, false);
+    if (!asked.ok) assert.equal(asked.body.code, "switch_to_ship");
+    assert.equal(listOrderUpdates(`offbook:${row.id}`).length, 0);
     const applied = await applyCapturedAddress({
       confirm: true,
       offbookId: row.id,
+      switchToShip: true,
       fields: parsePastedAddress("10909 Hannan Rd, Romulus, Michigan, 48174"),
     });
     assert.equal(applied.ok, true);
@@ -362,6 +407,449 @@ describe("address capture save", { concurrency: 1 }, () => {
     assert.equal(blocked.ok, false);
     if (!blocked.ok) assert.equal(blocked.body.code, "address_choice");
     assert.equal(methods.includes("PATCH"), false);
+    resetAddressCheckOutage();
+    delete process.env.SHIPENGINE_API_KEY;
+  });
+
+  test("a live replace logs the raw HubSpot address before the write and marks it applied after", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "live.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    delete process.env.SHIPENGINE_API_KEY;
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    process.env.DRY_RUN = "false";
+    process.env.ALLOW_HUBSPOT_WRITES = "true";
+    const dealId = "349919419125";
+    let patched = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/associations/")) return jsonResponse({ results: [{ toObjectId: "501" }] });
+      if (method === "GET" && url.includes("/contacts/501")) {
+        return jsonResponse({
+          id: "501",
+          properties: {
+            address: "10 Old Street",
+            city: "Romulus",
+            state: "Michigan",
+            zip: "48174",
+            country: "United States",
+            firstname: "Wayne",
+            lastname: "Hood",
+          },
+        });
+      }
+      if (method === "PATCH") {
+        const prior = listOrderUpdates(`deal:${dealId}`).find((entry) => entry.text.includes("Previous HubSpot address"));
+        assert.ok(prior);
+        assert.equal(orderUpdateAppliedAt(prior.id), null);
+        assert.match(prior.text, /Michigan/);
+        assert.match(prior.text, /10 Old Street/);
+        patched = true;
+        return jsonResponse({ id: "501" });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as typeof fetch;
+
+    const fields = {
+      street1: "10909 Hannan Rd",
+      street2: "",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    const blocked = await applyCapturedAddress({ confirm: true, dealId, fields });
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) {
+      assert.equal(blocked.body.code, "replace_hubspot");
+      const current = blocked.body.current as { state?: string; address?: string };
+      assert.equal(current.state, "Michigan");
+      assert.equal(current.address, "10 Old Street");
+    }
+    assert.equal(patched, false);
+    assert.equal(
+      listOrderUpdates(`deal:${dealId}`).some((entry) => entry.text.includes("Previous HubSpot address")),
+      false,
+    );
+
+    const applied = await applyCapturedAddress({ confirm: true, dealId, fields, replaceHubspot: true });
+    assert.equal(applied.ok, true);
+    if (applied.ok) assert.equal(applied.body.wrote, true);
+    assert.equal(patched, true);
+    const prior = listOrderUpdates(`deal:${dealId}`).find((entry) => entry.text.includes("Previous HubSpot address"));
+    assert.ok(prior);
+    assert.ok(orderUpdateAppliedAt(prior.id));
+  });
+
+  test("dry run returns wrote false and does not log a HubSpot change", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "dry-apply.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    delete process.env.SHIPENGINE_API_KEY;
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    process.env.DRY_RUN = "true";
+    process.env.ALLOW_HUBSPOT_WRITES = "true";
+    const dealId = "349919419126";
+    const methods: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      methods.push(method);
+      if (method === "PATCH") throw new Error("dry run must not patch");
+      if (url.includes("/associations/")) return jsonResponse({ results: [{ toObjectId: "502" }] });
+      if (url.includes("/contacts/502")) {
+        return jsonResponse({
+          id: "502",
+          properties: { address: "10 Old Street", city: "Romulus", state: "Michigan", zip: "48174", country: "US" },
+        });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as typeof fetch;
+
+    const applied = await applyCapturedAddress({
+      confirm: true,
+      dealId,
+      replaceHubspot: true,
+      fields: {
+        street1: "10909 Hannan Rd",
+        city: "Romulus",
+        state: "MI",
+        zip: "48174",
+        country: "US",
+      },
+    });
+    assert.equal(applied.ok, true);
+    if (applied.ok) {
+      assert.equal(applied.body.wrote, false);
+      assert.equal(applied.body.writesOff, true);
+      assert.equal(applied.body.message, HUBSPOT_WRITES_OFF_MESSAGE);
+    }
+    assert.equal(methods.includes("PATCH"), false);
+    assert.equal(listOrderUpdates(`deal:${dealId}`).length, 0);
+  });
+
+  test("a missing unit on paste asks, and no-unit then saves", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "unit.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    process.env.DRY_RUN = "false";
+    process.env.ALLOW_HUBSPOT_WRITES = "true";
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/addresses/validate")) {
+        return jsonResponse([
+          { status: "unverified", messages: ["This building needs an apartment or unit number."] },
+        ]);
+      }
+      if (url.includes("/associations/")) return jsonResponse({ results: [{ toObjectId: "503" }] });
+      if (method === "GET" && url.includes("/contacts/503")) {
+        return jsonResponse({ id: "503", properties: { address: "", city: "", state: "", zip: "", country: "" } });
+      }
+      if (method === "PATCH") return jsonResponse({ id: "503" });
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as typeof fetch;
+    const fields = {
+      street1: "10909 Hannan Rd",
+      street2: "",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    const asked = await applyCapturedAddress({ confirm: true, dealId: "349919419127", fields });
+    assert.equal(asked.ok, false);
+    if (!asked.ok) assert.equal(asked.body.code, "needs_unit");
+    const saved = await applyCapturedAddress({ confirm: true, dealId: "349919419127", fields, noUnit: true });
+    assert.equal(saved.ok, true);
+    if (saved.ok) assert.equal(saved.body.wrote, true);
+    resetAddressCheckOutage();
+    delete process.env.SHIPENGINE_API_KEY;
+  });
+
+  test("a public ShipEngine outage does not block label validation and submit keeps the confirmed address", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "outage.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    const fields = {
+      street1: "123 Resin Way",
+      street2: "Apt 4B",
+      city: "San Diego",
+      state: "CA",
+      zip: "92101",
+      country: "US",
+    };
+    globalThis.fetch = (async () => {
+      throw new Error("ShipEngine down");
+    }) as typeof fetch;
+    const checked = await checkCapturedAddress(fields, { audience: "public", rateKey: "outage-buyer" });
+    assert.equal(checked.status, "unchecked");
+    assert.equal(publicAddressOutageActive(), true);
+    assert.equal(labelAddressOutageActive(), false);
+
+    const token = addressCheckToken(fields);
+    const prepared = await prepareClientAddressSubmit({
+      fields,
+      addressAcknowledged: true,
+      addressCheckToken: token,
+      decision: "confirm",
+      rateKey: "outage-submit",
+    });
+    assert.equal(prepared.ok, true);
+    if (prepared.ok) {
+      assert.equal(prepared.fields.street1, "123 Resin Way");
+      assert.equal(prepared.fields.street2, "Apt 4B");
+      assert.equal(prepared.checkedAt, "");
+      const created = createOrderLink({
+        internalLabel: "MIG-2002",
+        itemDescription: "Acastus Knight",
+        agreedAmount: "40",
+        paymentMethod: "Zelle",
+        paymentReference: "Z2",
+        buyerNameHint: "Jane",
+        buyerUsernameHint: "jane.prints",
+        ownerNotes: "",
+        expiryDays: 7,
+      });
+      const stored = submitClientOrder(
+        created.token,
+        { ...submission, shippingStreet: prepared.fields.street1, shippingStreet2: prepared.fields.street2, shippingCity: prepared.fields.city, shippingState: prepared.fields.state, shippingPostalCode: prepared.fields.zip, shippingCountry: prepared.fields.country },
+        { status: prepared.storedStatus, checkedAt: prepared.checkedAt, choice: prepared.choice, messages: prepared.messages },
+      );
+      assert.deepEqual(stored, { ok: true });
+      const link = getOrderLink(created.link.id);
+      assert.equal(link?.shippingStreet, "123 Resin Way");
+      assert.equal(link?.addressCheckedAt, "");
+    }
+
+    let labelCalls = 0;
+    globalThis.fetch = (async () => {
+      labelCalls += 1;
+      return jsonResponse([
+        {
+          status: "verified",
+          matched_address: {
+            address_line1: "123 Resin Way",
+            address_line2: "Apt 4B",
+            city_locality: "San Diego",
+            state_province: "CA",
+            postal_code: "92101",
+            country_code: "US",
+          },
+          messages: [],
+        },
+      ]);
+    }) as typeof fetch;
+    const label = await ensureAddressCheck({
+      force: true,
+      contact: {
+        id: null,
+        name: "Buyer",
+        email: "",
+        phone: "",
+        addressLines: [],
+        ...fields,
+      },
+    });
+    assert.equal(label.status, "verified");
+    assert.ok(labelCalls >= 1);
+    resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    delete process.env.SHIPENGINE_API_KEY;
+  });
+
+  test("public suggestions require an open link and the client rate limit is per IP", () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "public.db");
+    resetOrderLinkStore();
+    resetClientAttemptLimits();
+    const created = createOrderLink({
+      internalLabel: "MIG-2003",
+      itemDescription: "Acastus Knight",
+      agreedAmount: "40",
+      paymentMethod: "Zelle",
+      paymentReference: "Z3",
+      buyerNameHint: "",
+      buyerUsernameHint: "",
+      ownerNotes: "",
+      expiryDays: 7,
+    });
+    assert.equal(lookupClientOrder(created.token).ok, true);
+    assert.equal(lookupClientOrder("").ok, false);
+    expireOrderLink(created.link.id);
+    const closed = lookupClientOrder(created.token);
+    assert.equal(closed.ok, false);
+    const tooLong = publicAddressFieldsSchema.safeParse({
+      shippingStreet: "x".repeat(201),
+      shippingStreet2: "",
+      shippingCity: "San Diego",
+      shippingState: "CA",
+      shippingPostalCode: "92101",
+      shippingCountry: "US",
+    });
+    assert.equal(tooLong.success, false);
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      assert.equal(consumeClientAttempt("203.0.113.8"), false);
+    }
+    assert.equal(consumeClientAttempt("203.0.113.8"), true);
+    assert.equal(consumeClientAttempt("203.0.113.9"), false);
+    const trusted: unknown[] = [];
+    configureTrustProxy({ set: (_name, value) => trusted.push(value) }, { RAILWAY_ENVIRONMENT_NAME: "production" });
+    assert.deepEqual(trusted, [1]);
+    configureTrustProxy({ set: () => { throw new Error("local must not trust proxy"); } }, {});
+  });
+
+  test("submit rejects a confirmed address that no longer matches the check", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "mismatch.db");
+    resetOrderLinkStore();
+    resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    const typed = {
+      street1: "10909 Hannan Rd",
+      street2: "",
+      city: "Romulus",
+      state: "MI",
+      zip: "48174",
+      country: "US",
+    };
+    globalThis.fetch = (async () =>
+      jsonResponse([
+        {
+          status: "verified",
+          matched_address: {
+            address_line1: "10909 Hannan Road",
+            address_line2: "",
+            city_locality: "Romulus",
+            state_province: "MI",
+            postal_code: "48174",
+            country_code: "US",
+          },
+          messages: [],
+        },
+      ])) as typeof fetch;
+    const prepared = await prepareClientAddressSubmit({
+      fields: typed,
+      decision: "accept",
+      addressAcknowledged: true,
+      addressCheckToken: addressCheckToken(typed),
+      rateKey: "mismatch-buyer",
+    });
+    assert.equal(prepared.ok, false);
+    if (!prepared.ok) assert.equal(prepared.body.code, "address_choice");
+    resetAddressCheckOutage();
+    resetPublicAddressValidation();
+    delete process.env.SHIPENGINE_API_KEY;
+  });
+
+  test("a reused contact address is logged before it is replaced", async () => {
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "reuse.db");
+    resetOrderLinkStore();
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    let logId = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET") {
+        return jsonResponse({
+          id: "88",
+          properties: { address: "9 First St", city: "Romulus", state: "Michigan", zip: "48174", country: "United States" },
+        });
+      }
+      if (method === "PATCH") {
+        const rows = (await import("../server/lib/order-links")).getSqlite()
+          .prepare(`SELECT id, applied_at, old_text FROM contact_address_replacements`)
+          .all() as Array<{ id: number; applied_at: string | null; old_text: string }>;
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0]?.applied_at, null);
+        assert.match(rows[0]?.old_text ?? "", /Michigan/);
+        logId = rows[0]?.id ?? 0;
+        return jsonResponse({ id: "88" });
+      }
+      throw new Error(method);
+    }) as typeof fetch;
+    await updateContact("88", {
+      paymentConfirmed: true,
+      fullName: "Wayne Hood",
+      marketplaceUsername: "wayne",
+      email: "wayne@example.com",
+      phone: "734-555-0100",
+      address: "10909 Hannan Rd",
+      city: "Romulus",
+      state: "MI",
+      postalCode: "48174",
+      country: "US",
+      productName: "Knight",
+      amount: "40",
+      conversationSummary: "paid",
+    });
+    assert.ok(logId);
+    assert.ok(reusedContactAddressAppliedAt(logId));
+  });
+
+  test("public address checks are rate limited and cached without tripping the label breaker", async () => {
+    resetPublicAddressValidation();
+    resetAddressCheckOutage();
+    delete process.env.SHIPENGINE_API_KEY;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw new Error("should use the cache or skip when there is no key");
+    }) as typeof fetch;
+    const base = { street2: "", city: "San Diego", state: "CA", zip: "92101", country: "US" };
+    for (let index = 0; index < 12; index += 1) {
+      const checked = await checkCapturedAddress(
+        { ...base, street1: `${index + 1} Main St` },
+        { audience: "public", rateKey: "cache-buyer" },
+      );
+      assert.equal(checked.status, "unchecked");
+    }
+    await assert.rejects(
+      () =>
+        checkCapturedAddress(
+          { ...base, street1: "99 Main St" },
+          { audience: "public", rateKey: "cache-buyer" },
+        ),
+      PublicAddressRateLimitError,
+    );
+    assert.equal(labelAddressOutageActive(), false);
+    assert.equal(calls, 0);
+    resetPublicAddressValidation();
+    process.env.SHIPENGINE_API_KEY = "TEST_key";
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return jsonResponse([
+        {
+          status: "verified",
+          matched_address: {
+            address_line1: "1 Cache St",
+            address_line2: "",
+            city_locality: "San Diego",
+            state_province: "CA",
+            postal_code: "92101",
+            country_code: "US",
+          },
+          messages: [],
+        },
+      ]);
+    }) as typeof fetch;
+    const first = await checkCapturedAddress(
+      { street1: "1 Cache St", street2: "", city: "San Diego", state: "CA", zip: "92101", country: "US" },
+      { audience: "public", rateKey: "cache-two" },
+    );
+    const second = await checkCapturedAddress(
+      { street1: "1 Cache St", street2: "", city: "San Diego", state: "CA", zip: "92101", country: "US" },
+      { audience: "public", rateKey: "cache-two" },
+    );
+    assert.equal(first.status, "verified");
+    assert.equal(second.status, "verified");
+    assert.equal(calls, 1);
+    assert.equal(labelAddressOutageActive(), false);
+    resetPublicAddressValidation();
     resetAddressCheckOutage();
     delete process.env.SHIPENGINE_API_KEY;
   });

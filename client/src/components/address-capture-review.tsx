@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatLabelAddress, type CaptureCheck } from "@shared/address-capture";
+import { CUSTOMER_ADDRESS_CHECK_NOTE, formatLabelAddress, type CaptureCheck } from "@shared/address-capture";
 import { CLIENT_ADDRESS_ACK_TEXT } from "@shared/address-ack";
 import type { ShipAddressFields } from "@shared/ship-address";
 
@@ -54,9 +54,7 @@ export function UnverifiedAddressCard({
   return (
     <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-address-unverified">
       <p className="text-sm font-semibold">Please double-check this address</p>
-      <p className="text-sm text-muted-foreground">
-        We could not verify it, so it is flagged for Miguel before a label is printed.
-      </p>
+      <p className="text-sm text-muted-foreground">{CUSTOMER_ADDRESS_CHECK_NOTE}</p>
       <AddressBlock label="Address to check" fields={fields} testId="card-address-unverified" />
       <Button type="button" className="w-full" onClick={onConfirmCheck} data-testid="button-address-double-check">
         I double-checked it
@@ -98,6 +96,74 @@ export function UnitPrompt({
           This address has no unit
         </Button>
       </div>
+    </div>
+  );
+}
+
+export type RawHubSpotAddress = {
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+};
+
+function rawAddressText(raw: RawHubSpotAddress): string {
+  const region = [raw.state, raw.zip].filter(Boolean).join(" ");
+  const cityLine = [raw.city, region].filter(Boolean).join(", ");
+  return [raw.address, cityLine, raw.country].filter(Boolean).join("\n");
+}
+
+export function ReplaceHubSpotCard({
+  current,
+  next,
+  pending,
+  onReplace,
+}: {
+  current: RawHubSpotAddress;
+  next: ShipAddressFields;
+  pending?: boolean;
+  onReplace: () => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-replace-hubspot">
+      <p className="text-sm font-semibold">Replace HubSpot address</p>
+      <p className="text-sm text-muted-foreground">
+        This contact already has an address. Nothing is written until you confirm this replacement.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-md border border-border bg-background p-3" data-testid="card-hubspot-current">
+          <p className="text-xs text-muted-foreground">Current HubSpot address</p>
+          <p className="mt-1 whitespace-pre-line text-sm">{rawAddressText(current)}</p>
+        </div>
+        <div className="rounded-md border border-border bg-background p-3" data-testid="card-hubspot-next">
+          <p className="text-xs text-muted-foreground">New address</p>
+          <p className="mt-1 whitespace-pre-line text-sm">{formatLabelAddress(next)}</p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        className="w-full"
+        disabled={pending}
+        onClick={onReplace}
+        data-testid="button-replace-hubspot-address"
+      >
+        Replace HubSpot address
+      </Button>
+    </div>
+  );
+}
+
+export function SwitchToShipCard({ pending, onSwitch }: { pending?: boolean; onSwitch: () => void }) {
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-switch-to-ship">
+      <p className="text-sm font-semibold">This order is pickup</p>
+      <p className="text-sm text-muted-foreground">
+        Saving a shipping address will switch it to shipping. It stays pickup until you confirm.
+      </p>
+      <Button type="button" className="w-full" disabled={pending} onClick={onSwitch} data-testid="button-switch-to-ship">
+        Switch to shipping
+      </Button>
     </div>
   );
 }

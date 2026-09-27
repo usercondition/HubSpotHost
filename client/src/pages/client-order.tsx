@@ -11,7 +11,7 @@ import { Mark } from "@/components/shell";
 import { DidYouMeanCard, LabelConfirmCard, UnitPrompt, UnverifiedAddressCard } from "@/components/address-capture-review";
 import { ShippingAddressFields, shippingAddressError, type ShippingFormAddress } from "@/components/shipping-address-fields";
 import { cn } from "@/lib/utils";
-import type { CaptureCheck } from "@shared/address-capture";
+import { CUSTOMER_ADDRESS_CHECK_NOTE, type CaptureCheck } from "@shared/address-capture";
 import type { ClientOrderSavedDetails, ClientOrderView } from "@shared/schema";
 import { countryIsUs, normalizeUsStateProvince, type ShipAddressFields } from "@shared/ship-address";
 
@@ -69,7 +69,9 @@ function applySavedDetails(
 
 type CapturePhase = "edit" | "unit" | "choice" | "unverified" | "confirm";
 
-function readCapture(payload: Record<string, unknown>): CaptureCheck | null {
+type CaptureView = CaptureCheck & { checkToken?: string; suggestionToken?: string | null };
+
+function readCapture(payload: Record<string, unknown>): CaptureView | null {
   if (!payload.typed || typeof payload.typed !== "object") return null;
   const status = payload.status;
   const suggestion = payload.suggestion && typeof payload.suggestion === "object" ? (payload.suggestion as ShipAddressFields) : null;
@@ -83,7 +85,20 @@ function readCapture(payload: Record<string, unknown>): CaptureCheck | null {
     typed: payload.typed as ShipAddressFields,
     suggestion,
     messages,
+    checkedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : null,
+    checkToken: typeof payload.checkToken === "string" ? payload.checkToken : "",
+    suggestionToken: typeof payload.suggestionToken === "string" ? payload.suggestionToken : null,
   };
+}
+
+function payloadFromError(error: Error): Record<string, unknown> | null {
+  const raw = error.message.replace(/^\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function ClientOrder() {
@@ -97,7 +112,7 @@ export default function ClientOrder() {
   const [submitted, setSubmitted] = useState(false);
   const [identity, setIdentity] = useState({ email: "", username: "" });
   const [phase, setPhase] = useState<CapturePhase>("edit");
-  const [capture, setCapture] = useState<CaptureCheck | null>(null);
+  const [capture, setCapture] = useState<CaptureView | null>(null);
   const [labelFields, setLabelFields] = useState<ShipAddressFields | null>(null);
   const [decision, setDecision] = useState<"accept" | "override" | "confirm">("confirm");
   const [noUnit, setNoUnit] = useState(false);
@@ -204,12 +219,29 @@ export default function ClientOrder() {
         clientPaymentConfirmed: paymentConfirmed,
         addressAcknowledged,
         addressDecision: decision,
+        addressCheckToken: decision === "accept" ? capture?.suggestionToken ?? "" : capture?.checkToken ?? "",
         noUnit,
       });
       return (await res.json()) as { ok: true };
     },
     onSuccess: () => setSubmitted(true),
     onError: (mutationError: Error) => {
+      const payload = payloadFromError(mutationError);
+      const code = typeof payload?.code === "string" ? payload.code : "";
+      const next = payload ? readCapture(payload) : null;
+      if (code === "needs_unit" && next) {
+        setCapture(next);
+        setUnitDraft(form.shippingStreet2);
+        setPhase("unit");
+        setError("");
+        return;
+      }
+      if (code === "address_choice" && next) {
+        setCapture(next);
+        setPhase("choice");
+        setError("");
+        return;
+      }
       const message = mutationError.message;
       const detail = message.match(/"error":"([^"]+)"/)?.[1];
       setError(
@@ -225,7 +257,7 @@ export default function ClientOrder() {
     setAddressAcknowledged(false);
   };
 
-  const showCapture = (check: CaptureCheck, fields: typeof form, skipUnit = false) => {
+  const showCapture = (check: CaptureView, fields: typeof form, skipUnit = false) => {
     setCapture(check);
     if (check.needsUnit && !fields.shippingStreet2.trim() && !skipUnit) {
       setUnitDraft(fields.shippingStreet2);
@@ -483,6 +515,7 @@ export default function ClientOrder() {
                 {shippingRequired && (
                   <ShippingAddressFields
                     value={addressValue}
+                    linkToken={token}
                     onChange={(next) => {
                       setForm((current) => ({
                         ...current,
@@ -494,6 +527,7 @@ export default function ClientOrder() {
                         shippingCountry: next.country,
                       }));
                       setAddressAcknowledged(false);
+                      setNoUnit(false);
                       if (phase !== "edit") setPhase("edit");
                     }}
                   />
@@ -555,11 +589,12 @@ export default function ClientOrder() {
                   <LabelConfirmCard
                     fields={labelFields}
                     note={
-                      capture?.status === "unchecked"
-                        ? "ShipEngine could not check this address just now. It is flagged for Miguel."
-                        : capture?.status === "unverified" || decision === "override"
-                          ? "This address is flagged for Miguel."
-                          : undefined
+                      capture?.status === "error" ||
+                      capture?.status === "unchecked" ||
+                      capture?.status === "unverified" ||
+                      decision === "override"
+                        ? CUSTOMER_ADDRESS_CHECK_NOTE
+                        : undefined
                     }
                     pending={submit.isPending}
                     confirmLabel="Send my details to the seller"

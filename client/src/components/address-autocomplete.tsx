@@ -18,16 +18,24 @@ type Suggestion = AddressFill & {
   label: string;
 };
 
+function newSessionToken(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function AddressAutocomplete({
   street,
   onStreetChange,
   onSelect,
   id = "shipping-street",
+  linkToken = "",
 }: {
   street: string;
   onStreetChange: (value: string) => void;
   onSelect: (value: AddressFill) => void;
   id?: string;
+  /** Open client-order link. Suggestions stay off without one. */
+  linkToken?: string;
 }) {
   const provider = useQuery({
     queryKey: ["/api/address-provider"],
@@ -40,9 +48,10 @@ export function AddressAutocomplete({
     staleTime: 60_000,
     retry: false,
   });
-  const suggestionsOn = provider.data?.enabled === true;
+  const suggestionsOn = provider.data?.enabled === true && linkToken.trim().length > 0;
   const listId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const sessionToken = useRef(newSessionToken());
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -64,7 +73,11 @@ export function AddressAutocomplete({
         const response = await fetch("/api/address-suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({
+            query,
+            token: linkToken,
+            sessionToken: sessionToken.current,
+          }),
         });
         if (!response.ok) throw new Error("suggest failed");
         const data = (await response.json()) as { ok: true; suggestions: Suggestion[] };
@@ -86,7 +99,7 @@ export function AddressAutocomplete({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [street, suggestionsOn]);
+  }, [street, suggestionsOn, linkToken]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -107,6 +120,7 @@ export function AddressAutocomplete({
     setSuggestions([]);
     setOpen(false);
     setActiveIndex(-1);
+    sessionToken.current = newSessionToken();
   };
 
   return (

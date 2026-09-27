@@ -1,5 +1,6 @@
 import { HubSpotError, PRINT_ORDERS_PIPELINE, ensurePrintFileDealProperties, hubspotRequest } from "./hubspot";
 import { splitName } from "./intake";
+import { getSqlite } from "./order-links";
 import type {
   HubSpotIntakeDealRef,
   OrderLineKind,
@@ -82,14 +83,149 @@ async function createContact(draft: PaidOrderDraft): Promise<HubSpotRecord> {
   });
 }
 
+function ensureContactAddressLog(): void {
+  getSqlite().exec(`
+    CREATE TABLE IF NOT EXISTS contact_address_replacements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contact_id TEXT NOT NULL,
+      old_text TEXT NOT NULL,
+      new_text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      applied_at TEXT
+    );
+  `);
+}
+
+/** Log the previous HubSpot address before a reused contact is overwritten. */
+export function logReusedContactAddress(input: {
+  contactId: string;
+  oldText: string;
+  newText: string;
+}): number {
+  ensureContactAddressLog();
+  const row = getSqlite()
+    .prepare(
+      `INSERT INTO contact_address_replacements (contact_id, old_text, new_text, created_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(input.contactId, input.oldText, input.newText, new Date().toISOString());
+  return Number(row.lastInsertRowid);
+}
+
+export function markReusedContactAddressApplied(id: number): void {
+  ensureContactAddressLog();
+  getSqlite()
+    .prepare(`UPDATE contact_address_replacements SET applied_at = ? WHERE id = ?`)
+    .run(new Date().toISOString(), id);
+}
+
+export function reusedContactAddressAppliedAt(id: number): string | null {
+  ensureContactAddressLog();
+  const row = getSqlite().prepare(`SELECT applied_at FROM contact_address_replacements WHERE id = ?`).get(id) as
+    | { applied_at: string | null }
+    | undefined;
+  const value = row?.applied_at?.trim() ?? "";
+  return value || null;
+}
+
+const ADDRESS_KEYS = ["address", "city", "state", "zip", "country"] as const;
+
 /** Refresh shipping / name details when we reuse a Contact by email. */
-async function updateContact(contactId: string, draft: PaidOrderDraft): Promise<void> {
+export async function updateContact(contactId: string, draft: PaidOrderDraft): Promise<void> {
   const properties = contactPropertiesFromDraft(draft, { includeEmail: false });
   if (Object.keys(properties).length === 0) return;
+  const current = await hubspotRequest(
+    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=address,city,state,zip,country`,
+    { method: "GET" },
+  );
+  const props = (current?.properties ?? {}) as Record<string, string | null>;
+  const oldAddress = {
+    address: String(props.address ?? ""),
+    city: String(props.city ?? ""),
+    state: String(props.state ?? ""),
+    zip: String(props.zip ?? ""),
+    country: String(props.country ?? ""),
+  };
+  const replacing = ADDRESS_KEYS.some((key) => {
+    const previous = oldAddress[key].trim();
+    const next = properties[key]?.trim() ?? "";
+    return Boolean(previous) && Boolean(next) && previous !== next;
+  });
+  let logId = 0;
+  if (replacing) {
+    logId = logReusedContactAddress({
+      contactId,
+      oldText: JSON.stringify(oldAddress),
+      newText: JSON.stringify({
+        address: properties.address ?? "",
+        city: properties.city ?? "",
+        state: properties.state ?? "",
+        zip: properties.zip ?? "",
+        country: properties.country ?? "",
+      }),
+    });
+  }
   await hubspotRequest(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
     method: "PATCH",
     body: JSON.stringify({ properties }),
   });
+  if (logId) markReusedContactAddressApplied(logId);
+}
+
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{8,80}$/;
+
+function ensurePaidOrderIdempotency(): void {
+  getSqlite().exec(`
+    CREATE TABLE IF NOT EXISTS paid_order_idempotency (
+      idempotency_key TEXT PRIMARY KEY,
+      result_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
+/** Claim a manual-create retry key so a second submit cannot create another deal. */
+export function claimPaidOrderCreate(
+  key: string,
+): { state: "invalid" } | { state: "claimed" } | { state: "pending" } | { state: "done"; result: PaidOrderCreateResult } {
+  const cleaned = key.trim();
+  if (!IDEMPOTENCY_KEY.test(cleaned)) return { state: "invalid" };
+  ensurePaidOrderIdempotency();
+  try {
+    getSqlite()
+      .prepare(`INSERT INTO paid_order_idempotency (idempotency_key, result_json, created_at) VALUES (?, '', ?)`)
+      .run(cleaned, new Date().toISOString());
+    return { state: "claimed" };
+  } catch {
+    const row = getSqlite()
+      .prepare(`SELECT result_json FROM paid_order_idempotency WHERE idempotency_key = ?`)
+      .get(cleaned) as { result_json: string } | undefined;
+    const raw = row?.result_json?.trim() ?? "";
+    if (!raw) return { state: "pending" };
+    try {
+      return { state: "done", result: JSON.parse(raw) as PaidOrderCreateResult };
+    } catch {
+      return { state: "pending" };
+    }
+  }
+}
+
+export function savePaidOrderCreate(key: string, result: PaidOrderCreateResult): void {
+  const cleaned = key.trim();
+  if (!IDEMPOTENCY_KEY.test(cleaned)) return;
+  ensurePaidOrderIdempotency();
+  getSqlite()
+    .prepare(`UPDATE paid_order_idempotency SET result_json = ? WHERE idempotency_key = ?`)
+    .run(JSON.stringify(result), cleaned);
+}
+
+export function releasePaidOrderCreate(key: string): void {
+  const cleaned = key.trim();
+  if (!IDEMPOTENCY_KEY.test(cleaned)) return;
+  ensurePaidOrderIdempotency();
+  getSqlite()
+    .prepare(`DELETE FROM paid_order_idempotency WHERE idempotency_key = ? AND result_json = ''`)
+    .run(cleaned);
 }
 
 async function createDeal(input: {

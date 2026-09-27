@@ -2,6 +2,7 @@
  * Foolproof address capture shared by the client form and Miguel's paste box.
  * Parsing reuses normalizeShipAddress. Autocomplete stays off unless a provider is enabled.
  */
+import { z } from "zod";
 import {
   countryIsUs,
   normalizeShipAddress,
@@ -10,12 +11,20 @@ import {
 
 export type CaptureStatus = "verified" | "corrected" | "unverified" | "unchecked" | "error";
 
+/** Shown on the customer form when a check cannot verify the address. */
+export const CUSTOMER_ADDRESS_CHECK_NOTE =
+  "We couldn't verify this address automatically; we'll double-check it before shipping.";
+
+export const HUBSPOT_WRITES_OFF_MESSAGE = "Not written to HubSpot (writes off)";
+
 export type CaptureCheck = {
   status: CaptureStatus;
   needsUnit: boolean;
   typed: ShipAddressFields;
   suggestion: ShipAddressFields | null;
   messages: string[];
+  /** When the carrier check ran. Empty when the check did not run. */
+  checkedAt?: string | null;
 };
 
 export type AddressProviderId = "off" | "google-places";
@@ -144,6 +153,18 @@ export function resolveCaptureSubmit(input: {
           : "unverified";
   return { ok: true, fields: typed, storedStatus, choice: "typed" };
 }
+
+const bounded = (max: number) => z.string().trim().max(max, `Use at most ${max} characters`);
+
+/** Public validate-address body. Rejects non-strings and over-long fields before any carrier call. */
+export const publicAddressFieldsSchema = z.object({
+  shippingStreet: bounded(200),
+  shippingStreet2: bounded(120).optional().default(""),
+  shippingCity: bounded(120),
+  shippingState: bounded(120),
+  shippingPostalCode: bounded(40),
+  shippingCountry: bounded(120),
+});
 
 /** Off unless GOOGLE_PLACES_API_KEY is set. The key itself is never returned. */
 export function addressProviderFromEnv(env: NodeJS.ProcessEnv = process.env): AddressProviderStatus {

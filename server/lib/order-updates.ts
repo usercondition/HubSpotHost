@@ -9,7 +9,7 @@ import {
   type OrderUpdateEntry,
   type OrderUpdateSource,
 } from "../../shared/schema";
-import { getDb } from "./order-links";
+import { getDb, getSqlite } from "./order-links";
 
 function toEntry(row: typeof orderUpdateLog.$inferSelect): OrderUpdateEntry {
   return {
@@ -30,6 +30,28 @@ export function listOrderUpdates(orderKey: string): OrderUpdateEntry[] {
     .orderBy(desc(orderUpdateLog.id))
     .all()
     .map(toEntry);
+}
+
+function ensureAppliedColumn(): void {
+  const columns = getSqlite().prepare(`PRAGMA table_info(order_update_log)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "applied_at")) {
+    getSqlite().exec(`ALTER TABLE order_update_log ADD COLUMN applied_at TEXT`);
+  }
+}
+
+/** Stamp a log row only after the HubSpot write it describes has succeeded. */
+export function markOrderUpdateApplied(id: number, at = new Date().toISOString()): void {
+  ensureAppliedColumn();
+  getSqlite().prepare(`UPDATE order_update_log SET applied_at = ? WHERE id = ?`).run(at, id);
+}
+
+export function orderUpdateAppliedAt(id: number): string | null {
+  ensureAppliedColumn();
+  const row = getSqlite().prepare(`SELECT applied_at FROM order_update_log WHERE id = ?`).get(id) as
+    | { applied_at: string | null }
+    | undefined;
+  const value = row?.applied_at?.trim() ?? "";
+  return value || null;
 }
 
 export function appendOrderUpdate(input: {

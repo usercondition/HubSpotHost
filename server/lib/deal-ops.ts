@@ -208,13 +208,18 @@ export function expireDealContactCache(dealId?: string): void {
   }
 }
 
-export async function fetchDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
-  const cached = dealContactCache.get(dealId);
-  if (cached && Date.now() - cached.fetchedAt < DEAL_CONTACT_CACHE_MS) {
-    return cached.value;
+export async function fetchDealAssociatedContact(
+  dealId: string,
+  options?: { fresh?: boolean },
+): Promise<DealAssociatedContact> {
+  if (!options?.fresh) {
+    const cached = dealContactCache.get(dealId);
+    if (cached && Date.now() - cached.fetchedAt < DEAL_CONTACT_CACHE_MS) {
+      return cached.value;
+    }
+    const inflight = dealContactInflight.get(dealId);
+    if (inflight) return inflight;
   }
-  const inflight = dealContactInflight.get(dealId);
-  if (inflight) return inflight;
 
   const pending = loadDealAssociatedContact(dealId)
     .then((contact) => {

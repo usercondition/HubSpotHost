@@ -47,6 +47,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { printsDealHref } from "@/lib/workflow";
+import { formatAckDate } from "@shared/address-ack";
 
 /** Owner-side rows never carry the token hash or the raw share token. */
 type QueueLink = Omit<OrderIntakeLink, "tokenHash" | "shareToken"> & {
@@ -1037,6 +1038,7 @@ function ReviewDialog({
       );
       return (await res.json()) as {
         ok: true;
+        warning?: string;
         result: {
           dealName: string;
           dealId: string;
@@ -1045,7 +1047,7 @@ function ReviewDialog({
         };
       };
     },
-    onSuccess: ({ result }) => {
+    onSuccess: ({ result, warning }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/order-links"] });
       setCreatedDeal({
         dealId: result.dealId,
@@ -1053,11 +1055,13 @@ function ReviewDialog({
         deals: result.deals?.length ? result.deals : [{ dealId: result.dealId, dealName: result.dealName, amount: "", productName: result.dealName }],
       });
       toast({
-        title: "Created in HubSpot",
-        description:
-          (result.deals?.length ?? 1) > 1
+        title: warning ? "Created in HubSpot, address property failed" : "Created in HubSpot",
+        description: warning
+          ? warning.slice(0, 220)
+          : (result.deals?.length ?? 1) > 1
             ? `${result.deals.length} Print Orders created on one Contact. Attach plates per item next.`
             : `${result.dealName} is in Deposit Received. Attach the first plate next.`,
+        variant: warning ? "destructive" : "default",
       });
     },
     onError: (error: Error) =>
@@ -1217,7 +1221,8 @@ function ReviewDialog({
               ) : null}
               {link.addressCheckStatus === "verified" ? (
                 <p className="sm:col-span-2 text-sm text-muted-foreground" data-testid="text-address-verified-intake">
-                  Address verified on the client form.
+                  Verified
+                  {link.addressCheckedAt ? ` · ${formatAckDate(link.addressCheckedAt)}` : ""}
                 </p>
               ) : null}
               {shippingRequired && (

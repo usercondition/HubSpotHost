@@ -46,6 +46,7 @@ export interface StackRowModel {
   steps: StackStep[];
   members: StackRowModel[];
   warning?: string;
+  doneAt?: string | null;
 }
 
 export interface StackView {

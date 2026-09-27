@@ -91,6 +91,11 @@ export default function PaidOrders() {
   const [addressDecision, setAddressDecision] = useState("");
   const [addressFromPaste, setAddressFromPaste] = useState(false);
   const [noUnit, setNoUnit] = useState(false);
+  const idempotencyKey = useRef(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `manual-${Date.now().toString(36)}`,
+  );
   const [addressGate, setAddressGate] = useState<(CaptureCheck & { code?: string }) | null>(null);
   const [unitDraft, setUnitDraft] = useState("");
   const [buyerHint, setBuyerHint] = useState<string | null>(null);
@@ -308,12 +313,17 @@ export default function PaidOrders() {
           addressDecision,
           noUnit,
           addressFormSource: addressFromPaste ? "paste" : "",
+          idempotencyKey: idempotencyKey.current,
         },
         { headers },
       );
       return (await response.json()) as { ok: true; result: PaidOrderCreateResult };
     },
     onSuccess: ({ result }) => {
+      idempotencyKey.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `manual-${Date.now().toString(36)}`;
       setCreated(result);
       toast({
         title: "Paid order created in HubSpot",
@@ -664,6 +674,7 @@ export default function PaidOrders() {
                         country: next.country,
                       }));
                       setAddressDecision("");
+                      setNoUnit(false);
                       setCreated(null);
                     }}
                   />

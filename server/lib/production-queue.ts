@@ -312,6 +312,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       costsIncomplete: costsIncomplete.has(deal.dealId),
       isStale: staleDealIds.has(deal.dealId),
       needsReply: deal.needsReply === true,
+      tentative: tentativeDeals.has(deal.dealId),
       fulfillment: checklistForDeal(deal.dealId, checklists.get(deal.dealId), deal.costsComplete),
     };
     const bucket = classifyBucket(base);

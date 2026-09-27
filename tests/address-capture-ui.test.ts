@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
@@ -103,8 +104,64 @@ async function fillClient(page: playwright.Page) {
   await page.locator("[data-testid='checkbox-client-payment-confirmed']").check();
 }
 
-test("address capture screenshots", { timeout: 180_000 }, async () => {
-  mkdirSync("/opt/cursor/artifacts", { recursive: true });
+const artifactsDir = process.env.ARTIFACTS_DIR?.trim() ?? "";
+const runAddressCaptureUi = process.env.ADDRESS_CAPTURE_UI === "1" && artifactsDir.length > 0;
+
+const STACK = {
+  ok: true,
+  generatedAt: "2026-09-27T18:00:00.000Z",
+  today: "2026-09-27",
+  weekEnd: "2026-10-03",
+  rows: [
+    {
+      key: "deal:349919419125",
+      kind: "deal",
+      rank: 1,
+      manual: false,
+      isNew: false,
+      name: "Acastus Knight",
+      contactName: "Wayne Hood",
+      stage: "Deposit Received",
+      bucket: "next_print",
+      lane: "plates",
+      blocker: "",
+      blockerSource: "auto",
+      nextStep: "",
+      targetDate: "2026-10-01",
+      targetSource: "unset",
+      tentative: false,
+      amount: 40,
+      tier: "committed",
+      shippingRequired: true,
+      dealId: "349919419125",
+      offbookId: null,
+      bundleId: null,
+      fulfillment: null,
+      steps: [],
+      members: [],
+    },
+  ],
+  outTheDoor: [],
+  totals: { committed: 40, stretch: 0, later: 0, outTheDoor: 0, offBookUnpriced: 0 },
+  hiddenCount: 0,
+};
+
+const REPLACE = {
+  ok: false,
+  code: "replace_hubspot",
+  error: "This contact already has an address. Confirm Replace HubSpot address to overwrite it.",
+  current: {
+    address: "10 Old Street",
+    city: "Romulus",
+    state: "Michigan",
+    zip: "48174",
+    country: "United States",
+  },
+  next: CORRECTED.suggestion,
+};
+
+test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_000 }, async () => {
+  mkdirSync(artifactsDir, { recursive: true });
   if (!existsSync("dist/index.cjs")) {
     const built = spawnSync("npm", ["run", "build"], { stdio: "inherit" });
     assert.equal(built.status, 0, "production build failed");
@@ -127,7 +184,11 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    try {
+      browser = await chromium.launch({ channel: "chrome", headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
     const context = await browser.newContext({ deviceScaleFactor: 1 });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
@@ -137,6 +198,14 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
     page.on("pageerror", (error) => pageErrors.push(String(error)));
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname === "/api/priority-stack") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(STACK) });
+        return;
+      }
+      if (url.pathname === "/api/address-capture/apply") {
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify(REPLACE) });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -151,12 +220,12 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
       await page.locator("[data-testid='panel-shipping-address']").waitFor();
       await fillClient(page);
       await page.locator("[data-testid='panel-shipping-address']").screenshot({
-        path: `/opt/cursor/artifacts/address-form-${suffix}.png`,
+        path: join(artifactsDir, suffix === "phone" ? "client-address-form-390.png" : `address-form-${suffix}.png`),
       });
       await page.locator("[data-testid='button-submit-client-details']").click();
       await page.locator("[data-testid='panel-did-you-mean']").waitFor();
       await page.locator("[data-testid='panel-did-you-mean']").screenshot({
-        path: `/opt/cursor/artifacts/address-did-you-mean-${suffix}.png`,
+        path: join(artifactsDir, `address-did-you-mean-${suffix}.png`),
       });
       await page.locator("[data-testid='button-use-standardized-address']").click();
       await page.locator("[data-testid='panel-label-confirm']").waitFor();
@@ -178,7 +247,7 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
       assert.equal(await ack.isChecked(), false);
       assert.equal(await confirmButton.isDisabled(), true);
       await confirm.screenshot({
-        path: `/opt/cursor/artifacts/address-confirm-${suffix}.png`,
+        path: join(artifactsDir, suffix === "phone" ? "client-address-confirm-390.png" : `address-confirm-${suffix}.png`),
       });
     };
 
@@ -195,13 +264,39 @@ test("address capture screenshots", { timeout: 180_000 }, async () => {
       const checkPaste = paste.locator("[data-testid='button-check-pasted-address']");
       await checkPaste.click({ force: true });
       await paste.locator("[data-testid='panel-did-you-mean']").waitFor();
-      await paste.screenshot({ path: `/opt/cursor/artifacts/address-paste-${suffix}.png` });
+      await paste.screenshot({ path: join(artifactsDir, `address-paste-${suffix}.png`) });
     };
 
     await shootClient(1440, 900, "desktop");
     await shootClient(390, 844, "phone");
     await shootPaste(1440, 900, "desktop");
     await shootPaste(390, 844, "phone");
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='button-open-deal:349919419125']").click();
+    await page.locator("[data-testid='drawer-deal-ops']").waitFor();
+    await page.locator("[data-testid='button-drawer-overflow']").click();
+    await page.locator("[data-testid='menu-paste-address']").click();
+    const drawerPaste = page.locator("[data-testid='panel-paste-address']");
+    await drawerPaste.waitFor();
+    await page.locator("[data-testid='input-paste-address']").fill("Wayne Hood\n10909 Hannan Rd\nRomulus, MI 48174\nUnited States");
+    await drawerPaste.locator("[data-testid='button-check-pasted-address']").click();
+    await drawerPaste.locator("[data-testid='panel-did-you-mean']").waitFor();
+    await page.locator("[data-testid='drawer-deal-ops']").screenshot({
+      path: join(artifactsDir, "drawer-paste-address-1440.png"),
+    });
+    await drawerPaste.locator("[data-testid='button-use-standardized-address']").click();
+    await drawerPaste.locator("[data-testid='button-confirm-label-address']").click();
+    await page.locator("[data-testid='panel-replace-hubspot']").waitFor();
+    const replaceText = await page.locator("[data-testid='panel-replace-hubspot']").innerText();
+    assert.match(replaceText, /Replace HubSpot address/);
+    assert.match(replaceText, /Michigan/);
+    assert.match(replaceText, /10 Old Street/);
+    await page.locator("[data-testid='drawer-deal-ops']").screenshot({
+      path: join(artifactsDir, "drawer-replace-hubspot-confirm-1440.png"),
+    });
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();

@@ -58,6 +58,10 @@ export function resetAddressCheckOutage(): void {
   outageUntil = 0;
 }
 
+export function labelAddressOutageActive(now = Date.now()): boolean {
+  return now < outageUntil;
+}
+
 export function hashNormalizedAddress(fields: ShipAddressFields): string {
   const payload = [fields.street1, fields.street2, fields.city, fields.state, fields.zip, fields.country]
     .map((part) => part.trim().toLowerCase())
@@ -251,6 +255,105 @@ export async function ensureAddressCheck(input: {
     };
   } catch {
     outageUntil = Date.now() + OUTAGE_BACKOFF_MS;
+    return blank;
+  }
+}
+
+/** Customer checks must not open the breaker that blocks label purchases. */
+export const PUBLIC_ADDRESS_CACHE_TTL_MS = 10 * 60 * 1000;
+const PUBLIC_OUTAGE_BACKOFF_MS = 120_000;
+const PUBLIC_RATE_WINDOW_MS = 60_000;
+const PUBLIC_RATE_LIMIT = 12;
+
+let publicOutageUntil = 0;
+const publicAddressCache = new Map<string, { at: number; value: EnsuredAddressCheck }>();
+const publicRates = new Map<string, { count: number; resetAt: number }>();
+
+export class PublicAddressRateLimitError extends Error {
+  constructor() {
+    super("Too many address checks. Try again in a minute.");
+    this.name = "PublicAddressRateLimitError";
+  }
+}
+
+export function resetPublicAddressValidation(): void {
+  publicOutageUntil = 0;
+  publicAddressCache.clear();
+  publicRates.clear();
+}
+
+export function publicAddressOutageActive(now = Date.now()): boolean {
+  return now < publicOutageUntil;
+}
+
+function publicValidationLimited(rateKey: string, now = Date.now()): boolean {
+  const key = rateKey.trim() || "public";
+  const entry = publicRates.get(key);
+  if (!entry || entry.resetAt <= now) {
+    publicRates.set(key, { count: 1, resetAt: now + PUBLIC_RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > PUBLIC_RATE_LIMIT;
+}
+
+/**
+ * Validate one normalized address for the public form.
+ * Results are cached briefly. An outage sets only the public breaker.
+ */
+export async function validatePublicAddress(input: {
+  contact: DealAssociatedContact;
+  rateKey?: string;
+}): Promise<EnsuredAddressCheck> {
+  const normalized = normalizeShipAddress({
+    street1: input.contact.street1,
+    street2: input.contact.street2,
+    city: input.contact.city,
+    state: input.contact.state,
+    zip: input.contact.zip,
+    country: input.contact.country,
+  });
+  const addressHash = hashNormalizedAddress(normalized.normalized);
+  const address = contactToShipEngineAddress(input.contact);
+  const blank: EnsuredAddressCheck = {
+    status: "unchecked",
+    checkedAt: null,
+    addressHash,
+    matched: null,
+    messages: [],
+    normalized,
+    address,
+    fromStore: false,
+  };
+  if (!address) return blank;
+
+  const cached = publicAddressCache.get(addressHash);
+  if (cached && Date.now() - cached.at < PUBLIC_ADDRESS_CACHE_TTL_MS) {
+    return { ...cached.value, fromStore: true };
+  }
+  if (publicValidationLimited(input.rateKey || "public")) {
+    throw new PublicAddressRateLimitError();
+  }
+  if (!getShipEngineApiKey() || Date.now() < publicOutageUntil) return blank;
+
+  try {
+    const validation = await validateShipEngineAddress(address);
+    const status = classifyStoredStatus(validation);
+    const checkedAt = new Date().toISOString();
+    const result: EnsuredAddressCheck = {
+      status,
+      checkedAt,
+      addressHash,
+      matched: validation.matched,
+      messages: validation.messages,
+      normalized,
+      address,
+      fromStore: false,
+    };
+    publicAddressCache.set(addressHash, { at: Date.now(), value: result });
+    return result;
+  } catch {
+    publicOutageUntil = Date.now() + PUBLIC_OUTAGE_BACKOFF_MS;
     return blank;
   }
 }
