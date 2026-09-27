@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, Loader2, RefreshCw } from 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
+import { formatMoney } from "@/lib/format";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
@@ -22,13 +23,9 @@ const PERIOD_LABEL: Record<ShopPeriodId, string> = {
   all: "All time",
 };
 
-function money(value: number): string {
-  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
-}
-
 function formatValue(metric: ShopMetric): string {
   if (metric.value == null) return "—";
-  if (metric.unit === "usd") return money(metric.value);
+  if (metric.unit === "usd") return formatMoney(metric.value, { compact: false });
   if (metric.unit === "percent") return `${metric.value.toFixed(1)}%`;
   if (metric.unit === "hours") return `${metric.value.toFixed(1)} h`;
   if (metric.unit === "ml") return `${metric.value.toFixed(0)} ml`;
@@ -40,7 +37,7 @@ function formatDelta(metric: ShopMetric): string | null {
   if (!metric.compare || metric.value == null || metric.previous == null) return null;
   const delta = Math.round((metric.value - metric.previous) * 100) / 100;
   const sign = delta > 0 ? "+" : "";
-  if (metric.unit === "usd") return `${sign}${money(delta)}`;
+  if (metric.unit === "usd") return `${sign}${formatMoney(delta, { compact: false })}`;
   if (metric.unit === "percent") return `${sign}${delta.toFixed(1)} pt`;
   if (metric.unit === "hours") return `${sign}${delta.toFixed(1)} h`;
   if (metric.unit === "ml") return `${sign}${delta.toFixed(0)} ml`;
@@ -283,7 +280,7 @@ export default function Performance() {
                       <div key={customer.name} className="grid grid-cols-[minmax(0,1fr)_2.5rem_6.5rem] items-baseline gap-3 border-b border-border/70 py-1.5 last:border-b-0">
                         <p className="truncate text-sm">{customer.name}</p>
                         <p className="numeric text-right text-sm text-muted-foreground">{customer.orders}</p>
-                        <p className="numeric text-right text-sm font-semibold">{money(customer.revenue)}</p>
+                        <p className="numeric text-right text-sm font-semibold">{formatMoney(customer.revenue, { compact: false })}</p>
                       </div>
                     ))
                   )}
