@@ -367,6 +367,16 @@ function bodyFor(input: string | URL) {
       hubspotPortalId: "1",
     };
   }
+  if (pathname.startsWith("/api/expenses")) {
+    return {
+      expenses: [
+        { id: "monthly", vendor: "Patreon", name: "Creator membership", category: "Models/Patreon", amount_cents: 1200, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-09-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "yearly", vendor: "Google One", name: "Storage", category: "Software/AI", amount_cents: 9999, currency: "USD", usd_amount_cents: null, cadence: "yearly", start_date: "2026-01-01", end_date: null, payment_count: null, payment_note: "", notes: "" },
+        { id: "installment", vendor: "Affirm", name: "Printer financing", category: "Equipment", amount_cents: 8500, currency: "USD", usd_amount_cents: null, cadence: "monthly", start_date: "2026-06-01", end_date: null, payment_count: 12, payment_note: "", notes: "" },
+        { id: "one-off", vendor: "Resin supplier", name: "Resin", category: "Materials", amount_cents: 4200, currency: "USD", usd_amount_cents: null, cadence: "one-off", start_date: "2026-09-15", end_date: null, payment_count: null, payment_note: "", notes: "" },
+      ],
+    };
+  }
   if (pathname.startsWith("/api/priority-stack/updates")) {
     return {
       ok: true,
@@ -1171,7 +1181,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
     await page.locator("[data-testid='stats-origin-svg'] path").first().click();
     await page.locator("[data-testid='stats-origin-svg'] circle").last().click();
-    if (artifactPath("stats-map-popover-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-popover-1440.png")! });
+    if (artifactPath("stats-map-legend-1440.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-legend-1440.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1193,6 +1203,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
     if (artifactPath("stats-desktop-1440.png")) await page.screenshot({ path: artifactPath("stats-desktop-1440.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-1440.png")) await page.screenshot({ path: artifactPath("performance-overhead-1440.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
@@ -1200,6 +1211,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         else el.removeAttribute("style");
       }
     });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-desktop-1440.png")) await page.screenshot({ path: artifactPath("expenses-desktop-1440.png")!, fullPage: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
@@ -1409,6 +1424,8 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
     if (artifactPath("stats-phone-390.png")) await page.screenshot({ path: artifactPath("stats-phone-390.png")!, fullPage: true });
+    if (artifactPath("stats-phone-390-v2.png")) await page.screenshot({ path: artifactPath("stats-phone-390-v2.png")!, fullPage: true });
+    if (artifactPath("performance-overhead-390.png")) await page.screenshot({ path: artifactPath("performance-overhead-390.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
@@ -1416,6 +1433,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
         else el.removeAttribute("style");
       }
     });
+
+    await page.goto(`${base}/#/expenses`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Add expense" }).first().waitFor();
+    if (artifactPath("expenses-phone-390.png")) await page.screenshot({ path: artifactPath("expenses-phone-390.png")!, fullPage: true });
+    await page.getByRole("button", { name: "Add expense" }).first().click();
+    if (artifactPath("expenses-drawer-390.png")) await page.screenshot({ path: artifactPath("expenses-drawer-390.png")!, fullPage: true });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });
