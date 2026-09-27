@@ -271,7 +271,7 @@ export default function Performance() {
                     ))
                   )}
                 </div>
-                <MetricList metrics={dashboard.pipelineMetrics} openId={openId} setOpenId={setOpenId} />
+                <MetricList metrics={dashboard.pipelineMetrics.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
               </Panel>
               <Panel title="Customers" className="lg:col-span-2">
                 <MetricList metrics={dashboard.channelMetrics} openId={openId} setOpenId={setOpenId} />

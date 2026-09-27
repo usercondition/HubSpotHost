@@ -77,8 +77,8 @@ export function updateExpense(id: string, input: ExpenseInput) {
 }
 
 export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {
-  const startAt = new Date(`${start}T00:00:00Z`).getTime(), endAt = new Date(`${end}T23:59:59Z`).getTime();
   return rows.reduce<number>((sum, row: any) => {
+    if (row.category === "Materials" || row.category === "Shipping supplies") return sum;
     const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
     const installmentEnd = row.payment_count && (row.cadence === "monthly" || row.cadence === "yearly")
       ? addCadence(row.start_date, row.cadence, row.payment_count)
@@ -87,7 +87,10 @@ export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: 
     if (!Number.isFinite(amount) || row.start_date > end || (effectiveEnd && effectiveEnd < start)) return sum;
     if (row.cadence === "monthly" || row.cadence === "yearly") {
       const daily = amount / (row.cadence === "monthly" ? 30.4375 : 365.25);
-      return sum + Math.round(daily * Math.max(0, Math.floor((endAt - startAt) / 86_400_000) + 1));
+      const overlapStart = row.start_date > start ? row.start_date : start;
+      const overlapEnd = effectiveEnd && effectiveEnd < end ? effectiveEnd : end;
+      const days = Math.max(0, Math.round((Date.parse(`${overlapEnd}T00:00:00Z`) - Date.parse(`${overlapStart}T00:00:00Z`)) / 86_400_000));
+      return sum + Math.round(daily * days);
     }
     return row.start_date >= start && row.start_date <= end ? sum + amount : sum;
   }, 0);
