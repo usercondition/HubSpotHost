@@ -149,9 +149,10 @@ test("dashboard map follows the same period and bundled ZIP file resolves San Di
 });
 
 test("map payload never includes customer or deal names", () => {
+  const createdAt = "2026-09-10T12:00:00.000Z";
   const origins = buildOrderOrigins({
-    start: null, end: Date.now(), zips: indexZipRows([["70112", "New Orleans", "LA", 29.95, -90.07]]),
-    orders: [{ id: "1", amount: 25, createdAt: new Date().toISOString(), pickup: false, shipTo: { city: "New Orleans", state: "LA", zip: "70112", country: "US" } }],
+    start: null, end: Date.parse(createdAt), zips: indexZipRows([["70112", "New Orleans", "LA", 29.95, -90.07]]),
+    orders: [{ id: "1", amount: 25, createdAt, pickup: false, shipTo: { city: "New Orleans", state: "LA", zip: "70112", country: "US" } }],
   });
   const payload = JSON.stringify({ ...origins, contactName: undefined, dealName: undefined });
   assert.doesNotMatch(payload, /Ada|Customer|Deal/);

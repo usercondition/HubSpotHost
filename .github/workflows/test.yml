@@ -1,0 +1,41 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Test
+        env:
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+          DRY_RUN: "true"
+        run: npm test
+      - name: Upload layout screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-screenshots
+          path: artifacts/
+          if-no-files-found: ignore

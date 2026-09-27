@@ -2,7 +2,8 @@
  * Browser layout gate. Serves the production build, stubs shop APIs, and checks
  * the shell and the main boards at 1440×900 and 390×844.
  *
- * Requires `npm run build` first (dist/index.cjs) and Google Chrome.
+ * Requires `npm run build` first (dist/index.cjs). Uses Chrome when it is
+ * installed, otherwise the Playwright Chromium build.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -724,7 +725,11 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    try {
+      browser = await chromium.launch({ channel: "chrome", headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
     const context = await browser.newContext({ deviceScaleFactor: 1, hasTouch: true });
     await context.addInitScript(() => {
       sessionStorage.setItem("print-ops-owner-code", "preview");
