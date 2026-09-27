@@ -5,6 +5,7 @@
  */
 
 import { buildOrderOrigins, type OrderOrigins, type ShipToFields, type ZipIndex } from "./order-origins";
+import { shipByCalendarDate, SHIP_BY_TIME_ZONE } from "./ship-by";
 
 export const SHOP_PERIODS = ["7", "30", "90", "ytd", "all"] as const;
 export type ShopPeriodId = (typeof SHOP_PERIODS)[number];
@@ -126,16 +127,31 @@ function parseTime(value: string | null | undefined): number | null {
 }
 
 function dayKey(time: number): string {
-  return new Date(time).toISOString().slice(0, 10);
+  return shipByCalendarDate(new Date(time));
+}
+
+function pacificYear(now: Date): number {
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: SHIP_BY_TIME_ZONE, year: "numeric" }).format(now));
+}
+
+function pacificDateAtMidnight(year: number, month: number, day: number): number {
+  const probe = new Date(Date.UTC(year, month, day, 12));
+  const offset = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHIP_BY_TIME_ZONE, timeZoneName: "shortOffset",
+  }).formatToParts(probe).find((part) => part.type === "timeZoneName")?.value ?? "GMT-8";
+  const match = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(offset);
+  const minutes = match ? (Number(match[2]) * 60 + Number(match[3] ?? 0)) * (match[1] === "+" ? 1 : -1) : -480;
+  return Date.UTC(year, month, day) - minutes * 60_000;
 }
 
 export function resolveShopWindow(period: ShopPeriodId, now: Date): Window {
   const end = now.getTime();
   if (period === "all") return { start: null, end, previousStart: null, previousEnd: null };
   if (period === "ytd") {
-    const start = Date.UTC(now.getUTCFullYear(), 0, 1);
-    const previousStart = Date.UTC(now.getUTCFullYear() - 1, 0, 1);
-    const previousEnd = Date.UTC(now.getUTCFullYear() - 1, now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds());
+    const year = pacificYear(now);
+    const start = pacificDateAtMidnight(year, 0, 1);
+    const previousStart = pacificDateAtMidnight(year - 1, 0, 1);
+    const previousEnd = end - (start - previousStart);
     return { start, end, previousStart, previousEnd };
   }
   const days = Number(period);
@@ -161,8 +177,8 @@ function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return round2(sorted[mid]!);
-  return round2((sorted[mid - 1]! + sorted[mid]!) / 2);
+  if (sorted.length % 2 === 1) return Math.max(0, round2(sorted[mid]!));
+  return Math.max(0, round2((sorted[mid - 1]! + sorted[mid]!) / 2));
 }
 
 function metric(partial: Omit<ShopMetric, "series" | "previous" | "compare"> & { previous?: number | null; compare?: boolean; series?: number[] }): ShopMetric {
@@ -274,7 +290,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const now = new Date(input.now);
   const window = resolveShopWindow(input.period, now);
   const compare = window.previousEnd != null;
-  const today = dayKey(window.end);
+  const today = shipByCalendarDate(now);
 
   const currentBooked = booked(input.orders, window.start, window.end);
   const priorBooked = booked(input.orders, window.previousStart, window.previousEnd);
@@ -392,8 +408,9 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
       oldest = oldest == null ? age : Math.max(oldest, age);
     }
     if (order.shipBy && !order.tentative && order.shipBy < today) late += 1;
-    const waitingOnLabel = order.shipping === "ship" && order.postage == null && !order.hasTracking;
-    const waitingOnPickup = order.shipping === "pickup";
+    const printComplete = order.resinCost != null;
+    const waitingOnLabel = printComplete && order.shipping === "ship" && order.postage == null && !order.hasTracking;
+    const waitingOnPickup = printComplete && order.shipping === "pickup";
     if (order.shipping === "unknown") unknownShip += 1;
     if (waitingOnLabel || waitingOnPickup) {
       waitingCount += 1;
@@ -415,7 +432,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const waitingMetric = metric({
     id: "waiting-money",
     label: "Waiting on a label or pickup",
-    formula: "Amount of open ship orders with no postage and no tracking, plus open pickup orders. Orders with no ship or pickup flag are left out.",
+    formula: "Amount of print-complete open ship orders with no postage and no tracking, plus print-complete open pickup orders. Orders with no ship or pickup flag are left out.",
     value: waitingCount > 0 ? waiting : unknownShip > 0 && waitingCount === 0 ? null : 0,
     unit: "usd",
     compare: false,
@@ -530,8 +547,8 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   });
   const hoursMetric = metric({
     id: "print-hours",
-    label: "Print hours",
-    formula: "Sum of print time on plates attached in the period. Plates with no print time are left out.",
+    label: "Print hours from slicer estimates",
+    formula: "Sum of slicer-estimated print time on plates attached in the period. Plates with no print time are left out.",
     value: currentHours.known > 0 ? currentHours.hours : currentPlates.length === 0 ? 0 : null,
     unit: "hours",
     previous: compare && priorHours.known > 0 ? priorHours.hours : null,
@@ -540,8 +557,8 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   });
   const resinMl = metric({
     id: "resin-ml",
-    label: "Resin used",
-    formula: "Sum of resin milliliters on plates attached in the period.",
+    label: "Resin used from slicer estimates",
+    formula: "Sum of slicer-estimated resin milliliters on plates attached in the period.",
     value: currentResin.mlKnown > 0 ? currentResin.ml : currentPlates.length === 0 ? 0 : null,
     unit: "ml",
     previous: compare && priorResin.mlKnown > 0 ? priorResin.ml : null,
@@ -550,8 +567,8 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   });
   const resinUsd = metric({
     id: "resin-usd",
-    label: "Resin cost",
-    formula: "Sum of resin dollars on plates attached in the period.",
+    label: "Resin cost from slicer estimates",
+    formula: "Sum of slicer-estimated resin dollars on plates attached in the period.",
     value: currentResin.usdKnown > 0 ? currentResin.usd : currentPlates.length === 0 ? 0 : null,
     unit: "usd",
     previous: compare && priorResin.usdKnown > 0 ? priorResin.usd : null,
@@ -751,7 +768,6 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
       zips: input.zips ?? { byZip: new Map(), byCity: new Map() },
       orders: input.orders.map((order) => ({
         id: order.id,
-        name: order.name,
         amount: order.amount,
         createdAt: order.createdAt,
         pickup: order.shipping === "pickup",

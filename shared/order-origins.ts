@@ -35,7 +35,6 @@ export type ZipIndex = {
 
 export type OriginOrderInput = {
   id: string;
-  name: string;
   amount: number | null;
   createdAt: string | null;
   pickup: boolean;
@@ -61,7 +60,6 @@ export type OriginCountry = OriginTotals & { name: string; plotName: string | nu
 
 export type OriginOrderRow = {
   id: string;
-  name: string;
   amount: number | null;
   state: string | null;
   country: string | null;
@@ -235,7 +233,6 @@ export function buildOrderOrigins(input: {
       addTotals(pickup, order.amount);
       orders.push({
         id: order.id,
-        name: order.name,
         amount: order.amount,
         state: null,
         country: null,
@@ -255,7 +252,6 @@ export function buildOrderOrigins(input: {
       countries.set(name, row);
       orders.push({
         id: order.id,
-        name: order.name,
         amount: order.amount,
         state: null,
         country: name,
@@ -275,7 +271,6 @@ export function buildOrderOrigins(input: {
       unknown += 1;
       orders.push({
         id: order.id,
-        name: order.name,
         amount: order.amount,
         state: null,
         country: null,
@@ -307,7 +302,6 @@ export function buildOrderOrigins(input: {
 
     orders.push({
       id: order.id,
-      name: order.name,
       amount: order.amount,
       state: stateCode,
       country: null,

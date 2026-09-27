@@ -237,7 +237,7 @@ function authHeaders(token: string): Record<string, string> {
 
 export async function hubspotRequest(
   path: string,
-  init: { method: string; body?: string },
+  init: { method: string; body?: string; readOnly?: boolean },
 ): Promise<any> {
   const config = getConfig();
   const token = getToken();
@@ -272,7 +272,7 @@ export async function hubspotRequest(
     }
     const method = init.method.toUpperCase();
     const isSearch = path.includes("/search");
-    if (method !== "GET" && method !== "HEAD" && !isSearch) {
+    if (!init.readOnly && method !== "GET" && method !== "HEAD" && !isSearch) {
       const { recordHubspotWriteSuccess } = await import("./hubspot-write-log");
       recordHubspotWriteSuccess();
     }

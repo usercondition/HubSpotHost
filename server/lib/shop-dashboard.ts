@@ -3,7 +3,7 @@
  * HubSpot is read-only here. Off-book rows stay in Print Ops.
  */
 import { desc } from "drizzle-orm";
-import { printFileRecords } from "../../shared/schema";
+import { dealRequiresPlates, printFileRecords } from "../../shared/schema";
 import type { ShipToFields } from "../../shared/order-origins";
 import {
   buildShopDashboard,
@@ -61,8 +61,12 @@ export function collectShopDashboard(input: {
   const sqlite = getSqlite();
   const plates = getDb().select().from(printFileRecords).orderBy(desc(printFileRecords.attachedAt)).all();
   const resinByDeal = new Map<string, { cost: number; any: boolean }>();
+  const seenPlateFingerprints = new Set<string>();
   for (const plate of plates) {
     const cost = numberOrNull(plate.resinCost);
+    const fingerprint = `${plate.hubspotDealId}:${plate.sha256}`;
+    if (seenPlateFingerprints.has(fingerprint)) continue;
+    seenPlateFingerprints.add(fingerprint);
     const row = resinByDeal.get(plate.hubspotDealId) ?? { cost: 0, any: false };
     if (cost != null) {
       row.cost += cost;
@@ -99,9 +103,10 @@ export function collectShopDashboard(input: {
   const orders: ShopDashboardOrder[] = [];
   for (const deal of input.deals) {
     const props = deal.properties;
+    if (!dealRequiresPlates(props)) continue;
     const stage = stageById.get(props.dealstage ?? "");
     const label = stage?.label ?? "";
-    const won = truthy(props.hs_is_closed_won) || /completed|closed\s*won/i.test(label);
+    const won = truthy(props.hs_is_closed_won) || /completed|closed\s*won|shipped|out the door/i.test(label);
     const lost = /lost/i.test(label) && !won;
     const closed = stageClosed(stage) || truthy(props.hs_is_closed) || won || lost;
     const stack = stackByDeal.get(deal.id);
@@ -130,7 +135,8 @@ export function collectShopDashboard(input: {
       lost,
       stageLabel: stage?.label || "No stage",
       amount: numberOrNull(props.amount),
-      resinCost: plateResin?.any ? Math.round((plateResin.cost + Number.EPSILON) * 100) / 100 : material,
+      // Entered material cost is actual; slicer totals are a fallback only.
+      resinCost: material ?? (plateResin?.any ? Math.round((plateResin.cost + Number.EPSILON) * 100) / 100 : null),
       postage: shipping === "pickup" ? (postage ?? 0) : postage,
       packaging: packagingEntered ?? 0,
       shipBy: day(stack?.target_date) || day(props.print_ship_by) || day(props.ship_by_date),

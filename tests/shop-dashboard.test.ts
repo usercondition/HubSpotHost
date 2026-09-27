@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildShopDashboard, type ShopDashboardInput, type ShopDashboardOrder } from "../shared/shop-dashboard";
+import { buildShopDashboard, resolveShopWindow, type ShopDashboardInput, type ShopDashboardOrder } from "../shared/shop-dashboard";
 
 const NOW = "2026-09-15T12:00:00.000Z";
 
@@ -187,4 +187,14 @@ test("repeat customers use the recorded name, and empty periods stay empty", () 
   assert.equal(result.customers[0]?.name, "Ada");
   assert.equal(byId(result.pipelineMetrics, "awaiting-client").value, 3);
   assert.equal(byId(result.pipelineMetrics, "win-rate").value, null);
+});
+
+test("Pacific ship-by date stays current through 6 PM and YTD starts in Pacific time", () => {
+  const result = dashboard({
+    now: "2026-09-16T01:00:00.000Z", // Sep 15, 6 PM PT
+    orders: [order({ id: "today", shipBy: "2026-09-15", amount: 10 })],
+  });
+  assert.equal(byId(result.speed, "late-now").value, 0);
+  const ytd = resolveShopWindow("ytd", new Date("2026-01-01T07:30:00.000Z"));
+  assert.equal(new Date(ytd.start!).toISOString(), "2025-01-01T08:00:00.000Z");
 });

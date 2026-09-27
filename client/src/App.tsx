@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, Router } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -13,7 +14,7 @@ import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
 import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import OrderLinks from "@/pages/order-links";
-import Performance from "@/pages/performance";
+const Performance = lazy(() => import("@/pages/performance"));
 import Supplies from "@/pages/supplies";
 import Prints from "@/pages/prints";
 import PlateLibraryPage from "@/pages/plate-library";
@@ -77,7 +78,7 @@ function App() {
               {/* Public buyer form. Legacy /client-order path still works. */}
               <Route path="/order-form/:token" component={ClientOrder} />
               <Route path="/client-order/:token" component={ClientOrder} />
-              <Route component={ShellRoutes} />
+              <Suspense fallback={null}><Route component={ShellRoutes} /></Suspense>
             </Switch>
           </Router>
         </TooltipProvider>

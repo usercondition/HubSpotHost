@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { lazy, Suspense, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,7 +10,7 @@ import { Panel } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { PerformanceResponse } from "@shared/schema";
 import { SHOP_PERIODS, type ShopDashboard, type ShopMetric, type ShopPeriodId } from "@shared/shop-dashboard";
-import { OrderOriginMap } from "@/components/order-origin-map";
+const OrderOriginMap = lazy(async () => import("@/components/order-origin-map").then((module) => ({ default: module.OrderOriginMap })));
 
 type DashboardResponse = PerformanceResponse & { dashboard?: ShopDashboard };
 
@@ -113,6 +113,7 @@ export default function Performance() {
       const response = await apiRequest("GET", `/api/performance?dashboard=1&period=${period}`, undefined, { headers });
       return (await response.json()) as DashboardResponse;
     },
+    placeholderData: keepPreviousData,
   });
 
   const dashboard = performance.data?.dashboard;
@@ -195,7 +196,7 @@ export default function Performance() {
                     <p className="rule-label truncate">{item.label}</p>
                     <p className="numeric mt-1 text-right text-lg font-semibold">{formatValue(item)}</p>
                     <p className={cn("numeric mt-1 text-right text-xs", delta ? (up ? "text-accent" : "text-destructive") : "text-muted-foreground")}>
-                      {delta ?? item.note ?? "Right now"}
+                      {delta ?? item.note ?? (dashboard.period.id === "all" ? "" : "Right now")}
                     </p>
                     {item.id === "revenue-booked" ? <Spark series={item.series} /> : null}
                     {openId === item.id ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.formula}</p> : null}
@@ -209,7 +210,7 @@ export default function Performance() {
               description="Ship-to city and state for orders opened in this period. Pickup counts as San Diego. Streets are not shown."
               testId="stats-origin-map"
             >
-              <OrderOriginMap origins={dashboard.origins} />
+              <Suspense fallback={<Skeleton className="h-64 rounded-md" />}><OrderOriginMap origins={dashboard.origins} /></Suspense>
             </Panel>
 
             <section className="grid gap-4 lg:grid-cols-2">

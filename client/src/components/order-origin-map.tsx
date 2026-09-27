@@ -144,9 +144,10 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
           </div>
         ) : null}
         {view.k !== 1 || view.x !== 0 || view.y !== 0 ? (
-          <button type="button" className="rounded-md px-2 py-1 text-xs text-muted-foreground" onClick={resetView}>
-            Reset view
-          </button>
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded-md px-2 py-1 text-xs text-muted-foreground" aria-label="Map actions">…</summary>
+            <button type="button" className="absolute right-0 z-10 whitespace-nowrap rounded-md border border-border bg-background px-2 py-1 text-xs" onClick={resetView}>Reset view</button>
+          </details>
         ) : null}
       </div>
 
@@ -154,11 +155,10 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
         <svg
           data-testid="stats-origin-svg"
           viewBox="0 0 960 500"
-          className="block h-auto w-full touch-none"
+          className="block h-auto w-full"
           role="img"
           aria-label="Where orders come from"
           onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
             pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
             moved.current = false;
             if (pointers.current.size === 2) {
@@ -289,13 +289,10 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
         {selected ? (
           <ul className="divide-y divide-border/70" data-testid="stats-origin-orders">
             {listed.length === 0 ? <li className="py-1 text-sm text-muted-foreground">No orders in this selection.</li> : null}
-            {listed.slice(0, 6).map((order) => (
-              <li key={order.id} className="grid grid-cols-[minmax(0,1fr)_6.5rem] items-baseline gap-3 py-1.5">
-                <span className="truncate text-sm">{order.name}</span>
-                <span className="numeric text-right text-sm">{order.amount == null ? "—" : money(order.amount)}</span>
-              </li>
-            ))}
-            {listed.length > 6 ? <li className="py-1 text-xs text-muted-foreground">{listed.length - 6} more</li> : null}
+            <li className="grid grid-cols-[minmax(0,1fr)_6.5rem] items-baseline gap-3 py-1.5">
+              <span className="text-sm">Selected location</span>
+              <span className="numeric text-right text-sm">{listed.length} order{listed.length === 1 ? "" : "s"}</span>
+            </li>
           </ul>
         ) : null}
       </div>

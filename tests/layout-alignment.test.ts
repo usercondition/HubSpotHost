@@ -17,6 +17,10 @@ import { buildShopDashboard } from "../shared/shop-dashboard";
 const { chromium } = playwright;
 
 const TODAY = "2026-09-25";
+const artifactsDir = process.env.ARTIFACTS_DIR;
+function artifactPath(name: string) {
+  return artifactsDir ? `${artifactsDir}/${name}` : undefined;
+}
 
 function queueItem(
   id: string,
@@ -1139,7 +1143,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const tableProfit = await current().locator("[data-testid='text-table-profit-b1']").first().evaluate((el) => getComputedStyle(el).color);
     check(tableProfit === "rgb(61, 184, 139)", `table profit color was ${tableProfit}`);
 
-    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
     await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='stats-headlines']").waitFor();
     const desktopStats = await current().evaluate((root) => ({
@@ -1167,7 +1171,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     });
     check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
     check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
-    await current().locator("[data-testid='stats-origin-map']").screenshot({ path: "/opt/cursor/artifacts/stats-map-desktop.png" });
+    if (artifactPath("stats-map-desktop.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-desktop.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1188,7 +1192,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
-    await page.screenshot({ path: "/opt/cursor/artifacts/stats-desktop.png", fullPage: true });
+    if (artifactPath("stats-desktop.png")) await page.screenshot({ path: artifactPath("stats-desktop.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
@@ -1381,7 +1385,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     });
     check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
     check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
-    await current().locator("[data-testid='stats-origin-map']").screenshot({ path: "/opt/cursor/artifacts/stats-map-phone.png" });
+    if (artifactPath("stats-map-phone.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
       const nodes = Array.from(document.querySelectorAll("[data-testid='page-transition']"));
@@ -1402,7 +1406,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot = saved;
     });
-    await page.screenshot({ path: "/opt/cursor/artifacts/stats-phone.png", fullPage: true });
+    if (artifactPath("stats-phone.png")) await page.screenshot({ path: artifactPath("stats-phone.png")!, fullPage: true });
     await page.evaluate(() => {
       const saved = (window as unknown as { __statsShot?: Array<[HTMLElement, string]> }).__statsShot ?? [];
       for (const [el, css] of saved) {
