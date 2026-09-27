@@ -436,6 +436,9 @@ function bodyFor(input: string | URL) {
   if (pathname.startsWith("/api/printers")) return { ok: true, printers: [] };
   if (pathname.startsWith("/api/resin-reorder")) return { buyNow: [], suggestions: [] };
   if (pathname.startsWith("/api/plate-files")) {
+    if (url.searchParams.get("summary") === "1") {
+      return { ok: true, total: LIBRARY_FILES.length, files: [], failures: [] };
+    }
     const q = (url.searchParams.get("q") || "").toLowerCase();
     const printer = url.searchParams.get("printer") || "";
     const orderKey = url.searchParams.get("orderKey") || "";
@@ -539,6 +542,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.waitForFunction(
       () => document.querySelector('[data-testid="badge-nav-floor"]')?.textContent?.trim() === "2",
     );
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="badge-nav-library"]')?.textContent?.trim() === "2",
+    );
+    await page.locator("[data-testid='link-nav-library']").waitFor();
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
     assert.ok(nav.length >= 3, "nav count slots rendered");
@@ -730,9 +737,52 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='input-library-search']").fill("");
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
-      await root.locator("[data-testid='select-library-printer']").selectOption("Mighty 12K");
+      await root.locator("[data-testid='chip-library-printer-mighty-12k']").click();
       await root.locator("[data-testid='library-row-file-castigator']").waitFor({ state: "hidden" });
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
+      await root.locator("[data-testid='input-library-search']").fill("zzzz-not-a-plate");
+      await root.locator("[data-testid='text-library-empty']").waitFor();
+      const empty = await root.locator("[data-testid='text-library-empty']").innerText();
+      check(/Upload/.test(empty) && /Google Drive/.test(empty), `${label} empty library copy was ${empty}`);
+      check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(empty), `${label} empty library has dev text`);
+      const switchCount = await page.locator("[data-testid='switch-prints-library']").evaluateAll((els) =>
+        els.filter((el) => el.getClientRects().length > 0).length,
+      );
+      if (label === "phone") {
+        check(switchCount === 1, "phone Prints | Library switch is missing");
+        const segments = await page.locator("[data-testid='switch-prints-library'] a").evaluateAll((els) =>
+          els.filter((el) => el.getClientRects().length > 0).map((el) => ({
+            text: (el.textContent || "").trim(),
+            active: el.getAttribute("data-active"),
+            right: el.getBoundingClientRect().right,
+            height: el.getBoundingClientRect().height,
+          })),
+        );
+        check(segments.map((segment) => segment.text).join("|") === "Prints|Library", `phone switch was ${segments.map((segment) => segment.text).join("|")}`);
+        check(segments[1]?.active === "true", "phone Library segment is not selected");
+        check(segments.every((segment) => segment.height >= 32 && segment.height <= 40), `phone switch height was ${segments.map((segment) => segment.height).join(",")}`);
+        const inner = await page.evaluate(() => window.innerWidth);
+        check(segments.every((segment) => segment.right <= inner + 1), "phone switch runs off screen");
+        const printsTab = await page.locator("[data-testid='link-phone-prints']").getAttribute("data-active");
+        check(printsTab === "true", "phone Prints tab is not selected on Library");
+        const tabLabels = await page.locator(".ops-tabbar > .ops-tab").evaluateAll((els) =>
+          els.map((el) => {
+            const spans = [...el.querySelectorAll(":scope > span")];
+            return (spans[spans.length - 1]?.textContent || "").trim();
+          }),
+        );
+        check(tabLabels.join("|") === "Floor|Stack|Queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
+      } else {
+        check(switchCount === 0, "desktop shows the phone Prints | Library switch");
+      }
+      await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${base}/#/library?orderKey=${encodeURIComponent("deal:c1")}`, { waitUntil: "domcontentloaded" });
+      await settlePage();
+      const filtered = current();
+      await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
+      await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
+      const orderChip = (await filtered.locator("[data-testid='chip-library-order']").innerText()).replace(/\s+/g, " ").trim();
+      check(orderChip === "Deal c1", `${label} library order chip was ${orderChip}`);
     };
     const checkDrawer = async (label: string) => {
       await openDrawer();
@@ -799,6 +849,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       await page.locator("[data-testid='slice-files']").waitFor();
       const sliceName = await page.locator("[data-testid='slice-file-name']").first().innerText();
       check(/Castigator_MEGA_8K\.ctb/.test(sliceName), `${label} slice name was ${sliceName}`);
+      const filesHeading = (await page.locator("[data-testid='slice-files'] h3").innerText()).trim();
+      check(filesHeading === "Files", `${label} files heading was ${filesHeading}`);
+      const seeLibrary = (await page.locator("[data-testid='link-see-in-library']").getAttribute("href")) || "";
+      check(/library/.test(seeLibrary) && /orderKey/.test(seeLibrary) && /c1/.test(seeLibrary), `${label} see-in-library href was ${seeLibrary}`);
       const sliceBox = await page.locator("[data-testid='slice-file-name']").first().evaluate((el) => {
         const rect = el.getBoundingClientRect();
         const drawer = el.closest("[data-testid='drawer-deal-ops']")?.getBoundingClientRect();
@@ -1030,6 +1084,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.waitForSelector("[data-testid='panel-mobile-more']");
     const moreText = await page.locator("[data-testid='panel-mobile-more']").innerText();
     assert.equal(/\bOrders\b/.test(moreText), false);
+    assert.equal(/\bLibrary\b/.test(moreText), false);
     await page.getByTestId("button-mobile-nav-more").click();
     await page.locator("[data-testid='panel-mobile-more']").waitFor({ state: "hidden" });
 

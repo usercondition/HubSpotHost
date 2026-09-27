@@ -113,11 +113,16 @@ export function SliceFiles({
 
   return (
     <section className="mt-3" data-testid="slice-files">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Slice files</h3>
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen((value) => !value)} data-testid="button-add-slice-file">
-          Add slice file
-        </Button>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Files</h3>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Link href={`/library?orderKey=${encodeURIComponent(orderKey)}`} className="text-xs font-medium text-primary" data-testid="link-see-in-library">
+            See in library
+          </Link>
+          <Button type="button" size="sm" variant="outline" onClick={() => setOpen((value) => !value)} data-testid="button-add-slice-file">
+            Add slice file
+          </Button>
+        </div>
       </div>
       {open ? (
         <div className="mb-2 space-y-2 rounded-md border border-border p-2">

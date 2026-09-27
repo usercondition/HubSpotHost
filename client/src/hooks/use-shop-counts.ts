@@ -53,6 +53,18 @@ export function useShopCounts() {
     staleTime: 30_000,
   });
 
+  const library = useQuery<{ total: number }>({
+    queryKey: ["/api/plate-files", "count", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/plate-files?summary=1", undefined, { headers });
+      const body = (await response.json()) as { total?: number; files?: unknown[] };
+      const total = typeof body.total === "number" ? body.total : Array.isArray(body.files) ? body.files.length : 0;
+      return { total };
+    },
+    staleTime: 30_000,
+  });
+
   const stack = useQuery<{ rows: unknown[]; generatedAt?: string }>({
     queryKey: ["/api/priority-stack", ownerCode],
     enabled: isUnlocked,
@@ -93,6 +105,7 @@ export function useShopCounts() {
     needs,
     needsYou: performance.data ? needs.length : null,
     stackCount: stack.data ? stack.data.rows.length : null,
+    libraryCount: library.data ? library.data.total : null,
     queueCount: productionQueue.data
       ? productionQueue.data.nextPrint.length + productionQueue.data.inProduction.length
       : null,
