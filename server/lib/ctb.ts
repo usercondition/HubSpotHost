@@ -6,9 +6,8 @@
  * - Encrypted CTB v4/v5 used by modern printers (e.g. Elegoo Mighty/Mega 8K),
  *   where the slicer settings block is AES-CBC encrypted
  *
- * Only header/settings byte ranges are inspected. Layer images are never
- * decoded. Large Mega 8K uploads can stay on disk and be sampled by offset
- * instead of loading the whole plate into RAM.
+ * Header and layer-table ranges are sampled by offset. One layer's RLE can be
+ * read from a known span; the plate body is never loaded whole.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -28,6 +27,13 @@ const MAX_EXT_CONFIG_BYTES = 4_096;
 const ENCRYPTED_HEADER_SIZE = 48;
 const ENCRYPTED_SETTINGS_MIN = 168;
 const HASH_CHUNK_BYTES = SLICE_FINGERPRINT_CHUNK;
+/** ChiTuBox pages layer addresses in 4 GiB steps. Plates under that size use page 0. */
+export const CTB_PAGE_SIZE = 4_294_967_296;
+const CLASSIC_LAYER_STRIDE = 36;
+const ENCRYPTED_POINTER_STRIDE = 16;
+export const ENCRYPTED_LAYER_DEF = 88;
+const MAX_PREVIEW_LAYERS = 20_000;
+export const MAX_CTB_LAYER_BYTES = 8 * 1024 * 1024;
 
 /**
  * Fingerprint a plate from its size, the first 1 MiB, the last 1 MiB, and the
@@ -300,7 +306,227 @@ export function encryptCtbSettingsBlock(plain: Buffer): Buffer {
   return Buffer.concat([cipher.update(padded), cipher.final()]);
 }
 
-function parseEncryptedCtb(fileName: string, reader: CtbReader, magic: number): PrintFileMetrics {
+/** Absolute file offset from a ChiTuBox page number and in-page address. */
+export function ctbPageOffset(page: number, local: number): number {
+  if (!Number.isInteger(page) || page < 0 || page > 1024) {
+    throw new CtbParseError("That layer page is out of range");
+  }
+  if (!Number.isInteger(local) || local < 0) {
+    throw new CtbParseError("That layer offset is out of range");
+  }
+  return page * CTB_PAGE_SIZE + local;
+}
+
+/**
+ * ChiTuBox layer XOR (UVtools LayerRleCryptBuffer). Unsigned 32-bit wrapping.
+ * The same routine covers classic EncryptionKey and encrypted v4/v5 LayerXorKey.
+ */
+export function xorCtbLayer(seed: number, layerIndex: number, bytes: Buffer): void {
+  if ((seed >>> 0) === 0 || bytes.length === 0) return;
+  const init = (Math.imul(seed >>> 0, 0x2d83cdac) + 0xd8a83423) >>> 0;
+  const mixed = (Math.imul(layerIndex >>> 0, 0x1e1530cd) + 0xec3d47cd) >>> 0;
+  let key = Math.imul(mixed, init) >>> 0;
+  let index = 0;
+  for (let i = 0; i < bytes.length; i += 1) {
+    const k = (key >>> (8 * index)) & 0xff;
+    index += 1;
+    if ((index & 3) === 0) {
+      key = (key + init) >>> 0;
+      index = 0;
+    }
+    bytes[i] = bytes[i]! ^ k;
+  }
+}
+
+export interface CtbLayerPlan {
+  encrypted: boolean;
+  layerCount: number;
+  width: number;
+  height: number;
+  xorKey: number;
+  tableOffset: number;
+  tableBytes: number;
+}
+
+export interface CtbLayerEntry {
+  /** Classic: absolute RLE offset. Encrypted: absolute offset of the 88-byte layer def. */
+  offset: number;
+  /** Classic: RLE length. Encrypted: filled after the def is read. */
+  length: number;
+}
+
+export interface CtbEncryptedSpan {
+  length: number;
+  encOffset: number;
+  encLength: number;
+}
+
+/** Where the layer table lives. Does not read layer pixels. */
+export function ctbLayerPlan(reader: CtbReader): CtbLayerPlan {
+  const magic = u32At(reader, 0);
+  if (magic === null || (magic >>> 16) !== CTB_MAGIC_PREFIX) {
+    throw new CtbParseError("That file does not have a recognized Chitubox CTB header");
+  }
+  if (magic === CTB_ENCRYPTED_MAGIC) {
+    const { settings } = readEncryptedSettings(reader);
+    return layerPlanFromSettings(true, {
+      layerCount: u32(settings, 64),
+      width: u32(settings, 56),
+      height: u32(settings, 60),
+      tableOffset: u32(settings, 8),
+      xorKey: u32(settings, 128) ?? 0,
+      fileSize: reader.size,
+      stride: ENCRYPTED_POINTER_STRIDE,
+    });
+  }
+  const header = reader.read(0, Math.min(CLASSIC_HEADER_READ, reader.size));
+  if (!header || header.length < HEADER_MIN_BYTES) {
+    throw new CtbParseError("This file is too small to be a Chitubox CTB slice file");
+  }
+  return layerPlanFromSettings(false, {
+    layerCount: u32(header, 0x44),
+    width: u32(header, 0x34),
+    height: u32(header, 0x38),
+    tableOffset: u32(header, 0x40),
+    xorKey: header.length >= 0x68 ? (u32(header, 0x64) ?? 0) : 0,
+    fileSize: reader.size,
+    stride: CLASSIC_LAYER_STRIDE,
+  });
+}
+
+function layerPlanFromSettings(
+  encrypted: boolean,
+  input: {
+    layerCount: number | null;
+    width: number | null;
+    height: number | null;
+    tableOffset: number | null;
+    xorKey: number;
+    fileSize: number;
+    stride: number;
+  },
+): CtbLayerPlan {
+  const layerCount = layerCountOrNull(input.layerCount);
+  const width = reasonableUInt(input.width, 1, 65_536);
+  const height = reasonableUInt(input.height, 1, 65_536);
+  if (!layerCount || !width || !height || input.tableOffset === null) {
+    throw new CtbParseError("That CTB has no layer table");
+  }
+  if (layerCount > MAX_PREVIEW_LAYERS) {
+    throw new CtbParseError("That plate has too many layers to preview");
+  }
+  const tableBytes = layerCount * input.stride;
+  if (input.tableOffset < 0 || input.tableOffset + tableBytes > input.fileSize) {
+    throw new CtbParseError("That CTB layer table does not fit the file");
+  }
+  return {
+    encrypted,
+    layerCount,
+    width,
+    height,
+    xorKey: input.xorKey >>> 0,
+    tableOffset: input.tableOffset,
+    tableBytes,
+  };
+}
+
+/** Parse a cached layer table buffer into per-layer offsets. Pixels are not included. */
+export function ctbLayerEntries(plan: CtbLayerPlan, table: Buffer, fileSize: number): CtbLayerEntry[] {
+  if (table.length < plan.tableBytes) throw new CtbParseError("Layer table is short");
+  const entries: CtbLayerEntry[] = [];
+  for (let i = 0; i < plan.layerCount; i += 1) {
+    if (plan.encrypted) {
+      const at = i * ENCRYPTED_POINTER_STRIDE;
+      const offset = ctbPageOffset(table.readUInt32LE(at + 4), table.readUInt32LE(at));
+      if (offset < 0 || offset + ENCRYPTED_LAYER_DEF > fileSize) {
+        throw new CtbParseError("That layer definition is outside the file");
+      }
+      entries.push({ offset, length: 0 });
+      continue;
+    }
+    const at = i * CLASSIC_LAYER_STRIDE;
+    const length = table.readUInt32LE(at + 16);
+    const offset = ctbPageOffset(table.readUInt32LE(at + 20), table.readUInt32LE(at + 12));
+    if (length < 1 || length > MAX_CTB_LAYER_BYTES || offset + length > fileSize) {
+      throw new CtbParseError("That layer image is outside the file");
+    }
+    entries.push({ offset, length });
+  }
+  return entries;
+}
+
+/** DataLength / encryption window inside an 88-byte encrypted layer def. */
+export function encryptedLayerRle(def: Buffer): CtbEncryptedSpan {
+  if (def.length < 40) throw new CtbParseError("Layer definition is short");
+  const length = def.readUInt32LE(24);
+  const encOffset = def.readUInt32LE(32);
+  const encLength = def.readUInt32LE(36);
+  if (length < 1 || length > MAX_CTB_LAYER_BYTES) {
+    throw new CtbParseError("That layer is larger than a single preview");
+  }
+  if (encLength > 0 && (encOffset + encLength > length || encLength % 16 !== 0)) {
+    throw new CtbParseError("That layer encryption block does not line up");
+  }
+  return { length, encOffset, encLength };
+}
+
+/** AES-decrypt the encrypted window (same key as settings), then XOR. Returns plaintext RLE. */
+export function revealCtbLayer(
+  bytes: Buffer,
+  encOffset: number,
+  encLength: number,
+  xorKey: number,
+  layerIndex: number,
+): Buffer {
+  const out = Buffer.from(bytes);
+  if (encLength > 0) {
+    const slice = out.subarray(encOffset, encOffset + encLength);
+    let plain: Buffer;
+    try {
+      plain = decryptCtbSettingsBlock(slice);
+    } catch {
+      throw new CtbParseError("That layer could not be decrypted");
+    }
+    plain.subarray(0, encLength).copy(out, encOffset);
+  }
+  xorCtbLayer(xorKey, layerIndex, out);
+  return out;
+}
+
+/**
+ * Read one layer's plaintext RLE. Encrypted plates take the 88-byte def, then the
+ * RLE that follows it. `spans` remembers those def fields so the next visit skips the def.
+ */
+export async function readCtbLayerBytes(
+  readRange: (start: number, length: number) => Promise<Buffer | null>,
+  plan: CtbLayerPlan,
+  entries: CtbLayerEntry[],
+  spans: Map<number, CtbEncryptedSpan>,
+  index: number,
+): Promise<Buffer> {
+  if (!Number.isInteger(index) || index < 0 || index >= plan.layerCount) {
+    throw new CtbParseError("That layer is not on this plate");
+  }
+  const entry = entries[index];
+  if (!entry) throw new CtbParseError("That layer is not on this plate");
+  if (!plan.encrypted) {
+    const raw = await readRange(entry.offset, entry.length);
+    if (!raw || raw.length < entry.length) throw new CtbParseError("That layer could not be read");
+    return revealCtbLayer(raw.subarray(0, entry.length), 0, 0, plan.xorKey, index);
+  }
+  let span = spans.get(index);
+  if (!span) {
+    const def = await readRange(entry.offset, ENCRYPTED_LAYER_DEF);
+    if (!def || def.length < 40) throw new CtbParseError("That layer could not be read");
+    span = encryptedLayerRle(def);
+    spans.set(index, span);
+  }
+  const raw = await readRange(entry.offset + ENCRYPTED_LAYER_DEF, span.length);
+  if (!raw || raw.length < span.length) throw new CtbParseError("That layer could not be read");
+  return revealCtbLayer(raw.subarray(0, span.length), span.encOffset, span.encLength, plan.xorKey, index);
+}
+
+function readEncryptedSettings(reader: CtbReader): { settings: Buffer; version: number | null } {
   const header = reader.read(0, ENCRYPTED_HEADER_SIZE);
   if (!header) {
     throw new CtbParseError("This encrypted CTB header is incomplete");
@@ -335,6 +561,11 @@ function parseEncryptedCtb(fileName: string, reader: CtbReader, magic: number): 
   if (settings.length < ENCRYPTED_SETTINGS_MIN) {
     throw new CtbParseError("Decrypted CTB settings were shorter than expected");
   }
+  return { settings, version };
+}
+
+function parseEncryptedCtb(fileName: string, reader: CtbReader, magic: number): PrintFileMetrics {
+  const { settings, version } = readEncryptedSettings(reader);
 
   const resinVolumeMl = reasonable(f32(settings, 104), 0.001, 100_000);
   const resinMassG = reasonable(f32(settings, 108), 0.001, 100_000);

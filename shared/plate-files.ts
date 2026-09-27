@@ -140,16 +140,31 @@ export const plateFileIndexSchema = z.object({
   orderKeys: z.array(plateOrderKeySchema).max(20).optional(),
 });
 
-export const plateUploadQuerySchema = z.object({
-  orderKey: plateOrderKeySchema,
-  fileName: z.string().trim().min(1).max(240),
-  printer: z.string().trim().max(40).optional().default(""),
-  notes: z.string().trim().max(2000).optional().default(""),
-  kit: z.string().trim().max(180).optional().default(""),
-  customer: z.string().trim().max(120).optional().default(""),
-  sha256: z.string().trim().max(64).optional().default(""),
-  printRecordId: z.string().trim().max(20).optional().default(""),
-});
+export const plateUploadQuerySchema = z
+  .object({
+    orderKey: z.string().trim().max(40).optional().default(""),
+    fileName: z.string().trim().min(1).max(240),
+    printer: z.string().trim().max(40).optional().default(""),
+    notes: z.string().trim().max(2000).optional().default(""),
+    kit: z.string().trim().max(180).optional().default(""),
+    customer: z.string().trim().max(120).optional().default(""),
+    sha256: z.string().trim().max(64).optional().default(""),
+    printRecordId: z.string().trim().max(20).optional().default(""),
+    /** Parent .ctb drive id when this upload is the plate's STL/3MF, not a new catalog row. */
+    modelFor: z.string().trim().max(200).optional().default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (value.modelFor) {
+      const ext = plateExtension(value.fileName);
+      if (ext !== ".stl" && ext !== ".3mf") {
+        ctx.addIssue({ code: "custom", message: "Attach an STL or 3MF model.", path: ["fileName"] });
+      }
+      return;
+    }
+    if (!plateOrderKeySchema.safeParse(value.orderKey).success) {
+      ctx.addIssue({ code: "custom", message: "Use a deal or off-book order key", path: ["orderKey"] });
+    }
+  });
 
 export const platePrepareSchema = z.object({
   orderKey: plateOrderKeySchema,
@@ -202,6 +217,8 @@ export interface PlateFileRecord {
   printRecordIds: number[];
   hasPreview: boolean;
   stats: PlatePreviewStats | null;
+  modelDriveFileId: string;
+  modelName: string;
 }
 
 export interface PlateLibraryPending {

@@ -22,6 +22,8 @@ type FileRow = {
   notes: string;
   source: string;
   sha256: string;
+  model_drive_file_id?: string;
+  model_name?: string;
 };
 
 export interface PlateIndexInput {
@@ -110,6 +112,8 @@ function toRecord(row: FileRow): PlateFileRecord {
     printRecordIds: printIdsFor(row.drive_file_id),
     hasPreview: preview.hasPreview,
     stats: preview.stats,
+    modelDriveFileId: row.model_drive_file_id || "",
+    modelName: row.model_name || "",
   });
 }
 
@@ -261,6 +265,17 @@ export function upsertPlateFiles(files: PlateIndexInput[], source: PlateFileSour
   });
   write(files);
   return saved.map((id) => toRecord(readFile(id)!));
+}
+
+export function attachPlateModel(
+  driveFileId: string,
+  model: { driveFileId: string; name: string },
+): PlateFileRecord | null {
+  if (!readFile(driveFileId)) return null;
+  getSqlite()
+    .prepare(`UPDATE plate_files SET model_drive_file_id = ?, model_name = ?, updated_at = ? WHERE drive_file_id = ?`)
+    .run(model.driveFileId, model.name.slice(0, 240), new Date().toISOString(), driveFileId);
+  return toRecord(readFile(driveFileId)!);
 }
 
 export function getPlateFile(driveFileId: string): PlateFileRecord | null {

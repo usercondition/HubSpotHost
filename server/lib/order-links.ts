@@ -458,6 +458,8 @@ CREATE TABLE IF NOT EXISTS plate_files (
   notes TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL,
   sha256 TEXT NOT NULL DEFAULT '',
+  model_drive_file_id TEXT NOT NULL DEFAULT '',
+  model_name TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -606,6 +608,10 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
     (sqlite.prepare("PRAGMA table_info(plate_files)").all() as Array<{ name: string }>).map((row) => row.name),
   );
   if (!existing.has("sha256")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN sha256 TEXT NOT NULL DEFAULT ''`);
+  if (!existing.has("model_drive_file_id")) {
+    sqlite.exec(`ALTER TABLE plate_files ADD COLUMN model_drive_file_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!existing.has("model_name")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`);
 }
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {

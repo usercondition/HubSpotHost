@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { plainDriveMessage, startPlateDownload } from "@/lib/plate-library-client";
+import { plainDriveMessage, startPlateDownload, uploadPlateBytes } from "@/lib/plate-library-client";
+import { PlateLayerView } from "@/components/plate-layer-view";
 import { usedOnOrders, type PlateFileRecord, type PlatePreviewStats } from "@shared/plate-files";
 
 function formatDuration(seconds: number | null): string {
@@ -24,6 +26,44 @@ function formatCost(value: number | null): string {
   return `$${value.toFixed(2)}`;
 }
 
+function PlateModelHost({ file, headers }: { file: PlateFileRecord; headers: Record<string, string> }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !file.modelDriveFileId) return;
+    let cancelled = false;
+    let url = "";
+    let dispose = () => {};
+    void apiRequest("GET", `/api/plate-files/${encodeURIComponent(file.driveFileId)}/model`, undefined, { headers })
+      .then((response) => response.blob())
+      .then(async (blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        const view = await import("./plate-model-view");
+        if (cancelled) return;
+        dispose = await view.mountPlateModel(host, url, file.modelName || "model.stl");
+        if (cancelled) dispose();
+      })
+      .catch(() => {
+        if (!cancelled) setError("This plate has no 3D model.");
+      });
+    return () => {
+      cancelled = true;
+      dispose();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [file.driveFileId, file.modelDriveFileId, file.modelName, headers]);
+  if (error) {
+    return (
+      <p className="mb-3 text-sm text-muted-foreground" data-testid="text-model-missing">
+        {error}
+      </p>
+    );
+  }
+  return <div ref={hostRef} className="plate-model-view" data-testid="plate-model-view" />;
+}
+
 function PreviewPanel({
   file,
   headers,
@@ -33,10 +73,13 @@ function PreviewPanel({
   headers: Record<string, string>;
   onClose: () => void;
 }) {
+  const canLayers = /\.ctb$/i.test(file.name);
+  const canModel = Boolean(file.modelDriveFileId);
+  const [mode, setMode] = useState<"layers" | "model">(canLayers ? "layers" : "model");
   const [imageUrl, setImageUrl] = useState("");
   const stats: PlatePreviewStats | null = file.stats;
   useEffect(() => {
-    if (!file.hasPreview || !file.sha256) return;
+    if (canLayers || canModel || !file.hasPreview || !file.sha256) return;
     let cancelled = false;
     let url = "";
     void apiRequest("GET", `/api/plate-previews/${file.sha256}`, undefined, { headers })
@@ -69,7 +112,7 @@ function PreviewPanel({
   return (
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 p-3 md:items-center" data-testid="panel-plate-preview" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-lg border border-border bg-card p-4"
+        className={`max-h-[90vh] w-full overflow-auto rounded-lg border border-border bg-card p-4 ${canLayers || canModel ? "max-w-3xl" : "max-w-lg"}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">
@@ -80,7 +123,35 @@ function PreviewPanel({
             Close
           </button>
         </div>
-        {imageUrl ? (
+        {canLayers && canModel ? (
+          <div className="plate-view-toggle" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "layers"}
+              data-testid="button-view-layers"
+              className={mode === "layers" ? "is-active" : ""}
+              onClick={() => setMode("layers")}
+            >
+              Layers
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "model"}
+              data-testid="button-view-model"
+              className={mode === "model" ? "is-active" : ""}
+              onClick={() => setMode("model")}
+            >
+              3D
+            </button>
+          </div>
+        ) : null}
+        {mode === "model" && canModel ? (
+          <PlateModelHost file={file} headers={headers} />
+        ) : canLayers ? (
+          <PlateLayerView file={file} headers={headers} />
+        ) : imageUrl ? (
           <img src={imageUrl} alt="" className="mb-3 max-h-48 w-full rounded-md bg-black object-contain md:max-h-80" data-testid="img-plate-preview" />
         ) : (
           <p className="mb-3 text-sm text-muted-foreground" data-testid="text-plate-preview-missing">
@@ -113,8 +184,11 @@ export function PlateFileMenu({
   buttonTestId?: string;
   sendToLibrary?: { recordId: number; onSend: () => void } | null;
 }) {
+  const queryClient = useQueryClient();
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+  const canAttachModel = /\.ctb$/i.test(file.name);
   return (
     <div className="relative shrink-0">
       <button
@@ -127,7 +201,7 @@ export function PlateFileMenu({
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open ? (
-        <div className="absolute right-0 z-20 mt-1 w-40 rounded-md border border-border bg-popover p-1 text-sm shadow-md">
+        <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border border-border bg-popover p-1 text-sm shadow-md">
           {sendToLibrary ? (
             <button
               type="button"
@@ -170,7 +244,55 @@ export function PlateFileMenu({
           <a className="block rounded px-2 py-1.5 hover:bg-muted" href={file.webViewLink} target="_blank" rel="noopener noreferrer">
             Open in Drive
           </a>
+          {canAttachModel ? (
+            <button
+              type="button"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+              data-testid={`button-add-model-${file.driveFileId}`}
+              onClick={() => modelInputRef.current?.click()}
+            >
+              Add 3D model
+            </button>
+          ) : null}
         </div>
+      ) : null}
+      {canAttachModel ? (
+        <input
+          ref={modelInputRef}
+          type="file"
+          accept=".stl,.3mf,model/stl,model/3mf"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          data-testid={`input-plate-model-${file.driveFileId}`}
+          onChange={(event) => {
+            const picked = event.target.files?.[0];
+            event.target.value = "";
+            if (!picked) return;
+            setOpen(false);
+            setError("");
+            void uploadPlateBytes({
+              file: picked,
+              orderKey: file.orderKeys[0] || "",
+              printer: file.printer,
+              notes: "",
+              kit: file.kit,
+              customer: "",
+              sha256: "",
+              headers,
+              modelFor: file.driveFileId,
+              onProgress: () => undefined,
+            })
+              .then((updated) => {
+                void queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
+                onPreview(updated);
+              })
+              .catch((reason: unknown) => {
+                const raw = reason instanceof Error ? reason.message : "";
+                setError(plainDriveMessage(raw, "Drive upload failed."));
+              });
+          }}
+        />
       ) : null}
       {error ? (
         <p

@@ -175,6 +175,10 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     assert.equal(locked.status, 401);
     const lockedStart = await fetch(`${base}/api/google/oauth/start`);
     assert.equal(lockedStart.status, 401);
+    const layersLocked = await fetch(`${base}/api/plate-files/missing/layers`);
+    assert.equal(layersLocked.status, 401);
+    const modelLocked = await fetch(`${base}/api/plate-files/missing/model`);
+    assert.equal(modelLocked.status, 401);
 
     const start = await fetch(`${base}/api/google/oauth/start`, { headers });
     assert.equal(start.status, 200);
@@ -212,6 +216,31 @@ test("slice library uploads, search, index, and Google connect stay owner-only",
     assert.equal(okBody.file.kit, "Castigator");
     assert.equal(okBody.file.source, "upload");
     assert.deepEqual(okBody.file.orderKeys, ["deal:81"]);
+    assert.equal(okBody.file.modelDriveFileId, "");
+
+    const modelBytes = Buffer.from("solid torso");
+    const model = await fetch(
+      `${base}/api/plate-files/upload?${new URLSearchParams({
+        modelFor: okBody.file.driveFileId,
+        fileName: "torso.stl",
+      }).toString()}`,
+      {
+        method: "POST",
+        headers: {
+          ...headers,
+          "content-type": "application/octet-stream",
+          "content-length": String(modelBytes.length),
+        },
+        body: modelBytes,
+      },
+    );
+    assert.equal(model.status, 201);
+    const modelBody = await model.json();
+    assert.equal(modelBody.file.driveFileId, "id-Castigator_MEGA_8K.ctb");
+    assert.equal(modelBody.file.modelDriveFileId, "id-torso.stl");
+    assert.equal(modelBody.file.modelName, "torso.stl");
+    assert.equal(listPlateFiles({}).files.length, 1);
+    assert.equal(/Ada|Glenn|Wayne|Daniel/.test(JSON.stringify(modelBody.file)), false);
 
     mode = "no-id";
     const failed = await upload("Land_Raider_12K.ctb", "deal:81");

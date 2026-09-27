@@ -24,7 +24,18 @@ import {
   type PlatePreviewStats,
 } from "../../shared/plate-files";
 import { SLICE_FINGERPRINT_CHUNK } from "../../shared/slice-fingerprint";
-import { parseCtbFileFromPrefix, sliceFingerprint } from "./ctb";
+import {
+  CtbParseError,
+  createPrefixCtbReader,
+  ctbLayerEntries,
+  ctbLayerPlan,
+  parseCtbFileFromPrefix,
+  readCtbLayerBytes,
+  sliceFingerprint,
+  type CtbEncryptedSpan,
+  type CtbLayerEntry,
+  type CtbLayerPlan,
+} from "./ctb";
 import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
 import {
   DriveReconnectError,
@@ -52,6 +63,7 @@ import {
   readDownloadTicket,
   readPlatePreviewPng,
   recordUploadFailure,
+  attachPlateModel,
   registerUploadedPlate,
   saveDownloadTicket,
   saveLibraryPending,
@@ -66,6 +78,64 @@ import { firstIssue } from "./validation";
 const NOT_IN_LIBRARY = "Not in Library yet.";
 const UPLOAD_UNFINISHED = "The upload did not finish.";
 const PREVIEW_PREFIX_BYTES = 8 * 1024 * 1024;
+const MODEL_MAX_BYTES = 64 * 1024 * 1024;
+
+interface CachedLayerTable {
+  plan: CtbLayerPlan;
+  entries: CtbLayerEntry[];
+  spans: Map<number, CtbEncryptedSpan>;
+}
+
+const layerTables = new Map<string, CachedLayerTable>();
+
+function layerTableKey(file: PlateFileRecord): string {
+  return `${file.driveFileId}:${file.sizeBytes ?? 0}:${file.modifiedAt ?? ""}`;
+}
+
+async function cachedLayerTable(
+  file: PlateFileRecord,
+  readRange: (fileId: string, start: number, length: number) => Promise<Buffer | null>,
+): Promise<CachedLayerTable> {
+  const key = layerTableKey(file);
+  const hit = layerTables.get(key);
+  if (hit) return hit;
+  const size = file.sizeBytes ?? 0;
+  const prefixLen = Math.min(PREVIEW_PREFIX_BYTES, size);
+  const prefix = await readRange(file.driveFileId, 0, prefixLen);
+  if (!prefix || prefix.length < 0x50) throw new CtbParseError("That plate has no layer preview.");
+  const reader = createPrefixCtbReader(prefix, size);
+  const plan = ctbLayerPlan(reader);
+  let table = reader.read(plan.tableOffset, plan.tableBytes);
+  if (!table) {
+    const fetched = await readRange(file.driveFileId, plan.tableOffset, plan.tableBytes);
+    if (!fetched || fetched.length < plan.tableBytes) throw new CtbParseError("That plate has no layer preview.");
+    table = fetched;
+  }
+  const cache: CachedLayerTable = {
+    plan,
+    entries: ctbLayerEntries(plan, table, size),
+    spans: new Map(),
+  };
+  layerTables.set(key, cache);
+  if (layerTables.size > 24) {
+    const oldest = layerTables.keys().next().value;
+    if (oldest) layerTables.delete(oldest);
+  }
+  return cache;
+}
+
+function layerFailure(res: Response, error: unknown): void {
+  if (error instanceof DriveReconnectError) {
+    res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
+    return;
+  }
+  if (error instanceof DriveUnreadableError) {
+    res.status(404).json({ ok: false, error: "That plate has no layer preview." });
+    return;
+  }
+  console.error("[ctb] layer preview", error instanceof Error ? error.message : error);
+  res.status(422).json({ ok: false, error: "That plate has no layer preview." });
+}
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -497,6 +567,74 @@ export function registerPlateLibraryRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/plate-files/:driveFileId/layers", async (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const file = getPlateFile(queryValue(req.params.driveFileId));
+    if (!file || !/\.ctb$/i.test(file.name) || file.sizeBytes == null) {
+      return res.status(404).json({ ok: false, error: "That plate has no layer preview." });
+    }
+    try {
+      const table = await cachedLayerTable(file, readDriveBounded);
+      return res.json({
+        ok: true,
+        layerCount: table.plan.layerCount,
+        width: table.plan.width,
+        height: table.plan.height,
+      });
+    } catch (error) {
+      return layerFailure(res, error);
+    }
+  });
+
+  app.get("/api/plate-files/:driveFileId/layers/:index", async (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const file = getPlateFile(queryValue(req.params.driveFileId));
+    const index = Number(queryValue(req.params.index));
+    if (!file || !/\.ctb$/i.test(file.name) || file.sizeBytes == null || !Number.isInteger(index) || index < 0) {
+      return res.status(404).json({ ok: false, error: "That plate has no layer preview." });
+    }
+    try {
+      const table = await cachedLayerTable(file, readDriveBounded);
+      const bytes = await readCtbLayerBytes(
+        (start, length) => readDriveBounded(file.driveFileId, start, length),
+        table.plan,
+        table.entries,
+        table.spans,
+        index,
+      );
+      res.setHeader("content-type", "application/octet-stream");
+      res.setHeader("cache-control", "private, no-store");
+      res.setHeader("x-layer-width", String(table.plan.width));
+      res.setHeader("x-layer-height", String(table.plan.height));
+      res.setHeader("x-layer-count", String(table.plan.layerCount));
+      res.setHeader("x-layer-index", String(index));
+      return res.send(bytes);
+    } catch (error) {
+      return layerFailure(res, error);
+    }
+  });
+
+  app.get("/api/plate-files/:driveFileId/model", async (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const file = getPlateFile(queryValue(req.params.driveFileId));
+    if (!file?.modelDriveFileId) return res.status(404).json({ ok: false, error: "That plate has no 3D model." });
+    try {
+      const upstream = await openDriveMedia(file.modelDriveFileId, undefined);
+      if (!upstream.ok && upstream.status !== 206) {
+        return res.status(502).json({ ok: false, error: "Drive could not read that model." });
+      }
+      const bytes = await takeResponseBytes(upstream, MODEL_MAX_BYTES);
+      if (bytes.length < 1) return res.status(404).json({ ok: false, error: "That plate has no 3D model." });
+      res.setHeader("content-type", "application/octet-stream");
+      res.setHeader("content-disposition", attachmentName(file.modelName || "model.stl"));
+      res.setHeader("cache-control", "private, no-store");
+      return res.send(bytes);
+    } catch (error) {
+      if (error instanceof DriveReconnectError) return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
+      return res.status(502).json({ ok: false, error: "Drive could not read that model." });
+    }
+  });
+
   app.post("/api/plate-files/upload", async (req: Request, res: Response) => {
     if (rejectOwner(req, res)) {
       releaseBody(req);
@@ -511,6 +649,7 @@ export function registerPlateLibraryRoutes(app: Express): void {
       customer: queryValue(req.query.customer),
       sha256: queryValue(req.query.sha256),
       printRecordId: queryValue(req.query.printRecordId),
+      modelFor: queryValue(req.query.modelFor),
     });
     if (!parsed.success || !isPlateFileName(parsed.success ? parsed.data.fileName : "")) {
       releaseBody(req);
@@ -522,6 +661,42 @@ export function registerPlateLibraryRoutes(app: Express): void {
       return res.status(400).json({ ok: false, error: "Send the file with a Content-Length up to 2 GB." });
     }
     const meta = parsed.data;
+    if (meta.modelFor) {
+      const parent = getPlateFile(meta.modelFor);
+      if (!parent) {
+        releaseBody(req);
+        return res.status(404).json({ ok: false, error: "That plate is not in the library." });
+      }
+      if (!googleDriveConfigured()) {
+        releaseBody(req);
+        return res.status(503).json({ ok: false, error: "Google Drive is not configured" });
+      }
+      try {
+        const folder = await ensureLibraryFolder(libraryFolderName(parent.kit || "Kit"));
+        const modelName = librarySliceName(meta.fileName, "");
+        const uploaded = await uploadDriveFile({
+          access: folder.access,
+          folderId: folder.folderId,
+          name: modelName,
+          size,
+          body: req,
+        });
+        if (!uploaded.id) {
+          releaseBody(req);
+          return res.status(502).json({ ok: false, error: "Drive did not confirm the file." });
+        }
+        const file = attachPlateModel(parent.driveFileId, { driveFileId: uploaded.id, name: uploaded.name || modelName });
+        return res.status(201).json({ ok: true, file });
+      } catch (error) {
+        const raw = error instanceof Error ? error.message : String(error || "");
+        console.error("[drive] model upload failed", raw);
+        releaseBody(req);
+        if (error instanceof DriveReconnectError) {
+          return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
+        }
+        return res.status(502).json({ ok: false, error: "Drive upload failed." });
+      }
+    }
     const sliceName = librarySliceName(meta.fileName, meta.customer);
     const catalogKit = libraryKitName(meta.kit || meta.fileName, meta.customer);
     const printRecordId = printRecordIdOf(meta.printRecordId);
