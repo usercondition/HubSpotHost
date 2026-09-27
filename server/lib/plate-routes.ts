@@ -26,6 +26,7 @@ import {
   uploadDriveFile,
 } from "./google-drive";
 import { countPlateFiles, linkPlateFile, listPlateFiles, recordUploadFailure, registerUploadedPlate, unlinkPlateFile, upsertPlateFiles } from "./plate-files";
+import { firstIssue } from "./validation";
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -66,10 +67,6 @@ function queryValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return "";
-}
-
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
 }
 
 function oauthFailure(res: Response): void {

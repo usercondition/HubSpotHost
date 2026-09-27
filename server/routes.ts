@@ -64,6 +64,7 @@ import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
 import { registerPrinterRoutes } from "./lib/printer-routes";
+import { firstIssue } from "./lib/validation";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -611,10 +612,6 @@ async function loadOwnerDigestContext(): Promise<OwnerDigestContext> {
     resin: buildResinInventorySnapshot(),
     recentPlates: listPrintFileRecords(200),
   };
-}
-
-function firstIssue(error: { issues: Array<{ message: string }> }): string {
-  return error.issues[0]?.message ?? "Some details are missing or invalid";
 }
 
 function stageIsClosed(stage: { metadata: Record<string, unknown> } | undefined): boolean {
