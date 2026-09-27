@@ -256,7 +256,10 @@ export function collectShopDashboard(input: {
   );
   const overheadMetric = dashboard.money.find((item) => item.id === "overhead");
   const netMetric = dashboard.money.find((item) => item.id === "net-profit");
-  if (overheadMetric && netMetric) dashboard.headlines.push(overheadMetric, netMetric);
+  if (overheadMetric && netMetric) {
+    dashboard.headlines.push(overheadMetric, netMetric);
+    dashboard.money = dashboard.money.filter((item) => item.id !== "overhead" && item.id !== "net-profit");
+  }
   dashboard.origins.incomplete = input.mapIncomplete === true;
   dashboard.origins.busy = input.mapBusy === true;
   return dashboard;
