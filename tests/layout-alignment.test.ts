@@ -600,6 +600,63 @@ function bodyFor(input: string | URL) {
   if (pathname.startsWith("/api/google/drive")) {
     return { ok: true, configured: true, connected: false, email: "", reconnect: false };
   }
+  if (pathname.endsWith("/address-capture/preview") || pathname.endsWith("/validate-address")) {
+    return {
+      ok: true,
+      status: "corrected",
+      needsUnit: false,
+      typed: { street1: "10909 Hannan Rd", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      suggestion: { street1: "10909 Hannan Road", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      messages: [],
+      formattedTyped: "10909 Hannan Rd\nRomulus, MI 48174\nUS",
+      formattedSuggestion: "10909 Hannan Road\nRomulus, MI 48174\nUS",
+    };
+  }
+  if (pathname.includes("/shipping-labels/ship-to/")) {
+    return {
+      ok: true,
+      ready: true,
+      hasContact: true,
+      missing: [],
+      contact: { name: "Wayne Hood", addressLines: [] },
+      normalized: { street1: "10909 Hannan Road", street2: "", city: "Romulus", state: "MI", zip: "48174", country: "US" },
+      validation: { status: "unchecked", messages: ["Address unchecked"] },
+    };
+  }
+  if (pathname.endsWith("/shipengine/status")) {
+    return {
+      ok: true,
+      configured: true,
+      hasApiKey: true,
+      hasShipFrom: true,
+      testMode: true,
+      carriers: [{ carrierId: "se-1", carrierCode: "usps", friendlyName: "USPS", nickname: "USPS", balance: 42 }],
+      funds: { availableUsd: 42, lowestBalanceUsd: 42, fundedCarriers: [] },
+    };
+  }
+  if (pathname.endsWith("/shipengine/rates")) {
+    return {
+      ok: true,
+      dealId: "349919419126",
+      testMode: true,
+      messages: [],
+      addressTo: { name: "Wayne Hood", street1: "10909 Hannan Road", city: "Romulus", state: "MI", zip: "48174" },
+      rates: [
+        {
+          rateId: "se-rate-1",
+          amount: "7.20",
+          currency: "usd",
+          carrierId: "se-1",
+          carrierCode: "usps",
+          carrierFriendlyName: "USPS",
+          serviceCode: "usps_ground_advantage",
+          serviceType: "USPS Ground Advantage",
+          deliveryDays: 3,
+          attributes: ["cheapest"],
+        },
+      ],
+    };
+  }
   return { ok: true };
 }
 
@@ -1302,6 +1359,23 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.getByRole("button", { name: "Add expense" }).first().waitFor();
     if (artifactPath("expenses-desktop-1440.png")) await page.screenshot({ path: artifactPath("expenses-desktop-1440.png")!, fullPage: true });
 
+    await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='input-shipengine-deal-id']").fill("349919419126");
+    await page.locator("[data-testid='panel-shipping-address']").waitFor();
+    const labelGrid = await page.evaluate(() => {
+      const ship = document.querySelector("[data-testid='panel-shipping-address']")?.getBoundingClientRect();
+      const weight = document.getElementById("shipengine-weightOz");
+      const parcel = weight?.closest(".grid")?.getBoundingClientRect();
+      return {
+        shipLeft: ship?.left ?? -1,
+        shipWidth: ship?.width ?? -1,
+        parcelLeft: parcel?.left ?? -1,
+        parcelWidth: parcel?.width ?? -1,
+      };
+    });
+    check(Math.abs(labelGrid.shipLeft - labelGrid.parcelLeft) <= 1, `labels ship-to left ${labelGrid.shipLeft} vs package ${labelGrid.parcelLeft}`);
+    check(Math.abs(labelGrid.shipWidth - labelGrid.parcelWidth) <= 1, `labels ship-to width ${labelGrid.shipWidth} vs package ${labelGrid.parcelWidth}`);
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[data-testid='badge-phone-floor']");
@@ -1607,10 +1681,74 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const saveVisible = await page.getByRole("button", { name: "Save" }).last().evaluate((el) => {
       const rect = el.getBoundingClientRect();
       const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      return rect.top >= 0 && rect.bottom <= innerHeight && (center === el || el.contains(center));
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const notes = document.querySelector("textarea[aria-label='Notes']");
+      const scroller = notes?.parentElement ?? null;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      const notesRect = notes?.getBoundingClientRect();
+      const footerTop = el.closest("footer")?.getBoundingClientRect().top ?? innerHeight;
+      return {
+        uncovered: rect.top >= 0 && rect.bottom <= tabTop - 1 && (center === el || el.contains(center)),
+        notesClear: (notesRect?.bottom ?? footerTop) <= footerTop + 1,
+        pad: scroller ? parseFloat(getComputedStyle(scroller).paddingBottom) : 0,
+      };
     });
-    check(saveVisible, "expense drawer Save footer is visible and uncovered");
+    check(saveVisible.uncovered, "expense drawer Save footer is visible above the bottom menu");
+    check(saveVisible.notesClear, "expense notes sit under the form footer");
+    check(saveVisible.pad >= 64, `expense form scroll padding ${saveVisible.pad} does not clear the bottom menu`);
     if (artifactPath("expenses-drawer-390.png")) await page.screenshot({ path: artifactPath("expenses-drawer-390.png")!, fullPage: true });
+
+    await page.goto(`${base}/#/paid-orders`, { waitUntil: "domcontentloaded" });
+    const paste = page.locator("[data-testid='panel-paste-address']").last();
+    await paste.waitFor();
+    await paste.locator("[data-testid='input-paste-address']").fill("Wayne Hood\n10909 Hannan Rd\nRomulus, MI 48174\nUnited States");
+    await paste.locator("[data-testid='button-check-pasted-address']").click();
+    await paste.locator("[data-testid='button-keep-typed-address']").waitFor();
+    const pasteClear = await page.locator("[data-testid='button-use-standardized-address']").evaluate((el) => {
+      const pane = document.querySelector("[data-scroll-pane]");
+      el.scrollIntoView({ block: "end" });
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const rect = el.getBoundingClientRect();
+      if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+      const keep = document.querySelector("[data-testid='button-keep-typed-address']")?.getBoundingClientRect();
+      const use = el.getBoundingClientRect();
+      const tabBox = tab?.getBoundingClientRect();
+      const limit = tabBox && tabBox.height > 0 ? tabBox.top : innerHeight;
+      return {
+        keepTop: keep?.top ?? -1,
+        keepBottom: keep?.bottom ?? 0,
+        useTop: use.top,
+        useBottom: use.bottom,
+        limit,
+        pad: pane ? parseFloat(getComputedStyle(pane).paddingBottom) : 0,
+        tabHeight: tabBox?.height ?? 0,
+      };
+    });
+    check(pasteClear.pad + 0.5 >= pasteClear.tabHeight, `phone scroll padding ${pasteClear.pad} is shorter than the bottom menu`);
+    check(pasteClear.keepTop >= 0 && pasteClear.keepBottom <= pasteClear.limit - 1, `Keep what I typed is not fully above the bottom menu (${pasteClear.keepTop}-${pasteClear.keepBottom} / ${pasteClear.limit})`);
+    check(pasteClear.useTop >= 0 && pasteClear.useBottom <= pasteClear.limit - 1, `Use this address is not fully above the bottom menu (${pasteClear.useTop}-${pasteClear.useBottom} / ${pasteClear.limit})`);
+
+    await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='input-shipengine-deal-id']").fill("349919419126");
+    await page.locator("[data-testid='button-shipengine-get-rates']").click();
+    await page.locator("[data-testid='button-shipengine-buy']").waitFor();
+    const buyClear = await page.locator("[data-testid='button-shipengine-buy']").evaluate((el) => {
+      const pane = document.querySelector("[data-scroll-pane]");
+      el.scrollIntoView({ block: "end" });
+      const tab = document.querySelector(".ops-tabbar");
+      const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+      const rect = el.getBoundingClientRect();
+      if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+      const next = el.getBoundingClientRect();
+      const tabBox = tab?.getBoundingClientRect();
+      return {
+        bottom: next.bottom,
+        limit: tabBox && tabBox.height > 0 ? tabBox.top : innerHeight,
+      };
+    });
+    check(buyClear.bottom <= buyClear.limit - 1, `Buy label sits under the bottom menu (${buyClear.bottom} > ${buyClear.limit})`);
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/setup`, { waitUntil: "domcontentloaded" });

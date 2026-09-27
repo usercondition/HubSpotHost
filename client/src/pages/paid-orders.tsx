@@ -26,10 +26,11 @@ import { printsDealHref, queueDealHref, hubspotDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
-import { DidYouMeanCard, UnitPrompt } from "@/components/address-capture-review";
+import { DidYouMeanCard, ReplaceHubSpotCard, UnitPrompt, type RawHubSpotAddress } from "@/components/address-capture-review";
 import { PasteAddressBox } from "@/components/paste-address";
 import { ShippingAddressFields } from "@/components/shipping-address-fields";
 import type { CaptureCheck } from "@shared/address-capture";
+import type { ShipAddressFields } from "@shared/ship-address";
 import { cn } from "@/lib/utils";
 import type {
   PaidOrderAnalysis,
@@ -96,7 +97,9 @@ export default function PaidOrders() {
       ? crypto.randomUUID()
       : `manual-${Date.now().toString(36)}`,
   );
-  const [addressGate, setAddressGate] = useState<(CaptureCheck & { code?: string }) | null>(null);
+  const [addressGate, setAddressGate] = useState<
+    (CaptureCheck & { code?: string; current?: RawHubSpotAddress; next?: ShipAddressFields }) | null
+  >(null);
   const [unitDraft, setUnitDraft] = useState("");
   const [buyerHint, setBuyerHint] = useState<string | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -275,7 +278,7 @@ export default function PaidOrders() {
   }, [isUnlocked, bridgeStatus]);
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (flags?: { replaceHubspot?: boolean; keepOnOrder?: boolean }) => {
       const cleanedLines = lines
         .map((line) => ({
           productName: line.productName.trim(),
@@ -313,6 +316,8 @@ export default function PaidOrders() {
           addressDecision,
           noUnit,
           addressFormSource: addressFromPaste ? "paste" : "",
+          replaceHubspot: flags?.replaceHubspot === true,
+          keepOnOrder: flags?.keepOnOrder === true,
           idempotencyKey: idempotencyKey.current,
         },
         { headers },
@@ -337,8 +342,13 @@ export default function PaidOrders() {
       const message = error.message;
       const raw = message.replace(/^\d+:\s*/, "");
       try {
-        const payload = JSON.parse(raw) as CaptureCheck & { code?: string; error?: string };
-        if (payload.code === "address_choice" || payload.code === "needs_unit") {
+        const payload = JSON.parse(raw) as CaptureCheck & {
+          code?: string;
+          error?: string;
+          current?: RawHubSpotAddress;
+          next?: ShipAddressFields;
+        };
+        if (payload.code === "address_choice" || payload.code === "needs_unit" || payload.code === "replace_hubspot") {
           setAddressGate(payload);
           setUnitDraft(contact.address2 || "");
           toast({
@@ -413,7 +423,7 @@ export default function PaidOrders() {
         ? `${cleaned.length} items totaling ${formatMoney(lineTotal)}`
         : `${cleaned[0]!.productName} at ${formatMoney(parseAmount(cleaned[0]!.amount))}`;
     const proceed = window.confirm(`Create the paid HubSpot order for ${label}?`);
-    if (proceed) create.mutate();
+    if (proceed) create.mutate({});
   };
 
   return (
@@ -675,6 +685,7 @@ export default function PaidOrders() {
                       }));
                       setAddressDecision("");
                       setNoUnit(false);
+                      setAddressGate(null);
                       setCreated(null);
                     }}
                   />
@@ -693,6 +704,17 @@ export default function PaidOrders() {
                         setNoUnit(true);
                         setAddressGate(null);
                       }}
+                    />
+                  </div>
+                ) : null}
+                {addressGate?.code === "replace_hubspot" && addressGate.current && addressGate.next ? (
+                  <div className="sm:col-span-2">
+                    <ReplaceHubSpotCard
+                      current={addressGate.current}
+                      next={addressGate.next}
+                      pending={create.isPending}
+                      onReplace={() => create.mutate({ replaceHubspot: true })}
+                      onKeep={() => create.mutate({ keepOnOrder: true })}
                     />
                   </div>
                 ) : null}

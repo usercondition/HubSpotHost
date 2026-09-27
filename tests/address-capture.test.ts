@@ -31,7 +31,12 @@ import { readAddressAcknowledgment } from "../server/lib/address-capture";
 import { consumeClientAttempt, resetClientAttemptLimits } from "../server/lib/client-rate-limit";
 import { lookupClientOrder, expireOrderLink } from "../server/lib/order-links";
 import { orderUpdateAppliedAt } from "../server/lib/order-updates";
-import { reusedContactAddressAppliedAt, updateContact } from "../server/lib/paid-orders";
+import {
+  PaidOrderAddressConflict,
+  createPaidOrder,
+  reusedContactAddressAppliedAt,
+  updateContact,
+} from "../server/lib/paid-orders";
 import { publicAddressFieldsSchema } from "../shared/address-capture";
 import { configureTrustProxy } from "../server/lib/trust-proxy";
 import { HUBSPOT_WRITES_OFF_MESSAGE } from "../shared/address-capture";
@@ -675,32 +680,11 @@ describe("address capture save", { concurrency: 1 }, () => {
     delete process.env.SHIPENGINE_API_KEY;
   });
 
-  test("a reused contact address is logged before it is replaced", async () => {
+  test("a reused contact address is filled only when blank, otherwise confirmed or kept on the order", async () => {
     process.env.ORDER_LINKS_DB_FILE = join(dir, "reuse.db");
     resetOrderLinkStore();
     process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
-    let logId = 0;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const method = (init?.method ?? "GET").toUpperCase();
-      if (method === "GET") {
-        return jsonResponse({
-          id: "88",
-          properties: { address: "9 First St", city: "Romulus", state: "Michigan", zip: "48174", country: "United States" },
-        });
-      }
-      if (method === "PATCH") {
-        const rows = (await import("../server/lib/order-links")).getSqlite()
-          .prepare(`SELECT id, applied_at, old_text FROM contact_address_replacements`)
-          .all() as Array<{ id: number; applied_at: string | null; old_text: string }>;
-        assert.equal(rows.length, 1);
-        assert.equal(rows[0]?.applied_at, null);
-        assert.match(rows[0]?.old_text ?? "", /Michigan/);
-        logId = rows[0]?.id ?? 0;
-        return jsonResponse({ id: "88" });
-      }
-      throw new Error(method);
-    }) as typeof fetch;
-    await updateContact("88", {
+    const draft = {
       paymentConfirmed: true,
       fullName: "Wayne Hood",
       marketplaceUsername: "wayne",
@@ -714,9 +698,77 @@ describe("address capture save", { concurrency: 1 }, () => {
       productName: "Knight",
       amount: "40",
       conversationSummary: "paid",
-    });
+    };
+    const patches: Array<Record<string, string>> = [];
+    const dealDescriptions: string[] = [];
+    let current = { address: "", city: "", state: "", zip: "", country: "" };
+    let logId = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as { properties?: Record<string, string> })
+        : {};
+      if (url.includes("/crm/v3/properties/deals")) return jsonResponse({ results: [], ok: true });
+      if (url.includes("/contacts/search")) {
+        return jsonResponse({ results: [{ id: "88", properties: { firstname: "Wayne", lastname: "Hood", email: draft.email } }] });
+      }
+      if (method === "GET" && url.includes("/contacts/")) {
+        return jsonResponse({ id: "88", properties: current });
+      }
+      if (method === "PATCH" && url.includes("/contacts/")) {
+        if (body.properties?.address && current.address.trim()) {
+          const rows = (await import("../server/lib/order-links")).getSqlite()
+            .prepare(`SELECT id, applied_at, old_text FROM contact_address_replacements`)
+            .all() as Array<{ id: number; applied_at: string | null; old_text: string }>;
+          assert.equal(rows.length, 1);
+          assert.equal(rows[0]?.applied_at, null);
+          assert.match(rows[0]?.old_text ?? "", /9 First St/);
+          logId = rows[0]?.id ?? 0;
+        }
+        patches.push(body.properties ?? {});
+        return jsonResponse({ id: "88" });
+      }
+      if (method === "POST" && url.includes("/objects/deals")) {
+        dealDescriptions.push(body.properties?.description ?? "");
+        return jsonResponse({ id: "501" });
+      }
+      if (method === "PUT") return jsonResponse({ ok: true });
+      throw new Error(`${method} ${url}`);
+    }) as typeof fetch;
+
+    const filled = await updateContact("88", draft, { confirmAddressReplace: true });
+    assert.equal(filled, "filled");
+    assert.equal(patches.at(-1)?.address, "10909 Hannan Rd");
+    assert.equal(logId, 0);
+
+    current = { address: "9 First St", city: "Romulus", state: "Michigan", zip: "48174", country: "United States" };
+    await assert.rejects(
+      () => updateContact("88", draft, { confirmAddressReplace: true }),
+      (error: unknown) => {
+        assert.ok(error instanceof PaidOrderAddressConflict);
+        assert.equal(error.code, "replace_hubspot");
+        assert.match(error.current.address, /9 First St/);
+        assert.equal(error.next.street1, "10909 Hannan Rd");
+        return true;
+      },
+    );
+    assert.equal(patches.length, 1);
+
+    const replaced = await updateContact("88", draft, { replaceHubspot: true, confirmAddressReplace: true });
+    assert.equal(replaced, "replaced");
+    assert.equal(patches.at(-1)?.address, "10909 Hannan Rd");
     assert.ok(logId);
     assert.ok(reusedContactAddressAppliedAt(logId));
+
+    patches.length = 0;
+    const created = await createPaidOrder(draft, { keepOnOrder: true });
+    assert.equal(created.contactId, "88");
+    assert.equal(patches.at(-1)?.address, undefined);
+    const description = dealDescriptions.at(-1) ?? "";
+    assert.match(description, /Ship-to kept on this order/);
+    assert.match(description, /10909 Hannan Rd/);
+    assert.doesNotMatch(description, /9 First St/);
   });
 
   test("public address checks are rate limited and cached without tripping the label breaker", async () => {

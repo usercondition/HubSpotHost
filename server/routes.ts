@@ -179,7 +179,7 @@ import {
   getMarketplaceSendRequest,
   setMarketplaceSendRequest,
 } from "./lib/marketplace-send-request-store";
-import { createPaidOrder } from "./lib/paid-orders";
+import { createPaidOrder, PaidOrderAddressConflict } from "./lib/paid-orders";
 import {
   applyReviewEdits,
   clientLinkPath,
@@ -2895,7 +2895,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
     let result: Awaited<ReturnType<typeof createPaidOrder>>;
     let updated: ReturnType<typeof markOrderLinkCreated>;
     try {
-      result = await createPaidOrder(draft, { lineItems, orderGroup });
+      result = await createPaidOrder(draft, { lineItems, orderGroup, keepOnOrder: true });
       updated = markOrderLinkCreated(link.id, {
         contactId: result.contactId,
         deals: result.deals,
@@ -3316,10 +3316,22 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       result = await createPaidOrder(draft, {
         lineItems: lineItems ?? undefined,
         orderGroup,
+        replaceHubspot: paidBody.replaceHubspot === true,
+        keepOnOrder: paidBody.keepOnOrder === true,
+        confirmAddressReplace: true,
       });
       if (claim.state === "claimed") savePaidOrderCreate(idempotencyKey, result);
     } catch (error) {
       if (claim.state === "claimed") releasePaidOrderCreate(idempotencyKey);
+      if (error instanceof PaidOrderAddressConflict) {
+        return res.status(409).json({
+          ok: false,
+          code: error.code,
+          error: error.message,
+          current: error.current,
+          next: error.next,
+        });
+      }
       const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 502;
       return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
         ok: false,

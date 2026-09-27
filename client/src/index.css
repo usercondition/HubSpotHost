@@ -920,6 +920,15 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* Phone tab bar is 64px and fixed over the scroll pane. Last controls need room to sit above it. */
+  @media (max-width: 767px) {
+    .scroll-pane,
+    .scroll-pb-menu {
+      scroll-padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 24px);
+      padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 24px);
+    }
+  }
+
   .rule-label {
     font-size: 0.625rem;
     line-height: 0.875rem;

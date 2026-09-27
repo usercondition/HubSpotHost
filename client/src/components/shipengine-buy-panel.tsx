@@ -972,7 +972,7 @@ export function ShipEngineBuyPanel({
       </div>
     ) : shipToQuery.data ? (
       <div
-        className={cn("glance-item flex-col items-stretch gap-1", !shipToReady && "opacity-90")}
+        className={cn("w-full space-y-2", !shipToReady && "opacity-90")}
         data-tone={shipToReady ? "good" : "warn"}
         data-testid="panel-shipengine-ship-to"
       >
@@ -987,6 +987,7 @@ export function ShipEngineBuyPanel({
           <ShippingAddressFields
             idPrefix="label-ship"
             readOnly
+            columns="parcel"
             value={{
               street: shipToQuery.data.normalized.street1,
               street2: shipToQuery.data.normalized.street2,

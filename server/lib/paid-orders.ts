@@ -8,7 +8,7 @@ import type {
   PaidOrderDraft,
 } from "../../shared/schema";
 import { normalizeOrderLineKind, PRINT_LINE_KIND_PROPERTY, formatShippingStreetLine } from "../../shared/schema";
-import { normalizeShipAddress } from "../../shared/ship-address";
+import { normalizeShipAddress, type ShipAddressFields } from "../../shared/ship-address";
 
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
 
@@ -130,46 +130,157 @@ export function reusedContactAddressAppliedAt(id: number): string | null {
 
 const ADDRESS_KEYS = ["address", "city", "state", "zip", "country"] as const;
 
-/** Refresh shipping / name details when we reuse a Contact by email. */
-export async function updateContact(contactId: string, draft: PaidOrderDraft): Promise<void> {
+export type RawContactAddress = {
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+};
+
+/** Manual paid-order create asks before a non-blank contact address is replaced. */
+export class PaidOrderAddressConflict extends Error {
+  readonly status = 409;
+  readonly code = "replace_hubspot" as const;
+  readonly current: RawContactAddress;
+  readonly next: ShipAddressFields;
+
+  constructor(current: RawContactAddress, next: ShipAddressFields) {
+    super("This contact already has an address. Confirm Replace HubSpot address to overwrite it.");
+    this.name = "PaidOrderAddressConflict";
+    this.current = current;
+    this.next = next;
+  }
+}
+
+function draftShipAddress(draft: PaidOrderDraft): ShipAddressFields {
+  return normalizeShipAddress({
+    street1: clean(draft.address),
+    street2: clean(draft.address2),
+    city: clean(draft.city),
+    state: clean(draft.state),
+    zip: clean(draft.postalCode),
+    country: clean(draft.country),
+  }).normalized;
+}
+
+function readRawAddress(props: Record<string, string | null> | undefined): RawContactAddress {
+  return {
+    address: String(props?.address ?? ""),
+    city: String(props?.city ?? ""),
+    state: String(props?.state ?? ""),
+    zip: String(props?.zip ?? ""),
+    country: String(props?.country ?? ""),
+  };
+}
+
+function rawAddressBlank(raw: RawContactAddress): boolean {
+  return !raw.address.trim() && !raw.city.trim() && !raw.state.trim() && !raw.zip.trim() && !raw.country.trim();
+}
+
+function nextHasAddress(next: ShipAddressFields): boolean {
+  return Boolean(next.street1 || next.street2 || next.city || next.state || next.zip);
+}
+
+function addressesDiffer(current: RawContactAddress, next: ShipAddressFields): boolean {
+  const currentNorm = normalizeShipAddress({
+    street1: current.address,
+    street2: "",
+    city: current.city,
+    state: current.state,
+    zip: current.zip,
+    country: current.country,
+  }).normalized;
+  const currentLine = formatShippingStreetLine(currentNorm.street1, currentNorm.street2);
+  const nextLine = formatShippingStreetLine(next.street1, next.street2);
+  return (
+    currentLine !== nextLine ||
+    currentNorm.city !== next.city ||
+    currentNorm.state !== next.state ||
+    currentNorm.zip !== next.zip ||
+    currentNorm.country !== next.country
+  );
+}
+
+function addressProperties(next: ShipAddressFields): Record<string, string> {
+  const properties: Record<string, string> = {
+    address: formatShippingStreetLine(next.street1, next.street2),
+    city: next.city,
+    state: next.state,
+    zip: next.zip,
+    country: next.country,
+  };
+  for (const key of ADDRESS_KEYS) {
+    if (!properties[key]) delete properties[key];
+  }
+  return properties;
+}
+
+export function keptOrderAddressLine(draft: PaidOrderDraft): string {
+  const next = draftShipAddress(draft);
+  const street = formatShippingStreetLine(next.street1, next.street2);
+  const region = [next.city, [next.state, next.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  return [street, region, next.country].filter(Boolean).join(", ");
+}
+
+export type ContactAddressWrite = "filled" | "replaced" | "kept" | "unchanged";
+
+/**
+ * Refresh name and phone when a contact is reused.
+ * Address fields are written only when HubSpot's address is blank.
+ * A different non-blank address is replaced only after an explicit confirm,
+ * and the previous value is logged before that write.
+ */
+export async function updateContact(
+  contactId: string,
+  draft: PaidOrderDraft,
+  options?: { replaceHubspot?: boolean; keepOnOrder?: boolean; confirmAddressReplace?: boolean },
+): Promise<ContactAddressWrite> {
+  const next = draftShipAddress(draft);
   const properties = contactPropertiesFromDraft(draft, { includeEmail: false });
-  if (Object.keys(properties).length === 0) return;
-  const current = await hubspotRequest(
+  for (const key of ADDRESS_KEYS) delete properties[key];
+
+  const currentRecord = await hubspotRequest(
     `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=address,city,state,zip,country`,
     { method: "GET" },
   );
-  const props = (current?.properties ?? {}) as Record<string, string | null>;
-  const oldAddress = {
-    address: String(props.address ?? ""),
-    city: String(props.city ?? ""),
-    state: String(props.state ?? ""),
-    zip: String(props.zip ?? ""),
-    country: String(props.country ?? ""),
-  };
-  const replacing = ADDRESS_KEYS.some((key) => {
-    const previous = oldAddress[key].trim();
-    const next = properties[key]?.trim() ?? "";
-    return Boolean(previous) && Boolean(next) && previous !== next;
-  });
+  const current = readRawAddress((currentRecord?.properties ?? {}) as Record<string, string | null>);
+  const wantsAddress = nextHasAddress(next);
+  const differs = wantsAddress && !rawAddressBlank(current) && addressesDiffer(current, next);
+  let mode: ContactAddressWrite = "unchanged";
   let logId = 0;
-  if (replacing) {
+
+  if (wantsAddress && rawAddressBlank(current)) {
+    Object.assign(properties, addressProperties(next));
+    mode = "filled";
+  } else if (differs && options?.replaceHubspot === true) {
+    const nextRaw = addressProperties(next);
     logId = logReusedContactAddress({
       contactId,
-      oldText: JSON.stringify(oldAddress),
+      oldText: JSON.stringify(current),
       newText: JSON.stringify({
-        address: properties.address ?? "",
-        city: properties.city ?? "",
-        state: properties.state ?? "",
-        zip: properties.zip ?? "",
-        country: properties.country ?? "",
+        address: nextRaw.address ?? "",
+        city: nextRaw.city ?? "",
+        state: nextRaw.state ?? "",
+        zip: nextRaw.zip ?? "",
+        country: nextRaw.country ?? "",
       }),
     });
+    Object.assign(properties, nextRaw);
+    mode = "replaced";
+  } else if (differs && options?.confirmAddressReplace === true && options.keepOnOrder !== true) {
+    throw new PaidOrderAddressConflict(current, next);
+  } else if (differs) {
+    mode = "kept";
   }
+
+  if (Object.keys(properties).length === 0) return mode;
   await hubspotRequest(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
     method: "PATCH",
     body: JSON.stringify({ properties }),
   });
   if (logId) markReusedContactAddressApplied(logId);
+  return mode;
 }
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{8,80}$/;
@@ -238,6 +349,7 @@ async function createDeal(input: {
   lineIndex?: number;
   lineCount?: number;
   kind?: OrderLineKind;
+  keptShipTo?: string;
 }): Promise<HubSpotRecord> {
   const product = clean(input.productName, 180);
   const name = clean(input.contactName || input.marketplaceUsername || "Marketplace customer", 100);
@@ -260,6 +372,7 @@ async function createDeal(input: {
         }`
       : "",
     clean(input.conversationSummary, 1500),
+    input.keptShipTo ? `Ship-to kept on this order: ${clean(input.keptShipTo, 400)}` : "",
   ].filter(Boolean);
 
   return hubspotRequest("/crm/v3/objects/deals", {
@@ -293,6 +406,10 @@ export async function createPaidOrder(
   options?: {
     lineItems?: Array<{ productName: string; amount: string; kind?: OrderLineKind }>;
     orderGroup?: string;
+    replaceHubspot?: boolean;
+    keepOnOrder?: boolean;
+    /** Manual create shows Replace HubSpot address before a non-blank contact address changes. */
+    confirmAddressReplace?: boolean;
   },
 ): Promise<PaidOrderCreateResult> {
   const lines =
@@ -305,10 +422,17 @@ export async function createPaidOrder(
   const existing = await findContactByEmail(clean(draft.email));
   const contact = existing ?? (await createContact(draft));
   const contactStatus: "existing" | "created" = existing ? "existing" : "created";
+  let keptShipTo = "";
   if (existing) {
     try {
-      await updateContact(existing.id, draft);
-    } catch {
+      const addressWrite = await updateContact(existing.id, draft, {
+        replaceHubspot: options?.replaceHubspot === true,
+        keepOnOrder: options?.keepOnOrder === true,
+        confirmAddressReplace: options?.confirmAddressReplace === true,
+      });
+      if (addressWrite === "kept") keptShipTo = keptOrderAddressLine(draft);
+    } catch (error) {
+      if (error instanceof PaidOrderAddressConflict) throw error;
       // Contact reuse still succeeds even if a property patch fails.
     }
   }
@@ -332,6 +456,7 @@ export async function createPaidOrder(
       lineIndex: index,
       lineCount: lines.length,
       kind,
+      keptShipTo,
     });
     await associateDealToContact(deal.id, contact.id);
     const dealName = `${clean(line.productName, 180)} - ${clean(contactName, 100)}`.slice(0, 250);

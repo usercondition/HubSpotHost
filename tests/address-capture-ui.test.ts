@@ -81,6 +81,29 @@ function bodyFor(url: URL, method: string): unknown {
   if (url.pathname.endsWith("/address-provider")) return { ok: true, provider: EMPTY_SHOP.provider };
   if (url.pathname.includes("/production-queue")) return LABEL_QUEUE;
   if (url.pathname.includes("/shipping-labels/ship-to/")) return SHIP_TO;
+  if (url.pathname.endsWith("/shipengine/rates")) {
+    return {
+      ok: true,
+      dealId: "349919419126",
+      testMode: true,
+      messages: [],
+      addressTo: { name: "Wayne Hood", street1: "10909 Hannan Road", city: "Romulus", state: "MI", zip: "48174" },
+      rates: [
+        {
+          rateId: "se-rate-1",
+          amount: "7.20",
+          currency: "usd",
+          carrierId: "se-1",
+          carrierCode: "usps",
+          carrierFriendlyName: "USPS",
+          serviceCode: "usps_ground_advantage",
+          serviceType: "USPS Ground Advantage",
+          deliveryDays: 3,
+          attributes: ["cheapest"],
+        },
+      ],
+    };
+  }
   if (url.pathname.endsWith("/shipengine/status")) {
     return {
       ok: true,
@@ -389,7 +412,25 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
       await checkPaste.click({ force: true });
       await paste.locator("[data-testid='panel-did-you-mean']").waitFor();
       const pasteName = suffix === "phone" ? "address-paste-390.png" : "address-paste-1440.png";
-      await paste.screenshot({ path: join(artifactsDir, pasteName) });
+      if (suffix === "phone") {
+        const clear = await page.locator("[data-testid='button-use-standardized-address']").evaluate((el) => {
+          const pane = document.querySelector("[data-scroll-pane]");
+          el.scrollIntoView({ block: "end" });
+          const tab = document.querySelector(".ops-tabbar");
+          const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+          const rect = el.getBoundingClientRect();
+          if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+          const keep = document.querySelector("[data-testid='button-keep-typed-address']")?.getBoundingClientRect();
+          const use = el.getBoundingClientRect();
+          const limit = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+          return { keepTop: keep?.top ?? -1, keepBottom: keep?.bottom ?? 0, useTop: use.top, useBottom: use.bottom, limit };
+        });
+        assert.ok(clear.keepTop >= 0 && clear.keepBottom <= clear.limit - 1, `Keep what I typed is behind the bottom menu`);
+        assert.ok(clear.useTop >= 0 && clear.useBottom <= clear.limit - 1, `Use this address is behind the bottom menu`);
+        await page.screenshot({ path: join(artifactsDir, pasteName) });
+      } else {
+        await paste.screenshot({ path: join(artifactsDir, pasteName) });
+      }
     };
 
     await shootClient(1440, 900, "desktop");
@@ -431,7 +472,38 @@ test("address capture screenshots", { skip: !runAddressCaptureUi, timeout: 180_0
       await panel.waitFor();
       await page.locator("[data-testid='button-shipengine-pick-349919419126']").click();
       await panel.locator("[data-testid='panel-shipping-address']").waitFor();
-      await panel.screenshot({ path: join(artifactsDir, `labels-panel-${suffix}.png`) });
+      if (suffix === "1440") {
+        const aligned = await panel.evaluate(() => {
+          const ship = document.querySelector("[data-testid='panel-shipping-address']")?.getBoundingClientRect();
+          const weight = document.getElementById("shipengine-weightOz");
+          const parcel = weight?.closest(".grid")?.getBoundingClientRect();
+          return {
+            shipLeft: ship?.left ?? -1,
+            shipWidth: ship?.width ?? -1,
+            parcelLeft: parcel?.left ?? -1,
+            parcelWidth: parcel?.width ?? -1,
+          };
+        });
+        assert.ok(Math.abs(aligned.shipLeft - aligned.parcelLeft) <= 1, `ship-to left ${aligned.shipLeft} vs package ${aligned.parcelLeft}`);
+        assert.ok(Math.abs(aligned.shipWidth - aligned.parcelWidth) <= 1, `ship-to width ${aligned.shipWidth} vs package ${aligned.parcelWidth}`);
+        await panel.screenshot({ path: join(artifactsDir, "labels-panel-1440.png") });
+        return;
+      }
+      await page.locator("[data-testid='button-shipengine-get-rates']").click();
+      await page.locator("[data-testid='button-shipengine-buy']").waitFor();
+      const buyClear = await page.locator("[data-testid='button-shipengine-buy']").evaluate((el) => {
+        const pane = document.querySelector("[data-scroll-pane]");
+        el.scrollIntoView({ block: "end" });
+        const tab = document.querySelector(".ops-tabbar");
+        const tabTop = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+        const rect = el.getBoundingClientRect();
+        if (pane && rect.bottom > tabTop - 8) pane.scrollTop += rect.bottom - (tabTop - 16);
+        const next = el.getBoundingClientRect();
+        const limit = tab && tab.getBoundingClientRect().height > 0 ? tab.getBoundingClientRect().top : innerHeight;
+        return { top: next.top, bottom: next.bottom, limit };
+      });
+      assert.ok(buyClear.top >= 0 && buyClear.bottom <= buyClear.limit - 1, "Buy label is behind the bottom menu");
+      await page.screenshot({ path: join(artifactsDir, "labels-panel-390.png") });
     };
     await shootLabels(1440, 900, "1440");
     await shootLabels(390, 844, "390");

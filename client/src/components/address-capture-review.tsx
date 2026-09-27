@@ -133,11 +133,13 @@ export function ReplaceHubSpotCard({
   next,
   pending,
   onReplace,
+  onKeep,
 }: {
   current: RawHubSpotAddress;
   next: ShipAddressFields;
   pending?: boolean;
   onReplace: () => void;
+  onKeep?: () => void;
 }) {
   return (
     <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="panel-replace-hubspot">
@@ -155,15 +157,29 @@ export function ReplaceHubSpotCard({
           <p className="mt-1 whitespace-pre-line text-sm">{formatLabelAddress(next)}</p>
         </div>
       </div>
-      <Button
-        type="button"
-        className="w-full"
-        disabled={pending}
-        onClick={onReplace}
-        data-testid="button-replace-hubspot-address"
-      >
-        Replace HubSpot address
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          className="w-full"
+          disabled={pending}
+          onClick={onReplace}
+          data-testid="button-replace-hubspot-address"
+        >
+          Replace HubSpot address
+        </Button>
+        {onKeep ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={pending}
+            onClick={onKeep}
+            data-testid="button-keep-order-address"
+          >
+            Keep on this order
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

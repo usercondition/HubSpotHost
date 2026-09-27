@@ -42,19 +42,26 @@ export function ShippingAddressFields({
   onChange,
   idPrefix = "shipping",
   readOnly = false,
+  columns = "form",
 }: {
   value: ShippingFormAddress;
   onChange: (next: ShippingFormAddress) => void;
   idPrefix?: string;
   readOnly?: boolean;
+  /** `parcel` matches the Labels weight/length/width/height row. */
+  columns?: "form" | "parcel";
 }) {
   const us = countryIsUs(value.country);
   const stateCode = us ? normalizeUsStateProvince(value.state) : value.state;
   const set = (patch: Partial<ShippingFormAddress>) => onChange({ ...value, ...patch });
 
+  const wide = columns === "parcel" ? "col-span-2 sm:col-span-4" : "sm:col-span-2";
   return (
-    <div className="grid gap-4 sm:grid-cols-2" data-testid="panel-shipping-address">
-      <div className="sm:col-span-2">
+    <div
+      className={columns === "parcel" ? "grid w-full grid-cols-2 gap-3 sm:grid-cols-4" : "grid w-full gap-4 sm:grid-cols-2"}
+      data-testid="panel-shipping-address"
+    >
+      <div className={wide}>
         <AddressAutocomplete
           id={`${idPrefix}-street`}
           readOnly={readOnly}
@@ -72,7 +79,7 @@ export function ShippingAddressFields({
           }
         />
       </div>
-      <div className="space-y-1.5 sm:col-span-2">
+      <div className={`space-y-1.5 ${wide}`}>
         <Label htmlFor={`${idPrefix}-street-2`}>Apt/Unit</Label>
         <Input
           id={`${idPrefix}-street-2`}
