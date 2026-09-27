@@ -523,7 +523,10 @@ export async function attachShipAddressReadiness(
       return [dealId, readinessFromContact(contact, item)] as const;
     } catch {
       const cached = peekDealContactCache(dealId);
-      if (cached) return [dealId, readinessFromContact(cached, item)] as const;
+      if (cached) {
+        const readiness = readinessFromContact(cached, item);
+        if (readiness.addressStatus === "ready") return [dealId, readiness] as const;
+      }
       return [dealId, UNCHECKED_ADDRESS] as const;
     }
   });

@@ -153,6 +153,11 @@ export async function processWebhookInbox(now = new Date()): Promise<{ processed
       continue;
     }
     const summary = summarizeEvents([event]);
+    if (summary.contactCacheDealIds.length > 0 || summary.contactIds.length > 0) {
+      const { invalidateDealContactCache, invalidateDealsForContact } = await import("./deal-ops");
+      for (const dealId of summary.contactCacheDealIds) invalidateDealContactCache(dealId);
+      for (const contactId of summary.contactIds) invalidateDealsForContact(contactId);
+    }
     if (summary.cacheBust) {
       cacheBust = true;
       if (summary.dealIds.length === 0) {
@@ -173,8 +178,6 @@ export async function processWebhookInbox(now = new Date()): Promise<{ processed
 
   if (cacheBust) {
     invalidatePrintOrderDealsCache();
-    const { invalidateDealContactCache } = await import("./deal-ops");
-    invalidateDealContactCache();
     const { enqueueSyncHealthSoon } = await import("./print-ops-jobs");
     enqueueSyncHealthSoon();
     for (const eventId of bustIds) {

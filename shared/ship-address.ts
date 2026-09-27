@@ -164,6 +164,23 @@ export function deriveShipAddressReadiness(
   };
 }
 
+/**
+ * A live ship-to wins over the queue pill.
+ * ready:false must not keep a cached "ready" label.
+ * liveReady null means the live read has not arrived.
+ */
+export function addressStatusWithLiveShipTo(
+  queueStatus: AddressStatus | null | undefined,
+  liveReady: boolean | null,
+): AddressStatus {
+  if (queueStatus === "pickup") return "pickup";
+  if (liveReady === false) {
+    return queueStatus && queueStatus !== "ready" ? queueStatus : "partial";
+  }
+  if (liveReady === true) return "ready";
+  return queueStatus ?? "unknown";
+}
+
 export function addressStatusPill(status: AddressStatus): {
   label: string;
   tone: "good" | "warn" | "bad" | "neutral";

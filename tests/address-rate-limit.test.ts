@@ -3,17 +3,21 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HubSpotError, HUBSPOT_BUSY_MESSAGE, hubspotRequest, invalidateHubSpotPortalIdCache, invalidatePrintOrderDealsCache, invalidatePrintOrderStagesCache } from "../server/lib/hubspot";
+import { HubSpotError, hubspotRequest, invalidateHubSpotPortalIdCache, invalidatePrintOrderDealsCache, invalidatePrintOrderStagesCache } from "../server/lib/hubspot";
 import {
+  ageDealContactCache,
   expireDealContactCache,
   fetchDealAssociatedContact,
   invalidateDealContactCache,
+  buildDealOpsDetail,
 } from "../server/lib/deal-ops";
 import { attachShipAddressReadiness } from "../server/lib/production-queue";
 import { loadProductionQueue } from "../server/lib/queue-loader";
 import { resetOrderLinkStore } from "../server/lib/order-links";
 import { buildTrackerAssistantQueue } from "../server/lib/tracker-assistant";
 import { runShipmentEmailJob } from "../server/lib/shipment-notification-jobs";
+import { resetShippedEmailStore } from "../server/lib/shipped-email-store";
+import { addressStatusWithLiveShipTo } from "../shared/ship-address";
 import type { ProductionQueueItem, ProductionQueueResponse } from "../shared/schema";
 
 function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
@@ -264,6 +268,31 @@ describe("address rate limit", { concurrency: 1 }, () => {
     assert.equal(stale.shipReady[0]?.addressStatus, "ready");
     assert.equal(stale.shipReady[0]?.addressSummary, "Phoenix, AZ");
     assert.equal(stale.summary.needsAddress, 0);
+
+    ageDealContactCache(cachedDeal, 16 * 60 * 1000);
+    const expired = await attachShipAddressReadiness(queueOf([cachedDeal]));
+    assert.equal(expired.shipReady[0]?.addressStatus, "unknown");
+    assert.notEqual(expired.shipReady[0]?.addressStatus, "missing");
+
+    const partialDeal = "349912151800";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associations/contacts")) return jsonResponse({ results: [{ toObjectId: 9002 }] });
+      if (url.includes("/objects/contacts/")) {
+        return jsonResponse({
+          id: "9002",
+          properties: { firstname: "Glenn", lastname: "Chandler", address: "", city: "", state: "", zip: "" },
+        });
+      }
+      return jsonResponse({});
+    }) as typeof fetch;
+    const incomplete = await attachShipAddressReadiness(queueOf([partialDeal]));
+    assert.equal(incomplete.shipReady[0]?.addressStatus, "missing");
+    expireDealContactCache(partialDeal);
+    globalThis.fetch = (async () => jsonResponse({ message: "limit" }, 429, { "retry-after": "0" })) as typeof fetch;
+    const failedIncomplete = await attachShipAddressReadiness(queueOf([partialDeal]));
+    assert.equal(failedIncomplete.shipReady[0]?.addressStatus, "unknown");
+    assert.notEqual(failedIncomplete.shipReady[0]?.addressStatus, "missing");
   });
 
   test("unknown addresses stay out of the Ask Ops chase list", () => {
@@ -282,16 +311,59 @@ describe("address rate limit", { concurrency: 1 }, () => {
     );
   });
 
-  test("a busy contact read skips the shipped email", async (t) => {
+  test("a busy contact read throws so the shipment job can retry", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ship-email-"));
+    const previousEmailDb = process.env.SHIPPED_EMAIL_DB_FILE;
+    process.env.SHIPPED_EMAIL_DB_FILE = join(dir, "email.db");
+    resetShippedEmailStore();
     process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
     invalidateDealContactCache();
     t.after(() => {
       globalThis.fetch = originalFetch;
       invalidateDealContactCache();
+      resetShippedEmailStore();
+      if (previousEmailDb === undefined) delete process.env.SHIPPED_EMAIL_DB_FILE;
+      else process.env.SHIPPED_EMAIL_DB_FILE = previousEmailDb;
+      rmSync(dir, { recursive: true, force: true });
       if (previousToken === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
       else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
     });
     globalThis.fetch = (async () => jsonResponse({ message: "limit" }, 429, { "retry-after": "0" })) as typeof fetch;
+    await assert.rejects(
+      () =>
+        runShipmentEmailJob({
+          dealId: "346140673754",
+          trackingNumber: "1Z999",
+          notes: "UPS Ground",
+        }),
+      (error: unknown) => error instanceof HubSpotError && error.status === 429,
+    );
+  });
+
+  test("a missing contact skips the shipped email and is not retried", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ship-email-missing-"));
+    const previousEmailDb = process.env.SHIPPED_EMAIL_DB_FILE;
+    process.env.SHIPPED_EMAIL_DB_FILE = join(dir, "email.db");
+    resetShippedEmailStore();
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    invalidateDealContactCache();
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    t.after(() => {
+      console.warn = originalWarn;
+      globalThis.fetch = originalFetch;
+      invalidateDealContactCache();
+      resetShippedEmailStore();
+      if (previousEmailDb === undefined) delete process.env.SHIPPED_EMAIL_DB_FILE;
+      else process.env.SHIPPED_EMAIL_DB_FILE = previousEmailDb;
+      rmSync(dir, { recursive: true, force: true });
+      if (previousToken === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+      else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
+    });
+    globalThis.fetch = (async () => jsonResponse({ message: "missing" }, 404)) as typeof fetch;
     const result = await runShipmentEmailJob({
       dealId: "346140673754",
       trackingNumber: "1Z999",
@@ -299,7 +371,57 @@ describe("address rate limit", { concurrency: 1 }, () => {
     });
     assert.equal(result.sent, false);
     assert.equal(result.skipped, true);
-    assert.equal(result.reason, HUBSPOT_BUSY_MESSAGE);
+    assert.equal(result.reason, "No HubSpot contact linked");
+    assert.ok(warnings.some((line) => line.includes("not found")));
+  });
+
+  test("a live ship-to that is not ready does not keep a ready pill", () => {
+    assert.equal(addressStatusWithLiveShipTo("ready", false), "partial");
+    assert.equal(addressStatusWithLiveShipTo("missing", false), "missing");
+    assert.equal(addressStatusWithLiveShipTo("ready", true), "ready");
+    assert.equal(addressStatusWithLiveShipTo("unknown", null), "unknown");
+    assert.equal(addressStatusWithLiveShipTo("pickup", false), "pickup");
+  });
+
+  test("the drawer opens when the contact read is busy", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "drawer-contact-"));
+    const previousDb = process.env.ORDER_LINKS_DB_FILE;
+    process.env.ORDER_LINKS_DB_FILE = join(dir, "test.db");
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    resetOrderLinkStore();
+    invalidateDealContactCache();
+    invalidatePrintOrderStagesCache();
+    invalidateHubSpotPortalIdCache();
+    t.after(() => {
+      globalThis.fetch = originalFetch;
+      invalidateDealContactCache();
+      invalidatePrintOrderStagesCache();
+      invalidateHubSpotPortalIdCache();
+      resetOrderLinkStore();
+      if (previousToken === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+      else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
+      if (previousDb === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+      else process.env.ORDER_LINKS_DB_FILE = previousDb;
+      rmSync(dir, { recursive: true, force: true });
+    });
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associations/contacts")) return jsonResponse({ message: "limit" }, 429, { "retry-after": "0" });
+      if (url.includes("/objects/deals/")) {
+        return jsonResponse({ id: "346140673754", properties: { dealname: "Print - Daniel", dealstage: "ship", amount: "80" } });
+      }
+      if (url.includes("/pipelines/deals/")) {
+        return jsonResponse({ stages: [{ id: "ship", label: "Ready to Ship", displayOrder: 1, metadata: { isClosed: "false" } }] });
+      }
+      if (url.includes("/account-info/")) return jsonResponse({ portalId: 1 });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const detail = await buildDealOpsDetail("346140673754");
+    assert.equal("error" in detail, false);
+    if ("error" in detail) return;
+    assert.equal(detail.addressStatus, "unknown");
+    assert.equal(detail.packingSlip.contact.id, null);
+    assert.deepEqual(detail.packingSlip.contact.addressLines, []);
   });
 
   test("four simultaneous queue loads make at most one contact lookup per deal", async (t) => {

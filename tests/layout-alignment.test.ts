@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
@@ -1387,14 +1388,27 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       });
     });
 
-    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    const artifactsDir = process.env.ARTIFACTS_DIR?.trim() || "";
+    const saveShot = async (target: playwright.Locator, name: string) => {
+      if (!artifactsDir) return;
+      mkdirSync(artifactsDir, { recursive: true });
+      await target.screenshot({ path: join(artifactsDir, name) });
+    };
     const shootLabels = async (width: number, height: number, file: string) => {
       await page.setViewportSize({ width, height });
-      await page.goto(`${base}/#/labels`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${base}/?labels=${width}#/labels`, { waitUntil: "domcontentloaded" });
       const picks = current().locator("[data-testid='panel-shipengine-order-picks']");
       await picks.waitFor();
       const listText = await picks.innerText();
+      check(listText.includes("Address unchecked"), `unchecked address missing: ${listText}`);
       check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
+      if (width < 500) {
+        const joseRow = current().locator("[data-testid='button-shipengine-pick-342134173423']");
+        await joseRow.scrollIntoViewIfNeeded();
+        await saveShot(joseRow, "labels-unchecked-390.png");
+      } else {
+        await saveShot(picks, "labels-unchecked-1440.png");
+      }
       check(listText.includes("Daniel Ortega") && listText.includes("Address · Phoenix, AZ"), `Daniel address missing: ${listText}`);
       check(listText.includes("Address needs cleanup"), `Wayne cleanup pill missing: ${listText}`);
       const joseButton = current().locator("[data-testid='button-shipengine-pick-342134173423']");
@@ -1424,10 +1438,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(wayneText.includes("Address needs cleanup"), `Wayne card missing cleanup pill: ${wayneText}`);
       check(wayneText.includes("Suggested correction"), `Wayne card missing correction pill: ${wayneText}`);
       check(wayneText.includes("Address · Romulus, MI"), `Wayne live address missing: ${wayneText}`);
-      await picks.screenshot({ path: file });
+      await saveShot(picks, file);
     };
-    await shootLabels(1440, 900, "/opt/cursor/artifacts/labels-desktop.png");
-    await shootLabels(390, 844, "/opt/cursor/artifacts/labels-phone.png");
+    await shootLabels(1440, 900, "labels-desktop.png");
+    await shootLabels(390, 844, "labels-phone.png");
     await page.setViewportSize({ width: 1440, height: 900 });
 
     const lockedContext = await browser!.newContext({ deviceScaleFactor: 1 });

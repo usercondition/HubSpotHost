@@ -222,9 +222,17 @@ export class HubSpotError extends Error {
 /** Shown when a read fails because HubSpot is rate-limiting or unavailable. */
 export const HUBSPOT_BUSY_MESSAGE = "HubSpot busy, retry";
 
-/** 429, 5xx, and timeouts must not be treated as an empty CRM record. */
+/** Shown when the access token is missing. This is setup, not a busy HubSpot. */
+export const HUBSPOT_SETUP_MESSAGE = "HubSpot is not connected. Add the access token before loading a ship-to.";
+
+export function isHubSpotSetupError(error: unknown): boolean {
+  return error instanceof HubSpotError && /token not configured/i.test(error.message);
+}
+
+/** 429, 5xx, and timeouts. A missing token is a setup error, not a busy read. */
 export function isHubSpotBusyError(error: unknown): boolean {
-  return error instanceof HubSpotError && (error.status === 429 || error.status >= 500);
+  if (!(error instanceof HubSpotError) || isHubSpotSetupError(error)) return false;
+  return error.status === 429 || error.status >= 500;
 }
 
 const READ_RETRY_LIMIT = 2;
@@ -237,6 +245,13 @@ function isIdempotentHubSpotRead(method: string, path: string): boolean {
 function waitForRetry(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Spread retry waits so a burst of 429s does not line up on the same instant. */
+function withJitter(ms: number): number {
+  if (ms <= 0) return 0;
+  const spread = Math.max(1, Math.round(ms * 0.25));
+  return Math.max(0, ms + Math.floor(Math.random() * (spread * 2 + 1)) - spread);
 }
 
 function retryAfterMs(header: string | null): number | null {
@@ -326,7 +341,7 @@ export async function hubspotRequest(
       }
       attempt += 1;
       const backoff = 250 * 2 ** (attempt - 1);
-      await waitForRetry(Math.min(err.retryAfterMs ?? backoff, 8_000));
+      await waitForRetry(withJitter(Math.min(err.retryAfterMs ?? backoff, 8_000)));
     }
   }
 }

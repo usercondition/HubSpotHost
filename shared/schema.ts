@@ -2401,6 +2401,8 @@ export interface DealOpsDetail {
   stages: Array<{ id: string; label: string; closed: boolean }>;
   printers: Array<{ id: number; name: string; status: string }>;
   hubspotPortalId: string | null;
+  /** unknown when the contact read failed. The drawer still opens. */
+  addressStatus: "ready" | "partial" | "missing" | "pickup" | "unknown";
   writeGate: {
     dryRun: boolean;
     allowWrites: boolean;

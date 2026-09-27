@@ -41,7 +41,21 @@ import {
   isShopUsualBoxRate,
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
-import { addressStatusPill, type AddressStatus } from "@shared/ship-address";
+import { addressStatusPill, addressStatusWithLiveShipTo, type AddressStatus } from "@shared/ship-address";
+
+const HUBSPOT_BUSY_COPY = "HubSpot busy, retry";
+
+function shipToErrorCopy(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  const body = raw.replace(/^\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(body) as { error?: string };
+    if (parsed.error) return parsed.error;
+  } catch {
+    /* The body is already a sentence. */
+  }
+  return body || "Could not load ship-to address";
+}
 import { labelMatchContactKey } from "@shared/shipping-label-select";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
@@ -814,19 +828,20 @@ export function ShipEngineBuyPanel({
   };
 
   const addressChip = (item: ProductionQueueItem) => {
-    const live = item.dealId === dealId ? shipToQuery.data : undefined;
-    const liveError = item.dealId === dealId && shipToQuery.isError && !live?.ready;
+    const live = item.dealId === dealId && !shipToQuery.isError ? shipToQuery.data : undefined;
+    const liveError = item.dealId === dealId && shipToQuery.isError;
     if (liveError) {
+      const message = shipToErrorCopy(shipToQuery.error);
       return (
         <StatusPill
           tone="neutral"
           icon={MapPin}
-          label="HubSpot busy, retry"
+          label={message === HUBSPOT_BUSY_COPY ? HUBSPOT_BUSY_COPY : "Address unchecked"}
           testId={`status-shipengine-address-${item.dealId}`}
         />
       );
     }
-    const status: AddressStatus = live?.ready ? "ready" : (item.addressStatus ?? "unknown");
+    const status: AddressStatus = addressStatusWithLiveShipTo(item.addressStatus, live ? live.ready : null);
     const liveCity = (live?.normalized?.city || live?.contact.city)?.trim();
     const liveState = (live?.normalized?.state || live?.contact.state)?.trim();
     const summary = live?.ready
@@ -964,11 +979,14 @@ export function ShipEngineBuyPanel({
       <p className="text-xs text-muted-foreground">Loading HubSpot ship-to…</p>
     ) : shipToQuery.isError ? (
       <div
-        className="glance-item flex-col items-stretch gap-1"
+        className="glance-item flex-col items-stretch gap-2"
         data-tone="neutral"
         data-testid="panel-shipengine-ship-to"
       >
-        <p className="text-sm font-semibold">HubSpot busy, retry</p>
+        <p className="text-sm font-semibold">{shipToErrorCopy(shipToQuery.error)}</p>
+        <Button type="button" size="sm" variant="outline" data-testid="button-retry-ship-to" onClick={() => void shipToQuery.refetch()}>
+          Retry
+        </Button>
       </div>
     ) : shipToQuery.data ? (
       <div

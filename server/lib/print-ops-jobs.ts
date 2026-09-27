@@ -220,8 +220,8 @@ export async function enqueueShipmentEmailJob(
 
 export async function enqueueMarketplaceShipNoteJob(
   input: MarketplaceShipNoteJob,
-): Promise<{ queued: boolean; result?: ReturnType<typeof runMarketplaceShipNoteJob> }> {
-  if (!redisUrl()) return { queued: false, result: runMarketplaceShipNoteJob(input) };
+): Promise<{ queued: boolean; result?: Awaited<ReturnType<typeof runMarketplaceShipNoteJob>> }> {
+  if (!redisUrl()) return { queued: false, result: await runMarketplaceShipNoteJob(input) };
   if (!queue) startPrintOpsJobWorker();
   if (!queue) throw new Error("Print Ops Redis queue did not initialize");
   await queue.add("marketplace-ship-note", input, {

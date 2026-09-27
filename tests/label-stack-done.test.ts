@@ -9,7 +9,9 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { fulfillmentChecklists } from "../shared/schema";
 import { attachShippingLabelToDeals } from "../server/lib/shipping-label-attach";
+import { invalidateDealContactCache } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
+import { clearShippedEmailSent, recordShippedEmailSent, resetShippedEmailStore, wasShippedEmailSent } from "../server/lib/shipped-email-store";
 import { listStackState } from "../server/lib/priority-stack";
 import { invalidatePrintOrderDealsCache } from "../server/lib/hubspot";
 import { registerRoutes } from "../server/routes";
@@ -118,6 +120,121 @@ test("label attach counts in Out the door, a reprint does not re-send, and write
       else process.env[key] = value;
     };
     restore("ORDER_LINKS_DB_FILE", previous.db);
+    restore("DRY_RUN", previous.dry);
+    restore("ALLOW_HUBSPOT_WRITES", previous.writes);
+    restore("HUBSPOT_API_BASE", previous.base);
+    restore("HUBSPOT_ACCESS_TOKEN", previous.token);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a 404 contact read after the label is stored still returns the attachment", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "label-404-"));
+  const previous = {
+    db: process.env.ORDER_LINKS_DB_FILE,
+    dry: process.env.DRY_RUN,
+    writes: process.env.ALLOW_HUBSPOT_WRITES,
+    base: process.env.HUBSPOT_API_BASE,
+    token: process.env.HUBSPOT_ACCESS_TOKEN,
+    emailDb: process.env.SHIPPED_EMAIL_DB_FILE,
+  };
+  const mock = http.createServer((req, res) => {
+    const url = req.url || "";
+    if (url.includes("/associations/contacts") || url.includes("/objects/contacts/")) {
+      res.statusCode = 404;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "resource not found" }));
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    if (url.startsWith("/crm/v3/objects/deals/search")) {
+      res.end(JSON.stringify({ results: [DEAL] }));
+      return;
+    }
+    if (url.startsWith("/crm/v3/pipelines/deals/")) {
+      res.end(JSON.stringify({
+        stages: [{ id: "ready", label: "Ready to Ship", displayOrder: 1, metadata: { isClosed: "false" } }],
+      }));
+      return;
+    }
+    res.end(JSON.stringify({ results: [] }));
+  });
+  await new Promise<void>((resolve) => mock.listen(0, "127.0.0.1", () => resolve()));
+  const port = (mock.address() as { port: number }).port;
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "test.db");
+  process.env.SHIPPED_EMAIL_DB_FILE = join(dir, "email.db");
+  process.env.DRY_RUN = "true";
+  process.env.ALLOW_HUBSPOT_WRITES = "false";
+  process.env.HUBSPOT_API_BASE = `http://127.0.0.1:${port}`;
+  process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+  resetOrderLinkStore();
+  resetShippedEmailStore();
+  invalidatePrintOrderDealsCache();
+  invalidateDealContactCache();
+  clearShippedEmailSent();
+  try {
+    const attached = await attachShippingLabelToDeals({
+      dealIds: ["88001"],
+      trackingNumber: "1ZAFTER404",
+      notes: "UPS Ground",
+      postageUsd: "8.50",
+      packingDone: true,
+      labelBought: true,
+      markComplete: false,
+      messageChannel: "marketplace",
+      liveWrite: false,
+      shipengine: { labelId: "se_label_404", carrier: "ups", service: "ups_ground" },
+    });
+    assert.equal(attached.ok, true);
+    if (!attached.ok || attached.duplicate) throw new Error("expected the label to attach");
+    assert.equal(attached.checklist.trackingNumber, "1ZAFTER404");
+    assert.equal(attached.contact.id, null);
+    assert.equal(attached.buyerEmail?.sent, false);
+    assert.equal(wasShippedEmailSent("88001", "1ZAFTER404"), false);
+
+    const again = await attachShippingLabelToDeals({
+      dealIds: ["88001"],
+      trackingNumber: "1ZAFTER404",
+      notes: "UPS Ground",
+      postageUsd: "8.50",
+      packingDone: true,
+      labelBought: true,
+      markComplete: false,
+      messageChannel: "marketplace",
+      liveWrite: false,
+    });
+    assert.equal(again.ok, true);
+    if (!again.ok || !again.duplicate) throw new Error("expected a reattach");
+    assert.notEqual(again.buyerEmail?.reason, "Shipped email already sent for this tracking");
+
+    recordShippedEmailSent({ dealId: "88001", trackingNumber: "1ZAFTER404", email: "buyer@example.com", resendId: "re_1" });
+    const sent = await attachShippingLabelToDeals({
+      dealIds: ["88001"],
+      trackingNumber: "1ZAFTER404",
+      notes: "UPS Ground",
+      postageUsd: "8.50",
+      packingDone: true,
+      labelBought: true,
+      markComplete: false,
+      messageChannel: "marketplace",
+      liveWrite: false,
+    });
+    assert.equal(sent.ok, true);
+    if (!sent.ok || !sent.duplicate) throw new Error("expected the sent reattach");
+    assert.equal(sent.buyerEmail?.reason, "Shipped email already sent for this tracking");
+    assert.equal(sent.buyerEmail?.sent, false);
+  } finally {
+    mock.close();
+    resetOrderLinkStore();
+    resetShippedEmailStore();
+    invalidatePrintOrderDealsCache();
+    invalidateDealContactCache();
+    const restore = (key: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore("ORDER_LINKS_DB_FILE", previous.db);
+    restore("SHIPPED_EMAIL_DB_FILE", previous.emailDb);
     restore("DRY_RUN", previous.dry);
     restore("ALLOW_HUBSPOT_WRITES", previous.writes);
     restore("HUBSPOT_API_BASE", previous.base);

@@ -27,7 +27,9 @@ import {
   fetchPrintOrderPipelineStages,
   HubSpotError,
   HUBSPOT_BUSY_MESSAGE,
+  HUBSPOT_SETUP_MESSAGE,
   isHubSpotBusyError,
+  isHubSpotSetupError,
   clearDealPrintFileMetrics,
   patchDealPrintFileMetrics,
   type HubSpotDealRecord,
@@ -1726,6 +1728,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  function hubspotReadFailure(error: unknown, fallback: string): { status: number; error: string } {
+    if (isHubSpotSetupError(error)) return { status: 503, error: HUBSPOT_SETUP_MESSAGE };
+    if (isHubSpotBusyError(error)) return { status: 503, error: HUBSPOT_BUSY_MESSAGE };
+    const status = error instanceof HubSpotError && error.status >= 400 && error.status < 600 ? error.status : 502;
+    return { status, error: error instanceof Error ? error.message : fallback };
+  }
+
   /** Structured HubSpot ship-to for rate shopping. */
   app.get("/api/shipping-labels/ship-to/:dealId", async (req: Request, res: Response) => {
     if (rejectUnsecuredIntake(req, res)) return;
@@ -1734,7 +1743,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ ok: false, error: "Select a valid Print Order." });
     }
     try {
-      const contact = await fetchDealAssociatedContact(dealId);
+      const contact = await fetchDealAssociatedContact(dealId, { fresh: true });
       const ensured = await ensureAddressCheck({ dealId, contact });
       const cleaned = ensured.normalized;
       const address = ensured.address;
@@ -1779,14 +1788,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         missing,
       });
     } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
-      }
-      const status = error instanceof HubSpotError ? error.status : 502;
-      return res.status(status).json({
-        ok: false,
-        error: error instanceof Error ? error.message : "Could not load ship-to address",
-      });
+      const failure = hubspotReadFailure(error, "Could not load ship-to address");
+      return res.status(failure.status).json({ ok: false, error: failure.error });
     }
   });
 
@@ -1826,7 +1829,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     try {
-      const contact = await fetchDealAssociatedContact(parsed.data.dealId);
+      const contact = await fetchDealAssociatedContact(parsed.data.dealId, { fresh: true });
       const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealId);
       if (!gated.ok) {
         return res.status(gated.status).json(gated.body);
@@ -1856,8 +1859,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         messages: quoted.messages,
       });
     } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      if (error instanceof HubSpotError || isHubSpotSetupError(error) || isHubSpotBusyError(error)) {
+        const failure = hubspotReadFailure(error, "Could not load ship-to address");
+        return res.status(failure.status).json({ ok: false, error: failure.error });
       }
       const statusCode = error instanceof ShipEngineError ? error.status : 502;
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
@@ -1881,13 +1885,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     }
 
+    let purchase: Awaited<ReturnType<typeof purchaseShipEngineLabel>> | null = null;
     try {
-      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!);
+      const contact = await fetchDealAssociatedContact(parsed.data.dealIds[0]!, { fresh: true });
       const gated = await gateLabelAddress(contact, parsed.data.addressDecision, parsed.data.dealIds[0]);
       if (!gated.ok) {
         return res.status(gated.status).json(gated.body);
       }
-      const purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
+      purchase = await purchaseShipEngineLabel({ rateId: parsed.data.rateId });
       const recipientName = contact.name || null;
       const notes = buildShipNotesFromShipEngine({
         carrierCode: purchase.carrierCode || parsed.data.carrierCode,
@@ -1897,49 +1902,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         recipientName,
       });
       const postageUsd = purchase.amount || parsed.data.amount || "";
-      const attached = await attachShippingLabelToDeals({
-        dealIds: parsed.data.dealIds,
+      const label = {
+        labelId: purchase.labelId,
         trackingNumber: purchase.trackingNumber,
-        notes,
-        postageUsd,
-        packingDone: parsed.data.packingDone,
-        labelBought: true,
-        messageChannel: parsed.data.messageChannel,
-        liveWrite: parsed.data.liveWrite,
-        shipengine: {
-          labelId: purchase.labelId,
-          carrier: purchase.carrierCode,
-          service: purchase.serviceCode,
-        },
-      });
-      if (!attached.ok) {
-        return res.status(400).json({
-          ...attached,
+        trackingUrl: purchase.trackingUrl,
+        labelUrl: purchase.labelUrl,
+        amount: postageUsd,
+        currency: purchase.currency,
+        carrierCode: purchase.carrierCode || parsed.data.carrierCode,
+        serviceCode: purchase.serviceCode || parsed.data.serviceType,
+        testMode: purchase.testMode,
+      };
+      try {
+        const attached = await attachShippingLabelToDeals({
+          dealIds: parsed.data.dealIds,
+          trackingNumber: purchase.trackingNumber,
+          notes,
+          postageUsd,
+          packingDone: parsed.data.packingDone,
+          labelBought: true,
+          markComplete: true,
+          messageChannel: parsed.data.messageChannel,
+          liveWrite: parsed.data.liveWrite,
+          shipengine: {
+            labelId: purchase.labelId,
+            carrier: purchase.carrierCode,
+            service: purchase.serviceCode,
+          },
+        });
+        if (!attached.ok) {
+          return res.status(400).json({
+            ...attached,
+            shipengine: label,
+          });
+        }
+        return res.json({ ...attached, shipengine: label });
+      } catch (error) {
+        // The label is already bought. A contact read must not hide the URL.
+        return res.status(200).json({
+          ok: true,
+          attachedDealIds: parsed.data.dealIds,
+          contact: { id: null, name: "", email: "" },
+          buyerEmail: null,
+          marketplaceSend: null,
+          warning: error instanceof Error ? error.message : "Label bought; the follow-up contact read failed",
+          shipengine: label,
+        });
+      }
+    } catch (error) {
+      if (purchase) {
+        return res.status(200).json({
+          ok: true,
+          attachedDealIds: parsed.data.dealIds,
+          contact: { id: null, name: "", email: "" },
           shipengine: {
             trackingNumber: purchase.trackingNumber,
             labelUrl: purchase.labelUrl,
-            amount: postageUsd,
+            labelId: purchase.labelId,
             testMode: purchase.testMode,
           },
+          warning: error instanceof Error ? error.message : "Label bought; the follow-up contact read failed",
         });
       }
-      return res.json({
-        ...attached,
-        shipengine: {
-          labelId: purchase.labelId,
-          trackingNumber: purchase.trackingNumber,
-          trackingUrl: purchase.trackingUrl,
-          labelUrl: purchase.labelUrl,
-          amount: postageUsd,
-          currency: purchase.currency,
-          carrierCode: purchase.carrierCode || parsed.data.carrierCode,
-          serviceCode: purchase.serviceCode || parsed.data.serviceType,
-          testMode: purchase.testMode,
-        },
-      });
-    } catch (error) {
-      if (isHubSpotBusyError(error)) {
-        return res.status(503).json({ ok: false, error: HUBSPOT_BUSY_MESSAGE });
+      if (error instanceof HubSpotError || isHubSpotSetupError(error) || isHubSpotBusyError(error)) {
+        const failure = hubspotReadFailure(error, "Could not load ship-to address");
+        return res.status(failure.status).json({ ok: false, error: failure.error });
       }
       const statusCode = error instanceof ShipEngineError ? error.status : 502;
       return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
