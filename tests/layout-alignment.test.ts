@@ -782,12 +782,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
     };
     const settlePage = () =>
-      page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
+      page.locator("[data-testid='button-open-committed']:visible").last().waitFor({ state: "visible" });
     const openDrawer = async () => {
       // A fast tab change leaves exiting Stack copies in the crossfade. Clicking
       // one of those opens a drawer that unmounts when the copy finishes leaving.
       await settlePage();
-      await current().locator("[data-testid='button-open-committed']").first().evaluate((el) => (el as HTMLElement).click());
+      await page.locator("[data-testid='button-open-committed']:visible").last().click();
       await page.locator("[data-testid='drawer-deal-ops'] h2").waitFor();
       await page.waitForFunction(() => {
         const el = document.querySelector("[data-testid='drawer-deal-ops']");
@@ -802,7 +802,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     };
     const checkLibrary = async (label: string) => {
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const root = current();
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
@@ -868,7 +867,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       }
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
       await page.goto(`${base}/#/library?orderKey=${encodeURIComponent("deal:c1")}`, { waitUntil: "domcontentloaded" });
-      await settlePage();
       const filtered = current();
       await filtered.locator("[data-testid='library-row-file-castigator']").waitFor();
       await filtered.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
@@ -1171,6 +1169,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     });
     check(desktopOrigin.legendTop >= desktopOrigin.svgBottom - 1, "desktop origin legend is not below the map");
     check(desktopOrigin.svgWidth <= desktopOrigin.cardWidth + 1, "desktop origin map is wider than the card");
+    await page.locator("[data-testid='stats-origin-svg'] path").first().click();
+    await page.locator("[data-testid='stats-origin-detail']:visible").waitFor();
+    await page.locator("[data-testid^='origin-dot-']").first().click();
     if (artifactPath("stats-map-desktop.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-desktop.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];
@@ -1385,6 +1386,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     });
     check(phoneOrigin.legendTop >= phoneOrigin.svgBottom - 1, "phone origin legend is not below the map");
     check(phoneOrigin.svgWidth <= phoneOrigin.inner + 1, `phone origin map is wider than the screen (${phoneOrigin.svgWidth})`);
+    await page.locator("[data-testid='stats-origin-svg'] path").first().tap();
+    await page.locator("[data-testid='stats-origin-detail']:visible").waitFor();
+    await page.locator("[data-testid^='origin-dot-']").first().tap();
     if (artifactPath("stats-map-phone.png")) await current().locator("[data-testid='stats-origin-map']").screenshot({ path: artifactPath("stats-map-phone.png")! });
     await page.evaluate(() => {
       const saved: Array<[HTMLElement, string]> = [];

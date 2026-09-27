@@ -48,17 +48,19 @@ function text(value: unknown): string | null {
   return trimmed || null;
 }
 
-export async function loadDealShipTos(dealIds: string[]): Promise<Map<string, ShipToFields>> {
+export type ShipToLoad = { shipTos: Map<string, ShipToFields>; incomplete: boolean };
+
+export async function loadDealShipTos(dealIds: string[]): Promise<ShipToLoad> {
   const out = new Map<string, ShipToFields>();
   const ids = Array.from(new Set(dealIds.filter((id) => /^[0-9]{1,20}$/.test(id))));
-  if (ids.length === 0) return out;
+  if (ids.length === 0) return { shipTos: out, incomplete: false };
   const missing = ids.filter((id) => {
     const cached = shipToCache.get(id);
     if (!cached || cached.expiresAt < Date.now()) return true;
     out.set(id, cached.value);
     return false;
   });
-  if (missing.length === 0) return out;
+  if (missing.length === 0) return { shipTos: out, incomplete: false };
   try {
     const contactByDeal = new Map<string, string>();
     await inBatches(missing, async (slice) => {
@@ -101,7 +103,7 @@ export async function loadDealShipTos(dealIds: string[]): Promise<Map<string, Sh
       }
     }
   } catch {
-    return out;
+    return { shipTos: out, incomplete: true };
   }
-  return out;
+  return { shipTos: out, incomplete: false };
 }

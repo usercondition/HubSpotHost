@@ -8,7 +8,6 @@ import { INPUT_PROPERTIES, OUTPUT_PROPERTIES, getConfig, getToken } from "./conf
 import { PRINT_NEEDS_REPLY_PROPERTY, type PrintFileOrderSummary } from "../../shared/schema";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const PERFORMANCE_DEAL_LIMIT = 1_000;
 
 export const PRINT_ORDERS_PIPELINE = "default";
 
@@ -505,7 +504,7 @@ async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
       ],
       properties: [...PERFORMANCE_PROPERTIES],
       sorts: [{ propertyName: "createdate", direction: "DESCENDING" }],
-      limit: Math.min(100, PERFORMANCE_DEAL_LIMIT - deals.length),
+      limit: 100,
     };
     if (after) body.after = after;
 
@@ -521,19 +520,18 @@ async function searchPrintOrderDeals(): Promise<HubSpotDealRecord[]> {
           ? (result.properties as Record<string, string | null>)
           : {};
       deals.push({ id: result.id, properties });
-      if (deals.length >= PERFORMANCE_DEAL_LIMIT) break;
     }
 
     const next = data?.paging?.next?.after;
     after = typeof next === "string" && next.length > 0 ? next : undefined;
-  } while (after && deals.length < PERFORMANCE_DEAL_LIMIT);
+  } while (after);
 
   return deals;
 }
 
 /**
  * Read the Print Orders pipeline in pages of 100. This is intentionally
- * read-only and capped to keep one dashboard refresh bounded.
+ * read-only and paginated so Stats never silently omits older orders.
  * Concurrent callers share one in-flight search; results cache ~20s.
  */
 export async function fetchPrintOrderDeals(options?: {

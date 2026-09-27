@@ -201,6 +201,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
               return (
                 <path
                   key={shape.id}
+                  data-testid={`origin-state-${shape.id}`}
                   d={shape.d}
                   fill={shade(value, max, byRevenue)}
                   stroke={hot ? "hsl(186 72% 72%)" : "hsl(240 5% 22%)"}
@@ -228,6 +229,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
                 <g key={place.id} onMouseEnter={() => setFocus({ kind: "place", id: place.id })} onMouseLeave={() => setFocus(null)}>
                   <circle cx={point[0]} cy={point[1]} r={radius + 8} fill="transparent" />
                   <circle
+                    data-testid={`origin-dot-${place.id}`}
                     cx={point[0]}
                     cy={point[1]}
                     r={radius}
@@ -278,13 +280,14 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
           {origins.pickup.orders > 0 ? (
             <button type="button" className="inline-flex items-center gap-1.5" onClick={() => setSelected((current) => (current === "pickup" ? null : "pickup"))}>
               <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[hsl(158_50%_58%)]" />
-              Local pickup · San Diego · {origins.pickup.orders}
+              Local pickup · San Diego · <span className="numeric inline-block w-8 text-right">{origins.pickup.orders}</span>
             </button>
           ) : null}
-          <button type="button" className="text-left" onClick={() => setSelected((current) => (current === "unknown" ? null : "unknown"))} data-testid="button-origin-unknown">
-            Unknown location ({origins.unknown})
+          <button type="button" className="inline-flex items-center gap-1 text-left" onClick={() => setSelected((current) => (current === "unknown" ? null : "unknown"))} data-testid="button-origin-unknown">
+            Unknown location <span className="numeric inline-block w-8 text-right">({origins.unknown})</span>
           </button>
         </div>
+        {origins.incomplete ? <p className="text-sm text-amber-700 dark:text-amber-300" data-testid="stats-origin-busy">HubSpot busy, map may be incomplete.</p> : null}
         <p className="text-sm" data-testid="stats-origin-detail">{detail()}</p>
         {selected ? (
           <ul className="divide-y divide-border/70" data-testid="stats-origin-orders">
@@ -296,6 +299,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
           </ul>
         ) : null}
       </div>
+      <p className="mt-3 text-xs text-muted-foreground">ZIP centroids: GeoNames, CC BY 4.0.</p>
     </div>
   );
 }

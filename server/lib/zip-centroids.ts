@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { indexZipRows, type ZipIndex } from "../../shared/order-origins";
 
 let cached: ZipIndex | null = null;
+let missingFile = false;
 
 function bundleDir(): string | null {
   try {
@@ -31,7 +32,11 @@ function centroidFile(): string | null {
 export function loadUsZipCentroids(): ZipIndex {
   if (cached) return cached;
   const file = centroidFile();
-  if (!file) return indexZipRows([]);
+  if (!file) {
+    missingFile = true;
+    console.error("[zip-centroids] Bundled US ZIP centroid file is missing; the origin map cannot plot ZIP/city dots.");
+    return indexZipRows([]);
+  }
   const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, [string, string, number, number]>;
   const rows: Array<[string, string, string, number, number]> = [];
   for (const zip of Object.keys(raw)) {
@@ -41,4 +46,8 @@ export function loadUsZipCentroids(): ZipIndex {
   }
   cached = indexZipRows(rows);
   return cached;
+}
+
+export function zipCentroidsHealth() {
+  return { status: missingFile ? "missing" : "ok" };
 }

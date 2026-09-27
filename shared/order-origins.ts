@@ -68,6 +68,7 @@ export type OriginOrderRow = {
 };
 
 export type OrderOrigins = {
+  incomplete?: boolean;
   unknown: number;
   pickup: OriginTotals;
   states: OriginState[];
