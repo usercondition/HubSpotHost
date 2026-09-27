@@ -900,6 +900,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
           .filter((el) => el.getClientRects().length > 0)
           .map((el) => ({
             text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+            title: el.getAttribute("title") || "",
             scroll: el.scrollWidth,
             client: el.clientWidth,
             font: Number.parseFloat(getComputedStyle(el).fontSize),
@@ -908,8 +909,42 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const addressLabels = addressBlockers.filter((row) => /Address unchecked|Needs address/.test(row.text));
       check(addressLabels.length >= 2, `${label} address blockers missing`);
       for (const row of addressLabels) {
-        check(row.scroll <= row.client + 1, `${label} ${row.text} clipped (${row.scroll} > ${row.client})`);
         check(row.font >= 12, `${label} ${row.text} font is ${row.font}px`);
+        const phrase = row.text.includes("Address unchecked") ? "Address unchecked" : "Needs address";
+        check(row.title === phrase, `${label} ${phrase} title was ${row.title}`);
+        if (label === "phone") {
+          check(row.scroll <= row.client + 1, `${label} ${row.text} clipped (${row.scroll} > ${row.client})`);
+        }
+      }
+      if (label === "desktop") {
+        const orderTitle = await current().locator("[data-testid='button-open-committed'] .stack-title-line .stack-clip").evaluate((el) => ({
+          text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+          scroll: el.scrollWidth,
+          client: el.clientWidth,
+          title: el.getAttribute("title") || "",
+        }));
+        check(orderTitle.text === "Cerastus Chassis - Castigator", `order title was ${orderTitle.text}`);
+        check(orderTitle.title === orderTitle.text, "order title tooltip missing");
+        check(orderTitle.scroll <= orderTitle.client + 1, `order title clipped (${orderTitle.scroll} > ${orderTitle.client})`);
+        const badge = await current().locator("[data-testid='stack-row-offbook'] .stack-auto").evaluate((el) => ({
+          text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+          scroll: el.scrollWidth,
+          client: el.clientWidth,
+        }));
+        check(badge.text === "off-book", `off-book badge was ${badge.text}`);
+        check(badge.scroll <= badge.client + 1, `off-book badge clipped (${badge.scroll} > ${badge.client})`);
+        const money = await current().locator(".stack-row.stack-head, .stack-row.workspace-node").evaluateAll((els) => {
+          let head = "";
+          let row = "";
+          for (const el of els) {
+            const last = getComputedStyle(el).gridTemplateColumns.split(" ").slice(-3).join(" ");
+            if (!head && el.classList.contains("stack-head")) head = last;
+            if (!row && el.classList.contains("workspace-node")) row = last;
+          }
+          return { head, row };
+        });
+        check(money.head === money.row, `number columns moved (${money.head} vs ${money.row})`);
+        check(money.head.endsWith("150px 92px 128px"), `amount columns were ${money.head}`);
       }
       if (label === "desktop") {
         const templates = await current().locator(".stack-row").evaluateAll((els) => {

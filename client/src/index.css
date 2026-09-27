@@ -1115,7 +1115,7 @@
 
   .stack-row {
     display: grid;
-    grid-template-columns: 52px minmax(0, 1.6fr) 200px minmax(188px, 1.8fr) 150px 92px 128px;
+    grid-template-columns: 52px minmax(0, 2.2fr) 212px minmax(0, 1.5fr) 150px 92px 128px;
     column-gap: 16px;
     align-items: center;
     min-height: 60px;
@@ -1187,6 +1187,24 @@
     min-width: 0;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .stack-title-line {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stack-title-line > .stack-clip {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .stack-title-line > .stack-auto {
+    flex: none;
+    margin-left: 0;
   }
 
   .stack-sub {

@@ -514,11 +514,13 @@ export function StackRow({
         <span>{row.rank}</span>
       </span>
       <button type="button" title={who} className="stack-name text-left" onClick={row.kind === "bundle" ? onToggleExpand : onOpen} data-testid={`button-open-${row.key}`}>
-        <span className="stack-clip text-sm font-medium">
-          {title}
-          {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
+        <span className="stack-title-line">
+          <span className="stack-clip text-sm font-medium" title={title}>
+            {title}
+            {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
+          </span>
           {row.kind === "offbook" ? <span className="stack-auto">off-book</span> : null}
-          {row.kind === "bundle" ? <span className="ml-1 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
+          {row.kind === "bundle" ? <span className="shrink-0 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
         </span>
         <span className="stack-clip stack-sub">{rowSubtitle(row)}</span>
       </button>
