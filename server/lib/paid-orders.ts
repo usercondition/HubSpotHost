@@ -7,7 +7,6 @@ import type {
   PaidOrderDraft,
 } from "../../shared/schema";
 import { normalizeOrderLineKind, PRINT_LINE_KIND_PROPERTY, formatShippingStreetLine } from "../../shared/schema";
-import { normalizeShipAddress } from "../../shared/ship-address";
 
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
 
@@ -49,21 +48,13 @@ function contactPropertiesFromDraft(draft: PaidOrderDraft, options?: { includeEm
     firstname: name.firstName,
     lastname: name.lastName,
   };
-  const cleaned = normalizeShipAddress({
-    street1: clean(draft.address),
-    street2: clean(draft.address2),
+  const optional: Record<string, string> = {
+    phone: clean(draft.phone),
+    address: formatShippingStreetLine(draft.address, draft.address2),
     city: clean(draft.city),
     state: clean(draft.state),
     zip: clean(draft.postalCode),
-    country: clean(draft.country),
-  }).normalized;
-  const optional: Record<string, string> = {
-    phone: clean(draft.phone),
-    address: formatShippingStreetLine(cleaned.street1, cleaned.street2),
-    city: cleaned.city,
-    state: cleaned.state,
-    zip: cleaned.zip,
-    country: cleaned.street1 || cleaned.city ? cleaned.country : clean(draft.country),
+    country: clean(draft.country) || "United States",
   };
   if (options?.includeEmail !== false) {
     const email = clean(draft.email);

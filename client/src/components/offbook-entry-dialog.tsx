@@ -17,10 +17,6 @@ export function OffbookEntryDialog({
   const [targetDate, setTargetDate] = useState("");
   const [amount, setAmount] = useState("");
   const [blocker, setBlocker] = useState("");
-  const [shipStreet, setShipStreet] = useState("");
-  const [shipCity, setShipCity] = useState("");
-  const [shipState, setShipState] = useState("");
-  const [shipZip, setShipZip] = useState("");
   const [error, setError] = useState("");
 
   async function save() {
@@ -36,15 +32,6 @@ export function OffbookEntryDialog({
           targetDate: targetDate || null,
           amount: amount.trim(),
           blocker: blocker.trim(),
-          ...(mode === "ship"
-            ? {
-                shipStreet: shipStreet.trim(),
-                shipCity: shipCity.trim(),
-                shipState: shipState.trim(),
-                shipZip: shipZip.trim(),
-                shipCountry: "US",
-              }
-            : {}),
         },
         { headers },
       );
@@ -71,16 +58,6 @@ export function OffbookEntryDialog({
           <Button type="button" size="sm" variant={mode === "pickup" ? "default" : "outline"} onClick={() => setMode("pickup")}>Pickup</Button>
           <Button type="button" size="sm" variant={mode === "ship" ? "default" : "outline"} onClick={() => setMode("ship")}>Ship</Button>
         </div>
-        {mode === "ship" ? (
-          <div className="space-y-2" data-testid="panel-offbook-address">
-            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Street" value={shipStreet} onChange={(event) => setShipStreet(event.target.value)} data-testid="input-offbook-street" />
-            <div className="grid grid-cols-3 gap-2">
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="City" value={shipCity} onChange={(event) => setShipCity(event.target.value)} data-testid="input-offbook-city" />
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="State" value={shipState} onChange={(event) => setShipState(event.target.value)} data-testid="input-offbook-state" />
-              <input className="h-9 rounded-md border border-input bg-background px-2 text-sm" placeholder="ZIP" value={shipZip} onChange={(event) => setShipZip(event.target.value)} data-testid="input-offbook-zip" />
-            </div>
-          </div>
-        ) : null}
         <input type="date" className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} data-testid="input-offbook-date" />
         <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Amount (optional)" value={amount} onChange={(event) => setAmount(event.target.value)} data-testid="input-offbook-amount" />
         <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" placeholder="Blocker" value={blocker} onChange={(event) => setBlocker(event.target.value)} data-testid="input-offbook-blocker" />

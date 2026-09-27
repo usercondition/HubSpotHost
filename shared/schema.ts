@@ -1969,11 +1969,6 @@ export const priorityStackEntries = sqliteTable("priority_stack_entries", {
   doneAt: text("done_at"),
   doneAmount: text("done_amount").notNull().default(""),
   doneName: text("done_name").notNull().default(""),
-  shipStreet: text("ship_street").notNull().default(""),
-  shipCity: text("ship_city").notNull().default(""),
-  shipState: text("ship_state").notNull().default(""),
-  shipZip: text("ship_zip").notNull().default(""),
-  shipCountry: text("ship_country").notNull().default(""),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -2076,11 +2071,6 @@ export const offbookEntrySchema = z.object({
   tentative: z.boolean().optional(),
   hidden: z.boolean().optional(),
   steps: z.array(offbookStepSchema).max(12).optional(),
-  shipStreet: z.string().trim().max(200).optional().default(""),
-  shipCity: z.string().trim().max(100).optional().default(""),
-  shipState: z.string().trim().max(40).optional().default(""),
-  shipZip: z.string().trim().max(20).optional().default(""),
-  shipCountry: z.string().trim().max(40).optional().default(""),
 });
 
 export const stackDoneSchema = z.object({
@@ -2254,18 +2244,6 @@ export interface ProductionQueueItem {
   addressSummary: string | null;
   /** Copy-only Messenger/email chase when address is incomplete. */
   chaseDraft: string;
-  /**
-   * True when the normalized ship-to differs from the HubSpot contact fields.
-   * Warning only — this is not the red Needs address state.
-   */
-  addressNeedsCleanup?: boolean;
-  /**
-   * Last stored ShipEngine check for this normalized address.
-   * Absent when nothing is stored or the address hash changed.
-   * Unchecked (an outage) is not stored.
-   */
-  addressCheckStatus?: "verified" | "corrected" | "unverified" | "error";
-  addressCheckedAt?: string | null;
   /**
    * False when the buyer chose local pickup on intake (or notes say pickup).
    * Pickup orders do not need HubSpot ship-to or a shipping label.

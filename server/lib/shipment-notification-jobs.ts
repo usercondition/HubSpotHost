@@ -149,11 +149,6 @@ export async function runShipmentEmailJob(input: ShipmentEmailJob): Promise<Buye
 }
 
 /** Arm the existing Marketplace/OfferUp extension handoff from a worker. */
-export async function runMarketplaceShipNoteJob(input: MarketplaceShipNoteJob) {
-  const contact = await contactForShipment(input.dealId);
-  if (!contact?.name.trim()) {
-    if (contact) console.warn(`[shipment] deal ${input.dealId} has no contact name; marketplace note skipped`);
-    return { queued: false as const, skipped: true as const };
-  }
-  return enqueueMarketplaceShipmentSendRequest({ ...input, to: contact.name });
+export function runMarketplaceShipNoteJob(input: MarketplaceShipNoteJob) {
+  return enqueueMarketplaceShipmentSendRequest(input);
 }

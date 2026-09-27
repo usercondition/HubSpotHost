@@ -4,7 +4,6 @@ import { ExternalLink } from "lucide-react";
 import { GoogleDriveConnect } from "@/components/google-drive-connect";
 import { CodeLine } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useOwnerSession } from "@/hooks/use-owner-session";
 import { cn } from "@/lib/utils";
 import type { HealthResponse } from "@shared/schema";
 
@@ -132,9 +131,6 @@ const ENDPOINTS = [
   { method: "GET", path: "/api/shipping-labels/shipengine/status", note: "ShipEngine key + ship-from + carriers" },
   { method: "POST", path: "/api/shipping-labels/shipengine/rates", note: "Quote UPS/USPS rates for a Print Order" },
   { method: "POST", path: "/api/shipping-labels/shipengine/purchase", note: "Buy ShipEngine label → attach tracking" },
-  { method: "GET", path: "/api/shipping-labels/address-audit", note: "Open orders that need cleanup or are unverified or corrected" },
-  { method: "POST", path: "/api/shipping-labels/address-verify", note: "Run ShipEngine validation now for one Print Order" },
-  { method: "POST", path: "/api/shipping-labels/address-cleanup", note: "Write a cleaned address to HubSpot after confirm" },
 ];
 
 const DAILY_ROUTES = [
@@ -165,64 +161,6 @@ const SETUP_NAV: Array<{ id: SetupSection; label: string }> = [
   { id: "signatures", label: "Signatures" },
   { id: "endpoints", label: "Endpoints" },
 ];
-
-type AddressAuditRow = {
-  dealId: string;
-  dealName: string;
-  contactName: string | null;
-  needsCleanup: boolean;
-  validationStatus: string;
-};
-
-function AddressAuditList() {
-  const { isUnlocked, headers } = useOwnerSession();
-  const audit = useQuery<{ ok: true; rows: AddressAuditRow[] } | null>({
-    queryKey: ["/api/shipping-labels/address-audit", isUnlocked],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await fetch("/api/shipping-labels/address-audit", { headers });
-      if (response.status === 401) return null;
-      if (!response.ok) throw new Error("Could not load address audit");
-      return response.json();
-    },
-  });
-  if (!isUnlocked || !audit.data) return null;
-  const rows = audit.data.rows ?? [];
-  return (
-    <SettingsCard title="Address cleanup" testId="panel-address-audit">
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground" data-testid="text-address-audit-empty">
-          No open orders need an address check.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {rows.map((row) => (
-            <li key={row.dealId} className="text-sm" data-testid={`row-address-audit-${row.dealId}`}>
-              <p className="font-medium">
-                {row.dealName}
-                {row.contactName ? ` · ${row.contactName}` : ""}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {[
-                  row.needsCleanup ? "Address needs cleanup" : "",
-                  row.validationStatus === "corrected"
-                    ? "Suggested correction"
-                    : row.validationStatus === "unverified"
-                      ? "Unverified"
-                      : row.validationStatus === "error"
-                        ? "Address check failed"
-                        : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SettingsCard>
-  );
-}
 
 function SettingsCard({
   title,
@@ -278,7 +216,6 @@ export default function Setup() {
         {section === "overview" ? (
           <div className="space-y-4">
             <GoogleDriveConnect />
-            <AddressAuditList />
             {health.data?.storage?.warning ? (
               <SettingsCard title="Production data durability" testId="panel-setup-storage">
                 <p className="text-sm text-muted-foreground" data-testid="text-storage-warning">

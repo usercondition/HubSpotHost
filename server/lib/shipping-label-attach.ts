@@ -8,9 +8,7 @@ import {
   resolveCompletedPrintOrderStage,
   seedPrintDealCosts,
   updateDealCosts,
-  type DealAssociatedContact,
 } from "./deal-ops";
-import { wasShippedEmailSent } from "./shipped-email-store";
 import {
   getFulfillmentChecklist,
   listExistingTrackingAttachments,
@@ -24,7 +22,7 @@ import {
 } from "./print-ops-jobs";
 import { markStackDone } from "./priority-stack";
 import { loadProductionQueue } from "./queue-loader";
-import type { BuyerEmailSend, ShipmentEmailJob } from "./shipment-notification-jobs";
+import type { BuyerEmailSend } from "./shipment-notification-jobs";
 import type { ProductionQueueItem } from "../../shared/schema";
 
 export type LabelStageMove = {
@@ -57,12 +55,7 @@ export type AttachShippingLabelResult =
         source: "local" | "hubspot";
         updatedAt: string | null;
       };
-      marketplaceSend: {
-        queued: boolean;
-        id: number;
-        to: string;
-        channel: "marketplace" | "offerup";
-      } | null;
+      marketplaceSend: null;
       buyerEmail: BuyerEmailSend | null;
     }
   | {
@@ -90,120 +83,6 @@ function normalizeTracking(value: string | null | undefined): string {
   return (value ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 
-const EMPTY_LABEL_CONTACT: DealAssociatedContact = {
-  id: null,
-  name: "",
-  email: "",
-  phone: "",
-  addressLines: [],
-  street1: "",
-  street2: "",
-  city: "",
-  state: "",
-  zip: "",
-  country: "",
-};
-
-/** After a label is stored, a contact read must not fail the attach. */
-async function readContactForLabel(dealId: string): Promise<DealAssociatedContact> {
-  try {
-    return await fetchDealAssociatedContact(dealId, { fresh: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "contact read failed";
-    console.warn(`[shipment] contact read failed for deal ${dealId} after label attach: ${message}`);
-    return { ...EMPTY_LABEL_CONTACT };
-  }
-}
-
-const ALREADY_SENT: BuyerEmailSend = {
-  attempted: false,
-  sent: false,
-  skipped: true,
-  to: null,
-  id: null,
-  reason: "Shipped email already sent for this tracking",
-  error: null,
-};
-
-const REPRINT_KEPT: BuyerEmailSend = {
-  attempted: false,
-  sent: false,
-  skipped: true,
-  to: null,
-  id: null,
-  reason: "Reprint keeps the first completion",
-  error: null,
-};
-
-async function enqueueShippedEmail(input: ShipmentEmailJob): Promise<BuyerEmailSend> {
-  if (wasShippedEmailSent(input.dealId, input.trackingNumber)) return ALREADY_SENT;
-  try {
-    const dispatched = await enqueueShipmentEmailJob(input);
-    return (
-      dispatched.result ?? {
-        attempted: false,
-        sent: false,
-        skipped: false,
-        to: null,
-        id: null,
-        reason: "Shipped email queued",
-        error: null,
-      }
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not send the shipped email";
-    console.warn(`[shipment] shipped email for deal ${input.dealId} will retry: ${message}`);
-    return {
-      attempted: false,
-      sent: false,
-      skipped: false,
-      to: null,
-      id: null,
-      reason: message,
-      error: message,
-    };
-  }
-}
-
-async function enqueueMarketplaceNote(input: {
-  dealId: string;
-  trackingNumber: string;
-  channel: "marketplace" | "offerup";
-  contactName: string;
-}): Promise<{
-  queued: boolean;
-  id: number;
-  to: string;
-  channel: "marketplace" | "offerup";
-} | null> {
-  try {
-    const dispatched = await enqueueMarketplaceShipNoteJob({
-      dealId: input.dealId,
-      trackingNumber: input.trackingNumber,
-      to: input.contactName,
-      text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
-      channel: input.channel,
-    });
-    const result = dispatched.result;
-    if (dispatched.queued && !result) {
-      return { queued: true, id: 0, to: input.contactName, channel: input.channel };
-    }
-    if (!result || !("request" in result)) return null;
-    const request = result.request;
-    if (!request.to) return null;
-    return {
-      queued: result.queued,
-      id: request.id,
-      to: request.to,
-      channel: input.channel,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not queue the marketplace note";
-    console.warn(`[shipment] marketplace note for deal ${input.dealId} will retry: ${message}`);
-    return null;
-  }
-}
-
 export async function attachShippingLabelToDeals(
   input: AttachShippingLabelInput & {
     shipengine?: { labelId?: string; carrier?: string; service?: string };
@@ -224,18 +103,7 @@ export async function attachShippingLabelToDeals(
 
   if (toAttach.length === 0) {
     const primary = alreadyOnSelected[0] ?? alreadyOn[0]!;
-    const contact = await readContactForLabel(primary.dealId);
-    const buyerEmail = await enqueueShippedEmail({
-      dealId: primary.dealId,
-      trackingNumber: input.trackingNumber,
-      notes: primary.notes || sharedNote,
-    });
-    const marketplaceSend = await enqueueMarketplaceNote({
-      dealId: primary.dealId,
-      trackingNumber: input.trackingNumber,
-      channel: input.messageChannel,
-      contactName: contact.name,
-    });
+    const contact = await fetchDealAssociatedContact(primary.dealId);
     return {
       ok: true,
       duplicate: true,
@@ -262,8 +130,8 @@ export async function attachShippingLabelToDeals(
         source: primary.source,
         updatedAt: primary.updatedAt,
       },
-      marketplaceSend,
-      buyerEmail,
+      marketplaceSend: null,
+      buyerEmail: null,
     };
   }
 
@@ -361,22 +229,37 @@ export async function attachShippingLabelToDeals(
 
   const notifyDealId = attachedDealIds.find((dealId) => !reprintDealIds.has(dealId)) ?? null;
   const primaryDealId = notifyDealId ?? attachedDealIds[0]!;
-  const contact = await readContactForLabel(primaryDealId);
-  const buyerEmail = notifyDealId
-    ? await enqueueShippedEmail({
+  const contact = await fetchDealAssociatedContact(primaryDealId);
+  const postageAmount = Number(postage);
+  const marketplaceDispatch =
+    notifyDealId && contact.name && Number.isFinite(postageAmount) && postage !== ""
+      ? await enqueueMarketplaceShipNoteJob({
+          dealId: notifyDealId,
+          trackingNumber: input.trackingNumber,
+          to: contact.name,
+          text: `Your order has shipped. Tracking: ${input.trackingNumber}.`,
+          channel: input.messageChannel,
+        })
+      : null;
+
+  const buyerEmailDispatch = notifyDealId
+    ? await enqueueShipmentEmailJob({
         dealId: notifyDealId,
         trackingNumber: input.trackingNumber,
         notes: sharedNote,
       })
-    : REPRINT_KEPT;
-  const marketplaceSend = notifyDealId
-    ? await enqueueMarketplaceNote({
-        dealId: notifyDealId,
-        trackingNumber: input.trackingNumber,
-        channel: input.messageChannel,
-        contactName: contact.name,
-      })
     : null;
+  const buyerEmail =
+    buyerEmailDispatch?.result ??
+    ({
+      attempted: false,
+      sent: false,
+      skipped: false,
+      to: contact.email || null,
+      id: null,
+      reason: notifyDealId ? "Shipped email queued" : "Reprint keeps the first completion",
+      error: null,
+    } satisfies BuyerEmailSend);
 
   return {
     ok: true,
@@ -392,7 +275,16 @@ export async function attachShippingLabelToDeals(
       name: contact.name,
       email: contact.email,
     },
-    marketplaceSend,
+    marketplaceSend: marketplaceDispatch
+      ? {
+          // With no Redis configured, the synchronous fallback has already
+          // armed the existing Marketplace handoff; report that result.
+          queued: marketplaceDispatch.result?.queued ?? marketplaceDispatch.queued,
+          id: marketplaceDispatch.result?.request.id ?? 0,
+          to: contact.name,
+          channel: input.messageChannel,
+        }
+      : null,
     buyerEmail,
   };
 }

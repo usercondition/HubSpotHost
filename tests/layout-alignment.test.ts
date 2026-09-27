@@ -8,7 +8,6 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { createServer } from "node:net";
 import test from "node:test";
 import playwright from "playwright";
@@ -417,6 +416,8 @@ function bodyFor(input: string | URL) {
       amount: 80,
       tier: "committed",
       stage: "Ready to Ship",
+      blocker: "Needs address",
+      blockerSource: "auto",
       fulfillment: {
         dealId: "c1",
         addressVerified: false,
@@ -444,6 +445,8 @@ function bodyFor(input: string | URL) {
       stage: "Printing",
       tentative: true,
       targetDate: "2026-10-02",
+      blocker: "Address unchecked",
+      blockerSource: "auto",
     });
     const offbook = stackRow({
       key: "offbook",
@@ -570,53 +573,6 @@ function bodyFor(input: string | URL) {
     return { ok: true, configured: true, connected: false, email: "", reconnect: false };
   }
   return { ok: true };
-}
-
-const LABEL_ORDERS = [
-  { dealId: "346140673754", name: "Daniel Ortega", city: "Phoenix", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "349919419125", name: "Wayne Hood", city: "Romulus", state: "MI", status: "ready", needsCleanup: true },
-  { dealId: "349912151800", name: "Glenn Chandler", city: "Mesa", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "348746780377", name: "Angel Pineda", city: "Tempe", state: "AZ", status: "ready", needsCleanup: false },
-  { dealId: "342134173423", name: "Jose", city: "San Diego", state: "CA", status: "unknown", needsCleanup: false },
-];
-
-function labelsQueueBody() {
-  const shipReady = LABEL_ORDERS.map((order) => ({
-    ...queueItem(order.dealId, "ship_ready", 80),
-    dealName: `Print - ${order.name}`,
-    contactName: order.name,
-    stage: "Ready to Ship",
-    addressStatus: order.status,
-    addressSummary: order.status === "ready" ? `${order.city}, ${order.state}` : null,
-    addressNeedsCleanup: order.needsCleanup,
-    addressCheckStatus: order.needsCleanup ? "corrected" : order.status === "ready" ? "verified" : undefined,
-    addressCheckedAt: order.status === "ready" ? "2026-09-27T18:00:00.000Z" : null,
-    chaseDraft: "",
-  }));
-  return {
-    ok: true,
-    generatedAt: "2026-09-25T19:39:00.000Z",
-    hubspotPortalId: "1",
-    stages: [],
-    printers: [],
-    nextPrint: [],
-    inProduction: [],
-    shipReady,
-    blocked: [],
-    needsReply: [],
-    readyToPack: [],
-    recentFailures: [],
-    summary: {
-      nextPrint: 0,
-      inProduction: 0,
-      shipReady: shipReady.length,
-      blocked: 0,
-      needsReply: 0,
-      readyToPack: 0,
-      needsAddress: 0,
-      openOrders: shipReady.length,
-    },
-  };
 }
 
 function spread(values: number[]) {
@@ -1057,6 +1013,11 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal(await current().locator("[data-testid='button-bundle-selected']").count(), 0);
     const stackText = await current().getByTestId("stack-list").first().innerText();
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(stackText), false);
+    check(stackText.includes("Address unchecked"), `stack missing Address unchecked: ${stackText}`);
+    check(stackText.includes("Needs address"), `stack missing Needs address: ${stackText}`);
+    if (artifactPath("stack-address-desktop-1440.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
+    }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
@@ -1335,6 +1296,12 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
     await current().locator("[data-testid='stack-row-committed']").first().waitFor();
+    const phoneStackText = await current().getByTestId("stack-list").first().innerText();
+    check(phoneStackText.includes("Address unchecked"), `phone stack missing Address unchecked: ${phoneStackText}`);
+    check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
+    if (artifactPath("stack-address-phone-390.png")) {
+      await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
     if (artifactPath("stack-phone-390.png")) {
       await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
     }
@@ -1551,188 +1518,6 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const connectText = await current().locator("[data-testid='panel-google-drive']").innerText();
     check(/Connect Google Drive/.test(connectText), `connect copy was ${connectText}`);
     check(!/refresh|ya29|client_secret/i.test(connectText), "connect panel leaks a secret");
-
-    await page.unroute("**/api/**");
-    await page.route("**/api/**", async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname.startsWith("/api/production-queue")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(labelsQueueBody()),
-        });
-        return;
-      }
-      if (url.pathname.startsWith("/api/shipping-labels/shipengine/status")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            ok: true,
-            configured: true,
-            hasApiKey: true,
-            hasShipFrom: true,
-            testMode: true,
-            shipFrom: {
-              name: "Shop",
-              street1: "1 Main",
-              street2: "",
-              city: "San Diego",
-              state: "CA",
-              zip: "92101",
-              country: "US",
-            },
-            carriers: [
-              {
-                carrierId: "se-1",
-                carrierCode: "ups",
-                friendlyName: "UPS",
-                balance: 42,
-                requiresFundedAmount: true,
-              },
-            ],
-            funds: {
-              availableUsd: 42,
-              sharedWallet: true,
-              lowestBalanceUsd: 42,
-              fundedCarriers: [
-                { carrierId: "se-1", carrierCode: "ups", friendlyName: "UPS", balance: 42 },
-              ],
-            },
-          }),
-        });
-        return;
-      }
-      if (url.pathname.startsWith("/api/shipping-labels/ship-to/")) {
-        const dealId = url.pathname.split("/").pop() || "";
-        const order = LABEL_ORDERS.find((row) => row.dealId === dealId);
-        const wayne = dealId === "349919419125";
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            ok: true,
-            dealId,
-            ready: true,
-            hasContact: true,
-            missing: [],
-            needsCleanup: Boolean(order?.needsCleanup),
-            validation: wayne
-              ? {
-                  status: "corrected",
-                  checkedAt: "2026-09-27T18:00:00.000Z",
-                  suggestion: {
-                    street1: "10909 Hannan Rd",
-                    street2: "",
-                    city: "Romulus",
-                    state: "MI",
-                    zip: "48174",
-                    country: "US",
-                  },
-                  messages: [],
-                }
-              : {
-                  status: "verified",
-                  checkedAt: "2026-09-27T18:00:00.000Z",
-                  suggestion: null,
-                  messages: [],
-                },
-            original: wayne
-              ? {
-                  street1: "10909 Hannan Rd, Romulus, Michigan, 48174",
-                  street2: "",
-                  city: "Romulus",
-                  state: "Michigan",
-                  zip: "48174",
-                  country: "United States",
-                }
-              : undefined,
-            normalized: wayne
-              ? {
-                  street1: "10909 Hannan Rd",
-                  street2: "",
-                  city: "Romulus",
-                  state: "MI",
-                  zip: "48174",
-                  country: "US",
-                }
-              : undefined,
-            contact: {
-              id: "9",
-              name: order?.name ?? "Buyer",
-              email: "buyer@example.com",
-              phone: "",
-              addressLines: wayne
-                ? ["10909 Hannan Rd, Romulus, Michigan, 48174"]
-                : ["123 Main St", `${order?.city ?? "San Diego"}, ${order?.state ?? "CA"} 92101`],
-              city: order?.city ?? "San Diego",
-              state: order?.state ?? "CA",
-            },
-          }),
-        });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(bodyFor(url)),
-      });
-    });
-
-    const saveShot = async (target: playwright.Locator, name: string) => {
-      if (!artifactsDir) return;
-      mkdirSync(artifactsDir, { recursive: true });
-      await target.screenshot({ path: join(artifactsDir, name) });
-    };
-    const shootLabels = async (width: number, height: number, file: string) => {
-      await page.setViewportSize({ width, height });
-      await page.goto(`${base}/?labels=${width}#/labels`, { waitUntil: "domcontentloaded" });
-      const picks = current().locator("[data-testid='panel-shipengine-order-picks']");
-      await picks.waitFor();
-      const listText = await picks.innerText();
-      check(listText.includes("Address unchecked"), `unchecked address missing: ${listText}`);
-      check(!listText.includes("Needs address"), `labels list showed Needs address: ${listText}`);
-      if (width < 500) {
-        const joseRow = current().locator("[data-testid='button-shipengine-pick-342134173423']");
-        await joseRow.scrollIntoViewIfNeeded();
-        await saveShot(joseRow, "labels-unchecked-390.png");
-      } else {
-        await saveShot(picks, "labels-unchecked-1440.png");
-      }
-      check(listText.includes("Daniel Ortega") && listText.includes("Address · Phoenix, AZ"), `Daniel address missing: ${listText}`);
-      check(listText.includes("Address needs cleanup"), `Wayne cleanup pill missing: ${listText}`);
-      const joseButton = current().locator("[data-testid='button-shipengine-pick-342134173423']");
-      if ((await joseButton.count()) > 0) await joseButton.click();
-      await page.waitForFunction(() => {
-        const nodes = document.querySelectorAll("[data-testid='status-shipengine-address-342134173423']");
-        const node = nodes[nodes.length - 1];
-        const text = node && node.textContent ? node.textContent : "";
-        return text.indexOf("San Diego") >= 0;
-      });
-      const joseCard = current().locator("[data-testid='panel-shipengine-order-card-342134173423']");
-      const joseText = await joseCard.innerText();
-      check(!joseText.includes("Needs address"), `open label card showed Needs address: ${joseText}`);
-      check(joseText.includes("Address · San Diego, CA"), `live ship-to did not win: ${joseText}`);
-      check(joseText.includes("Verified"), `Jose ship-to missing Verified mark: ${joseText}`);
-      const wayneButton = current().locator("[data-testid='button-shipengine-pick-349919419125']");
-      if ((await wayneButton.count()) > 0) await wayneButton.click();
-      await page.waitForFunction(() => {
-        const nodes = document.querySelectorAll("[data-testid='panel-address-cleanup-diff']");
-        const node = nodes[nodes.length - 1];
-        const text = node && node.textContent ? node.textContent : "";
-        return text.indexOf("10909 Hannan Rd") >= 0 && text.indexOf("Before:") >= 0;
-      });
-      const wayneCard = current().locator("[data-testid='panel-shipengine-order-card-349919419125']");
-      const wayneText = await wayneCard.innerText();
-      check(!wayneText.includes("Needs address"), `Wayne card showed Needs address: ${wayneText}`);
-      check(wayneText.includes("Address needs cleanup"), `Wayne card missing cleanup pill: ${wayneText}`);
-      check(wayneText.includes("Suggested correction"), `Wayne card missing correction pill: ${wayneText}`);
-      check(wayneText.includes("Address · Romulus, MI"), `Wayne live address missing: ${wayneText}`);
-      await saveShot(picks, file);
-    };
-    await shootLabels(1440, 900, "labels-desktop.png");
-    await shootLabels(390, 844, "labels-phone.png");
-    await page.setViewportSize({ width: 1440, height: 900 });
 
     const lockedContext = await browser!.newContext({ deviceScaleFactor: 1 });
     const lockedPage = await lockedContext.newPage();

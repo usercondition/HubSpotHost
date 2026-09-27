@@ -558,7 +558,7 @@ test("a returning buyer's next private link prefills last submitted details", as
     shippingCity: submission.shippingCity,
     shippingState: submission.shippingState,
     shippingPostalCode: submission.shippingPostalCode,
-    shippingCountry: "US",
+    shippingCountry: submission.shippingCountry,
   });
   assert.equal(JSON.stringify(secondLookup.body.view).includes("MIG-RETURN-1"), false);
   assert.equal(JSON.stringify(secondLookup.body.view).includes(submission.confirmedItem), false);
