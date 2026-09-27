@@ -65,6 +65,7 @@ import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
 import { registerPrinterRoutes } from "./lib/printer-routes";
 import { firstIssue } from "./lib/validation";
+import { registerSupplyRoutes } from "./lib/supply-routes";
 import { shipByCalendarDate } from "../shared/ship-by";
 import { zipCentroidsHealth } from "./lib/zip-centroids";
 import { UltxParseError } from "./lib/ultx";
@@ -1001,34 +1002,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return res.json({ ok: true, match: findPriorClientDetails({ username, email }) });
   });
 
-  /**
-   * Owner-only supply ledger. Regular Amazon accounts have no clean, official
-   * order-feed integration, so the owner records receipt totals here. This
-   * remains independent from actual cost fields on a HubSpot deal to prevent
-   * double-counting the same spend in gross-profit calculations.
-   */
-  app.get("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    return res.json({
-      ok: true,
-      purchases: listSupplyPurchases(),
-      summary: buildSupplySpendSummary(),
-    });
-  });
-
-  app.post("/api/supplies", (req: Request, res: Response) => {
-    if (rejectUnsecuredIntake(req, res)) return;
-    const parsed = createSupplyPurchaseSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
-    }
-    const purchase = createSupplyPurchase(parsed.data);
-    return res.status(201).json({
-      ok: true,
-      purchase,
-      summary: buildSupplySpendSummary(),
-    });
-  });
+  registerSupplyRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Prefill the supply form from a receipt/invoice file (PDF, CSV, Excel,
