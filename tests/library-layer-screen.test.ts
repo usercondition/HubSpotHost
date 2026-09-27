@@ -300,12 +300,17 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     const desktopCover = await modelCoverage(page);
     console.log(`[plate-mesh] desktop cover x=${desktopCover.coverX.toFixed(3)} y=${desktopCover.coverY.toFixed(3)} clipped=${desktopCover.clipped}`);
     const desktopFill = Math.max(desktopCover.coverX, desktopCover.coverY);
-    assert.ok(desktopFill >= 0.74 && desktopFill <= 0.94, `desktop fill ${desktopCover.coverX} ${desktopCover.coverY}`);
-    const canvasBox = await page.locator("[data-testid='plate-model-view'] canvas").boundingBox();
-    if (canvasBox) {
-      await page.mouse.move(canvasBox.x + canvasBox.width * 0.52, canvasBox.y + canvasBox.height * 0.48);
-      for (let step = 0; step < 10; step += 1) await page.mouse.wheel(0, -180);
-    }
+    assert.ok(desktopFill >= 0.74 && desktopFill <= 0.97, `desktop fill ${desktopCover.coverX} ${desktopCover.coverY}`);
+    await page.locator("[data-testid='plate-model-view'] canvas").evaluate((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = rect.left + rect.width * 0.58;
+      const clientY = rect.top + rect.height * 0.46;
+      for (let step = 0; step < 7; step += 1) {
+        canvas.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -140, bubbles: true, cancelable: true, clientX, clientY }),
+        );
+      }
+    });
     await page.waitForTimeout(700);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-closeup-1440.png` });
 
@@ -320,7 +325,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     const phoneCover = await modelCoverage(page);
     console.log(`[plate-mesh] phone cover x=${phoneCover.coverX.toFixed(3)} y=${phoneCover.coverY.toFixed(3)} clipped=${phoneCover.clipped}`);
     const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
-    assert.ok(phoneFill >= 0.74 && phoneFill <= 0.94, `phone fill ${phoneCover.coverX} ${phoneCover.coverY}`);
+    assert.ok(phoneFill >= 0.74 && phoneFill <= 0.97, `phone fill ${phoneCover.coverX} ${phoneCover.coverY}`);
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();

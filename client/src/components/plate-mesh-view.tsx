@@ -113,6 +113,11 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
       target.addScaledVector(right, ((box.minX + box.maxX) / 2) * halfW);
       target.addScaledVector(camUp, ((box.minY + box.maxY) / 2) * halfH);
     }
+    const fitted = projectBox();
+    if (fitted) {
+      const spanNdc = Math.max(fitted.maxX - fitted.minX, fitted.maxY - fitted.minY);
+      if (spanNdc > 0.2) distance *= spanNdc / (fill * 2);
+    }
     camera.position.copy(target).addScaledVector(view, distance);
     camera.near = Math.max(distance / 200, 0.01);
     camera.far = Math.max(distance * 8, plateW + plateD);
