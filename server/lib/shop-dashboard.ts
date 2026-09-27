@@ -49,6 +49,20 @@ function day(value: string | null | undefined): string | null {
   return match?.[1] ?? null;
 }
 
+/** Material field is actual; same-file reprints never duplicate slicer fallback. */
+export function selectDashboardResinCost(material: string | null | undefined, plates: Array<{ sha256: string; resinCost: string | null }>) {
+  const entered = numberOrNull(material);
+  if (entered != null) return { cost: entered, estimated: false };
+  const hashes = new Set<string>(); let total = 0; let any = false;
+  for (const plate of plates) {
+    if (hashes.has(plate.sha256)) continue;
+    hashes.add(plate.sha256);
+    const cost = numberOrNull(plate.resinCost);
+    if (cost != null) { total += cost; any = true; }
+  }
+  return { cost: any ? Math.round((total + Number.EPSILON) * 100) / 100 : null, estimated: any };
+}
+
 export function collectShopDashboard(input: {
   deals: HubSpotDealRecord[];
   stages: HubSpotPipelineStage[];

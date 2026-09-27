@@ -16,14 +16,14 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function readBatch(path: string, body: object): Promise<any> {
+async function readBatch(path: string, body: object, sleep: (ms: number) => Promise<void> = wait): Promise<any> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await hubspotRequest(path, { method: "POST", body: JSON.stringify(body), readOnly: true });
     } catch (error) {
       if (!(error instanceof HubSpotError) || error.status !== 429 || attempt >= 2) throw error;
       const base = Math.min(10_000, error.retryAfterMs ?? 500 * 2 ** attempt);
-      await wait(base + Math.floor(Math.random() * 250));
+      await sleep(base + Math.floor(Math.random() * 250));
     }
   }
 }
@@ -52,12 +52,12 @@ function text(value: unknown): string | null {
 
 export type ShipToLoad = { shipTos: Map<string, ShipToFields>; incomplete: boolean; busy: boolean };
 
-export async function loadDealShipTos(dealIds: string[]): Promise<ShipToLoad> {
+export async function loadDealShipTos(dealIds: string[], options?: { sleep?: (ms: number) => Promise<void> }): Promise<ShipToLoad> {
   if (inflight) return inflight;
-  inflight = load(dealIds).finally(() => { inflight = null; });
+  inflight = load(dealIds, options?.sleep).finally(() => { inflight = null; });
   return inflight;
 }
-async function load(dealIds: string[]): Promise<ShipToLoad> {
+async function load(dealIds: string[], sleep?: (ms: number) => Promise<void>): Promise<ShipToLoad> {
   const out = new Map<string, ShipToFields>();
   const ids = Array.from(new Set(dealIds.filter((id) => /^[0-9]{1,20}$/.test(id))));
   if (ids.length === 0) return { shipTos: out, incomplete: false, busy: false };
@@ -72,7 +72,7 @@ async function load(dealIds: string[]): Promise<ShipToLoad> {
   try {
     const contactByDeal = new Map<string, string>();
     await inBatches(missing, async (slice) => {
-      const data = await readBatch("/crm/v4/associations/deals/contacts/batch/read", { inputs: slice.map((id) => ({ id })) });
+      const data = await readBatch("/crm/v4/associations/deals/contacts/batch/read", { inputs: slice.map((id) => ({ id })) }, sleep);
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const row of results) {
         const from = text(row?.from?.id);
@@ -88,7 +88,7 @@ async function load(dealIds: string[]): Promise<ShipToLoad> {
       const data = await readBatch("/crm/v3/objects/contacts/batch/read", {
         properties: ["city", "state", "zip", "country"],
         inputs: slice.map((id) => ({ id })),
-      });
+      }, sleep);
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const row of results) {
         const id = text(row?.id);
