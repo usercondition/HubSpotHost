@@ -38,6 +38,24 @@ function trim(value: string | null | undefined): string {
   return String(value ?? "").trim();
 }
 
+/** Queue row is local pickup: intake, a pickup stack bundle, or the address pill. */
+export function orderIsLocalPickup(input: {
+  shippingRequired?: boolean | null;
+  addressStatus?: string | null;
+}): boolean {
+  return input.shippingRequired === false || input.addressStatus === "pickup";
+}
+
+/** Labels should not warn "Needs label" for a pickup, or after a label is already bought. */
+export function showsNeedsLabel(input: {
+  shippingRequired?: boolean | null;
+  addressStatus?: string | null;
+  labelBought?: boolean | null;
+}): boolean {
+  if (orderIsLocalPickup(input)) return false;
+  return input.labelBought !== true;
+}
+
 /** True when intake or notes say the buyer is picking up (no ship-to). */
 export function looksLikePickup(input: {
   shippingRequired?: boolean | null;

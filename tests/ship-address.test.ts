@@ -5,7 +5,10 @@ import {
   draftAddressChaseMessage,
   dealNameForChase,
   addressStatusPill,
+  orderIsLocalPickup,
+  showsNeedsLabel,
 } from "../shared/ship-address";
+import { buildTrackerAssistantQueue } from "../server/lib/tracker-assistant";
 import { hubspotStageLooksShipReady, type ProductionQueueItem, type ProductionQueueResponse } from "../shared/schema";
 import { contactToShipEngineAddress } from "../server/lib/shipengine";
 import { queueItemsForShipAddressEnrichment } from "../server/lib/production-queue";
@@ -305,4 +308,103 @@ test("tracker assistant lists needs-address deals with chase drafts", () => {
   assert.match(answer.reply, /Hey Bea/);
   assert.match(answer.reply, /never send/i);
   assert.ok(answer.actions.some((action) => action.href.includes("/labels")));
+});
+
+test("local pickup is not a label gap", () => {
+  assert.equal(orderIsLocalPickup({ shippingRequired: false, addressStatus: "unknown" }), true);
+  assert.equal(orderIsLocalPickup({ addressStatus: "pickup" }), true);
+  assert.equal(showsNeedsLabel({ shippingRequired: false, addressStatus: "pickup", labelBought: false }), false);
+  assert.equal(showsNeedsLabel({ shippingRequired: true, addressStatus: "ready", labelBought: false }), true);
+  assert.equal(showsNeedsLabel({ shippingRequired: true, addressStatus: "ready", labelBought: true }), false);
+
+  const row = (
+    dealId: string,
+    pickup: boolean,
+  ): ProductionQueueItem =>
+    ({
+      dealId,
+      dealName: pickup ? "Local pickup bust" : dealId,
+      stageId: "s",
+      stage: "Ready to Ship",
+      amount: 10,
+      contactName: "Ada",
+      hasPlates: true,
+      requiresPlates: true,
+      promptAttachPlates: false,
+      costsIncomplete: false,
+      needsReply: false,
+      kitNeeded: 0,
+      kitReprint: 0,
+      unassignedPlateCount: 0,
+      assignedPrinterIds: [],
+      assignedPrinterNames: [],
+      plateCount: 1,
+      totalPrintTimeSeconds: 0,
+      totalResinMassG: 0,
+      latestPlateAttachedAt: null,
+      fulfillment: {
+        packingDone: false,
+        labelBought: false,
+        trackingPasted: false,
+        shipReady: true,
+        readyPercent: 100,
+        notes: null,
+        updatedAt: null,
+      },
+      priorityScore: 0,
+      bucket: "ship_ready",
+      readyToPack: true,
+      shipBy: "2026-09-20",
+      shipBySource: "derived",
+      shipByReason: "test",
+      shipByOverride: null,
+      shipPlanNote: null,
+      addressStatus: pickup ? "pickup" : "missing",
+      addressSummary: pickup ? "Local pickup" : null,
+      chaseDraft: "",
+      shippingRequired: !pickup,
+    }) as ProductionQueueItem;
+  const pickup = row("pickup-1", true);
+  const ship = row("ship-1", false);
+  const queue: ProductionQueueResponse = {
+    generatedAt: "2026-09-19T00:00:00.000Z",
+    hubspotPortalId: null,
+    stages: [],
+    printers: [],
+    nextPrint: [],
+    inProduction: [],
+    shipReady: [pickup, ship],
+    blocked: [],
+    needsReply: [],
+    readyToPack: [pickup, ship],
+    recentFailures: [],
+    summary: {
+      nextPrint: 0,
+      inProduction: 0,
+      shipReady: 2,
+      blocked: 0,
+      needsReply: 0,
+      readyToPack: 2,
+      needsAddress: 1,
+      openOrders: 2,
+    },
+  };
+  const built = buildTrackerAssistantQueue(queue);
+  assert.deepEqual(
+    built.needsLabel.map((deal) => deal.dealId),
+    ["ship-1"],
+  );
+
+  const answer = answerTrackerQuestionRules("What needs a label?", {
+    snapshot: emptySnapshot(),
+    awaitingLinks: [],
+    pendingLinks: [],
+    queue: {
+      ...built,
+      readyToPack: built.readyToPack.filter((deal) => deal.dealId === "pickup-1"),
+      needsLabel: [],
+      shipReady: built.shipReady,
+    },
+  });
+  assert.doesNotMatch(answer.reply, /no label/i);
 });

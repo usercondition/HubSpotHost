@@ -42,7 +42,7 @@ import {
   type ShippingRatePrefMode,
 } from "@shared/shipping-rate-prefs";
 import { ShippingAddressFields } from "@/components/shipping-address-fields";
-import { addressStatusPill, type AddressStatus } from "@shared/ship-address";
+import { addressStatusPill, orderIsLocalPickup, showsNeedsLabel, type AddressStatus } from "@shared/ship-address";
 import { labelMatchContactKey } from "@shared/shipping-label-select";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
@@ -452,6 +452,7 @@ export function ShipEngineBuyPanel({
     const picks = [];
     for (const item of [...shipReady, ...readyToPack, ...inProduction]) {
       if (seen.has(item.dealId)) continue;
+      if (orderIsLocalPickup(item)) continue;
       seen.add(item.dealId);
       picks.push(item);
       if (picks.length >= 10) break;
@@ -1517,9 +1518,9 @@ export function ShipEngineBuyPanel({
                             {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
-                            ) : (
+                            ) : showsNeedsLabel(item) ? (
                               <StatusPill tone="warn" icon={Ship} label="Needs label" />
-                            )}
+                            ) : null}
                             {packed ? (
                               <StatusPill tone="neutral" icon={PackageCheck} label="Packed" />
                             ) : null}
@@ -1647,9 +1648,9 @@ export function ShipEngineBuyPanel({
                             {cleanupChip(item)}
                             {labeled ? (
                               <StatusPill tone="good" icon={CheckCircle2} label="Labeled" />
-                            ) : (
+                            ) : showsNeedsLabel(item) ? (
                               <StatusPill tone="warn" icon={Ship} label="Needs label" />
-                            )}
+                            ) : null}
                             {packed ? (
                               <StatusPill tone="neutral" icon={PackageCheck} label="Packed" />
                             ) : null}
