@@ -384,6 +384,34 @@ describe("address cleanup confirm gate", { concurrency: 1 }, () => {
     });
     assert.equal(duringOutage.status, "unchecked");
     assert.equal(calls, 1);
+
+    saveAddressCheck({
+      dealId: "349919419129",
+      addressHash: first.addressHash,
+      status: "verified",
+      checkedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      matched: null,
+      messages: [],
+    });
+    const remembered = await ensureAddressCheck({
+      dealId: "349919419129",
+      contact,
+      refreshIfStale: true,
+    });
+    assert.equal(remembered.status, "verified");
+    assert.equal(remembered.fromStore, true);
+    assert.equal(calls, 1);
+
+    const blocked = await gateLabelAddress(contact, undefined, "349919419128");
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) {
+      assert.equal(blocked.status, 409);
+      assert.equal(blocked.body.code, "address_confirmation");
+      assert.match(String(blocked.body.error), /could not check/i);
+    }
+    const kept = await gateLabelAddress(contact, "override", "349919419128");
+    assert.equal(kept.ok, true);
+    if (kept.ok) assert.equal(kept.address.street1, "10909 Hannan Rd");
   });
 
   test("a corrected suggestion is stored and a stale check is refreshed before a label", async () => {
