@@ -238,8 +238,9 @@ export async function ensureAddressCheck(input: {
   if (!shouldCall && stored && hashMatches) {
     return fromStored(stored, normalized, address);
   }
+  const remembered = stored && hashMatches ? fromStored(stored, normalized, address) : null;
   if (!getShipEngineApiKey() || Date.now() < outageUntil) {
-    return blank;
+    return remembered ?? blank;
   }
 
   try {
@@ -268,7 +269,7 @@ export async function ensureAddressCheck(input: {
     };
   } catch {
     outageUntil = Date.now() + OUTAGE_BACKOFF_MS;
-    return blank;
+    return remembered ?? blank;
   }
 }
 

@@ -259,6 +259,17 @@ function formatShipFields(fields: ShipAddressFields | null | undefined): string 
   return [fields.street1, fields.street2, locality].filter(Boolean).join(", ");
 }
 
+function apiErrorText(error: Error): string {
+  const raw = error.message.replace(/^\d+:\s*/, "");
+  try {
+    const body = JSON.parse(raw) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim()) return body.error.trim();
+  } catch {
+    // Response was plain text.
+  }
+  return raw;
+}
+
 function readAddressConfirmation(error: Error): AddressConfirmation | null {
   const raw = error.message.replace(/^\d+:\s*/, "");
   try {
@@ -577,7 +588,7 @@ export function ShipEngineBuyPanel({
       }
       toast({
         title: "Could not get rates",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: apiErrorText(error).slice(0, 240),
         variant: "destructive",
       });
     },
@@ -663,7 +674,7 @@ export function ShipEngineBuyPanel({
       }
       toast({
         title: "Could not buy label",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: apiErrorText(error).slice(0, 240),
         variant: "destructive",
       });
     },
@@ -705,7 +716,7 @@ export function ShipEngineBuyPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not add funds",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 280),
+        description: apiErrorText(error).slice(0, 280),
         variant: "destructive",
       });
     },
@@ -740,7 +751,7 @@ export function ShipEngineBuyPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not verify the address",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: apiErrorText(error).slice(0, 240),
         variant: "destructive",
       });
     },
@@ -771,7 +782,7 @@ export function ShipEngineBuyPanel({
     onError: (error: Error) => {
       toast({
         title: "Could not fix the address",
-        description: error.message.replace(/^\d+:\s*/, "").slice(0, 240),
+        description: apiErrorText(error).slice(0, 240),
         variant: "destructive",
       });
     },
@@ -1283,7 +1294,7 @@ export function ShipEngineBuyPanel({
               Suggestion: {formatShipFields(addressPrompt.suggestion)}
             </p>
           ) : (
-            <p className="text-sm text-muted-foreground">ShipEngine could not verify this address.</p>
+            <p className="text-sm text-muted-foreground">No corrected address came back. Keep the contact address to continue.</p>
           )}
           <div className="flex flex-wrap gap-2">
             <Button

@@ -724,15 +724,41 @@ export async function gateLabelAddress(
     };
   }
   if (ensured.status === "unchecked") {
+    if (!getShipEngineApiKey()) {
+      return {
+        ok: false,
+        status: 503,
+        body: {
+          ok: false,
+          code: "address_unchecked",
+          error: "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
+        },
+      };
+    }
+    if (decision === "override") {
+      return {
+        ok: true,
+        address: ensured.address,
+        normalized: ensured.normalized,
+        validation: {
+          status: "unverified",
+          matched: null,
+          messages: ["ShipEngine could not check this address."],
+          differs: false,
+        },
+      };
+    }
     return {
       ok: false,
-      status: 503,
+      status: 409,
       body: {
         ok: false,
-        code: "address_unchecked",
-        error: getShipEngineApiKey()
-          ? "ShipEngine could not check this address. Nothing was bought."
-          : "Add SHIPENGINE_API_KEY on Railway (ShipStation API → API Keys).",
+        code: "address_confirmation",
+        error: "ShipEngine could not check this address.",
+        original: ensured.normalized.original,
+        normalized: ensured.normalized.normalized,
+        suggestion: null,
+        messages: ["ShipEngine could not check this address. Keep the contact address to see rates. Nothing was bought."],
       },
     };
   }
