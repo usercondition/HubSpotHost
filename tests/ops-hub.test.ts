@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { upsertFulfillmentChecklist, getFulfillmentChecklist } from "../server/lib/fulfillment";
 import { createProductionFailure, listFailuresForDeal } from "../server/lib/failures";
 import { buildProductionQueue, deriveShipBy } from "../server/lib/production-queue";
+import { createBundle } from "../server/lib/priority-stack";
+import { buildTrackerAssistantQueue } from "../server/lib/tracker-assistant";
 import { buildResinReorderSuggestions } from "../server/lib/resin-reorder";
 import { assignPlateToPrinter } from "../server/lib/deal-ops";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
@@ -640,4 +642,31 @@ test("resin reorder suggests buy when sealed stock is empty and burn is high", (
   const grey = result.suggestions.find((item) => item.productId === 1);
   assert.ok(grey);
   assert.ok(grey!.urgency === "soon" || grey!.urgency === "watch" || grey!.suggestedBuyCount >= 1);
+});
+
+test("a pickup stack bundle is not treated as needing a label", async () => {
+  await withTempDb(() => {
+    createBundle({ label: "Saturday pickup", mode: "pickup", dealIds: ["1002"] });
+    const queue = buildProductionQueue(
+      sampleSnapshot([
+        {
+          dealId: "1002",
+          dealName: "Kit set - Beau",
+          stageId: "s2",
+          stage: "Ready to Ship",
+          amount: 220,
+          hasPlates: true,
+          promptAttachPlates: false,
+          requiresPlates: true,
+          closeDate: null,
+          contactName: "Beau",
+        },
+      ]),
+    );
+    const beau = [...queue.shipReady, ...queue.inProduction, ...queue.nextPrint].find((item) => item.dealId === "1002");
+    assert.equal(beau?.shippingRequired, false);
+    assert.equal(beau?.addressStatus, "pickup");
+    const assistant = buildTrackerAssistantQueue(queue);
+    assert.equal(assistant.needsLabel.some((deal) => deal.dealId === "1002"), false);
+  });
 });

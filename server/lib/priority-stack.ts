@@ -567,6 +567,26 @@ export function markStackDone(key: string, queue: ProductionQueueItem[], now = n
   return false;
 }
 
+/** Deal ids sitting in a pickup stack bundle. Those orders do not need a shipping label. */
+export function pickupBundleDealIds(): Set<string> {
+  const database = getDb();
+  const pickupIds = new Set(
+    database
+      .select({ id: priorityStackBundles.id })
+      .from(priorityStackBundles)
+      .where(eq(priorityStackBundles.fulfillmentMode, "pickup"))
+      .all()
+      .map((row) => row.id),
+  );
+  if (pickupIds.size === 0) return new Set();
+  const deals = new Set<string>();
+  for (const entry of database.select().from(priorityStackEntries).all()) {
+    if (entry.kind !== "deal" || !entry.hubspotDealId || entry.bundleId == null) continue;
+    if (pickupIds.has(entry.bundleId)) deals.add(entry.hubspotDealId);
+  }
+  return deals;
+}
+
 /** HubSpot deals a Picked up action should close. Shipping labels close through attach. */
 export function pickupDealIdsForStackDone(key: string, queue: ProductionQueueItem[]): string[] {
   const database = getDb();
