@@ -131,6 +131,8 @@ export function slimQueueDeal(item: ProductionQueueItem): TrackerAssistantQueueD
 export function buildTrackerAssistantQueue(queue: ProductionQueueResponse): TrackerAssistantQueueContext {
   const needsLabelSource = [...queue.shipReady, ...queue.inProduction].filter(
     (item) =>
+      item.shippingRequired !== false &&
+      item.addressStatus !== "pickup" &&
       (item.bucket === "ship_ready" || item.fulfillment.shipReady || item.fulfillment.readyPercent >= 80) &&
       (!item.fulfillment.labelBought || !item.fulfillment.trackingPasted),
   );
@@ -484,7 +486,7 @@ export function answerTrackerQuestionRules(question: string, ctx: TrackerAssista
       );
       for (const deal of packList.slice(0, 5)) {
         const gaps: string[] = [];
-        if (!deal.labelBought) gaps.push("no label");
+        if (!deal.labelBought && deal.addressStatus !== "pickup") gaps.push("no label");
         if (!deal.trackingPasted) gaps.push("no tracking");
         if (!deal.readyToPack && gaps.length === 0) gaps.push("confirm packing");
         lines.push(

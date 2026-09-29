@@ -14,6 +14,7 @@ import {
 } from "../../shared/schema";
 import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
+import { pickupBundleDealIds } from "./priority-stack";
 import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
 import { listFulfillmentChecklists, withDerivedCostsEntered, withStoredAddressVerification } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
@@ -264,6 +265,7 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       .map((row) => String(row.dealId)),
   );
   const shippingByDeal = intakeShippingRequiredByDealId();
+  const pickupBundleIds = pickupBundleDealIds();
   const costsIncomplete = new Set(
     snapshot.attention.filter((item) => item.issueKey === "costs_incomplete").map((item) => item.dealId),
   );
@@ -314,8 +316,9 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
       fulfillment: checklistForDeal(deal.dealId, checklists.get(deal.dealId), deal.costsComplete),
     };
     const bucket = classifyBucket(base);
-    const shippingRequired =
-      shippingByDeal.has(deal.dealId)
+    const shippingRequired = pickupBundleIds.has(deal.dealId)
+      ? false
+      : shippingByDeal.has(deal.dealId)
         ? shippingByDeal.get(deal.dealId) !== false
         : !looksLikePickup({
             shipPlanNote: deal.shipPlanNote,
