@@ -7,6 +7,7 @@ import {
   wasShippedEmailSent,
 } from "../server/lib/shipped-email-store";
 import { resendConfigured, sendShippedEmailViaResend } from "../server/lib/resend-shipped-email";
+import { buyerEmailToastHint } from "../shared/shipping-email-template";
 
 test("shipped email store is idempotent per deal+tracking", () => {
   process.env.SHIPPED_EMAIL_DB_FILE = ":memory:";
@@ -59,4 +60,18 @@ test("Resend send skips when contact has no email", async () => {
   }
   delete process.env.RESEND_API_KEY;
   delete process.env.RESEND_FROM_EMAIL;
+});
+
+test("buy toast names a failed or queued shipped email without sending", () => {
+  assert.equal(buyerEmailToastHint(null), "");
+  assert.equal(
+    buyerEmailToastHint({ sent: true, to: "buyer@example.com" }),
+    " · emailed buyer@example.com",
+  );
+  assert.match(buyerEmailToastHint({ error: "domain not verified" }), /email failed: domain not verified/);
+  assert.equal(
+    buyerEmailToastHint({ skipped: true, reason: "Resend not configured" }),
+    " · email skipped (Resend not configured)",
+  );
+  assert.equal(buyerEmailToastHint({ reason: "Shipped email queued" }), " · Shipped email queued");
 });

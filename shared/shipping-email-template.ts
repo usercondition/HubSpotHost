@@ -234,6 +234,27 @@ export function buildShippingEmailHtml(input: ShippingEmailTemplateInput): strin
 </html>`;
 }
 
+/** Buy-toast suffix. Does not send mail. */
+export function buyerEmailToastHint(
+  email:
+    | {
+        sent?: boolean;
+        skipped?: boolean;
+        to?: string | null;
+        reason?: string | null;
+        error?: string | null;
+      }
+    | null
+    | undefined,
+): string {
+  if (!email) return "";
+  if (email.sent && email.to) return ` · emailed ${email.to}`;
+  if (email.error) return ` · email failed: ${email.error.slice(0, 140)}`;
+  if (email.skipped && email.reason) return ` · email skipped (${email.reason})`;
+  if (email.reason) return ` · ${email.reason}`;
+  return "";
+}
+
 export function buildShippingEmailPackage(input: ShippingEmailTemplateInput): {
   subject: string;
   text: string;

@@ -44,6 +44,7 @@ import {
 import { ShippingAddressFields } from "@/components/shipping-address-fields";
 import { addressStatusPill, orderIsLocalPickup, showsNeedsLabel, type AddressStatus } from "@shared/ship-address";
 import { labelMatchContactKey } from "@shared/shipping-label-select";
+import { buyerEmailToastHint } from "@shared/shipping-email-template";
 import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
 const ADD_FUND_PRESETS = [10, 25, 50, 100] as const;
@@ -311,6 +312,13 @@ type PurchaseResponse = {
     serviceCode: string;
     testMode: boolean;
   };
+  buyerEmail?: {
+    sent?: boolean;
+    skipped?: boolean;
+    to?: string | null;
+    reason?: string | null;
+    error?: string | null;
+  } | null;
 };
 
 const DEFAULT_PARCEL = {
@@ -657,11 +665,12 @@ export function ShipEngineBuyPanel({
           : "";
       const bundleHint =
         dealIds.length > 1 ? ` · shared box on ${dealIds.length} orders` : "";
+      const emailHint = buyerEmailToastHint(data.buyerEmail);
       toast({
         title: data.shipengine?.testMode ? "Test label bought" : "Label bought",
         description: tracking
-          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached${bundleHint}${stageHint}`
-          : data.message ?? `Tracking attached${bundleHint}${stageHint}`,
+          ? `${tracking} · $${data.shipengine?.amount ?? selectedRate?.amount ?? ""} attached${bundleHint}${stageHint}${emailHint}`
+          : `${data.message ?? `Tracking attached${bundleHint}${stageHint}`}${emailHint}`,
       });
     },
     onError: (error: Error) => {
@@ -1324,13 +1333,18 @@ export function ShipEngineBuyPanel({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          disabled={!shipToReady || quote.isPending}
+          disabled={!shipToReady || quote.isPending || addressPrompt != null}
           onClick={() => {
-            setAddressPrompt(null);
             quote.mutate(undefined);
           }}
           data-testid="button-shipengine-get-rates"
-          title={!shipToReady ? "Fix HubSpot ship-to before rate shopping" : undefined}
+          title={
+            addressPrompt
+              ? "Use suggestion or Keep my address to see rates"
+              : !shipToReady
+                ? "Fix HubSpot ship-to before rate shopping"
+                : undefined
+          }
         >
           {quote.isPending ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
