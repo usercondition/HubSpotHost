@@ -1,7 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { PrintFileOrderSummary } from "../shared/schema";
-import { patchDealPrintFileMetrics } from "../server/lib/hubspot";
+
+const previousDbFile = process.env.ORDER_LINKS_DB_FILE;
+const dbFile = path.join(os.tmpdir(), `hubspot-print-file-metrics-${crypto.randomUUID()}.db`);
+process.env.ORDER_LINKS_DB_FILE = dbFile;
+const { patchDealPrintFileMetrics } = await import("../server/lib/hubspot");
+
+test.after(() => {
+  if (previousDbFile === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+  else process.env.ORDER_LINKS_DB_FILE = previousDbFile;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      fs.unlinkSync(`${dbFile}${suffix}`);
+    } catch {
+      /* test cleanup */
+    }
+  }
+});
 
 const summary = {
   plateCount: 2,
