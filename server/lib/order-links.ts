@@ -462,6 +462,8 @@ CREATE TABLE IF NOT EXISTS plate_files (
   mesh_drive_file_id TEXT NOT NULL DEFAULT '',
   mesh_state TEXT NOT NULL DEFAULT '',
   mesh_version INTEGER NOT NULL DEFAULT 0,
+  stl_drive_file_id TEXT NOT NULL DEFAULT '',
+  stl_web_view_link TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -615,6 +617,8 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
   }
   if (!existing.has("mesh_state")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_state TEXT NOT NULL DEFAULT ''`);
   if (!existing.has("mesh_version")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_version INTEGER NOT NULL DEFAULT 0`);
+  if (!existing.has("stl_drive_file_id")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_drive_file_id TEXT NOT NULL DEFAULT ''`);
+  if (!existing.has("stl_web_view_link")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_web_view_link TEXT NOT NULL DEFAULT ''`);
 }
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {

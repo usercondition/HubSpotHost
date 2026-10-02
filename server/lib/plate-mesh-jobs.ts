@@ -7,10 +7,12 @@ import { libraryFolderName, librarySliceName } from "../../shared/plate-files";
 import { ensureLibraryFolder, openDriveMedia, trashDriveFile, uploadDriveFile } from "./google-drive";
 import { getPlateFile, listPlateIdsNeedingMesh, markPlateMesh } from "./plate-files";
 import { plateMeshEpoch, registerPlateMeshGate } from "./plate-mesh-gate";
-import { PLATE_MESH_VERSION, buildPlateGlb } from "./plate-mesh";
+import { PLATE_MESH_VERSION, buildPlateGlb, plateFootprint } from "./plate-mesh";
+import { stlPlateGlb } from "./stl-plate-mesh";
 
 /** One plate at a time. A 480MB decode must not overlap another. */
 const MESH_JOB_CONCURRENCY = 1;
+const MAX_STL_BYTES = 80 * 1024 * 1024;
 const pending = new Set<string>();
 const running = new Set<string>();
 registerPlateMeshGate(() => pending.clear());
@@ -73,7 +75,17 @@ async function generateOne(driveFileId: string, epoch: number): Promise<void> {
     return;
   }
   markPlateMesh(driveFileId, { meshState: "preparing" });
-  const glb = await buildPlateGlb((start, length) => readPlateRange(file.driveFileId, start, length), size);
+  const ctbRange = (start: number, length: number) => readPlateRange(file.driveFileId, start, length);
+  let glb: Buffer;
+  if (file.stlDriveFileId) {
+    const upstream = await openDriveMedia(file.stlDriveFileId, `bytes=0-${MAX_STL_BYTES - 1}`);
+    if (!upstream.ok && upstream.status !== 206) throw new Error("Drive could not read the attached STL.");
+    const stl = await (await import("./plate-routes")).takeResponseBytes(upstream, MAX_STL_BYTES);
+    const footprint = await plateFootprint(ctbRange, size);
+    glb = stlPlateGlb(stl, footprint);
+  } else {
+    glb = await buildPlateGlb(ctbRange, size);
+  }
   if (!live()) return;
   if (glb.length < 20) {
     markPlateMesh(driveFileId, { meshState: "ready", meshDriveFileId: "", meshVersion: PLATE_MESH_VERSION });

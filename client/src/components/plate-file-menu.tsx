@@ -28,6 +28,7 @@ function formatCost(value: number | null): string {
 function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Record<string, string> }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const resetRef = useRef<(() => void) | null>(null);
+  const viewRef = useRef<((name: "top" | "front" | "iso") => void) | null>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !file.meshDriveFileId) return;
@@ -46,11 +47,13 @@ function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Reco
         }
         dispose = mounted.dispose;
         resetRef.current = mounted.reset;
+        viewRef.current = mounted.view;
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
       resetRef.current = null;
+      viewRef.current = null;
       dispose();
     };
   }, [file.driveFileId, file.meshDriveFileId, headers]);
@@ -65,6 +68,13 @@ function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Reco
       >
         Reset view
       </button>
+      <div className="absolute left-2 top-2 z-10 flex gap-1">
+        {(["Top", "Front", "Iso"] as const).map((label) => (
+          <button key={label} type="button" className="rounded-md bg-zinc-900/80 px-2 py-1 text-xs text-zinc-100" onClick={() => viewRef.current?.(label.toLowerCase() as "top" | "front" | "iso")}>
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -80,8 +90,10 @@ function PreviewPanel({
 }) {
   const canLayers = /\.ctb$/i.test(file.name);
   const meshReady = Boolean(file.meshDriveFileId);
-  const [mode, setMode] = useState<"layers" | "model">("layers");
+  const [mode, setMode] = useState<"layers" | "model">("model");
   const [imageUrl, setImageUrl] = useState("");
+  const [stlLink, setStlLink] = useState("");
+  const [stlError, setStlError] = useState("");
   const stats: PlatePreviewStats | null = file.stats;
   const wantFlat = !canLayers || (mode === "model" && !meshReady);
   useEffect(() => {
@@ -153,6 +165,22 @@ function PreviewPanel({
             </button>
           </div>
         ) : null}
+        {canLayers ? (
+          <form
+            className="mb-3 flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setStlError("");
+              void apiRequest("POST", `/api/plate-files/${encodeURIComponent(file.driveFileId)}/stl`, { driveLink: stlLink }, { headers })
+                .then(() => window.location.reload())
+                .catch(() => setStlError("Could not attach that STL Drive link."));
+            }}
+          >
+            <input className="h-8 min-w-0 flex-1 rounded border border-input bg-background px-2 text-xs" value={stlLink} onChange={(event) => setStlLink(event.target.value)} placeholder={file.stlDriveFileId ? "Source STL attached" : "Attach source STL Drive link"} aria-label="Source STL Drive link" />
+            <button type="submit" className="rounded border border-input px-2 text-xs">Attach STL</button>
+          </form>
+        ) : null}
+        {stlError ? <p className="mb-2 text-xs text-destructive">{stlError}</p> : null}
         {canLayers && mode === "model" && meshReady ? (
           <PlateMeshHost file={file} headers={headers} />
         ) : canLayers && mode === "model" ? (

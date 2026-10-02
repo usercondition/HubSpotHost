@@ -24,7 +24,7 @@ export const MESH_VOXEL_MM = 0.1;
 /** Compressed GLB cap. The desktop viewer is the target; phones only need the file to open. */
 export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
-export const PLATE_MESH_VERSION = 4;
+export const PLATE_MESH_VERSION = 5;
 const CHUNK = 32;
 /** Pitch gate only. Occupied chunks are what get allocated, and they stay well under this. */
 const CHUNK_BUDGET = 2 * 1024 * 1024 * 1024;
@@ -340,6 +340,18 @@ async function loadLayerIndex(readRange: RangeRead, size: number): Promise<{ pla
     table = fetched;
   }
   return { plan, entries: ctbLayerEntries(plan, table, size) };
+}
+
+/** A sampled CTB footprint is enough to place a source STL on its saved plate. */
+export async function plateFootprint(
+  readRange: RangeRead,
+  size: number,
+): Promise<{ plateMmX: number; plateMmY: number; centerX: number; centerY: number }> {
+  const { plan, entries } = await loadLayerIndex(readRange, size);
+  const bounds = await scanBounds(readRange, plan, entries, new Map(), Math.max(1, Math.floor(plan.layerCount / 160)));
+  const centerX = bounds ? ((bounds.minX + bounds.maxX + 1) / 2) * plan.pixelMmX : plan.plateMmX / 2;
+  const centerY = bounds ? ((bounds.minY + bounds.maxY + 1) / 2) * plan.pixelMmY : plan.plateMmY / 2;
+  return { plateMmX: plan.plateMmX, plateMmY: plan.plateMmY, centerX, centerY };
 }
 
 /** Decode sampled layers into a GLB. An empty plate returns a zero-length buffer. */
