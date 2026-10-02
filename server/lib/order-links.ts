@@ -113,7 +113,6 @@ CREATE TABLE IF NOT EXISTS expenses (
   counts_as_overhead INTEGER NOT NULL DEFAULT 0,
   archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS expenses_recurring_charge_idx ON expenses(recurring_expense_id, start_date DESC);
 CREATE TABLE IF NOT EXISTS expense_audit (
   id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
   new_values_json TEXT, created_at TEXT NOT NULL
