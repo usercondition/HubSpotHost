@@ -214,6 +214,7 @@ export default function Performance() {
             <section className="grid gap-4 lg:grid-cols-2">
               <Panel title="Money" description={dashboard.period.compareLabel}>
                 <MetricList metrics={dashboard.money.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />
+                {(dashboard.costGaps?.length ?? 0) > 0 ? <details className="mt-3 border-t pt-2 text-sm"><summary className="cursor-pointer font-medium">Orders missing cost ({dashboard.costGaps.length})</summary><ul className="mt-2 space-y-1 text-muted-foreground">{dashboard.costGaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></details> : null}
               </Panel>
               <Panel title="Speed and reliability">
                 <MetricList metrics={dashboard.speed.filter((item) => !headlineIds.has(item.id))} openId={openId} setOpenId={setOpenId} />

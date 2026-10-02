@@ -104,6 +104,7 @@ export interface ShopDashboard {
   pipelineMetrics: ShopMetric[];
   channelMetrics: ShopMetric[];
   origins: OrderOrigins;
+  costGaps: string[];
 }
 
 const PERIOD_LABEL: Record<ShopPeriodId, string> = {
@@ -266,6 +267,14 @@ function profitOf(orders: ShopDashboardOrder[], start: number | null, end: numbe
   return { profit, cost, revenue, complete, missing, estimated };
 }
 
+function missingCostGaps(orders: ShopDashboardOrder[], start: number | null, end: number | null): string[] {
+  return orders.flatMap((order) => {
+    if (!inWindow(parseTime(order.createdAt), start, end) || moneyOnce(order)) return [];
+    const missing = [order.resinCost == null ? "resin" : "", order.postage == null ? "postage" : ""].filter(Boolean).join(" + ");
+    return missing ? [`${order.name}: ${missing}`] : [];
+  });
+}
+
 function seriesFor(orders: ShopDashboardOrder[], window: Window): number[] {
   if (window.start == null) return [];
   const buckets = 6;
@@ -304,6 +313,7 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const bars = seriesFor(input.orders, window);
 
   const amountNote = currentBooked.missingAmount > 0 ? units(currentBooked.missingAmount, "order missing an amount", "orders missing an amount") : null;
+  const costGaps = missingCostGaps(input.orders, window.start, window.end);
   const costNote = currentProfit.missing > 0 ? units(currentProfit.missing, "order missing cost", "orders missing cost") : null;
 
   const revenue = metric({
@@ -777,5 +787,6 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
         shipTo: order.shipTo ?? null,
       })),
     }),
+    costGaps,
   };
 }

@@ -108,8 +108,12 @@ CREATE TABLE IF NOT EXISTS expenses (
   category TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
   usd_amount_cents INTEGER, cadence TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT,
   payment_count INTEGER, payment_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  is_recurring INTEGER NOT NULL DEFAULT 0, recurring_status TEXT NOT NULL DEFAULT 'active',
+  next_due_date TEXT NOT NULL DEFAULT '', recurring_expense_id TEXT, payment_number INTEGER,
+  counts_as_overhead INTEGER NOT NULL DEFAULT 0,
   archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS expenses_recurring_charge_idx ON expenses(recurring_expense_id, start_date DESC);
 CREATE TABLE IF NOT EXISTS expense_audit (
   id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, action TEXT NOT NULL, old_values_json TEXT,
   new_values_json TEXT, created_at TEXT NOT NULL
@@ -732,6 +736,42 @@ function ensureSupplyPurchaseColumns(sqlite: Database.Database): void {
   }
 }
 
+function ensureExpenseColumns(sqlite: Database.Database): void {
+  const existing = new Set(
+    (sqlite.prepare("PRAGMA table_info(expenses)").all() as Array<{ name: string }>).map((row) => row.name),
+  );
+  const additions: Array<[string, string]> = [
+    ["is_recurring", "INTEGER NOT NULL DEFAULT 0"],
+    ["recurring_status", "TEXT NOT NULL DEFAULT 'active'"],
+    ["next_due_date", "TEXT NOT NULL DEFAULT ''"],
+    ["recurring_expense_id", "TEXT"],
+    ["payment_number", "INTEGER"],
+    ["counts_as_overhead", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, type] of additions) {
+    if (!existing.has(name)) sqlite.exec(`ALTER TABLE expenses ADD COLUMN ${name} ${type}`);
+  }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS expenses_recurring_charge_idx ON expenses(recurring_expense_id, start_date DESC)");
+  // Existing monthly/yearly/installment rows were already accrued overhead.
+  // Preserve that behavior while exposing them in Recurring. Legacy `usage`
+  // rows remain dated charges (not recurring definitions).
+  sqlite.exec(`
+    UPDATE expenses
+    SET is_recurring = 1,
+        counts_as_overhead = 1,
+        next_due_date = CASE WHEN next_due_date = '' THEN start_date ELSE next_due_date END,
+        recurring_status = CASE WHEN end_date IS NOT NULL AND end_date < date('now') THEN 'ended' ELSE recurring_status END
+    WHERE is_recurring = 0 AND cadence IN ('monthly', 'yearly', 'installment')
+  `);
+  sqlite.exec(`UPDATE expenses SET is_recurring = 0, counts_as_overhead = 0 WHERE cadence = 'usage' AND recurring_expense_id IS NULL`);
+  // Owner-provided fixed shop utility. This is intentionally the sole seeded
+  // expense; all other recurring records remain owner-entered.
+  sqlite
+    .prepare(`INSERT OR IGNORE INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,cadence,start_date,is_recurring,recurring_status,next_due_date,counts_as_overhead,notes,created_at,updated_at)
+      VALUES ('fixed-electricity', 'seed-fixed-electricity-v1', 'Electricity', 'Shop electricity', 'Utilities', 15000, 'USD', 'monthly', '2026-10-01', 1, 'active', '2026-11-01', 1, 'Owner-provided fixed monthly utility.', ?, ?)`)
+    .run(new Date().toISOString(), new Date().toISOString());
+}
+
 let db: BetterSQLite3Database | null = null;
 let sqliteConn: Database.Database | null = null;
 
@@ -805,6 +845,7 @@ export function getDb(): BetterSQLite3Database {
   ensureOffbookAddressColumns(sqlite);
   ensureSupplyPurchaseColumns(sqlite);
   ensureFulfillmentColumns(sqlite);
+  ensureExpenseColumns(sqlite);
   sqliteConn = sqlite;
   db = drizzle(sqlite);
   return db;

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { overheadForPeriod } from "../server/lib/expenses";
-import { effectiveExpenseEnd } from "../shared/expenses";
+import crypto from "node:crypto";
+import { createExpense, logRecurringCharge, overheadForPeriod } from "../server/lib/expenses";
+import { effectiveExpenseEnd, recurringPaymentNumber } from "../shared/expenses";
 
 test("recurring expenses prorate and one-off charges count once", () => {
   const rows: any = [
@@ -32,4 +33,47 @@ test("ended installments do not contribute after their end date", () => {
 
 test("effective end excludes a cancelled monthly subscription from today's run rate", () => {
   assert.equal(effectiveExpenseEnd({ start_date: "2026-01-01", cadence: "monthly", end_date: "2026-09-21" }), "2026-09-21");
+});
+
+test("recurring definitions never count as overhead, but their logged charge does", () => {
+  const recurring: any = createExpense({
+    idempotencyKey: `recurring-${crypto.randomUUID()}`, vendor: "Test hosting", name: "Usage", category: "Hosting",
+    amountCents: 1200, cadence: "usage-based", startDate: "2026-09-01", nextDueDate: "2026-10-01", isRecurring: true,
+  });
+  assert.equal(overheadForPeriod([recurring] as any, "2026-09-01", "2026-09-30"), 0);
+  const charge: any = logRecurringCharge(recurring.id, {
+    idempotencyKey: `charge-${crypto.randomUUID()}`, amountCents: 1575, startDate: "2026-09-15",
+  });
+  assert.equal(charge.recurring_expense_id, recurring.id);
+  assert.equal(overheadForPeriod([recurring, charge] as any, "2026-09-01", "2026-09-30"), 1575);
+});
+
+test("owner-provided fixed electricity accrues until a real linked charge replaces it", () => {
+  const electricity = { id: "electricity", is_recurring: 1, counts_as_overhead: 1, currency: "USD", amount_cents: 15000, cadence: "monthly", start_date: "2026-10-01", end_date: null, category: "Utilities" };
+  const charge = { is_recurring: 0, recurring_expense_id: "electricity", currency: "USD", amount_cents: 15250, cadence: "one-off", start_date: "2026-10-15", category: "Utilities" };
+  assert.equal(overheadForPeriod([electricity] as any, "2026-10-01", "2026-10-31"), 14784);
+  assert.equal(overheadForPeriod([electricity, charge] as any, "2026-10-01", "2026-10-31"), 15250);
+});
+
+test("migrated recurring accruals preserve prior overhead and legacy usage stays dated", () => {
+  const before: any[] = [
+    { id: "patreon", currency: "USD", amount_cents: 1200, cadence: "monthly", start_date: "2026-01-01" },
+    { id: "affirm", currency: "USD", amount_cents: 24000, cadence: "monthly", start_date: "2026-01-01", payment_count: 6 },
+    { id: "cursor", currency: "USD", amount_cents: 1900, cadence: "usage", start_date: "2026-09-12" },
+  ];
+  const after = before.map((row) => row.cadence === "usage" ? { ...row, is_recurring: 0 } : { ...row, is_recurring: 1, counts_as_overhead: 1 });
+  assert.equal(overheadForPeriod(after as any, "2026-09-01", "2026-09-30"), overheadForPeriod(before as any, "2026-09-01", "2026-09-30"));
+});
+
+test("installment display derives payment number from its next due date", () => {
+  assert.equal(recurringPaymentNumber({ start_date: "2026-06-01", next_due_date: "2026-10-07", cadence: "installment" }), 5);
+});
+
+test("one linked charge replaces only its month inside a YTD accrual", () => {
+  const electricity = { id: "electricity", is_recurring: 1, counts_as_overhead: 1, currency: "USD", amount_cents: 15000, cadence: "monthly", start_date: "2026-01-01", category: "Utilities" };
+  const charge = { is_recurring: 0, recurring_expense_id: "electricity", currency: "USD", amount_cents: 17000, cadence: "one-off", start_date: "2026-03-15", category: "Utilities" };
+  const withoutCharge = overheadForPeriod([electricity] as any, "2026-01-01", "2026-06-30");
+  const withCharge = overheadForPeriod([electricity, charge] as any, "2026-01-01", "2026-06-30");
+  const marchAccrual = overheadForPeriod([electricity] as any, "2026-03-01", "2026-04-01");
+  assert.equal(withCharge, withoutCharge - marchAccrual + 17000);
 });

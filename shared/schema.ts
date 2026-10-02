@@ -2214,6 +2214,8 @@ export const updateDealCostsSchema = z.object({
     .refine((value) => value === "" || Number.isFinite(Number(value.replace(/[$,\s]/g, ""))), "Enter a valid shipping cost"),
   /** When true and writes are allowed, HubSpot receives the PATCH + margin recalc. */
   liveWrite: z.boolean().optional().default(true),
+  /** Only local pickup backfill may record zero postage. */
+  allowZeroPostage: z.boolean().optional().default(false),
 });
 
 export type UpdateDealCostsInput = z.infer<typeof updateDealCostsSchema>;

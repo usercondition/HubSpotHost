@@ -445,7 +445,7 @@ export async function updateDealCosts(
     if (trimmed === "") return;
     const n = Number(trimmed.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(n) || n < 0) return;
-    if (key === "print_actual_shipping_cost" && n === 0) return;
+    if (key === "print_actual_shipping_cost" && n === 0 && !input.allowZeroPostage) return;
     properties[key] = String(n);
   };
   assign("print_material_cost", input.material);
@@ -511,6 +511,9 @@ export async function seedPrintDealCosts(
     materialEstimate?: number | null;
     postage?: string | null;
     liveWrite?: boolean;
+    /** Backfill may only supply material/postage; normal attach retains absorbed defaults. */
+    fillLaborPackaging?: boolean;
+    allowZeroPostage?: boolean;
   },
 ): Promise<Awaited<ReturnType<typeof updateDealCosts>> | null> {
   const id = dealId.trim();
@@ -530,14 +533,15 @@ export async function seedPrintDealCosts(
         : "";
     const postage = String(input.postage ?? "").trim();
     const postageAmount = Number(postage.replace(/[$,\s]/g, ""));
-    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount > 0;
+    const hasPostage = postage !== "" && Number.isFinite(postageAmount) && postageAmount >= 0;
 
     const defaults: UpdateDealCostsInput = {
       material: isBlank(props.print_material_cost) ? materialEstimate : "",
-      labor: isBlank(props.print_labor_cost) ? "0" : "",
-      packaging: isBlank(props.print_packaging_cost) ? "0" : "",
+      labor: input.fillLaborPackaging === false ? "" : isBlank(props.print_labor_cost) ? "0" : "",
+      packaging: input.fillLaborPackaging === false ? "" : isBlank(props.print_packaging_cost) ? "0" : "",
       shipping: isBlank(props.print_actual_shipping_cost) && hasPostage ? postage : "",
       liveWrite: input.liveWrite !== false,
+      allowZeroPostage: input.allowZeroPostage === true,
     };
 
     if (![defaults.material, defaults.labor, defaults.packaging, defaults.shipping].some(Boolean)) {

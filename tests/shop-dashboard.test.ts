@@ -77,6 +77,7 @@ test("gross profit leaves out missing resin or postage and treats labor as zero"
   const profit = byId(result.money, "gross-profit");
   assert.equal(profit.value, 100);
   assert.match(profit.note ?? "", /2 orders missing cost/);
+  assert.deepEqual(result.costGaps, ["no-resin: resin", "no-postage: postage"]);
   assert.equal(byId(result.money, "margin").value, 71.43);
   assert.equal(byId(result.money, "cost-per-order").value, 20);
 });

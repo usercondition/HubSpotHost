@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { getSqlite } from "./order-links";
 import { EXPENSE_CATEGORIES, monthlyEquivalentCents, type ExpenseCategory } from "../../shared/expenses";
 
-export const EXPENSE_CADENCES = ["one-off", "monthly", "yearly", "usage"] as const;
+export const EXPENSE_CADENCES = ["one-off", "monthly", "yearly", "usage", "usage-based", "installment"] as const;
 export { EXPENSE_CATEGORIES };
 export type ExpenseCadence = (typeof EXPENSE_CADENCES)[number];
 
@@ -14,6 +14,8 @@ export type ExpenseInput = {
   idempotencyKey: string; vendor: string; name: string; category: ExpenseCategory;
   amountCents: number; currency?: "USD" | "EUR"; usdAmountCents?: number | null; cadence: ExpenseCadence;
   startDate: string; endDate?: string | null; paymentCount?: number | null; paymentNote?: string; notes?: string;
+  isRecurring?: boolean; recurringStatus?: "active" | "ended" | "paused"; nextDueDate?: string;
+  countsAsOverhead?: boolean;
 };
 
 function validate(input: ExpenseInput) {
@@ -22,7 +24,7 @@ function validate(input: ExpenseInput) {
   if (!EXPENSE_CATEGORIES.includes(input.category) || !EXPENSE_CADENCES.includes(input.cadence)) throw new Error("Choose a valid category and cadence.");
   if (!Number.isInteger(input.amountCents) || input.amountCents < 0) throw new Error("Amount must be a non-negative number of cents.");
   if (input.currency === "EUR" && (!Number.isInteger(input.usdAmountCents) || (input.usdAmountCents ?? 0) < 0)) throw new Error("EUR expenses require the entered USD amount.");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) throw new Error("Start date must be YYYY-MM-DD.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate) || (input.nextDueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.nextDueDate))) throw new Error("Dates must be YYYY-MM-DD.");
 }
 
 export function listExpenses(includeArchived = false) {
@@ -35,8 +37,11 @@ export function createExpense(input: ExpenseInput) {
   if (existing) return existing;
   const now = new Date().toISOString(); const id = crypto.randomUUID();
   return db.transaction(() => {
-  db.prepare(`INSERT INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,usd_amount_cents,cadence,start_date,end_date,payment_count,payment_note,notes,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, input.idempotencyKey, input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", now, now);
+  const isRecurring = input.isRecurring ?? input.cadence !== "one-off";
+  const countsAsOverhead = input.countsAsOverhead ?? (isRecurring && ["monthly", "yearly", "installment"].includes(input.cadence));
+  db.prepare(`INSERT INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,usd_amount_cents,cadence,start_date,end_date,payment_count,payment_note,notes,is_recurring,recurring_status,next_due_date,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, input.idempotencyKey, input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", isRecurring ? 1 : 0, input.recurringStatus ?? "active", isRecurring ? (input.nextDueDate ?? input.startDate) : "", now, now);
+  db.prepare("UPDATE expenses SET counts_as_overhead = ? WHERE id = ?").run(countsAsOverhead ? 1 : 0, id);
   const row = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,new_values_json,created_at) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), id, "created", JSON.stringify(row), now);
   return row;
@@ -65,8 +70,10 @@ export function updateExpense(id: string, input: ExpenseInput) {
   if (!before) return null;
   const now = new Date().toISOString();
   return db.transaction(() => {
-  db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,updated_at=? WHERE id=?`)
-    .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", now, id);
+  const isRecurring = input.isRecurring ?? Boolean((before as any).is_recurring);
+  const countsAsOverhead = input.countsAsOverhead ?? (isRecurring && ["monthly", "yearly", "installment"].includes(input.cadence));
+  db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,is_recurring=?,recurring_status=?,next_due_date=?,counts_as_overhead=?,updated_at=? WHERE id=?`)
+    .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", isRecurring ? 1 : 0, input.recurringStatus ?? (before as any).recurring_status ?? "active", isRecurring ? (input.nextDueDate ?? (before as any).next_due_date ?? input.startDate) : "", countsAsOverhead ? 1 : 0, now, id);
   const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "updated", JSON.stringify(before), JSON.stringify(after), now);
   return after;
@@ -74,8 +81,20 @@ export function updateExpense(id: string, input: ExpenseInput) {
 }
 
 export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {
+  const chargesByRecurring = new Map<string, any[]>();
+  for (const row of rows as any[]) {
+    if (!row.is_recurring && row.recurring_expense_id && row.start_date >= start && row.start_date <= end) {
+      const charges = chargesByRecurring.get(row.recurring_expense_id) ?? [];
+      charges.push(row); chargesByRecurring.set(row.recurring_expense_id, charges);
+    }
+  }
   return rows.reduce<number>((sum, row: any) => {
     if (row.category === "Materials" || row.category === "Shipping supplies") return sum;
+    // A recurring row defines an expected bill, not an actual transaction.
+    // Only its logged charge rows count, except the owner-provided fixed
+    // Electricity accrual. A real linked Electricity charge replaces that
+    // accrual for its period rather than adding to it.
+    if (row.is_recurring && !row.counts_as_overhead) return sum;
     const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
     const installmentEnd = row.payment_count && (row.cadence === "monthly" || row.cadence === "yearly")
       ? addCadence(row.start_date, row.cadence, row.payment_count)
@@ -87,10 +106,48 @@ export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: 
       const overlapStart = row.start_date > start ? row.start_date : start;
       const overlapEnd = effectiveEnd && effectiveEnd < end ? effectiveEnd : end;
       const days = Math.max(0, Math.round((Date.parse(`${overlapEnd}T00:00:00Z`) - Date.parse(`${overlapStart}T00:00:00Z`)) / 86_400_000));
-      return sum + Math.round(daily * days);
+      const charges = chargesByRecurring.get(row.id) ?? [];
+      const coveredDays = new Set<string>();
+      for (const charge of charges) {
+        const date = new Date(`${charge.start_date}T12:00:00Z`);
+        const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+        for (let stamp = new Date(`${overlapStart}T12:00:00Z`); stamp < new Date(`${overlapEnd}T12:00:00Z`); stamp.setUTCDate(stamp.getUTCDate() + 1)) {
+          const key = stamp.toISOString().slice(0, 10);
+          if (row.cadence === "yearly" ? stamp.getUTCFullYear() === date.getUTCFullYear() : key.slice(0, 7) === month) coveredDays.add(key);
+        }
+      }
+      return sum + Math.round(daily * Math.max(0, days - coveredDays.size));
     }
     return row.start_date >= start && row.start_date <= end ? sum + amount : sum;
   }, 0);
+}
+
+export function listRecurringExpenses(includeArchived = false) {
+  return getSqlite().prepare(`SELECT * FROM expenses WHERE is_recurring = 1 ${includeArchived ? "" : "AND archived_at IS NULL"} ORDER BY next_due_date, vendor`).all();
+}
+
+export function endRecurringExpense(id: string) {
+  const db = getSqlite(); const before = db.prepare("SELECT * FROM expenses WHERE id = ? AND is_recurring = 1 AND archived_at IS NULL").get(id);
+  if (!before) return null;
+  const now = new Date().toISOString();
+  db.prepare("UPDATE expenses SET recurring_status = 'ended', end_date = COALESCE(NULLIF(end_date, ''), ?), updated_at = ? WHERE id = ?").run(now.slice(0, 10), now, id);
+  const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
+  db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "ended", JSON.stringify(before), JSON.stringify(after), now);
+  return after;
+}
+
+export function logRecurringCharge(recurringId: string, input: Omit<ExpenseInput, "vendor" | "name" | "category" | "cadence" | "isRecurring"> & { paymentNumber?: number | null }) {
+  const db = getSqlite(); const parent = db.prepare("SELECT * FROM expenses WHERE id = ? AND is_recurring = 1 AND archived_at IS NULL").get(recurringId) as any;
+  if (!parent) return null;
+  validate({ ...input, vendor: parent.vendor, name: parent.name, category: parent.category, cadence: "one-off", isRecurring: false });
+  const existing = db.prepare("SELECT * FROM expenses WHERE idempotency_key = ?").get(input.idempotencyKey);
+  if (existing) return existing;
+  const now = new Date().toISOString(); const id = crypto.randomUUID();
+  db.prepare(`INSERT INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,usd_amount_cents,cadence,start_date,notes,is_recurring,recurring_expense_id,payment_number,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, input.idempotencyKey, parent.vendor, parent.name, parent.category, input.amountCents, input.currency ?? parent.currency, input.usdAmountCents ?? null, "one-off", input.startDate, input.notes ?? "", 0, recurringId, input.paymentNumber ?? null, now, now);
+  const row = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
+  db.prepare("INSERT INTO expense_audit (id,expense_id,action,new_values_json,created_at) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), id, "charge_logged", JSON.stringify(row), now);
+  return row;
 }
 
 function addCadence(start: string, cadence: string, payments: number): string {
