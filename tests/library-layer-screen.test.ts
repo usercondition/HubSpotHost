@@ -204,6 +204,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
   });
   let browser: playwright.Browser | null = null;
   const layerHits: number[] = [];
+  let meshState = "ready";
   try {
     const base = `http://127.0.0.1:${port}`;
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -230,7 +231,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ ok: true, files: [FILE], failures: [], pending: [] }),
+          body: JSON.stringify({ ok: true, files: [{ ...FILE, meshState }], failures: [], pending: [] }),
         });
         return;
       }
@@ -327,6 +328,22 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     console.log(`[plate-mesh] phone cover x=${phoneCover.coverX.toFixed(3)} y=${phoneCover.coverY.toFixed(3)} clipped=${phoneCover.clipped}`);
     const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
     assert.ok(phoneFill > 0.05, `phone view did not draw ${phoneCover.coverX} ${phoneCover.coverY}`);
+    for (const state of ["preparing", "failed"] as const) {
+      meshState = state;
+      await openLayers();
+      await page.locator("[data-testid='button-view-model']").click();
+      await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
+      await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-phone-390.png` });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const state of ["preparing", "failed"] as const) {
+      await openLayers();
+      await page.locator("[data-testid='button-view-model']").click();
+      await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
+      await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-desktop-1440.png` });
+    }
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();

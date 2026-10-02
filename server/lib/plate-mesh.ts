@@ -26,13 +26,9 @@ export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
 export const PLATE_MESH_VERSION = 6;
 const CHUNK = 32;
-/**
- * Surface nets needs one index per potential cell. Keeping that under this
- * ceiling makes the worker's typed index grid bounded on full 8K/12K plates.
- * It also forces a practical fallback pitch before millions of tiny supports
- * can create an unbounded JS Map.
- */
-const MAX_GRID_CELLS = 3_500_000;
+/** Per-plate occupancy budget; retry at 0.2 mm before rejecting an unusually dense fallback. */
+const MAX_OCCUPIED_VOXELS = 8_000_000;
+const MAX_MESH_VOXEL_MM = 0.2;
 const CHUNK_STRIDE = 1_000_000;
 
 type RangeRead = (start: number, length: number) => Promise<Buffer | null>;
@@ -58,10 +54,11 @@ class SparseBits {
   solids = 0;
 
   pack(): { keys: Float64Array; chunks: Uint32Array[] } {
-    const keys = new Float64Array(this.chunks.size);
+    const sorted = [...this.chunks.entries()].sort(([left], [right]) => left - right);
+    const keys = new Float64Array(sorted.length);
     const chunks: Uint32Array[] = [];
     let index = 0;
-    for (const [key, chunk] of this.chunks) {
+    for (const [key, chunk] of sorted) {
       keys[index] = key;
       chunks.push(chunk);
       index += 1;
@@ -119,27 +116,27 @@ class SparseBits {
   }
 }
 
-function gridCells(gx: number, gy: number, gz: number): number {
-  const cells = gx * gy * gz;
-  return Number.isSafeInteger(cells) ? cells : Number.POSITIVE_INFINITY;
-}
-
-function chooseGrid(width: number, height: number, layers: number, pixelMmX: number, pixelMmY: number, layerMm: number): Grid {
-  let voxel = MESH_VOXEL_MM;
-  let grid: Grid = { binX: 1, binY: 1, step: 1, gx: 1, gy: 1, gz: 1, voxel };
-  for (let attempt = 0; attempt < 16; attempt += 1) {
-    const binX = Math.max(1, Math.round(voxel / pixelMmX));
-    const binY = Math.max(1, Math.round(voxel / pixelMmY));
-    const step = Math.max(1, Math.round(voxel / layerMm));
-    const gx = Math.max(1, Math.ceil(width / binX));
-    const gy = Math.max(1, Math.ceil(height / binY));
-    const gz = Math.max(1, Math.ceil(layers / step));
-    grid = { binX, binY, step, gx, gy, gz, voxel };
-    if (gridCells(gx, gy, gz) <= MAX_GRID_CELLS) return grid;
-    if (binX >= width && binY >= height && step >= layers) return grid;
-    voxel *= 1.5;
-  }
-  return grid;
+function chooseGrid(
+  width: number,
+  height: number,
+  layers: number,
+  pixelMmX: number,
+  pixelMmY: number,
+  layerMm: number,
+  voxel = MESH_VOXEL_MM,
+): Grid {
+  const binX = Math.max(1, Math.round(voxel / pixelMmX));
+  const binY = Math.max(1, Math.round(voxel / pixelMmY));
+  const step = Math.max(1, Math.round(voxel / layerMm));
+  return {
+    binX,
+    binY,
+    step,
+    gx: Math.max(1, Math.ceil(width / binX)),
+    gy: Math.max(1, Math.ceil(height / binY)),
+    gz: Math.max(1, Math.ceil(layers / step)),
+    voxel,
+  };
 }
 
 function paintRun(bits: SparseBits, start: number, stride: number, width: number, grid: Grid, origin: Origin, z: number): void {
@@ -362,25 +359,31 @@ export async function buildPlateGlb(readRange: RangeRead, size: number): Promise
   yieldedAt = 0;
   const { plan, entries } = await loadLayerIndex(readRange, size);
   const spans = new Map<number, CtbEncryptedSpan>();
-  const full = chooseGrid(plan.width, plan.height, plan.layerCount, plan.pixelMmX, plan.pixelMmY, plan.layerMm);
-  const origin: Origin = { x: 0, y: 0, z: 0 };
-  if (gridCells(full.gx, full.gy, full.gz) <= MAX_GRID_CELLS) {
-    const bits = new SparseBits();
-    await raster(readRange, plan, entries, spans, bits, full, origin);
-    return surfaceOnWorker(bits, plan, full, origin);
-  }
-  const bounds = await scanBounds(readRange, plan, entries, spans, full.step);
+  /** Sample only enough layers to crop the mostly-empty plate before allocation. */
+  const sampleStep = Math.max(1, Math.floor(plan.layerCount / 600));
+  const bounds = await scanBounds(readRange, plan, entries, spans, sampleStep);
   if (!bounds) return Buffer.alloc(0);
-  const cropped = chooseGrid(
-    bounds.maxX - bounds.minX + 1,
-    bounds.maxY - bounds.minY + 1,
-    bounds.maxL - bounds.minL + 1,
-    plan.pixelMmX,
-    plan.pixelMmY,
-    plan.layerMm,
-  );
-  const cropOrigin: Origin = { x: bounds.minX, y: bounds.minY, z: bounds.minL };
-  const bits = new SparseBits();
-  await raster(readRange, plan, entries, spans, bits, cropped, cropOrigin);
-  return surfaceOnWorker(bits, plan, cropped, cropOrigin);
+  const pad = sampleStep * 2;
+  const origin: Origin = {
+    x: Math.max(0, bounds.minX - 2),
+    y: Math.max(0, bounds.minY - 2),
+    z: Math.max(0, bounds.minL - pad),
+  };
+  const width = Math.min(plan.width - origin.x, bounds.maxX - bounds.minX + 5);
+  const height = Math.min(plan.height - origin.y, bounds.maxY - bounds.minY + 5);
+  const layers = Math.min(plan.layerCount - origin.z, bounds.maxL - bounds.minL + 1 + pad * 2);
+  const rasterAt = async (voxel: number): Promise<{ bits: SparseBits; grid: Grid }> => {
+    const grid = chooseGrid(width, height, layers, plan.pixelMmX, plan.pixelMmY, plan.layerMm, voxel);
+    const bits = new SparseBits();
+    await raster(readRange, plan, entries, spans, bits, grid, origin);
+    return { bits, grid };
+  };
+  let result = await rasterAt(MESH_VOXEL_MM);
+  if (result.bits.solids > MAX_OCCUPIED_VOXELS && MAX_MESH_VOXEL_MM > MESH_VOXEL_MM) {
+    result = await rasterAt(MAX_MESH_VOXEL_MM);
+  }
+  if (result.bits.solids > MAX_OCCUPIED_VOXELS) {
+    throw new Error("Plate has too much occupied detail for a 0.2 mm Library mesh.");
+  }
+  return surfaceOnWorker(result.bits, plan, result.grid, origin);
 }

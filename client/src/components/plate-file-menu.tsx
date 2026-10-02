@@ -79,6 +79,10 @@ function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Reco
         <p className="absolute bottom-2 left-2 z-10 rounded bg-red-950/80 px-2 py-1 text-xs text-red-200" data-testid="text-mesh-failed">
           3D build failed. Try regenerate.
         </p>
+      ) : file.meshState === "preparing" ? (
+        <p className="absolute bottom-2 left-2 z-10 rounded bg-zinc-900/80 px-2 py-1 text-xs text-zinc-200" data-testid="text-mesh-preparing">
+          3D preparing
+        </p>
       ) : null}
     </div>
   );

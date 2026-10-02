@@ -198,9 +198,19 @@ function mighty12kPlate(): Buffer {
 
 test("a real-resolution Mighty 12K plate stays within the bounded mesh grid", { timeout: 120_000 }, async () => {
   const file = mighty12kPlate();
+  const startRss = process.memoryUsage().rss;
+  const started = Date.now();
   const glb = await buildPlateGlb(reader(file, []), file.length);
+  const mesh = await readMesh(glb);
+  const ms = Date.now() - started;
+  const peakRss = process.memoryUsage().rss;
+  console.log(
+    `[plate-mesh] mighty12k pitch=${mesh.voxelMm} triangles=${mesh.indices.length / 3} glb=${glb.length} peakRss=${peakRss} startRss=${startRss} ms=${ms}`,
+  );
   assert.ok(glb.length > 100, "mesh is empty");
   assert.ok(glb.length <= MESH_BYTE_BUDGET, `mesh is ${glb.length} bytes`);
+  assert.ok(mesh.voxelMm <= 0.2, `pitch ${mesh.voxelMm}`);
+  assert.ok(peakRss < 3.5 * 1024 * 1024 * 1024, `peak RSS ${peakRss}`);
 });
 
 function featurePlate(): Buffer {
@@ -405,7 +415,7 @@ test("a 480MB plate is read as ranges, not as one buffer", async () => {
   console.log(
     `[plate-mesh] 480MB parts pitch=${result.voxelMm} glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} agreement=${result.agreement} manifold=${result.manifold} bytesRead=${result.bytesRead} peakRss=${result.peakRss} maxBlock=${result.maxBlock} ms=${result.ms}`,
   );
-  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 1, `pitch ${result.voxelMm}`);
+  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 0.2, `pitch ${result.voxelMm}`);
   assert.ok(result.maxBlock < 250, `event loop blocked ${result.maxBlock}ms`);
 });
 
@@ -534,7 +544,7 @@ test("a 480MB stream stays under 3.5GB RSS", { timeout: 120_000 }, async () => {
   );
   assert.ok(result.peakRss < 3.5 * 1024 * 1024 * 1024, `peak RSS ${result.peakRss}`);
   assert.ok(result.maxBlock < 250, `event loop blocked ${result.maxBlock}ms`);
-  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 1, `pitch ${result.voxelMm}`);
+  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 0.2, `pitch ${result.voxelMm}`);
   assert.ok(result.glbBytes <= MESH_BYTE_BUDGET);
   assert.ok(result.triangles > 1_000);
   assert.ok(result.components >= 3);
