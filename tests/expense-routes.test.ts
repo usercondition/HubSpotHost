@@ -42,3 +42,28 @@ test("expense routes reject missing owner code and cap bulk at 200", async () =>
     assert.equal(over.status, 400);
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
+
+test("recurring routes create definitions and log an actual charge", async () => {
+  const app = express(); app.use(express.json());
+  registerExpenseRoutes(app, (req, res) => {
+    if (req.get("x-paid-order-access-code") === "ok") return false;
+    res.status(401).json({ ok: false }); return true;
+  });
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const headers = { "content-type": "application/json", "x-paid-order-access-code": "ok" };
+  try {
+    const created = await fetch(`http://127.0.0.1:${port}/api/expenses/recurring`, {
+      method: "POST", headers, body: JSON.stringify({ ...base(), cadence: "usage-based", nextDueDate: "2026-10-01" }),
+    });
+    assert.equal(created.status, 201);
+    const recurring = (await created.json()).recurring;
+    const charge = await fetch(`http://127.0.0.1:${port}/api/expenses/recurring/${recurring.id}/charges`, {
+      method: "POST", headers, body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), amountCents: 1599, startDate: "2026-09-15" }),
+    });
+    assert.equal(charge.status, 201);
+    const listed = await fetch(`http://127.0.0.1:${port}/api/expenses/recurring`, { headers });
+    assert.equal((await listed.json()).recurring.some((row: { id: string }) => row.id === recurring.id), true);
+  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+});
