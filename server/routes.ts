@@ -2679,7 +2679,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
           results.push({ dealId: deal.id, dealName: props.dealname?.trim() || `Print Order ${deal.id}`, proposed, reason: missing.join("; ") || undefined });
           continue;
         }
-        const seeded = await seedPrintDealCosts(deal.id, { materialEstimate: proposed.material ?? null, postage: proposed.shipping == null ? null : String(proposed.shipping), liveWrite: true, fillLaborPackaging: false });
+        const seeded = await seedPrintDealCosts(deal.id, { materialEstimate: proposed.material ?? null, postage: proposed.shipping == null ? null : String(proposed.shipping), liveWrite: true, fillLaborPackaging: false, allowZeroPostage: proposed.shipping === 0 && pickupIds.has(deal.id) });
         if (seeded && !seeded.ok) {
           results.push({ dealId: deal.id, dealName: props.dealname?.trim() || `Print Order ${deal.id}`, proposed, reason: seeded.error });
         } else {
