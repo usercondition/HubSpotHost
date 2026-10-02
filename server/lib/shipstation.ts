@@ -19,7 +19,7 @@ export type IncomingShipment = {
   trackingNumber: string;
   shipDate: string;
   shipmentCost: string;
-  voided: boolean;
+  voided?: boolean;
   status?: ShipmentStatus;
   lastEventAt?: string | null;
 };
@@ -32,11 +32,17 @@ export function shipstationConfigured(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 export function mapShipmentStatus(value: unknown): ShipmentStatus {
+  const code = text(value).toUpperCase();
+  if (code === "DE" || code === "SP") return "delivered";
+  if (code === "IT" || code === "AC" || code === "AT") return "in transit";
+  if (code === "EX") return "exception";
+  if (code === "NY" || code === "UN") return "label created";
   const status = text(value).toLowerCase().replace(/[_-]+/g, " ");
   if (/\b(delivered|delivery complete)\b/.test(status)) return "delivered";
   if (/\b(out\s*for\s*delivery|outfordelivery)\b/.test(status)) return "out for delivery";
   if (/\b(exception|failed|return to sender|undeliverable)\b/.test(status)) return "exception";
-  if (/\b(in transit|intransit|accepted|picked up)\b/.test(status)) return "in transit";
+  if (/\b(in transit|intransit|accepted|picked up|delivery attempt)\b/.test(status)) return "in transit";
+  if (/\b(unknown|error|not yet in system)\b/.test(status)) return "label created";
   return "label created";
 }
 
@@ -71,13 +77,26 @@ async function shipstationRequest(path: string, init: RequestInit = {}, env: Nod
   const key = env.SHIPSTATION_API_KEY?.trim() || "";
   if (!key) throw new Error("ShipStation API key is not configured");
   const base = env.SHIPSTATION_API_BASE?.trim() || SHIPSTATION_BASE;
-  const url = new URL(path, base).toString();
+  const urlObject = new URL(path, base);
+  if (/^https?:\/\//i.test(path) && (urlObject.protocol !== "https:" || urlObject.hostname !== "api.shipstation.com")) {
+    throw new Error("ShipStation resource URL host is not allowed");
+  }
+  const url = urlObject.toString();
   const response = await fetch(url, {
     ...init,
     headers: { "API-Key": key, Accept: "application/json", ...(init.headers ?? {}) },
   });
   if (!response.ok) throw new Error(`ShipStation ${response.status}: ${response.statusText}`);
   return response.json();
+}
+
+/** Fetch a v2 webhook resource only from ShipStation's documented API host. */
+export async function fetchShipstationResource(resourceUrl: string, env?: NodeJS.ProcessEnv): Promise<IncomingShipment[]> {
+  const body = await shipstationRequest(resourceUrl, {}, env);
+  const rows = Array.isArray((body as RecordLike)?.labels)
+    ? (body as RecordLike).labels as unknown[]
+    : [body];
+  return rows.flatMap((row) => row && typeof row === "object" ? [mapShipstationShipment(row as RecordLike)].filter(Boolean) : []) as IncomingShipment[];
 }
 
 export async function fetchShipstationShipments(days: number, env?: NodeJS.ProcessEnv): Promise<IncomingShipment[]> {
@@ -104,14 +123,19 @@ export function upsertShipstationShipment(input: IncomingShipment, match: Shipme
       voided, status, last_event_at, matched_deal_id, matched_deal_name, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(shipment_id) DO UPDATE SET
-      order_number=excluded.order_number, ship_to_name=excluded.ship_to_name, carrier_code=excluded.carrier_code,
-      service_code=excluded.service_code, tracking_number=excluded.tracking_number, ship_date=excluded.ship_date,
-      shipment_cost=excluded.shipment_cost, voided=excluded.voided, status=excluded.status,
+      shipment_cost=COALESCE(NULLIF(excluded.shipment_cost, ''), shipment_cost),
+      order_number=COALESCE(NULLIF(excluded.order_number, ''), order_number),
+      ship_to_name=COALESCE(NULLIF(excluded.ship_to_name, ''), ship_to_name),
+      carrier_code=COALESCE(NULLIF(excluded.carrier_code, ''), carrier_code),
+      service_code=COALESCE(NULLIF(excluded.service_code, ''), service_code),
+      tracking_number=COALESCE(NULLIF(excluded.tracking_number, ''), tracking_number),
+      ship_date=COALESCE(NULLIF(excluded.ship_date, ''), ship_date),
+      voided=excluded.voided, status=excluded.status,
       last_event_at=excluded.last_event_at, matched_deal_id=excluded.matched_deal_id,
       matched_deal_name=excluded.matched_deal_name, updated_at=excluded.updated_at
   `).run(
     shipmentId, input.orderNumber, input.shipToName, input.carrierCode, input.serviceCode, input.trackingNumber,
-    input.shipDate, input.shipmentCost, input.voided ? 1 : 0, input.status ?? (text(existing?.status) || "label created"),
+    input.shipDate, input.shipmentCost, input.voided === undefined ? Boolean(existing?.voided) ? 1 : 0 : input.voided ? 1 : 0, input.status ?? (text(existing?.status) || "label created"),
     input.lastEventAt ?? (text(existing?.last_event_at) || null), match?.dealId ?? (text(existing?.matched_deal_id) || null),
     match?.dealName ?? (text(existing?.matched_deal_name) || null), text(existing?.created_at) || now, now,
   );
@@ -179,7 +203,7 @@ export function mapTrackWebhook(payload: RecordLike): IncomingShipment | null {
     trackingNumber: tracking,
     shipDate: text(payload.created_at),
     shipmentCost: money(payload.shipment_cost),
-    voided: Boolean(payload.voided),
+    voided: payload.voided === undefined ? undefined : Boolean(payload.voided),
     status: mapShipmentStatus(payload.status_code ?? payload.status_description),
     lastEventAt: text(event.occurred_at ?? event.event_date ?? payload.event_date) || null,
   };

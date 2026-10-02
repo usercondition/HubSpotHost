@@ -316,6 +316,7 @@ import {
   summarizeShipEngineFunds,
 } from "./lib/shipengine";
 import {
+  fetchShipstationResource,
   fetchShipstationShipments,
   listShipstationShipments,
   mapShipstationShipment,
@@ -968,7 +969,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  /** ShipStation v2 webhooks carry tracking / label data directly. */
+  /** ShipStation v2 webhooks carry a data envelope or an API resource URL. */
   app.post("/api/shipstation/webhook", (req: Request, res: Response) => {
     const expected = process.env.SHIPSTATION_WEBHOOK_KEY?.trim() || "";
     const supplied = firstQueryValue(req.query?.key);
@@ -981,10 +982,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(401).json({ ok: false, error: "Invalid ShipStation webhook key" });
     }
     const payload = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
-    const shipment = mapTrackWebhook(payload) ?? mapShipstationShipment(payload);
-    if (!shipment) return res.status(400).json({ ok: false, error: "Unsupported ShipStation v2 webhook payload" });
+    const data = payload.data && typeof payload.data === "object" ? payload.data as Record<string, unknown> : null;
+    const shipment = data ? mapTrackWebhook(data) ?? mapShipstationShipment(data) : null;
+    const resourceUrl = String(payload.resource_url ?? "").trim();
+    if (!shipment && !resourceUrl) return res.status(400).json({ ok: false, error: "Unsupported ShipStation v2 webhook payload" });
     res.status(200).json({ ok: true, queued: true });
-    void ingestShipstationShipments([shipment]);
+    if (shipment) void ingestShipstationShipments([shipment]);
+    else void fetchShipstationResource(resourceUrl).then(ingestShipstationShipments).catch((error) => {
+      console.error(`[shipstation] resource fetch failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    });
   });
 
   app.get("/api/shipstation/shipments", (req: Request, res: Response) => {

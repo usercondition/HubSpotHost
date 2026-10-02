@@ -63,8 +63,11 @@ test("ShipStation v2 tracking webhook accepts quickly then stores its payload", 
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      label_id: "ss-123", tracking_number: "1ZTEST", status_code: "in_transit", carrier_code: "ups",
-      events: [{ occurred_at: "2026-10-02T00:00:00Z" }],
+      resource_type: "API_TRACK",
+      data: {
+        label_id: "ss-123", tracking_number: "1ZTEST", status_code: "IT", carrier_code: "ups",
+        events: [{ occurred_at: "2026-10-02T00:00:00Z" }],
+      },
     }),
   });
   assert.equal(response.status, 200);
@@ -79,7 +82,30 @@ test("ShipStation upsert is idempotent and status mapping is conservative", () =
   upsertShipstationShipment({ shipmentId: "idempotent", orderNumber: "9", shipToName: "Taylor Test", carrierCode: "usps", serviceCode: "ground", trackingNumber: "9400", shipDate: "2026-10-01T00:00:00Z", shipmentCost: "4.25", voided: false });
   upsertShipstationShipment({ shipmentId: "idempotent", orderNumber: "9", shipToName: "Taylor Test", carrierCode: "usps", serviceCode: "ground", trackingNumber: "9400", shipDate: "2026-10-01T00:00:00Z", shipmentCost: "4.25", voided: false });
   assert.equal(listShipstationShipments().filter((row) => row.shipmentId === "idempotent").length, 1);
-  assert.equal(mapShipmentStatus("Delivered"), "delivered");
-  assert.equal(mapShipmentStatus("OutForDelivery"), "out for delivery");
+  for (const code of ["DE", "SP"]) assert.equal(mapShipmentStatus(code), "delivered");
+  for (const code of ["IT", "AC", "AT"]) assert.equal(mapShipmentStatus(code), "in transit");
+  assert.equal(mapShipmentStatus("EX"), "exception");
+  for (const code of ["NY", "UN"]) assert.equal(mapShipmentStatus(code), "label created");
+  assert.equal(mapShipmentStatus("in_transit"), "in transit");
+  assert.equal(mapShipmentStatus("delivered"), "delivered");
+  assert.equal(mapShipmentStatus("error"), "label created");
   assert.equal(mapShipmentStatus("mystery carrier phrase"), "label created");
+});
+
+test("tracking event preserves label fields that the webhook does not carry", () => {
+  upsertShipstationShipment({
+    shipmentId: "full-label", orderNumber: "654", shipToName: "Morgan Sample", carrierCode: "ups",
+    serviceCode: "ups_ground", trackingNumber: "1ZPRESERVE", shipDate: "2026-10-01T00:00:00Z",
+    shipmentCost: "9.20", voided: false, status: "label created",
+  });
+  upsertShipstationShipment({
+    shipmentId: "tracking:1ZPRESERVE", orderNumber: "", shipToName: "", carrierCode: "", serviceCode: "",
+    trackingNumber: "1ZPRESERVE", shipDate: "", shipmentCost: "", status: "in transit",
+    lastEventAt: "2026-10-02T00:00:00Z",
+  });
+  const saved = listShipstationShipments().find((row) => row.trackingNumber === "1ZPRESERVE");
+  assert.equal(saved?.shipToName, "Morgan Sample");
+  assert.equal(saved?.shipmentCost, "9.20");
+  assert.equal(saved?.shipDate, "2026-10-01T00:00:00Z");
+  assert.equal(saved?.status, "in transit");
 });
