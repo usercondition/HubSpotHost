@@ -83,11 +83,68 @@ The build emits four warnings because CJS output replaces `import.meta` in `serv
    - **Why it matters:** Passing tests strongly cover existing UI/workflow behavior but do not protect the data-integrity and credential-lifetime defects above.
    - **Lean fix:** Add narrow unit/integration tests before modifying each path: non-blank HubSpot preservation, explicit overwrite, single-use/expired ticket behavior, and capped/retried ShipStation refresh.
 
+### Supplemental follow-up findings
+
+12. **Webhook inbox and pending-write jobs can process the same SQLite work concurrently**
+   - **Severity:** Medium
+   - **Evidence:** `server/lib/print-ops-jobs.ts:121-123,147-148,195` gives inbox/write jobs unique timestamp IDs while the worker has concurrency four. `server/lib/webhook-inbox.ts:127-133` reads pending work without a claim, and `server/lib/hubspot-writes.ts:119-131` similarly loops unclaimed writes. Sync health also invokes the inbox at `server/lib/sync-health.ts:751-752`.
+   - **Why it matters:** Two workers can recalculate one deal or write the same pending fields twice, racing attempts/status updates.
+   - **Lean fix:** Use stable coalescing job IDs and per-kind serialization, or atomically claim rows with `UPDATE … WHERE status = 'pending' … RETURNING`.
+
+13. **Plate attachment can leave HubSpot changed while no corresponding local plate exists**
+   - **Severity:** Medium
+   - **Evidence:** `server/routes.ts:2692-2707` patches HubSpot metrics, then seeds costs, then creates the local print record. A seed-cost failure returns before record creation at `server/routes.ts:2697-2698`.
+   - **Why it matters:** Subsequent UI and sync reconciliation see a HubSpot plate summary with no Print Ops record, making repair and costs ambiguous.
+   - **Lean fix:** Record local intent transactionally before the remote change, or compensate the HubSpot patch on local failure and return an explicit partial-result state. Add a forced-failure integration test.
+
+14. **Shipping bundles can be partially attached**
+   - **Severity:** Medium
+   - **Evidence:** `server/lib/shipping-label-attach.ts:152-176` persists and syncs each selected deal in a loop, then returns an error immediately on one checklist failure with the already-attached IDs.
+   - **Why it matters:** A bundle can show only some members done/shipped, contrary to the shipping-bundle completion rule.
+   - **Lean fix:** Validate all members before side effects and use a local transaction plus a durable repair workflow for remote operations; otherwise present a first-class partial state and retry action.
+
+15. **Unset persistence configuration splits related operational state across two defaults**
+   - **Severity:** Medium
+   - **Evidence:** `server/lib/order-links.ts:738-741` defaults the main database to `cwd/data.db`; the marketplace brief, scan, send, and shipped-email stores instead fall back to `/data/marketplace-inbox-brief.db` (`server/lib/marketplace-inbox-brief-store.ts:26-27`, `server/lib/marketplace-scan-request-store.ts:27-28`, `server/lib/marketplace-send-request-store.ts:41-42`, `server/lib/shipped-email-store.ts:20-25`).
+   - **Why it matters:** A deployment with only one default persisted path can lose or separate notification/marketplace state while the health warning describes only the primary database.
+   - **Lean fix:** Centralize one default database-path resolver and extend health to detect/warn about a split store configuration.
+
+16. **Shop dates are formatted in browser-local time in several owner workflows**
+   - **Severity:** Medium
+   - **Evidence:** `shared/ship-by.ts:107-111` formats a date without the Pacific zone, while Stack planning uses Pacific; `client/src/pages/supplies.tsx:53-68` derives a default purchase date from browser-local “today.”
+   - **Why it matters:** Near midnight or on a non-Pacific device, a displayed ship-by/purchase day can differ from the operational America/Los_Angeles day.
+   - **Lean fix:** Reuse `SHIP_BY_TIME_ZONE`/`shipByCalendarDate()` for date-only formatting and defaults. Add non-Pacific timezone tests.
+
+17. **The initial client bundle eagerly includes 3D preview code**
+   - **Severity:** High
+   - **Evidence:** `client/src/components/stl-preview.tsx:2-4` statically imports Three; the chain `client/src/components/plate-bits-panel.tsx:18` → `client/src/pages/prints.tsx:64` is eagerly imported by `client/src/App.tsx:10-34`. The measured initial JS is 1.94 MB / 539.8 KB gzip.
+   - **Why it matters:** Every shell page pays for a 3D-only feature before the user visits Prints or opens a preview.
+   - **Lean fix:** Lazy-load `stl-preview` from `PlateBitsPanel`, following the existing dynamic Three import in `plate-mesh-view.tsx`, and lazy-load large owner routes.
+
+18. **The default React Query fetcher is a fragile unauthenticated URL builder**
+   - **Severity:** Medium
+   - **Evidence:** `client/src/lib/queryClient.ts:56-68` calls `fetch(queryKey.join("/"))` and cannot add an owner header. It currently works only for public-safe callers such as `operations.tsx:50-55`.
+   - **Why it matters:** A future protected query can accidentally issue an unauthenticated request or generate a malformed concatenated URL.
+   - **Lean fix:** Remove the default query function and require explicit `apiRequest`/query functions for all API queries.
+
+19. **The client repeats derived shop work and invalidates it on every route change**
+   - **Severity:** Low
+   - **Evidence:** `client/src/components/shell.tsx:250-257` invalidates performance, queue, and stack on every path change; `useShopCounts()` is invoked at `shell.tsx:181,236` and `attention-bell.tsx:18`; Dashboard duplicates its floor derivation at `client/src/pages/dashboard.tsx:160-170`.
+   - **Why it matters:** React Query deduplicates many requests, but repeated derivation/invalidation adds avoidable network, CPU, and memory churn.
+   - **Lean fix:** Provide one shell-level shop-count context, consume it in Dashboard/Bell, and invalidate only after mutations or explicit refresh.
+
+20. **Currency parsing is inconsistent**
+   - **Severity:** Low
+   - **Evidence:** `server/lib/calc.ts:44-46` strips commas but not `$`; cost paths strip `$`, commas, and whitespace at `server/lib/cost-defaults.ts:48` and `server/lib/deal-ops.ts:446`.
+   - **Why it matters:** A valid-looking `$12.50` input in the calculation path can be treated as non-numeric while the cost UI accepts it.
+   - **Lean fix:** Use one shared currency parser, returning integer cents or a validated decimal consistently.
+
 ## Discrepancies and documentation
 
 - **Timezone discrepancy (high):** the shop requirement is Pacific, whereas all owner notification defaults and deployment snippets are Eastern (finding 2).
 - **Dependency-contract discrepancy (medium):** `meshoptimizer` and `nanoid` are imported as application code but absent from root dependencies (finding 7).
 - **State-model discrepancy (medium):** the application says Kits are parked, but leaves a full page, API, persistence model, and tests active (finding 8).
+- **Duplicate stage logic (low):** `server/lib/production-queue.ts:135-137` and `shared/priority-stack.ts:37-39` each detect post-process stages with separate regexes.
 - **Build configuration drift (low):** `script/build.ts:7-31` contains an inherited allowlist for 19 packages, including packages not declared or used. It is misleading configuration rather than a currently observable bundle failure because the externals list is derived from declared dependencies.
 
 I did not find evidence of an owner-only API route missing its access-code guard, an unsigned HubSpot webhook, client calls to absent APIs, money rounding defects, or a currently unhandled promise rejection that reaches a user-facing route. The review does not treat speculative possibilities as findings.
@@ -170,17 +227,17 @@ It will conflict textually with any route splitting (`server/routes.ts`), SQLite
 ### Batch 1 — protect data and customer files
 1. Make slice-metric HubSpot writes blank-only, with explicit overwrite confirmation and tests.
 2. Make download tickets hashed and single-use; stop putting bearer credentials in query strings.
-3. Transactionalize the `order_parts` table-rebuild migration and add failure-recovery tests.
+3. Claim/coalesce webhook and pending-write jobs, then transactionalize the `order_parts` table-rebuild migration.
 
 ### Batch 2 — correct shop time and operational scale
-4. Change owner notification defaults/docs/tests to `America/Los_Angeles`.
-5. Bound and persist cursor/error state for ShipStation tracking refresh.
-6. Convert Drive library backfill to a bounded resumable background job.
+4. Change all owner date defaults/formatters/docs/tests to `America/Los_Angeles`.
+5. Repair plate-attach and shipping-bundle partial-write behavior with durable reconciliation.
+6. Bound and persist cursor/error state for ShipStation tracking and Drive library backfill.
 
 ### Batch 3 — shrink and simplify
 7. Remove the parked Kits page/API/schema after a migration/retention decision.
-8. Consolidate owner authentication and split `server/routes.ts` into route modules.
+8. Lazy-load Three/large owner routes and set a client bundle budget.
 9. Remove confirmed-unused dependencies and stale build allowlist entries; declare `meshoptimizer` and `nanoid` directly if retaining their imports.
 
 ### Batch 4 — improve first-load efficiency and safety net
-10. Lazy-load owner route pages, then add bundle-budget reporting and regression tests for HubSpot preservation, ticket one-time use, and ShipStation refresh bounds.
+10. Consolidate owner authentication/routes and add regressions for HubSpot preservation, ticket one-time use, job claims, Pacific dates, and ShipStation refresh bounds.
