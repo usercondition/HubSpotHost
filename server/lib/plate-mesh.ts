@@ -33,7 +33,6 @@ const CHUNK = 32;
  * can create an unbounded JS Map.
  */
 const MAX_GRID_CELLS = 3_500_000;
-const MAX_CHUNKS = 2_048;
 const CHUNK_STRIDE = 1_000_000;
 
 type RangeRead = (start: number, length: number) => Promise<Buffer | null>;
@@ -78,7 +77,6 @@ class SparseBits {
     const key = cx + cy * CHUNK_STRIDE + cz * CHUNK_STRIDE * CHUNK_STRIDE;
     let chunk = this.chunks.get(key);
     if (!chunk) {
-      if (this.chunks.size >= MAX_CHUNKS) throw new Error("Plate mesh exceeded its bounded occupancy grid.");
       chunk = new Uint32Array(CHUNK * CHUNK);
       this.chunks.set(key, chunk);
     }
