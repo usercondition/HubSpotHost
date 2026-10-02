@@ -204,7 +204,6 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
   });
   let browser: playwright.Browser | null = null;
   const layerHits: number[] = [];
-  let meshState = "ready";
   try {
     const base = `http://127.0.0.1:${port}`;
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -233,7 +232,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
           contentType: "application/json",
           body: JSON.stringify({
             ok: true,
-            files: [{ ...FILE, meshState, meshDriveFileId: meshState === "preparing" ? "" : FILE.meshDriveFileId }],
+            files: [{ ...FILE, meshDriveFileId: FILE.meshState === "preparing" ? "" : FILE.meshDriveFileId }],
             failures: [],
             pending: [],
           }),
@@ -335,7 +334,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
     assert.ok(phoneFill > 0.05, `phone view did not draw ${phoneCover.coverX} ${phoneCover.coverY}`);
     for (const state of ["preparing", "failed"] as const) {
-      meshState = state;
+      FILE.meshState = state;
       await openLayers();
       await page.locator("[data-testid='button-view-model']").click();
       if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
@@ -344,6 +343,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const state of ["preparing", "failed"] as const) {
+      FILE.meshState = state;
       await openLayers();
       await page.locator("[data-testid='button-view-model']").click();
       if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
