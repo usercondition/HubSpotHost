@@ -2831,7 +2831,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         excludeRecordId: existing.id,
       });
       if (remaining) {
-        await patchDealPrintFileMetrics(existing.hubspotDealId, remaining, new Date().toISOString());
+        await patchDealPrintFileMetrics(existing.hubspotDealId, remaining, new Date().toISOString(), true);
       } else {
         await clearDealPrintFileMetrics(existing.hubspotDealId);
       }

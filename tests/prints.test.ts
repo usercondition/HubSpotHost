@@ -319,6 +319,7 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
     analysisId: second.analysisId,
     dealId: "701",
     printerId,
+    overwrite: true,
   });
   assert.equal(secondAttach.status, 201);
   assert.equal(secondAttach.body.summary.plateCount, 2);
