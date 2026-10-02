@@ -752,16 +752,18 @@ function ensureExpenseColumns(sqlite: Database.Database): void {
     if (!existing.has(name)) sqlite.exec(`ALTER TABLE expenses ADD COLUMN ${name} ${type}`);
   }
   sqlite.exec("CREATE INDEX IF NOT EXISTS expenses_recurring_charge_idx ON expenses(recurring_expense_id, start_date DESC)");
-  // Pre-existing monthly/yearly/usage rows were the original recurring model.
-  // Keep their amounts intact and expose them as definitions; only later charge
-  // rows are counted as realized Performance overhead.
+  // Existing monthly/yearly/installment rows were already accrued overhead.
+  // Preserve that behavior while exposing them in Recurring. Legacy `usage`
+  // rows remain dated charges (not recurring definitions).
   sqlite.exec(`
     UPDATE expenses
     SET is_recurring = 1,
+        counts_as_overhead = 1,
         next_due_date = CASE WHEN next_due_date = '' THEN start_date ELSE next_due_date END,
         recurring_status = CASE WHEN end_date IS NOT NULL AND end_date < date('now') THEN 'ended' ELSE recurring_status END
-    WHERE is_recurring = 0 AND cadence IN ('monthly', 'yearly', 'usage')
+    WHERE is_recurring = 0 AND cadence IN ('monthly', 'yearly', 'installment')
   `);
+  sqlite.exec(`UPDATE expenses SET is_recurring = 0, counts_as_overhead = 0 WHERE cadence = 'usage' AND recurring_expense_id IS NULL`);
   // Owner-provided fixed shop utility. This is intentionally the sole seeded
   // expense; all other recurring records remain owner-entered.
   sqlite

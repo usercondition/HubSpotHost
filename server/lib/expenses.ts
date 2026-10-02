@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { getSqlite } from "./order-links";
 import { EXPENSE_CATEGORIES, monthlyEquivalentCents, type ExpenseCategory } from "../../shared/expenses";
 
-export const EXPENSE_CADENCES = ["one-off", "monthly", "yearly", "usage-based", "installment"] as const;
+export const EXPENSE_CADENCES = ["one-off", "monthly", "yearly", "usage", "usage-based", "installment"] as const;
 export { EXPENSE_CATEGORIES };
 export type ExpenseCadence = (typeof EXPENSE_CADENCES)[number];
 
@@ -15,6 +15,7 @@ export type ExpenseInput = {
   amountCents: number; currency?: "USD" | "EUR"; usdAmountCents?: number | null; cadence: ExpenseCadence;
   startDate: string; endDate?: string | null; paymentCount?: number | null; paymentNote?: string; notes?: string;
   isRecurring?: boolean; recurringStatus?: "active" | "ended" | "paused"; nextDueDate?: string;
+  countsAsOverhead?: boolean;
 };
 
 function validate(input: ExpenseInput) {
@@ -37,8 +38,10 @@ export function createExpense(input: ExpenseInput) {
   const now = new Date().toISOString(); const id = crypto.randomUUID();
   return db.transaction(() => {
   const isRecurring = input.isRecurring ?? input.cadence !== "one-off";
+  const countsAsOverhead = input.countsAsOverhead ?? (isRecurring && ["monthly", "yearly", "installment"].includes(input.cadence));
   db.prepare(`INSERT INTO expenses (id,idempotency_key,vendor,name,category,amount_cents,currency,usd_amount_cents,cadence,start_date,end_date,payment_count,payment_note,notes,is_recurring,recurring_status,next_due_date,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, input.idempotencyKey, input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", isRecurring ? 1 : 0, input.recurringStatus ?? "active", isRecurring ? (input.nextDueDate ?? input.startDate) : "", now, now);
+  db.prepare("UPDATE expenses SET counts_as_overhead = ? WHERE id = ?").run(countsAsOverhead ? 1 : 0, id);
   const row = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,new_values_json,created_at) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), id, "created", JSON.stringify(row), now);
   return row;
@@ -68,8 +71,9 @@ export function updateExpense(id: string, input: ExpenseInput) {
   const now = new Date().toISOString();
   return db.transaction(() => {
   const isRecurring = input.isRecurring ?? Boolean((before as any).is_recurring);
-  db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,is_recurring=?,recurring_status=?,next_due_date=?,updated_at=? WHERE id=?`)
-    .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", isRecurring ? 1 : 0, input.recurringStatus ?? (before as any).recurring_status ?? "active", isRecurring ? (input.nextDueDate ?? (before as any).next_due_date ?? input.startDate) : "", now, id);
+  const countsAsOverhead = input.countsAsOverhead ?? (isRecurring && ["monthly", "yearly", "installment"].includes(input.cadence));
+  db.prepare(`UPDATE expenses SET vendor=?,name=?,category=?,amount_cents=?,currency=?,usd_amount_cents=?,cadence=?,start_date=?,end_date=?,payment_count=?,payment_note=?,notes=?,is_recurring=?,recurring_status=?,next_due_date=?,counts_as_overhead=?,updated_at=? WHERE id=?`)
+    .run(input.vendor.trim(), input.name.trim(), input.category, input.amountCents, input.currency ?? "USD", input.usdAmountCents ?? null, input.cadence, input.startDate, input.endDate ?? null, input.paymentCount ?? null, input.paymentNote ?? "", input.notes ?? "", isRecurring ? 1 : 0, input.recurringStatus ?? (before as any).recurring_status ?? "active", isRecurring ? (input.nextDueDate ?? (before as any).next_due_date ?? input.startDate) : "", countsAsOverhead ? 1 : 0, now, id);
   const after = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   db.prepare("INSERT INTO expense_audit (id,expense_id,action,old_values_json,new_values_json,created_at) VALUES (?,?,?,?,?,?)").run(crypto.randomUUID(), id, "updated", JSON.stringify(before), JSON.stringify(after), now);
   return after;

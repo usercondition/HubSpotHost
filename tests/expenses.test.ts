@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createExpense, logRecurringCharge, overheadForPeriod } from "../server/lib/expenses";
-import { effectiveExpenseEnd } from "../shared/expenses";
+import { effectiveExpenseEnd, recurringPaymentNumber } from "../shared/expenses";
 
 test("recurring expenses prorate and one-off charges count once", () => {
   const rows: any = [
@@ -53,4 +53,18 @@ test("owner-provided fixed electricity accrues until a real linked charge replac
   const charge = { is_recurring: 0, recurring_expense_id: "electricity", currency: "USD", amount_cents: 15250, cadence: "one-off", start_date: "2026-10-15", category: "Utilities" };
   assert.equal(overheadForPeriod([electricity] as any, "2026-10-01", "2026-10-31"), 14784);
   assert.equal(overheadForPeriod([electricity, charge] as any, "2026-10-01", "2026-10-31"), 15250);
+});
+
+test("migrated recurring accruals preserve prior overhead and legacy usage stays dated", () => {
+  const before: any[] = [
+    { id: "patreon", currency: "USD", amount_cents: 1200, cadence: "monthly", start_date: "2026-01-01" },
+    { id: "affirm", currency: "USD", amount_cents: 24000, cadence: "monthly", start_date: "2026-01-01", payment_count: 6 },
+    { id: "cursor", currency: "USD", amount_cents: 1900, cadence: "usage", start_date: "2026-09-12" },
+  ];
+  const after = before.map((row) => row.cadence === "usage" ? { ...row, is_recurring: 0 } : { ...row, is_recurring: 1, counts_as_overhead: 1 });
+  assert.equal(overheadForPeriod(after as any, "2026-09-01", "2026-09-30"), overheadForPeriod(before as any, "2026-09-01", "2026-09-30"));
+});
+
+test("installment display derives payment number from its next due date", () => {
+  assert.equal(recurringPaymentNumber({ start_date: "2026-06-01", next_due_date: "2026-10-07", cadence: "installment" }), 5);
 });

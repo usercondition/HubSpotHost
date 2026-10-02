@@ -354,14 +354,24 @@ async function ingestShipstationShipments(
   const deals = await fetchPrintOrderDeals().catch(() => [] as HubSpotDealRecord[]);
   for (const shipment of shipments) {
     const checklistMatch = matchFulfillmentChecklist(shipment);
+    const tracking = shipment.trackingNumber.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    const byTracking = tracking
+      ? deals.find((deal) => String(deal.properties.print_tracking_number ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase() === tracking)
+      : undefined;
     const byOrder = shipment.orderNumber
       ? deals.find((deal) => deal.id === shipment.orderNumber || String(deal.properties.dealname ?? "").includes(shipment.orderNumber))
       : undefined;
-    const match = checklistMatch ?? (byOrder ? { dealId: byOrder.id } : null);
+    const match = checklistMatch ?? (byTracking ? { dealId: byTracking.id } : byOrder ? { dealId: byOrder.id } : null);
     const dealName = match
       ? deals.find((deal) => deal.id === match.dealId)?.properties.dealname ?? `Order ${match.dealId}`
       : "";
     upsertShipstationShipment(shipment, match ? { dealId: match.dealId, dealName: String(dealName) } : null);
+    const postage = Number(shipment.shipmentCost);
+    if (match && Number.isFinite(postage) && postage >= 0) {
+      // Safe fill: seedPrintDealCosts reads the current deal and writes postage
+      // only while the HubSpot field is blank.
+      await seedPrintDealCosts(match.dealId, { postage: String(postage), liveWrite: true, fillLaborPackaging: false });
+    }
   }
 }
 

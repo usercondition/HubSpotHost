@@ -11,7 +11,7 @@ const expenseSchema = z.object({
   amountCents: z.number().int().min(0),
   currency: z.enum(["USD", "EUR"]).default("USD"),
   usdAmountCents: z.number().int().min(0).nullable().optional(),
-  cadence: z.enum(["one-off", "monthly", "yearly", "usage-based", "installment"]),
+  cadence: z.enum(["one-off", "monthly", "yearly", "usage", "usage-based", "installment"]),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   paymentCount: z.number().int().positive().nullable().optional(),
