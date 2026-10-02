@@ -319,7 +319,6 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
     analysisId: second.analysisId,
     dealId: "701",
     printerId,
-    overwrite: true,
   });
   assert.equal(secondAttach.status, 201);
   assert.equal(secondAttach.body.summary.plateCount, 2);
@@ -350,6 +349,41 @@ test("each CTB plate appends to one job and HubSpot receives cumulative totals",
   assert.equal(listed.body.boards.length, 1);
   assert.equal(listed.body.boards[0].plateCount, 2);
   assert.equal(listed.body.boards[0].totalResinCost, 9.5);
+});
+
+test("a second plate preserves an owner-edited slice metric", async () => {
+  const { getDb } = await import("../server/lib/order-links");
+  const { printFileRecords } = await import("../shared/schema");
+  getDb().delete(printFileRecords).run();
+  mockCalls = [];
+  mockDealProperties = {};
+
+  const fleet = await jsonOwnerRequest("GET", "/api/printers");
+  const printerId = fleet.body.printers[0]?.printerId as number;
+  const first = stagePrintFile("owner-metric-01.ctb", fixtureCtb(6));
+  const firstAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: first.analysisId,
+    dealId: "701",
+    printerId,
+  });
+  assert.equal(firstAttach.status, 201);
+  mockDealProperties.print_estimated_resin_cost = "owner-set";
+
+  const second = stagePrintFile("owner-metric-02.ctb", fixtureCtb(7));
+  const secondAttach = await jsonOwnerRequest("POST", "/api/prints/attach", {
+    analysisId: second.analysisId,
+    dealId: "701",
+    printerId,
+  });
+  assert.equal(secondAttach.status, 201);
+
+  const latestPatch = JSON.parse(
+    mockCalls.filter((call) => call.method === "PATCH" && call.url === "/crm/v3/objects/deals/701").at(-1)!
+      .body,
+  ).properties;
+  assert.equal(latestPatch.print_plate_count, "2");
+  assert.equal(latestPatch.print_estimated_resin_cost, undefined);
+  assert.equal(mockDealProperties.print_estimated_resin_cost, "owner-set");
 });
 
 test("attach previews and confirmed detach rebuilds only print planning totals", async () => {
