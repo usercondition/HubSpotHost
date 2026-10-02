@@ -125,9 +125,10 @@ function chooseGrid(
   layerMm: number,
   voxel = MESH_VOXEL_MM,
 ): Grid {
-  const binX = Math.max(1, Math.round(voxel / pixelMmX));
-  const binY = Math.max(1, Math.round(voxel / pixelMmY));
-  const step = Math.max(1, Math.round(voxel / layerMm));
+  /** Flooring makes the recorded physical pitch never exceed the requested 0.2 mm cap. */
+  const binX = Math.max(1, Math.floor(voxel / pixelMmX));
+  const binY = Math.max(1, Math.floor(voxel / pixelMmY));
+  const step = Math.max(1, Math.floor(voxel / layerMm));
   return {
     binX,
     binY,

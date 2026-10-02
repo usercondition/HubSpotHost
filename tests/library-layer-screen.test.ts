@@ -264,6 +264,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
       const close = page.locator("[data-testid='button-close-plate-preview']");
       if (await close.count()) await close.click();
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator("[data-testid='library-row-file-torso']").waitFor();
       await page.locator("[data-testid='button-plate-menu-file-torso']").click();
       assert.equal(await page.locator("[data-testid='button-add-model-file-torso']").count(), 0);
