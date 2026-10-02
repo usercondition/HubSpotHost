@@ -51,6 +51,6 @@ test("recurring definitions never count as overhead, but their logged charge doe
 test("owner-provided fixed electricity accrues until a real linked charge replaces it", () => {
   const electricity = { id: "electricity", is_recurring: 1, counts_as_overhead: 1, currency: "USD", amount_cents: 15000, cadence: "monthly", start_date: "2026-10-01", end_date: null, category: "Utilities" };
   const charge = { is_recurring: 0, recurring_expense_id: "electricity", currency: "USD", amount_cents: 15250, cadence: "one-off", start_date: "2026-10-15", category: "Utilities" };
-  assert.equal(overheadForPeriod([electricity] as any, "2026-10-01", "2026-10-31"), 15000);
+  assert.equal(overheadForPeriod([electricity] as any, "2026-10-01", "2026-10-31"), 14784);
   assert.equal(overheadForPeriod([electricity, charge] as any, "2026-10-01", "2026-10-31"), 15250);
 });

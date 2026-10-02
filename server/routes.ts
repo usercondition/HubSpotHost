@@ -277,6 +277,7 @@ import {
   deleteOffbook,
   listStackState,
   markStackDone,
+  pickupBundleDealIds,
   pickupDealIdsForStackDone,
   pruneStackEntries,
   resetStackOrder,
@@ -2630,6 +2631,51 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       seeded: results.filter((result) => result.status === "seeded").length,
       results,
     });
+  });
+
+  /** Owner-only safe repair for historical blanks; never overwrites entered costs. */
+  app.post("/api/costs/backfill", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    const dryRun = String(req.query.dryRun ?? "") === "1";
+    try {
+      const deals = await fetchPrintOrderDeals();
+      const resinByDeal = new Map<string, number>();
+      for (const record of listPrintFileRecords(500)) {
+        const cost = Number(record.resinCost);
+        if (Number.isFinite(cost) && cost >= 0) resinByDeal.set(record.hubspotDealId, (resinByDeal.get(record.hubspotDealId) ?? 0) + cost);
+      }
+      const shipments = new Map(listShipstationShipments().filter((row) => !row.voided && row.trackingNumber).map((row) => [row.trackingNumber.replace(/[^0-9A-Za-z]/g, "").toUpperCase(), row]));
+      const pickupIds = pickupBundleDealIds();
+      const results: Array<{ dealId: string; dealName: string; proposed: Record<string, number>; changed?: Record<string, number>; reason?: string }> = [];
+      for (const deal of deals) {
+        const props = deal.properties;
+        const proposed: Record<string, number> = {};
+        const material = resinByDeal.get(deal.id);
+        if (String(props.print_material_cost ?? "").trim() === "" && material != null) proposed.material = Math.round(material * 100) / 100;
+        const tracking = String(props.print_tracking_number ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+        const shipment = tracking ? shipments.get(tracking) : undefined;
+        if (String(props.print_actual_shipping_cost ?? "").trim() === "") {
+          const postage = shipment ? Number(shipment.shipmentCost) : pickupIds.has(deal.id) ? 0 : null;
+          if (postage != null && Number.isFinite(postage) && postage >= 0) proposed.shipping = postage;
+        }
+        const missing: string[] = [];
+        if (String(props.print_material_cost ?? "").trim() === "" && material == null) missing.push("no attached plate resin estimate");
+        if (String(props.print_actual_shipping_cost ?? "").trim() === "" && !("shipping" in proposed)) missing.push(tracking ? "no linked ShipStation label cost" : "no tracking or local pickup");
+        if (dryRun || Object.keys(proposed).length === 0) {
+          results.push({ dealId: deal.id, dealName: props.dealname?.trim() || `Print Order ${deal.id}`, proposed, reason: missing.join("; ") || undefined });
+          continue;
+        }
+        const seeded = await seedPrintDealCosts(deal.id, { materialEstimate: proposed.material ?? null, postage: proposed.shipping == null ? null : String(proposed.shipping), liveWrite: true, fillLaborPackaging: false });
+        if (seeded && !seeded.ok) {
+          results.push({ dealId: deal.id, dealName: props.dealname?.trim() || `Print Order ${deal.id}`, proposed, reason: seeded.error });
+        } else {
+          results.push({ dealId: deal.id, dealName: props.dealname?.trim() || `Print Order ${deal.id}`, proposed, changed: proposed, reason: missing.join("; ") || undefined });
+        }
+      }
+      return res.json({ ok: true, dryRun, changed: results.filter((row) => row.changed).length, results });
+    } catch (error) {
+      return res.status(error instanceof HubSpotError ? error.status : 502).json({ ok: false, error: error instanceof Error ? error.message : "Cost backfill failed" });
+    }
   });
 
   /**

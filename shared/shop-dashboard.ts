@@ -266,6 +266,15 @@ function profitOf(orders: ShopDashboardOrder[], start: number | null, end: numbe
   return { profit, cost, revenue, complete, missing, estimated };
 }
 
+function missingCostNote(orders: ShopDashboardOrder[], start: number | null, end: number | null): string | null {
+  const gaps = orders.flatMap((order) => {
+    if (!inWindow(parseTime(order.createdAt), start, end) || moneyOnce(order)) return [];
+    const missing = [order.resinCost == null ? "resin" : "", order.postage == null ? "postage" : ""].filter(Boolean).join(" + ");
+    return missing ? [`${order.name}: ${missing}`] : [];
+  });
+  return gaps.length ? gaps.join("; ") : null;
+}
+
 function seriesFor(orders: ShopDashboardOrder[], window: Window): number[] {
   if (window.start == null) return [];
   const buckets = 6;
@@ -304,7 +313,9 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
   const bars = seriesFor(input.orders, window);
 
   const amountNote = currentBooked.missingAmount > 0 ? units(currentBooked.missingAmount, "order missing an amount", "orders missing an amount") : null;
-  const costNote = currentProfit.missing > 0 ? units(currentProfit.missing, "order missing cost", "orders missing cost") : null;
+  const costNote = currentProfit.missing > 0
+    ? `${units(currentProfit.missing, "order missing cost", "orders missing cost")}: ${missingCostNote(input.orders, window.start, window.end) ?? ""}`.trim()
+    : null;
 
   const revenue = metric({
     id: "revenue-booked",
