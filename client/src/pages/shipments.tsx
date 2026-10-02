@@ -30,7 +30,8 @@ export default function ShipmentsPage() {
         {!isUnlocked ? <OwnerUnlockPanel title="Unlock Shipments" description="Owner code required to view recipient and tracking data." buttonLabel="Unlock Shipments" testIdPrefix="shipments" pending={unlock.isPending} onUnlock={(code) => unlock.mutate(code)} /> : (
           <Panel title="Recent shipments" description="Newest first · exceptions and shipments with no movement for four days need attention." testId="panel-shipments">
             {shipments.isLoading ? <p className="text-sm text-muted-foreground">Loading shipments…</p> : shipments.data?.shipments.length ? (
-              <div className="overflow-x-auto">
+              <>
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[680px] text-left text-sm">
                   <thead className="border-b text-xs text-muted-foreground">
                     <tr><th className="pb-2 pr-3">Date</th><th className="pb-2 pr-3">Recipient</th><th className="pb-2 pr-3">Carrier / service</th><th className="pb-2 pr-3">Tracking</th><th className="pb-2 pr-3">Status</th><th className="pb-2 pr-3 text-right">Cost</th><th className="pb-2">Matched order</th></tr>
@@ -50,6 +51,25 @@ export default function ShipmentsPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="space-y-2 sm:hidden">
+                {shipments.data.shipments.map((shipment) => (
+                  <article key={shipment.shipmentId} className="glance-item gap-2" data-tone={shipment.status === "exception" || shipment.stale ? "warn" : undefined}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{recipient(shipment.shipToName)}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {shipment.carrierCode || "Carrier unknown"}{shipment.serviceCode ? ` · ${shipment.serviceCode}` : ""}
+                      </p>
+                      <p className="mt-1 truncate text-xs text-primary">{shipment.trackingNumber || "No tracking"}</p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <StatusPill tone={tone(shipment.status)} icon={shipment.status === "delivered" ? CheckCircle2 : Truck} label={shipment.status} />
+                      {(shipment.stale || shipment.status === "exception") && <span className="text-[0.6875rem] font-medium text-destructive">{shipment.status === "exception" ? "Exception" : "Stale"}</span>}
+                      <span className="text-xs tabular-nums text-muted-foreground">{shipment.shipmentCost ? formatMoney(Number(shipment.shipmentCost)) : "—"}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              </>
             ) : <div className="glance-item flex-col items-center py-8 text-center"><PackageSearch className="h-5 w-5 text-muted-foreground" /><p className="mt-2 text-sm font-medium">No ShipStation shipments yet</p><p className="text-xs text-muted-foreground">Webhooks or an owner sync will add them here.</p></div>}
           </Panel>
         )}
