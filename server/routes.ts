@@ -367,10 +367,14 @@ async function ingestShipstationShipments(
       : "";
     upsertShipstationShipment(shipment, match ? { dealId: match.dealId, dealName: String(dealName) } : null);
     const postage = Number(shipment.shipmentCost);
-    if (match && Number.isFinite(postage) && postage >= 0) {
+    if (match && Number.isFinite(postage) && postage > 0) {
       // Safe fill: seedPrintDealCosts reads the current deal and writes postage
       // only while the HubSpot field is blank.
-      await seedPrintDealCosts(match.dealId, { postage: String(postage), liveWrite: true, fillLaborPackaging: false });
+      try {
+        await seedPrintDealCosts(match.dealId, { postage: String(postage), liveWrite: true, fillLaborPackaging: false });
+      } catch {
+        // Shipment ingestion remains durable even when HubSpot is unavailable.
+      }
     }
   }
 }

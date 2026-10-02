@@ -81,18 +81,20 @@ export function updateExpense(id: string, input: ExpenseInput) {
 }
 
 export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: string, end: string): number {
-  const recurringWithActualCharge = new Set(
-    (rows as any[])
-      .filter((row) => !row.is_recurring && row.recurring_expense_id && row.start_date >= start && row.start_date <= end)
-      .map((row) => row.recurring_expense_id),
-  );
+  const chargesByRecurring = new Map<string, any[]>();
+  for (const row of rows as any[]) {
+    if (!row.is_recurring && row.recurring_expense_id && row.start_date >= start && row.start_date <= end) {
+      const charges = chargesByRecurring.get(row.recurring_expense_id) ?? [];
+      charges.push(row); chargesByRecurring.set(row.recurring_expense_id, charges);
+    }
+  }
   return rows.reduce<number>((sum, row: any) => {
     if (row.category === "Materials" || row.category === "Shipping supplies") return sum;
     // A recurring row defines an expected bill, not an actual transaction.
     // Only its logged charge rows count, except the owner-provided fixed
     // Electricity accrual. A real linked Electricity charge replaces that
     // accrual for its period rather than adding to it.
-    if (row.is_recurring && (!row.counts_as_overhead || recurringWithActualCharge.has(row.id))) return sum;
+    if (row.is_recurring && !row.counts_as_overhead) return sum;
     const amount = row.currency === "EUR" ? row.usd_amount_cents : row.amount_cents;
     const installmentEnd = row.payment_count && (row.cadence === "monthly" || row.cadence === "yearly")
       ? addCadence(row.start_date, row.cadence, row.payment_count)
@@ -104,7 +106,17 @@ export function overheadForPeriod(rows: ReturnType<typeof listExpenses>, start: 
       const overlapStart = row.start_date > start ? row.start_date : start;
       const overlapEnd = effectiveEnd && effectiveEnd < end ? effectiveEnd : end;
       const days = Math.max(0, Math.round((Date.parse(`${overlapEnd}T00:00:00Z`) - Date.parse(`${overlapStart}T00:00:00Z`)) / 86_400_000));
-      return sum + Math.round(daily * days);
+      const charges = chargesByRecurring.get(row.id) ?? [];
+      const coveredDays = new Set<string>();
+      for (const charge of charges) {
+        const date = new Date(`${charge.start_date}T12:00:00Z`);
+        const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+        for (let stamp = new Date(`${overlapStart}T12:00:00Z`); stamp < new Date(`${overlapEnd}T12:00:00Z`); stamp.setUTCDate(stamp.getUTCDate() + 1)) {
+          const key = stamp.toISOString().slice(0, 10);
+          if (row.cadence === "yearly" ? stamp.getUTCFullYear() === date.getUTCFullYear() : key.slice(0, 7) === month) coveredDays.add(key);
+        }
+      }
+      return sum + Math.round(daily * Math.max(0, days - coveredDays.size));
     }
     return row.start_date >= start && row.start_date <= end ? sum + amount : sum;
   }, 0);
