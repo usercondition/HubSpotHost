@@ -139,6 +139,48 @@ The build emits four warnings because CJS output replaces `import.meta` in `serv
    - **Why it matters:** A valid-looking `$12.50` input in the calculation path can be treated as non-numeric while the cost UI accepts it.
    - **Lean fix:** Use one shared currency parser, returning integer cents or a validated decimal consistently.
 
+21. **The main typecheck excludes every test file**
+   - **Severity:** High
+   - **Evidence:** `tsconfig.json:3` excludes `**/*.test.ts`, while `package.json:13` defines `check` as only `tsc --noEmit`.
+   - **Why it matters:** The reported green typecheck provides no static validation for the 22,627-line test suite; broken test-only imports and type contracts reach runtime only.
+   - **Lean fix:** Add a `tsconfig.test.json` and `check:tests` script, or use project references so application and tests are both typechecked.
+
+22. **The full test command has an intermittent Playwright/layout failure**
+   - **Severity:** High
+   - **Evidence:** `tests/library-send-screen.test.ts:307` contains the Send-to-Library responsive browser test. A separate full-suite run failed this test under load but the focused rerun passed, consistent with contention among browser/server tests. The successful audit run does not eliminate this observed flake.
+   - **Why it matters:** The CI signal is nondeterministic; a passing retry can hide visual regressions and a failing retry blocks unrelated changes.
+   - **Lean fix:** Put browser/layout tests in a dedicated serial script/job, share one prepared server/build, and preserve artifacts on failure.
+
+23. **Tests do not consistently run in test mode**
+   - **Severity:** High
+   - **Evidence:** `package.json:14` runs `tsx --test tests/*.test.ts` without `NODE_ENV=test`; only individual suites set it, including `tests/integration.test.ts:53` and `tests/loss-proof-sync.test.ts:107`.
+   - **Why it matters:** Route behavior guarded by `NODE_ENV` and `ENABLE_INTERNAL_ADMIN` can differ between suites, local runs, and CI.
+   - **Lean fix:** Set `NODE_ENV=test` in the test script and CI workflow, with individual tests overriding only when they explicitly test production behavior.
+
+24. **README environment documentation is materially incomplete**
+   - **Severity:** High
+   - **Evidence:** the README’s environment table stops at `README.md:398-413`, while `.env.example` documents additional active configuration for file limits, Google, Telegram, ShipEngine/ShipStation, Resend, Redis, tracker assistant, and extension testing.
+   - **Why it matters:** Operators can deploy a feature with undocumented required/optional persistence, credential, or scheduling settings.
+   - **Lean fix:** Make `.env.example` the explicitly canonical configuration reference from README, or generate/maintain one exhaustive README table with section links.
+
+25. **The shipped UI kit carries additional verified dead wrappers and dependencies**
+   - **Severity:** Medium
+   - **Evidence:** `recharts`, `cmdk`, `embla-carousel-react`, `input-otp`, `vaul`, `react-day-picker`, and `react-resizable-panels` are imported only by otherwise unreferenced `client/src/components/ui/` wrappers. Multiple Radix packages similarly correspond solely to unused wrappers; `@radix-ui/react-accordion`, `@radix-ui/react-aspect-ratio`, and `@radix-ui/react-avatar` have neither an active wrapper nor application import.
+   - **Why it matters:** The unused component kit enlarges the direct dependency inventory, install size, update workload, and audit surface.
+   - **Lean fix:** Delete unreferenced UI wrapper files and remove their matching packages in small, verified batches. Keep only wrappers reached from application components.
+
+26. **Several runtime environment variables have no configuration documentation**
+   - **Severity:** Medium
+   - **Evidence:** `server/lib/shipengine.ts:116` reads `SHIP_FROM_COMPANY`; `server/lib/shipped-email-store.ts:21-25` reads `SHIPPED_EMAIL_DB_FILE` and `MARKETPLACE_INBOX_BRIEF_DB_FILE`; these are absent from `.env.example`.
+   - **Why it matters:** Operators cannot intentionally configure company-address output or durable satellite-store placement.
+   - **Lean fix:** Document these variables in `.env.example` and README persistence/ShipEngine sections, including fallback precedence.
+
+27. **A required OCR regression fixture can silently skip its assertions**
+   - **Severity:** Medium
+   - **Evidence:** `tests/shipping-label.test.ts:141-147` returns early when an agent-local fixture path is absent, rather than marking the test skipped or failing.
+   - **Why it matters:** CI can report a green suite without running the PDF/OCR regression it appears to cover.
+   - **Lean fix:** Commit a redacted fixture under `tests/fixtures`, resolve it relative to the test file, and explicitly `test.skip` with a reason only when a fixture cannot legally be committed.
+
 ## Discrepancies and documentation
 
 - **Timezone discrepancy (high):** the shop requirement is Pacific, whereas all owner notification defaults and deployment snippets are Eastern (finding 2).
@@ -220,7 +262,7 @@ Do not remove a dependency merely because it is large without verifying its impo
 
 Open [PR #240](https://github.com/usercondition/HubSpotHost/pull/240), **“Add recurring expenses and safe cost fills,”** changes `client/src/pages/expenses.tsx`, `client/src/pages/performance.tsx`, `server/lib/deal-ops.ts`, `server/lib/expense-routes.ts`, `server/lib/expenses.ts`, `server/lib/order-links.ts`, `server/routes.ts`, `shared/expenses.ts`, `shared/shop-dashboard.ts`, and related tests.
 
-It will conflict textually with any route splitting (`server/routes.ts`), SQLite migration hardening (`server/lib/order-links.ts`), or expense refactor. It directly overlaps the audit’s blank-only HubSpot-write concern in `server/lib/deal-ops.ts` and its expense/state-model analysis. Rebase #240 first; preserve its stated blank-only cost-fill behavior when addressing finding 1.
+It is currently cleanly mergeable against main. It will overlap future route splitting (`server/routes.ts`), SQLite migration hardening (`server/lib/order-links.ts`), or expense refactors. Its new cost-backfill endpoint has no focused integration test for dry-run and non-overwrite behavior; add one before merge. Preserve its stated blank-only cost-fill behavior when addressing finding 1.
 
 ## Prioritized top-10 fix plan
 
@@ -240,4 +282,4 @@ It will conflict textually with any route splitting (`server/routes.ts`), SQLite
 9. Remove confirmed-unused dependencies and stale build allowlist entries; declare `meshoptimizer` and `nanoid` directly if retaining their imports.
 
 ### Batch 4 — improve first-load efficiency and safety net
-10. Consolidate owner authentication/routes and add regressions for HubSpot preservation, ticket one-time use, job claims, Pacific dates, and ShipStation refresh bounds.
+10. Make tests deterministic and complete: enforce `NODE_ENV=test`, typecheck tests, split serial browser tests, add the committed OCR fixture, and cover HubSpot preservation, ticket one-time use, job claims, Pacific dates, and ShipStation refresh bounds.
