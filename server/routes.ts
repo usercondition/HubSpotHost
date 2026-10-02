@@ -101,6 +101,7 @@ import {
   groupPrintFileRecordsByDeal,
   isSupportedSliceFileName,
   listPrintFileRecords,
+  listPrintFileRecordsForDeal,
   markPrintFileAnalysisUsed,
   previewAttachSummary,
   stagePrintFileFromPath,
@@ -2748,8 +2749,21 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
       const fleetPrinterId = requestedPrinterId ?? autoMatchedId;
 
       const attachedAt = new Date().toISOString();
+      const previousSummary = buildPrintFileOrderSummaryFromRecords(deal.id);
+      const previousAttachedAt = previousSummary
+        ? [...listPrintFileRecordsForDeal(deal.id)]
+            .sort((a, b) => b.attachedAt.localeCompare(a.attachedAt) || b.id - a.id)[0]?.attachedAt
+        : null;
       const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
-      await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
+      await patchDealPrintFileMetrics(
+        parsed.data.dealId,
+        summary,
+        attachedAt,
+        parsed.data.overwrite === true,
+        previousSummary && previousAttachedAt
+          ? { summary: previousSummary, attachedAt: previousAttachedAt }
+          : null,
+      );
       const seededCosts = await seedPrintDealCosts(deal.id, {
         materialEstimate: summary.totalResinCost,
         liveWrite: true,
@@ -2826,7 +2840,7 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
         excludeRecordId: existing.id,
       });
       if (remaining) {
-        await patchDealPrintFileMetrics(existing.hubspotDealId, remaining, new Date().toISOString());
+        await patchDealPrintFileMetrics(existing.hubspotDealId, remaining, new Date().toISOString(), true);
       } else {
         await clearDealPrintFileMetrics(existing.hubspotDealId);
       }

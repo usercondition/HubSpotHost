@@ -408,6 +408,14 @@ function compactText(value: string | null, maxLength = 1_000): string | null {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
+function isBlankHubSpotValue(value: unknown): boolean {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function sameHubSpotValue(value: unknown, expected: string | undefined): boolean {
+  return expected !== undefined && String(value ?? "").trim() === expected.trim();
+}
+
 function printFileProperties(summary: PrintFileOrderSummary, attachedAt: string): Record<string, string> {
   const { latest } = summary;
   const properties: Record<string, string> = {
@@ -501,11 +509,32 @@ export async function patchDealPrintFileMetrics(
   dealId: string,
   summary: PrintFileOrderSummary,
   attachedAt: string,
+  overwrite = false,
+  previous?: { summary: PrintFileOrderSummary; attachedAt: string } | null,
 ): Promise<void> {
   await ensurePrintFileDealProperties();
+  const properties = printFileProperties(summary, attachedAt);
+  const previousProperties = previous
+    ? printFileProperties(previous.summary, previous.attachedAt)
+    : {};
+  const query = new URLSearchParams({ properties: Object.keys(properties).join(",") });
+  const current = await request(
+    `/crm/v3/objects/deals/${encodeURIComponent(dealId)}?${query.toString()}`,
+    { method: "GET" },
+  );
+  const updates = overwrite
+    ? properties
+    : Object.fromEntries(
+        Object.entries(properties).filter(
+          ([name]) =>
+            isBlankHubSpotValue(current?.properties?.[name]) ||
+            sameHubSpotValue(current?.properties?.[name], previousProperties[name]),
+        ),
+      );
+  if (Object.keys(updates).length === 0) return;
   await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: printFileProperties(summary, attachedAt) }),
+    body: JSON.stringify({ properties: updates }),
   });
   invalidatePrintOrderDealsCache();
 }

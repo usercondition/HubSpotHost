@@ -1447,6 +1447,8 @@ export const attachPrintFileSchema = z.object({
    * embeds a shared model name (e.g. Mighty 8K) shared by NEWX1/2/3.
    */
   printerId: z.coerce.number().int().positive("Choose which printer ran this plate").optional(),
+  /** Owner-only opt-in to replace populated HubSpot slice planning fields. */
+  overwrite: z.boolean().optional(),
 });
 
 export type AttachPrintFileInput = z.infer<typeof attachPrintFileSchema>;
