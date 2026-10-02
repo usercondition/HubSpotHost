@@ -231,7 +231,12 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ ok: true, files: [{ ...FILE, meshState }], failures: [], pending: [] }),
+          body: JSON.stringify({
+            ok: true,
+            files: [{ ...FILE, meshState, meshDriveFileId: meshState === "preparing" ? "" : FILE.meshDriveFileId }],
+            failures: [],
+            pending: [],
+          }),
         });
         return;
       }
@@ -333,7 +338,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
       meshState = state;
       await openLayers();
       await page.locator("[data-testid='button-view-model']").click();
-      await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
       await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
       await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-phone-390.png` });
     }
@@ -341,7 +346,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     for (const state of ["preparing", "failed"] as const) {
       await openLayers();
       await page.locator("[data-testid='button-view-model']").click();
-      await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
       await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
       await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-desktop-1440.png` });
     }

@@ -27,7 +27,7 @@ export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 export const PLATE_MESH_VERSION = 6;
 const CHUNK = 32;
 /** Per-plate occupancy budget; retry at 0.2 mm before rejecting an unusually dense fallback. */
-const MAX_OCCUPIED_VOXELS = 8_000_000;
+const MAX_OCCUPIED_VOXELS = 15_000_000;
 const MAX_MESH_VOXEL_MM = 0.2;
 const CHUNK_STRIDE = 1_000_000;
 
