@@ -552,19 +552,33 @@ export function readPlatePreviewPng(sha256: string): Buffer | null {
   return row.png;
 }
 
-export function saveDownloadTicket(driveFileId: string): { token: string; expiresAt: string } {
+const DOWNLOAD_TICKET_TTL_MS = 5 * 60 * 1000;
+
+function hashDownloadTicket(token: string): string {
+  return crypto.createHash("sha256").update(token.trim(), "utf8").digest("hex");
+}
+
+export function saveDownloadTicket(
+  driveFileId: string,
+  now = new Date(),
+): { token: string; expiresAt: string } {
   const token = crypto.randomBytes(24).toString("base64url");
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const expiresAt = new Date(now.getTime() + DOWNLOAD_TICKET_TTL_MS).toISOString();
   const sqlite = getSqlite();
-  sqlite.prepare(`DELETE FROM plate_download_tickets WHERE expires_at < ?`).run(new Date().toISOString());
-  sqlite.prepare(`INSERT INTO plate_download_tickets (token, drive_file_id, expires_at) VALUES (?, ?, ?)`).run(token, driveFileId, expiresAt);
+  sqlite.prepare(`DELETE FROM plate_download_tickets WHERE expires_at <= ?`).run(now.toISOString());
+  sqlite
+    .prepare(`INSERT INTO plate_download_tickets (token_hash, drive_file_id, expires_at) VALUES (?, ?, ?)`)
+    .run(hashDownloadTicket(token), driveFileId, expiresAt);
   return { token, expiresAt };
 }
 
-export function readDownloadTicket(token: string): string | null {
+export function readDownloadTicket(token: string, now = new Date()): string | null {
   const row = getSqlite()
-    .prepare(`SELECT drive_file_id, expires_at FROM plate_download_tickets WHERE token = ?`)
-    .get(token) as { drive_file_id: string; expires_at: string } | undefined;
-  if (!row || row.expires_at <= new Date().toISOString()) return null;
-  return row.drive_file_id;
+    .prepare(
+      `DELETE FROM plate_download_tickets
+       WHERE token_hash = ? AND expires_at > ?
+       RETURNING drive_file_id`,
+    )
+    .get(hashDownloadTicket(token), now.toISOString()) as { drive_file_id: string } | undefined;
+  return row?.drive_file_id ?? null;
 }
