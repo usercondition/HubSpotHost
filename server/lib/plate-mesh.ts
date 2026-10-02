@@ -19,15 +19,21 @@ import {
 } from "./ctb";
 
 const PREFIX_BYTES = 8 * 1024 * 1024;
-/** Sample pitch. Coarsened only if the worst-case chunk grid would exceed the budget. */
+/** Sample pitch. Coarsened only when a real plate exceeds the bounded voxel grid. */
 export const MESH_VOXEL_MM = 0.1;
 /** Compressed GLB cap. The desktop viewer is the target; phones only need the file to open. */
 export const MESH_BYTE_BUDGET = 40 * 1024 * 1024;
 /** Bumped when the mesher changes so backfill rebuilds plates marked ready by an older pass. */
-export const PLATE_MESH_VERSION = 5;
+export const PLATE_MESH_VERSION = 6;
 const CHUNK = 32;
-/** Pitch gate only. Occupied chunks are what get allocated, and they stay well under this. */
-const CHUNK_BUDGET = 2 * 1024 * 1024 * 1024;
+/**
+ * Surface nets needs one index per potential cell. Keeping that under this
+ * ceiling makes the worker's typed index grid bounded on full 8K/12K plates.
+ * It also forces a practical fallback pitch before millions of tiny supports
+ * can create an unbounded JS Map.
+ */
+const MAX_GRID_CELLS = 3_500_000;
+const MAX_CHUNKS = 2_048;
 const CHUNK_STRIDE = 1_000_000;
 
 type RangeRead = (start: number, length: number) => Promise<Buffer | null>;
@@ -72,7 +78,7 @@ class SparseBits {
     const key = cx + cy * CHUNK_STRIDE + cz * CHUNK_STRIDE * CHUNK_STRIDE;
     let chunk = this.chunks.get(key);
     if (!chunk) {
-      if (this.chunks.size * CHUNK * CHUNK * 4 >= CHUNK_BUDGET) return;
+      if (this.chunks.size >= MAX_CHUNKS) throw new Error("Plate mesh exceeded its bounded occupancy grid.");
       chunk = new Uint32Array(CHUNK * CHUNK);
       this.chunks.set(key, chunk);
     }
@@ -115,10 +121,9 @@ class SparseBits {
   }
 }
 
-function chunkBytes(gx: number, gy: number, gz: number): number {
-  const cells = Math.ceil(gx / CHUNK) * Math.ceil(gy / CHUNK) * Math.ceil(gz / CHUNK);
-  if (!Number.isFinite(cells)) return Number.POSITIVE_INFINITY;
-  return cells * CHUNK * CHUNK * 4;
+function gridCells(gx: number, gy: number, gz: number): number {
+  const cells = gx * gy * gz;
+  return Number.isSafeInteger(cells) ? cells : Number.POSITIVE_INFINITY;
 }
 
 function chooseGrid(width: number, height: number, layers: number, pixelMmX: number, pixelMmY: number, layerMm: number): Grid {
@@ -132,7 +137,7 @@ function chooseGrid(width: number, height: number, layers: number, pixelMmX: num
     const gy = Math.max(1, Math.ceil(height / binY));
     const gz = Math.max(1, Math.ceil(layers / step));
     grid = { binX, binY, step, gx, gy, gz, voxel };
-    if (chunkBytes(gx, gy, gz) <= CHUNK_BUDGET) return grid;
+    if (gridCells(gx, gy, gz) <= MAX_GRID_CELLS) return grid;
     if (binX >= width && binY >= height && step >= layers) return grid;
     voxel *= 1.5;
   }
@@ -361,7 +366,7 @@ export async function buildPlateGlb(readRange: RangeRead, size: number): Promise
   const spans = new Map<number, CtbEncryptedSpan>();
   const full = chooseGrid(plan.width, plan.height, plan.layerCount, plan.pixelMmX, plan.pixelMmY, plan.layerMm);
   const origin: Origin = { x: 0, y: 0, z: 0 };
-  if (chunkBytes(full.gx, full.gy, full.gz) <= CHUNK_BUDGET) {
+  if (gridCells(full.gx, full.gy, full.gz) <= MAX_GRID_CELLS) {
     const bits = new SparseBits();
     await raster(readRange, plan, entries, spans, bits, full, origin);
     return surfaceOnWorker(bits, plan, full, origin);

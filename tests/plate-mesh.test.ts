@@ -173,6 +173,36 @@ function longRle(white: boolean, length: number): number[] {
   return [head, 0xc0 | ((length >> 16) & 0x1f), (length >> 8) & 0xff, length & 0xff];
 }
 
+function mighty12kPlate(): Buffer {
+  const width = 11_520;
+  const height = 5_120;
+  const layers = 320;
+  const payloads: Buffer[] = [];
+  for (let layer = 0; layer < layers; layer += 1) {
+    const bytes: number[] = [];
+    for (let y = 0; y < height; y += 1) {
+      if (y < 1_600 || y >= 3_500) {
+        bytes.push(...longRle(false, width));
+        continue;
+      }
+      bytes.push(...longRle(false, 3_400), ...longRle(true, 4_600), ...longRle(false, width - 8_000));
+    }
+    payloads.push(Buffer.from(bytes));
+  }
+  const file = packClassic(width, height, 0x80, payloads);
+  file.writeFloatLE(218.88, 0x08);
+  file.writeFloatLE(122.88, 0x0c);
+  file.writeFloatLE(0.05, 0x20);
+  return file;
+}
+
+test("a real-resolution Mighty 12K plate stays within the bounded mesh grid", { timeout: 120_000 }, async () => {
+  const file = mighty12kPlate();
+  const glb = await buildPlateGlb(reader(file, []), file.length);
+  assert.ok(glb.length > 100, "mesh is empty");
+  assert.ok(glb.length <= MESH_BYTE_BUDGET, `mesh is ${glb.length} bytes`);
+});
+
 function featurePlate(): Buffer {
   const pixel = 0.05;
   const width = 240;
@@ -375,7 +405,7 @@ test("a 480MB plate is read as ranges, not as one buffer", async () => {
   console.log(
     `[plate-mesh] 480MB parts pitch=${result.voxelMm} glb=${result.glbBytes} triangles=${result.triangles} components=${result.components} thin=${result.thinSupports} agreement=${result.agreement} manifold=${result.manifold} bytesRead=${result.bytesRead} peakRss=${result.peakRss} maxBlock=${result.maxBlock} ms=${result.ms}`,
   );
-  assert.ok(Math.abs(result.voxelMm - MESH_VOXEL_MM) < 1e-6, `pitch ${result.voxelMm}`);
+  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 1, `pitch ${result.voxelMm}`);
   assert.ok(result.maxBlock < 250, `event loop blocked ${result.maxBlock}ms`);
 });
 
@@ -453,6 +483,7 @@ test("mesh jobs run one at a time", async () => {
     await whenPlateMeshesIdle();
     assert.equal(peak, 1);
     assert.equal(plateMeshJobPeak(), 1);
+    assert.equal(getPlateFile("mesh-a")?.meshState, "failed");
   } finally {
     setDriveFetchForTest(null);
     resetOrderLinkStore();
@@ -503,7 +534,7 @@ test("a 480MB stream stays under 3.5GB RSS", { timeout: 120_000 }, async () => {
   );
   assert.ok(result.peakRss < 3.5 * 1024 * 1024 * 1024, `peak RSS ${result.peakRss}`);
   assert.ok(result.maxBlock < 250, `event loop blocked ${result.maxBlock}ms`);
-  assert.ok(Math.abs(result.voxelMm - MESH_VOXEL_MM) < 1e-6, `pitch ${result.voxelMm}`);
+  assert.ok(result.voxelMm >= MESH_VOXEL_MM && result.voxelMm <= 1, `pitch ${result.voxelMm}`);
   assert.ok(result.glbBytes <= MESH_BYTE_BUDGET);
   assert.ok(result.triangles > 1_000);
   assert.ok(result.components >= 3);

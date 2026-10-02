@@ -88,7 +88,13 @@ export function meshSurface(occupancy: Occupancy, scale: MeshScale, gx: number, 
 function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): RawMesh | null {
   const strideY = gx + 4;
   const strideZ = strideY * (gy + 4);
-  const cellOf = new Map<number, number>();
+  const cellCount = strideZ * (gz + 4);
+  if (!Number.isSafeInteger(cellCount) || cellCount > 8_000_000) {
+    throw new Error("Plate mesh grid is too large.");
+  }
+  /** Bounded typed lookup: real 8K/12K plates must never allocate a JS Map per surface cell. */
+  const cellOf = new Int32Array(cellCount);
+  cellOf.fill(-1);
   let sx = new Float64Array(256);
   let sy = new Float64Array(256);
   let sz = new Float64Array(256);
@@ -115,12 +121,12 @@ function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): 
 
   const cell = (x: number, y: number, z: number): number => {
     const key = x + 1 + (y + 1) * strideY + (z + 1) * strideZ;
-    const found = cellOf.get(key);
-    if (found !== undefined) return found;
+    const found = cellOf[key]!;
+    if (found >= 0) return found;
     const index = cells;
     cells += 1;
     if (index >= sx.length) growCells();
-    cellOf.set(key, index);
+    cellOf[key] = index;
     return index;
   };
 

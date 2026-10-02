@@ -1,6 +1,6 @@
 /**
  * Mesh jobs run off the upload and backfill requests.
- * A plate already marked ready is left alone. A crash mid-job stays retryable.
+ * A plate already marked ready is left alone. Failed jobs stay visible and retryable.
  */
 import { Readable } from "node:stream";
 import { libraryFolderName, librarySliceName } from "../../shared/plate-files";
@@ -123,7 +123,7 @@ async function drain(): Promise<void> {
         if (plateMeshEpoch() !== epoch) continue;
         const message = error instanceof Error ? error.message : "mesh failed";
         console.error("[plate-mesh]", id, message);
-        markPlateMesh(id, { meshState: "" });
+        markPlateMesh(id, { meshState: "failed" });
       } finally {
         activeJobs -= 1;
         running.delete(id);
