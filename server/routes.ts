@@ -2749,7 +2749,12 @@ startOwnerDigestScheduler(loadOwnerDigestContext, process.env, (message) => {
 
       const attachedAt = new Date().toISOString();
       const summary = buildPrintFileOrderSummary(deal.id, staged.metrics);
-      await patchDealPrintFileMetrics(parsed.data.dealId, summary, attachedAt);
+      await patchDealPrintFileMetrics(
+        parsed.data.dealId,
+        summary,
+        attachedAt,
+        parsed.data.overwrite === true,
+      );
       const seededCosts = await seedPrintDealCosts(deal.id, {
         materialEstimate: summary.totalResinCost,
         liveWrite: true,
