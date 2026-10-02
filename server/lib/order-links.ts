@@ -510,7 +510,7 @@ CREATE TABLE IF NOT EXISTS plate_previews (
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plate_download_tickets (
-  token TEXT PRIMARY KEY,
+  token_hash TEXT PRIMARY KEY,
   drive_file_id TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
@@ -646,6 +646,38 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
   if (!existing.has("mesh_version")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_version INTEGER NOT NULL DEFAULT 0`);
   if (!existing.has("stl_drive_file_id")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_drive_file_id TEXT NOT NULL DEFAULT ''`);
   if (!existing.has("stl_web_view_link")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_web_view_link TEXT NOT NULL DEFAULT ''`);
+}
+
+function ensureDownloadTicketSchema(sqlite: Database.Database): void {
+  const columns = new Set(
+    (sqlite.prepare("PRAGMA table_info(plate_download_tickets)").all() as Array<{ name: string }>).map(
+      (row) => row.name,
+    ),
+  );
+  if (columns.has("token_hash") && !columns.has("token")) return;
+
+  const tickets = columns.has("token")
+    ? (sqlite
+        .prepare(`SELECT token, drive_file_id, expires_at FROM plate_download_tickets WHERE expires_at > ?`)
+        .all(new Date().toISOString()) as Array<{ token: string; drive_file_id: string; expires_at: string }>)
+    : [];
+  const migrate = sqlite.transaction(() => {
+    sqlite.exec(`
+      CREATE TABLE plate_download_tickets_v2 (
+        token_hash TEXT PRIMARY KEY,
+        drive_file_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+    `);
+    const insert = sqlite.prepare(
+      `INSERT INTO plate_download_tickets_v2 (token_hash, drive_file_id, expires_at) VALUES (?, ?, ?)`,
+    );
+    for (const ticket of tickets) {
+      insert.run(crypto.createHash("sha256").update(ticket.token, "utf8").digest("hex"), ticket.drive_file_id, ticket.expires_at);
+    }
+    sqlite.exec(`DROP TABLE plate_download_tickets; ALTER TABLE plate_download_tickets_v2 RENAME TO plate_download_tickets;`);
+  });
+  migrate();
 }
 
 function ensurePrintFileRecordColumns(sqlite: Database.Database): void {
@@ -837,6 +869,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_ORDER_UPDATE_LOG_SQL);
   sqlite.exec(CREATE_PLATE_LIBRARY_SQL);
   ensurePlateFileColumns(sqlite);
+  ensureDownloadTicketSchema(sqlite);
   sqlite.exec(CREATE_PRODUCTION_FAILURES_SQL);
   sqlite.exec(CREATE_SYNC_DURABILITY_SQL);
   ensurePrintFileRecordColumns(sqlite);
