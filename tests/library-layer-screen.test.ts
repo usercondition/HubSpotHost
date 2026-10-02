@@ -267,6 +267,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
       await page.locator("[data-testid='button-plate-menu-file-torso']").click();
       assert.equal(await page.locator("[data-testid='button-add-model-file-torso']").count(), 0);
       await page.locator("[data-testid='button-preview-plate-file-torso']").click();
+      await page.locator("[data-testid='button-view-layers']").click();
       await page.locator("[data-testid='plate-layer-scan']").waitFor();
       await page.waitForFunction(() => {
         const canvas = document.querySelector("[data-testid='canvas-plate-layer']");

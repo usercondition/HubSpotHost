@@ -36,9 +36,9 @@ function asciiStl(bytes: Buffer): Float32Array {
   return Float32Array.from(values.filter(Number.isFinite));
 }
 
-function pad(bytes: Buffer): Buffer {
+function pad(bytes: Buffer, fill = 0): Buffer {
   const extra = (4 - (bytes.length % 4)) % 4;
-  return extra ? Buffer.concat([bytes, Buffer.alloc(extra)]) : bytes;
+  return extra ? Buffer.concat([bytes, Buffer.alloc(extra, fill)]) : bytes;
 }
 
 /** STL Z is viewer Y; its Y is viewer Z.  Center it at the CTB footprint. */
@@ -71,7 +71,7 @@ export function stlPlateGlb(bytes: Buffer, footprint: PlateFootprint): Buffer {
     buffers: [{ byteLength: pos.length + ind.length }],
     bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: pos.length, target: 34962 }, { buffer: 0, byteOffset: pos.length, byteLength: ind.length, target: 34963 }],
     accessors: [{ bufferView: 0, componentType: 5126, count: vertexCount, type: "VEC3" }, { bufferView: 1, componentType: indices.BYTES_PER_ELEMENT === 2 ? 5123 : 5125, count: vertexCount, type: "SCALAR" }],
-  })));
+  })), 0x20);
   const bin = pad(Buffer.concat([pos, ind]));
   const out = Buffer.alloc(12 + 8 + json.length + 8 + bin.length);
   out.writeUInt32LE(0x46546c67, 0); out.writeUInt32LE(2, 4); out.writeUInt32LE(out.length, 8);
