@@ -13,7 +13,6 @@ process.env.ORDER_LINKS_DB_FILE = dbFile;
 process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH = crypto.createHash("sha256").update(ownerCode).digest("hex");
 process.env.SHIPSTATION_WEBHOOK_KEY = "webhook-test-key";
 process.env.SHIPSTATION_API_KEY = "api-key";
-process.env.SHIPSTATION_API_SECRET = "api-secret";
 
 const { mapShipmentStatus, upsertShipstationShipment, listShipstationShipments } = await import("../server/lib/shipstation");
 const { registerRoutes } = await import("../server/routes");
@@ -59,18 +58,21 @@ test("ShipStation webhook rejects missing or incorrect key", async () => {
   assert.equal(wrong.status, 401);
 });
 
-test("ShipStation webhook accepts quickly then stores its resource", async () => {
+test("ShipStation v2 tracking webhook accepts quickly then stores its payload", async () => {
   const response = await fetch(`${appBase}/api/shipstation/webhook?key=webhook-test-key`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ resource_type: "SHIP_NOTIFY", resource_url: `${resourceBase}/shipments/ss-123` }),
+    body: JSON.stringify({
+      label_id: "ss-123", tracking_number: "1ZTEST", status_code: "in_transit", carrier_code: "ups",
+      events: [{ occurred_at: "2026-10-02T00:00:00Z" }],
+    }),
   });
   assert.equal(response.status, 200);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (listShipstationShipments().some((row) => row.shipmentId === "ss-123")) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.fail("webhook resource was not stored");
+  assert.fail("webhook payload was not stored");
 });
 
 test("ShipStation upsert is idempotent and status mapping is conservative", () => {

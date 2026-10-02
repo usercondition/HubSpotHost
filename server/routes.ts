@@ -316,9 +316,11 @@ import {
   summarizeShipEngineFunds,
 } from "./lib/shipengine";
 import {
-  fetchShipstationResource,
   fetchShipstationShipments,
   listShipstationShipments,
+  mapShipstationShipment,
+  mapTrackWebhook,
+  registerShipstationWebhooks,
   shipstationConfigured,
   upsertShipstationShipment,
 } from "./lib/shipstation";
@@ -358,15 +360,6 @@ async function ingestShipstationShipments(
       ? deals.find((deal) => deal.id === match.dealId)?.properties.dealname ?? `Order ${match.dealId}`
       : "";
     upsertShipstationShipment(shipment, match ? { dealId: match.dealId, dealName: String(dealName) } : null);
-  }
-}
-
-async function ingestShipstationResource(resourceUrl: string): Promise<void> {
-  try {
-    await ingestShipstationShipments(await fetchShipstationResource(resourceUrl));
-  } catch (error) {
-    // The webhook has already been accepted. Keep this metadata-only so secrets and buyer data stay out of logs.
-    console.error(`[shipstation] resource fetch failed: ${error instanceof Error ? error.message : "unknown error"}`);
   }
 }
 
@@ -975,7 +968,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  /** ShipStation v1 webhooks are intentionally acknowledged before their resource is fetched. */
+  /** ShipStation v2 webhooks carry tracking / label data directly. */
   app.post("/api/shipstation/webhook", (req: Request, res: Response) => {
     const expected = process.env.SHIPSTATION_WEBHOOK_KEY?.trim() || "";
     const supplied = firstQueryValue(req.query?.key);
@@ -987,13 +980,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!validKey) {
       return res.status(401).json({ ok: false, error: "Invalid ShipStation webhook key" });
     }
-    const resourceUrl = String((req.body as { resource_url?: unknown } | undefined)?.resource_url ?? "").trim();
-    const resourceType = String((req.body as { resource_type?: unknown } | undefined)?.resource_type ?? "").trim();
-    if (!resourceUrl || !["SHIP_NOTIFY", "ITEM_SHIP_NOTIFY", "ORDER_NOTIFY"].includes(resourceType)) {
-      return res.status(400).json({ ok: false, error: "Unsupported ShipStation webhook payload" });
-    }
+    const payload = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+    const shipment = mapTrackWebhook(payload) ?? mapShipstationShipment(payload);
+    if (!shipment) return res.status(400).json({ ok: false, error: "Unsupported ShipStation v2 webhook payload" });
     res.status(200).json({ ok: true, queued: true });
-    void ingestShipstationResource(resourceUrl);
+    void ingestShipstationShipments([shipment]);
   });
 
   app.get("/api/shipstation/shipments", (req: Request, res: Response) => {
@@ -1013,6 +1004,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.json({ ok: true, count: shipments.length });
     } catch (error) {
       return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "ShipStation sync failed" });
+    }
+  });
+
+  app.post("/api/shipstation/webhooks/register", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    if (!shipstationConfigured()) return res.status(503).json({ ok: false, error: "ShipStation API key is not configured" });
+    const publicBase = process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
+    if (!/^https:\/\//i.test(publicBase)) {
+      return res.status(400).json({ ok: false, error: "Set PUBLIC_BASE_URL to the public HTTPS origin before registering webhooks" });
+    }
+    try {
+      const url = `${publicBase.replace(/\/+$/, "")}/api/shipstation/webhook?key=${encodeURIComponent(process.env.SHIPSTATION_WEBHOOK_KEY?.trim() || "")}`;
+      if (!process.env.SHIPSTATION_WEBHOOK_KEY?.trim()) return res.status(503).json({ ok: false, error: "SHIPSTATION_WEBHOOK_KEY is not configured" });
+      return res.json({ ok: true, ...(await registerShipstationWebhooks(url)) });
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "ShipStation webhook registration failed" });
     }
   });
 

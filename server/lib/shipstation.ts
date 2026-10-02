@@ -2,12 +2,11 @@
  * Read-only ShipStation shipment ingestion. Webhook delivery only stores and
  * displays shipment state; it deliberately never updates HubSpot or notifies a buyer.
  */
-import { getShipEngineApiKey } from "./shipengine";
 import { getSqlite } from "./order-links";
 import { normalizeTrackingNumber } from "./fulfillment";
 import type { ShipmentStatus, ShipstationShipmentView } from "../../shared/schema";
 
-const SHIPSTATION_BASE = "https://ssapi.shipstation.com";
+const SHIPSTATION_BASE = "https://api.shipstation.com";
 
 type RecordLike = Record<string, unknown>;
 export type ShipmentMatch = { dealId: string; dealName: string } | null;
@@ -29,7 +28,7 @@ const text = (value: unknown) => (value == null ? "" : String(value).trim());
 const iso = () => new Date().toISOString();
 
 export function shipstationConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.SHIPSTATION_API_KEY?.trim() && env.SHIPSTATION_API_SECRET?.trim());
+  return Boolean(env.SHIPSTATION_API_KEY?.trim());
 }
 
 export function mapShipmentStatus(value: unknown): ShipmentStatus {
@@ -48,70 +47,57 @@ function money(value: unknown): string {
 }
 
 export function mapShipstationShipment(raw: RecordLike): IncomingShipment | null {
-  const shipmentId = text(raw.shipmentId ?? raw.shipment_id);
+  const shipmentId = text(raw.label_id ?? raw.labelId ?? raw.shipment_id ?? raw.shipmentId);
   if (!shipmentId) return null;
-  const shipTo = (raw.shipTo ?? raw.ship_to ?? {}) as RecordLike;
-  const statusRaw = raw.shipmentStatus ?? raw.shipment_status ?? raw.status ?? raw.trackingStatus;
-  const eventAt = text(raw.deliveryDate ?? raw.delivery_date ?? raw.lastEventDate ?? raw.last_event_at);
+  const shipTo = (raw.ship_to ?? raw.shipTo ?? {}) as RecordLike;
+  const statusRaw = raw.tracking_status ?? raw.trackingStatus ?? raw.status ?? raw.status_code;
+  const eventAt = text(raw.last_event_at ?? raw.lastEventDate ?? raw.delivery_date ?? raw.deliveryDate ?? raw.created_at);
   return {
     shipmentId,
-    orderNumber: text(raw.orderNumber ?? raw.order_number),
-    shipToName: text(shipTo.name ?? raw.shipToName ?? raw.ship_to_name),
-    carrierCode: text(raw.carrierCode ?? raw.carrier_code),
-    serviceCode: text(raw.serviceCode ?? raw.service_code),
-    trackingNumber: text(raw.trackingNumber ?? raw.tracking_number),
-    shipDate: text(raw.shipDate ?? raw.ship_date ?? raw.createDate ?? raw.create_date),
-    shipmentCost: money(raw.shipmentCost ?? raw.shipment_cost ?? raw.cost),
+    orderNumber: text(raw.order_number ?? raw.orderNumber ?? raw.external_shipment_id),
+    shipToName: text(shipTo.name ?? raw.ship_to_name ?? raw.shipToName),
+    carrierCode: text(raw.carrier_code ?? raw.carrierCode),
+    serviceCode: text(raw.service_code ?? raw.serviceCode),
+    trackingNumber: text(raw.tracking_number ?? raw.trackingNumber),
+    shipDate: text(raw.created_at ?? raw.createDate ?? raw.ship_date ?? raw.shipDate),
+    shipmentCost: money(raw.shipment_cost ?? raw.shipmentCost ?? raw.cost),
     voided: Boolean(raw.voided ?? raw.void),
     status: statusRaw == null ? undefined : mapShipmentStatus(statusRaw),
     lastEventAt: eventAt || null,
   };
 }
 
-function allowedResourceUrl(resourceUrl: string, env: NodeJS.ProcessEnv): string {
-  const url = new URL(resourceUrl);
-  const configured = new URL(env.SHIPSTATION_API_BASE?.trim() || SHIPSTATION_BASE);
-  if (url.protocol !== "https:" && !/^127\.0\.0\.1$|^localhost$/i.test(url.hostname)) {
-    throw new Error("ShipStation resource URL must use HTTPS");
-  }
-  if (url.host !== configured.host && url.host !== "ssapi.shipstation.com") {
-    throw new Error("ShipStation resource URL host is not allowed");
-  }
-  return url.toString();
-}
-
-async function shipstationRequest(pathOrUrl: string, env: NodeJS.ProcessEnv = process.env): Promise<unknown> {
+async function shipstationRequest(path: string, init: RequestInit = {}, env: NodeJS.ProcessEnv = process.env): Promise<unknown> {
   const key = env.SHIPSTATION_API_KEY?.trim() || "";
-  const secret = env.SHIPSTATION_API_SECRET?.trim() || "";
-  if (!key || !secret) throw new Error("ShipStation API credentials are not configured");
+  if (!key) throw new Error("ShipStation API key is not configured");
   const base = env.SHIPSTATION_API_BASE?.trim() || SHIPSTATION_BASE;
-  const url = /^https?:\/\//i.test(pathOrUrl) ? allowedResourceUrl(pathOrUrl, env) : new URL(pathOrUrl, base).toString();
+  const url = new URL(path, base).toString();
   const response = await fetch(url, {
-    headers: { Authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`, Accept: "application/json" },
+    ...init,
+    headers: { "API-Key": key, Accept: "application/json", ...(init.headers ?? {}) },
   });
   if (!response.ok) throw new Error(`ShipStation ${response.status}: ${response.statusText}`);
   return response.json();
 }
 
-export async function fetchShipstationResource(resourceUrl: string, env?: NodeJS.ProcessEnv): Promise<IncomingShipment[]> {
-  const body = await shipstationRequest(resourceUrl, env);
-  const rows = Array.isArray((body as RecordLike)?.shipments)
-    ? ((body as RecordLike).shipments as unknown[])
-    : Array.isArray(body) ? body : [body];
-  return rows.flatMap((row) => (row && typeof row === "object" ? [mapShipstationShipment(row as RecordLike)].filter(Boolean) : [])) as IncomingShipment[];
-}
-
 export async function fetchShipstationShipments(days: number, env?: NodeJS.ProcessEnv): Promise<IncomingShipment[]> {
   const start = new Date(Date.now() - Math.max(1, Math.min(days, 365)) * 86_400_000).toISOString().slice(0, 10);
-  const body = await shipstationRequest(`/shipments?shipDateStart=${encodeURIComponent(start)}&pageSize=500`, env);
-  const rows = Array.isArray((body as RecordLike)?.shipments) ? ((body as RecordLike).shipments as unknown[]) : [];
-  return rows.flatMap((row) => (row && typeof row === "object" ? [mapShipstationShipment(row as RecordLike)].filter(Boolean) : [])) as IncomingShipment[];
+  const shipments: IncomingShipment[] = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const body = await shipstationRequest(`/v2/labels?created_at_start=${encodeURIComponent(start)}&page=${page}&page_size=500&sort_dir=desc`, {}, env) as RecordLike;
+    const rows = Array.isArray(body.labels) ? body.labels : Array.isArray(body.data) ? body.data : [];
+    shipments.push(...rows.flatMap((row) => row && typeof row === "object" ? [mapShipstationShipment(row as RecordLike)].filter(Boolean) : []) as IncomingShipment[]);
+    const pages = Number(body.pages ?? body.total_pages ?? 1);
+    if (!rows.length || !Number.isFinite(pages) || page >= pages) break;
+  }
+  return shipments;
 }
 
 export function upsertShipstationShipment(input: IncomingShipment, match: ShipmentMatch = null): void {
   const db = getSqlite();
   const now = iso();
-  const existing = db.prepare("SELECT created_at, status, last_event_at, matched_deal_id, matched_deal_name FROM shipstation_shipments WHERE shipment_id = ?").get(input.shipmentId) as RecordLike | undefined;
+  const existing = db.prepare("SELECT * FROM shipstation_shipments WHERE shipment_id = ? OR (? <> '' AND tracking_number = ?) LIMIT 1").get(input.shipmentId, input.trackingNumber, input.trackingNumber) as RecordLike | undefined;
+  const shipmentId = text(existing?.shipment_id) || input.shipmentId;
   db.prepare(`
     INSERT INTO shipstation_shipments (
       shipment_id, order_number, ship_to_name, carrier_code, service_code, tracking_number, ship_date, shipment_cost,
@@ -124,7 +110,7 @@ export function upsertShipstationShipment(input: IncomingShipment, match: Shipme
       last_event_at=excluded.last_event_at, matched_deal_id=excluded.matched_deal_id,
       matched_deal_name=excluded.matched_deal_name, updated_at=excluded.updated_at
   `).run(
-    input.shipmentId, input.orderNumber, input.shipToName, input.carrierCode, input.serviceCode, input.trackingNumber,
+    shipmentId, input.orderNumber, input.shipToName, input.carrierCode, input.serviceCode, input.trackingNumber,
     input.shipDate, input.shipmentCost, input.voided ? 1 : 0, input.status ?? (text(existing?.status) || "label created"),
     input.lastEventAt ?? (text(existing?.last_event_at) || null), match?.dealId ?? (text(existing?.matched_deal_id) || null),
     match?.dealName ?? (text(existing?.matched_deal_name) || null), text(existing?.created_at) || now, now,
@@ -159,19 +145,15 @@ export function trackingUrl(carrier: string, tracking: string): string | null {
   return `https://www.google.com/search?q=${encodeURIComponent(`${carrier} tracking ${tracking}`)}`;
 }
 
-/** ShipEngine tracking is optional; only known statuses are persisted. */
+/** ShipStation v2 tracking refresh for recent non-delivered labels. */
 export async function refreshShipstationTracking(): Promise<void> {
-  const key = getShipEngineApiKey();
-  if (!key) return;
+  if (!shipstationConfigured()) return;
   const candidates = listShipstationShipments().filter((row) => !row.voided && row.status !== "delivered" && row.shipDate && Date.now() - new Date(row.shipDate).getTime() < 30 * 86_400_000);
   for (const shipment of candidates) {
     if (!shipment.trackingNumber) continue;
     try {
-      const query = new URLSearchParams({ tracking_number: shipment.trackingNumber, carrier_code: shipment.carrierCode });
-      const response = await fetch(`https://api.shipengine.com/v1/tracking?${query}`, { headers: { "API-Key": key, Accept: "application/json" } });
-      if (!response.ok) continue;
-      const body = await response.json() as RecordLike;
-      const status = mapShipmentStatus(body.status ?? body.status_code);
+      const body = await shipstationRequest(`/v2/labels/${encodeURIComponent(shipment.shipmentId)}/track`) as RecordLike;
+      const status = mapShipmentStatus(body.tracking_status ?? body.status_code ?? body.status);
       const lastEventRow = body.last_event && typeof body.last_event === "object" ? body.last_event as RecordLike : {};
       const events = Array.isArray(body.events) ? body.events : [];
       const lastArrayEvent = events.at(-1) && typeof events.at(-1) === "object" ? events.at(-1) as RecordLike : {};
@@ -181,6 +163,46 @@ export async function refreshShipstationTracking(): Promise<void> {
       // Tracking must never make webhook ingestion fail.
     }
   }
+}
+
+export function mapTrackWebhook(payload: RecordLike): IncomingShipment | null {
+  const tracking = text(payload.tracking_number);
+  if (!tracking) return null;
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  const event = events.at(-1) && typeof events.at(-1) === "object" ? events.at(-1) as RecordLike : {};
+  return {
+    shipmentId: text(payload.label_id) || `tracking:${normalizeTrackingNumber(tracking)}`,
+    orderNumber: text(payload.order_number),
+    shipToName: text(payload.ship_to_name),
+    carrierCode: text(payload.carrier_code),
+    serviceCode: text(payload.service_code),
+    trackingNumber: tracking,
+    shipDate: text(payload.created_at),
+    shipmentCost: money(payload.shipment_cost),
+    voided: Boolean(payload.voided),
+    status: mapShipmentStatus(payload.status_code ?? payload.status_description),
+    lastEventAt: text(event.occurred_at ?? event.event_date ?? payload.event_date) || null,
+  };
+}
+
+export async function registerShipstationWebhooks(url: string): Promise<{ created: string[]; existing: string[] }> {
+  const list = await shipstationRequest("/v2/environment/webhooks") as RecordLike;
+  const webhooks = Array.isArray(list.webhooks) ? list.webhooks as RecordLike[] : Array.isArray(list) ? list as RecordLike[] : [];
+  const created: string[] = [];
+  const existing: string[] = [];
+  for (const event of ["track_event_v2", "label_created_v2"]) {
+    if (webhooks.some((hook) => text(hook.url) === url && text(hook.event) === event)) {
+      existing.push(event);
+      continue;
+    }
+    await shipstationRequest("/v2/environment/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `Print Ops ${event}`, url, event }),
+    });
+    created.push(event);
+  }
+  return { created, existing };
 }
 
 export function startShipstationTrackingSchedule(): void {
