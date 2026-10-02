@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { PRINT_FILE_MAX_LABEL } from "./lib/print-file-limits";
 import { startPrintOpsJobWorker } from "./lib/print-ops-jobs";
 import { startSyncHealthSchedule } from "./lib/sync-health";
+import { startShipstationTrackingSchedule } from "./lib/shipstation";
 import { configureTrustProxy } from "./lib/trust-proxy";
 
 const app = express();
@@ -65,6 +66,7 @@ app.use((req, res, next) => {
   // Redis failures are handled inside the worker; API health must not depend on it.
   startPrintOpsJobWorker();
   startSyncHealthSchedule();
+  startShipstationTrackingSchedule();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const oversizedUpload = err?.code === "LIMIT_FILE_SIZE";

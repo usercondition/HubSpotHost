@@ -266,6 +266,7 @@ import {
   getFulfillmentChecklist,
   upsertFulfillmentChecklist,
   listExistingTrackingAttachments,
+  matchFulfillmentChecklist,
 } from "./lib/fulfillment";
 import { loadProductionQueue, loadShopBoards } from "./lib/queue-loader";
 import {
@@ -314,6 +315,16 @@ import {
   shipEngineAddFundsRequestSchema,
   summarizeShipEngineFunds,
 } from "./lib/shipengine";
+import {
+  fetchShipstationResource,
+  fetchShipstationShipments,
+  listShipstationShipments,
+  mapShipstationShipment,
+  mapTrackWebhook,
+  registerShipstationWebhooks,
+  shipstationConfigured,
+  upsertShipstationShipment,
+} from "./lib/shipstation";
 
 const WEBHOOK_PATH = "/api/webhooks/hubspot";
 const INTAKE_BUILD_ID = "intake-auth-v6-20260803";
@@ -334,6 +345,23 @@ const printFileUpload = multer({
 function isSliceLogUploadName(fileName: string): boolean {
   const base = path.basename(fileName || "").toLowerCase();
   return base === "slice.log" || /^slice(?:-.*)?\.log$/.test(base) || base.endsWith(".log");
+}
+
+async function ingestShipstationShipments(
+  shipments: Awaited<ReturnType<typeof fetchShipstationShipments>>,
+): Promise<void> {
+  const deals = await fetchPrintOrderDeals().catch(() => [] as HubSpotDealRecord[]);
+  for (const shipment of shipments) {
+    const checklistMatch = matchFulfillmentChecklist(shipment);
+    const byOrder = shipment.orderNumber
+      ? deals.find((deal) => deal.id === shipment.orderNumber || String(deal.properties.dealname ?? "").includes(shipment.orderNumber))
+      : undefined;
+    const match = checklistMatch ?? (byOrder ? { dealId: byOrder.id } : null);
+    const dealName = match
+      ? deals.find((deal) => deal.id === match.dealId)?.properties.dealname ?? `Order ${match.dealId}`
+      : "";
+    upsertShipstationShipment(shipment, match ? { dealId: match.dealId, dealName: String(dealName) } : null);
+  }
 }
 
 /** Read Slice.log text; if oversized, keep the newest tail (Output lines land at the end). */
@@ -939,6 +967,66 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       unlocked: true,
       serverTime: new Date().toISOString(),
     });
+  });
+
+  /** ShipStation v2 webhooks carry a data envelope or an API resource URL. */
+  app.post("/api/shipstation/webhook", (req: Request, res: Response) => {
+    const expected = process.env.SHIPSTATION_WEBHOOK_KEY?.trim() || "";
+    const supplied = firstQueryValue(req.query?.key);
+    const suppliedKey = supplied ?? "";
+    const validKey =
+      Boolean(expected && supplied) &&
+      Buffer.byteLength(suppliedKey) === Buffer.byteLength(expected) &&
+      crypto.timingSafeEqual(Buffer.from(suppliedKey), Buffer.from(expected));
+    if (!validKey) {
+      return res.status(401).json({ ok: false, error: "Invalid ShipStation webhook key" });
+    }
+    const payload = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+    const data = payload.data && typeof payload.data === "object" ? payload.data as Record<string, unknown> : null;
+    const shipment = data ? mapTrackWebhook(data) ?? mapShipstationShipment(data) : null;
+    const resourceUrl = String(payload.resource_url ?? "").trim();
+    if (!shipment && !resourceUrl) return res.status(400).json({ ok: false, error: "Unsupported ShipStation v2 webhook payload" });
+    res.status(200).json({ ok: true, queued: true });
+    if (shipment) void ingestShipstationShipments([shipment]);
+    else void fetchShipstationResource(resourceUrl).then(ingestShipstationShipments).catch((error) => {
+      console.error(`[shipstation] resource fetch failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    });
+  });
+
+  app.get("/api/shipstation/shipments", (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    return res.json({ ok: true, shipments: listShipstationShipments() });
+  });
+
+  app.post("/api/shipstation/sync", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    if (!shipstationConfigured()) {
+      return res.status(503).json({ ok: false, error: "ShipStation API credentials are not configured" });
+    }
+    const days = Math.max(1, Math.min(365, Number(firstQueryValue(req.query?.days)) || 30));
+    try {
+      const shipments = await fetchShipstationShipments(days);
+      await ingestShipstationShipments(shipments);
+      return res.json({ ok: true, count: shipments.length });
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "ShipStation sync failed" });
+    }
+  });
+
+  app.post("/api/shipstation/webhooks/register", async (req: Request, res: Response) => {
+    if (rejectUnsecuredIntake(req, res)) return;
+    if (!shipstationConfigured()) return res.status(503).json({ ok: false, error: "ShipStation API key is not configured" });
+    const publicBase = process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
+    if (!/^https:\/\//i.test(publicBase)) {
+      return res.status(400).json({ ok: false, error: "Set PUBLIC_BASE_URL to the public HTTPS origin before registering webhooks" });
+    }
+    try {
+      const url = `${publicBase.replace(/\/+$/, "")}/api/shipstation/webhook?key=${encodeURIComponent(process.env.SHIPSTATION_WEBHOOK_KEY?.trim() || "")}`;
+      if (!process.env.SHIPSTATION_WEBHOOK_KEY?.trim()) return res.status(503).json({ ok: false, error: "SHIPSTATION_WEBHOOK_KEY is not configured" });
+      return res.json({ ok: true, ...(await registerShipstationWebhooks(url)) });
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : "ShipStation webhook registration failed" });
+    }
   });
 
   /* ---------------------------------------------------------------- */

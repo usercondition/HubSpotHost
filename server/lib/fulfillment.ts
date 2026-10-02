@@ -161,6 +161,25 @@ export function listLocalTrackingAttachments(
   return found;
 }
 
+/** Read-only shipment matcher: checklist deal id/order reference, ship-to text in notes, or tracking. */
+export function matchFulfillmentChecklist(input: {
+  orderNumber?: string | null;
+  shipToName?: string | null;
+  trackingNumber?: string | null;
+}): { dealId: string } | null {
+  const tracking = listLocalTrackingAttachments(input.trackingNumber)[0];
+  if (tracking) return { dealId: tracking.dealId };
+  const orderNumber = String(input.orderNumber ?? "").trim();
+  const shipTo = String(input.shipToName ?? "").trim().toLowerCase();
+  for (const row of getDb().select().from(fulfillmentChecklists).all()) {
+    if (orderNumber && row.hubspotDealId === orderNumber) return { dealId: row.hubspotDealId };
+    if (shipTo && shipTo.length >= 3 && String(row.notes ?? "").toLowerCase().includes(shipTo)) {
+      return { dealId: row.hubspotDealId };
+    }
+  }
+  return null;
+}
+
 /**
  * Find tracking already stored on a HubSpot deal property (when present in the
  * fetched deal payload).

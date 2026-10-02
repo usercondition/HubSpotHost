@@ -531,6 +531,30 @@ CREATE TABLE IF NOT EXISTS fulfillment_checklists (
 );
 `;
 
+const CREATE_SHIPSTATION_SHIPMENTS_SQL = `
+CREATE TABLE IF NOT EXISTS shipstation_shipments (
+  shipment_id TEXT PRIMARY KEY,
+  order_number TEXT NOT NULL DEFAULT '',
+  ship_to_name TEXT NOT NULL DEFAULT '',
+  carrier_code TEXT NOT NULL DEFAULT '',
+  service_code TEXT NOT NULL DEFAULT '',
+  tracking_number TEXT NOT NULL DEFAULT '',
+  ship_date TEXT NOT NULL DEFAULT '',
+  shipment_cost TEXT NOT NULL DEFAULT '',
+  voided INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'label created',
+  last_event_at TEXT,
+  matched_deal_id TEXT,
+  matched_deal_name TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shipstation_shipments_ship_date_idx
+  ON shipstation_shipments (ship_date DESC);
+CREATE INDEX IF NOT EXISTS shipstation_shipments_tracking_idx
+  ON shipstation_shipments (tracking_number);
+`;
+
 const CREATE_SYNC_DURABILITY_SQL = `
 CREATE TABLE IF NOT EXISTS webhook_events (
   event_id TEXT PRIMARY KEY,
@@ -769,6 +793,7 @@ export function getDb(): BetterSQLite3Database {
   sqlite.exec(CREATE_RESIN_BOTTLE_CONSUMPTIONS_SQL);
   sqlite.exec(CREATE_KITS_SQL);
   sqlite.exec(CREATE_FULFILLMENT_CHECKLISTS_SQL);
+  sqlite.exec(CREATE_SHIPSTATION_SHIPMENTS_SQL);
   sqlite.exec(CREATE_PRIORITY_STACK_SQL);
   sqlite.exec(CREATE_ORDER_UPDATE_LOG_SQL);
   sqlite.exec(CREATE_PLATE_LIBRARY_SQL);
