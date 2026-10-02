@@ -174,6 +174,11 @@ export const plateFileLinkSchema = z.object({
   orderKey: plateOrderKeySchema,
 });
 
+export const plateStlAttachSchema = z.object({
+  driveFileId: z.string().trim().min(1).max(200),
+  driveLink: z.string().trim().min(1).max(500),
+});
+
 export interface PlatePreviewStats {
   printerProfile: string;
   layerCount: number | null;
@@ -208,6 +213,9 @@ export interface PlateFileRecord {
   meshState: string;
   /** Mesher generation. Older ready meshes are rebuilt by plate backfill. */
   meshVersion: number;
+  /** Optional source STL attached by the owner. It is preferred over the CTB reconstruction. */
+  stlDriveFileId: string;
+  stlWebViewLink: string;
 }
 
 export interface PlateLibraryPending {

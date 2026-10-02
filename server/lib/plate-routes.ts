@@ -17,6 +17,7 @@ import {
   plateExtension,
   plateFileBulkSchema,
   plateFileLinkSchema,
+  plateStlAttachSchema,
   plateOrderKeySchema,
   platePrepareSchema,
   plateUploadQuerySchema,
@@ -58,6 +59,7 @@ import {
   renameLibraryKit,
   getPlateFile,
   linkPlateFile,
+  attachPlateStl,
   linkPlatePrint,
   listPlateFiles,
   readDownloadTicket,
@@ -443,6 +445,24 @@ export function registerPlateLibraryRoutes(app: Express): void {
       if (error instanceof DriveReconnectError) return res.status(409).json({ ok: false, error: "Reconnect Google Drive.", reconnect: true });
       return res.status(502).json({ ok: false, error: "Drive could not read that file." });
     }
+  });
+
+  app.post("/api/plate-files/:driveFileId/stl", (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = plateStlAttachSchema.safeParse({ ...(req.body ?? {}), driveFileId: queryValue(req.params.driveFileId) });
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const match = /(?:\/d\/|[?&]id=)([-\w]{10,})/.exec(parsed.data.driveLink);
+    if (!match?.[1]) return res.status(400).json({ ok: false, error: "Paste a Google Drive STL link." });
+    const file = attachPlateStl(parsed.data.driveFileId, match[1], `https://drive.google.com/file/d/${match[1]}/view`);
+    if (!file) return res.status(404).json({ ok: false, error: "That plate is not in the library." });
+    return res.json({ ok: true, file, queued: enqueuePlateMesh(file.driveFileId) });
+  });
+
+  /** Explicit owner action: existing plates are never regenerated just by opening Library. */
+  app.post("/api/plate-files/meshes/regenerate", (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const queued = enqueueMissingPlateMeshes();
+    return res.json({ ok: true, queued });
   });
 
   app.post("/api/plate-files/link", (req: Request, res: Response) => {

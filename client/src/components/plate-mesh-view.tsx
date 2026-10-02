@@ -2,7 +2,7 @@
  * Library 3D view. three.js is imported here so the Library page does not load it up front.
  * The camera frames the mesh. The plate outline stays on the floor and does not set the fit.
  */
-export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promise<{ dispose: () => void; reset: () => void }> {
+export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promise<{ dispose: () => void; reset: () => void; view: (name: "top" | "front" | "iso") => void }> {
   const THREE = await import("three");
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
   const { MeshoptDecoder } = await import("three/examples/jsm/libs/meshopt_decoder.module.js");
@@ -36,6 +36,10 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   const size = meshBox.getSize(new THREE.Vector3());
   const span = Math.max(size.x, size.y, size.z, 1);
   const floorY = meshBox.min.y - Math.max(span * 0.012, 0.15);
+  const plateBox = new THREE.Box3(
+    new THREE.Vector3(0, floorY, 0),
+    new THREE.Vector3(plateW, floorY, plateD),
+  );
   const outline = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, floorY, 0),
@@ -51,19 +55,20 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
   key.position.set(span, span * 2, span);
   scene.add(key);
 
-  const center = meshBox.getCenter(new THREE.Vector3());
+  const frameBox = meshBox.clone().union(plateBox);
+  const center = frameBox.getCenter(new THREE.Vector3());
   const corners = [
-    new THREE.Vector3(meshBox.min.x, meshBox.min.y, meshBox.min.z),
-    new THREE.Vector3(meshBox.min.x, meshBox.min.y, meshBox.max.z),
-    new THREE.Vector3(meshBox.min.x, meshBox.max.y, meshBox.min.z),
-    new THREE.Vector3(meshBox.min.x, meshBox.max.y, meshBox.max.z),
-    new THREE.Vector3(meshBox.max.x, meshBox.min.y, meshBox.min.z),
-    new THREE.Vector3(meshBox.max.x, meshBox.min.y, meshBox.max.z),
-    new THREE.Vector3(meshBox.max.x, meshBox.max.y, meshBox.min.z),
-    new THREE.Vector3(meshBox.max.x, meshBox.max.y, meshBox.max.z),
+    new THREE.Vector3(frameBox.min.x, frameBox.min.y, frameBox.min.z),
+    new THREE.Vector3(frameBox.min.x, frameBox.min.y, frameBox.max.z),
+    new THREE.Vector3(frameBox.min.x, frameBox.max.y, frameBox.min.z),
+    new THREE.Vector3(frameBox.min.x, frameBox.max.y, frameBox.max.z),
+    new THREE.Vector3(frameBox.max.x, frameBox.min.y, frameBox.min.z),
+    new THREE.Vector3(frameBox.max.x, frameBox.min.y, frameBox.max.z),
+    new THREE.Vector3(frameBox.max.x, frameBox.max.y, frameBox.min.z),
+    new THREE.Vector3(frameBox.max.x, frameBox.max.y, frameBox.max.z),
   ];
   /** Front is +Z. A 3/4 view sits up and to the right of that edge. */
-  const view = new THREE.Vector3(0.75, 0.62, 1).normalize();
+  let view = new THREE.Vector3(0.75, 0.62, 1).normalize();
   const fill = 0.8;
 
   const frameCamera = () => {
@@ -162,5 +167,12 @@ export async function mountPlateMesh(host: HTMLElement, glb: ArrayBuffer): Promi
     });
     renderer.domElement.remove();
   };
-  return { dispose, reset: () => frameCamera() };
+  return {
+    dispose,
+    reset: () => frameCamera(),
+    view: (name) => {
+      view = name === "top" ? new THREE.Vector3(0, 1, 0) : name === "front" ? new THREE.Vector3(0, 0.12, 1).normalize() : new THREE.Vector3(0.75, 0.62, 1).normalize();
+      frameCamera();
+    },
+  };
 }

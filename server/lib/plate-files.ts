@@ -26,6 +26,8 @@ type FileRow = {
   mesh_drive_file_id?: string;
   mesh_state?: string;
   mesh_version?: number;
+  stl_drive_file_id?: string;
+  stl_web_view_link?: string;
 };
 
 export interface PlateIndexInput {
@@ -117,6 +119,8 @@ function toRecord(row: FileRow): PlateFileRecord {
     meshDriveFileId: row.mesh_drive_file_id || "",
     meshState: row.mesh_state || "",
     meshVersion: row.mesh_version ?? 0,
+    stlDriveFileId: row.stl_drive_file_id || "",
+    stlWebViewLink: row.stl_web_view_link || "",
   });
 }
 
@@ -282,6 +286,18 @@ export function markPlateMesh(
   getSqlite()
     .prepare(`UPDATE plate_files SET mesh_drive_file_id = ?, mesh_state = ?, mesh_version = ?, updated_at = ? WHERE drive_file_id = ?`)
     .run(meshDriveFileId, meshState, meshVersion, new Date().toISOString(), driveFileId);
+  return toRecord(readFile(driveFileId)!);
+}
+
+export function attachPlateStl(driveFileId: string, stlDriveFileId: string, stlWebViewLink: string): PlateFileRecord | null {
+  if (!readFile(driveFileId)) return null;
+  getSqlite()
+    .prepare(
+      `UPDATE plate_files
+       SET stl_drive_file_id = ?, stl_web_view_link = ?, mesh_state = '', mesh_version = 0, updated_at = ?
+       WHERE drive_file_id = ?`,
+    )
+    .run(stlDriveFileId, stlWebViewLink, new Date().toISOString(), driveFileId);
   return toRecord(readFile(driveFileId)!);
 }
 

@@ -46,14 +46,6 @@ function kitSlug(kit: string): string {
   return kit.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "kit";
 }
 
-const LIBRARY_BACKFILL_KEY = "library-header-backfill";
-
-function plateNeedsHeaderFill(file: PlateFileRecord): boolean {
-  if (!/\.ctb$/i.test(file.name) || file.stats === undefined) return false;
-  if (file.stats == null) return true;
-  return file.stats.layerCount == null || file.stats.printTimeSeconds == null || file.stats.resinVolumeMl == null;
-}
-
 function KitMenu({
   kit,
   kits,
@@ -177,7 +169,6 @@ function KitMenu({
 }
 
 export default function PlateLibraryPage() {
-  const queryClient = useQueryClient();
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Library unlocked",
@@ -202,19 +193,6 @@ export default function PlateLibraryPage() {
       return Array.isArray(body.files) ? body.files : [];
     },
   });
-  useEffect(() => {
-    if (!isUnlocked || !library.data?.some(plateNeedsHeaderFill)) return;
-    try {
-      if (sessionStorage.getItem(LIBRARY_BACKFILL_KEY)) return;
-      sessionStorage.setItem(LIBRARY_BACKFILL_KEY, "1");
-    } catch {
-      return;
-    }
-    void apiRequest("POST", "/api/plate-files/backfill", {}, { headers })
-      .then(() => queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] }))
-      .catch(() => undefined);
-  }, [headers, isUnlocked, library.data, queryClient]);
-
   const files = library.data ?? [];
   const kits = useMemo(() => {
     const names = new Set<string>();
