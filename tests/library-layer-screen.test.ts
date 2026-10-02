@@ -230,7 +230,12 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ ok: true, files: [FILE], failures: [], pending: [] }),
+          body: JSON.stringify({
+            ok: true,
+            files: [{ ...FILE, meshDriveFileId: FILE.meshState === "preparing" ? "" : FILE.meshDriveFileId }],
+            failures: [],
+            pending: [],
+          }),
         });
         return;
       }
@@ -263,6 +268,7 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
       const close = page.locator("[data-testid='button-close-plate-preview']");
       if (await close.count()) await close.click();
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator("[data-testid='library-row-file-torso']").waitFor();
       await page.locator("[data-testid='button-plate-menu-file-torso']").click();
       assert.equal(await page.locator("[data-testid='button-add-model-file-torso']").count(), 0);
@@ -327,6 +333,23 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     console.log(`[plate-mesh] phone cover x=${phoneCover.coverX.toFixed(3)} y=${phoneCover.coverY.toFixed(3)} clipped=${phoneCover.clipped}`);
     const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
     assert.ok(phoneFill > 0.05, `phone view did not draw ${phoneCover.coverX} ${phoneCover.coverY}`);
+    for (const state of ["preparing", "failed"] as const) {
+      FILE.meshState = state;
+      await openLayers();
+      await page.locator("[data-testid='button-view-model']").click();
+      if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
+      await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-phone-390.png` });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const state of ["preparing", "failed"] as const) {
+      FILE.meshState = state;
+      await openLayers();
+      await page.locator("[data-testid='button-view-model']").click();
+      if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
+      await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
+      await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-desktop-1440.png` });
+    }
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();

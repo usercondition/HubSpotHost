@@ -1193,11 +1193,11 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       if (lane.rowColor) check(lane.headerColor === lane.rowColor, `queue total color ${lane.headerColor} vs row ${lane.rowColor}`);
     }
     const productionText = await current().locator("[data-testid='column-in-production']").first().evaluate((el) => el.textContent || "");
-    check(/Oct 2 · tentative/.test(productionText), `queue tentative label was ${productionText}`);
+    check(/(?:Oct 2|Due today) · tentative/.test(productionText), `queue tentative label was ${productionText}`);
     check(!/Oct 2 · set/.test(productionText), `queue tentative label was ${productionText}`);
     check(/Sun 9\/27 at risk/.test(productionText), "queue note was rewritten");
     const nextText = await current().locator("[data-testid='column-next-print']").first().evaluate((el) => el.textContent || "");
-    check(/Oct 2 · plan/.test(nextText), `queue plan label was ${nextText}`);
+    check(/(?:Oct 2|Due today) · plan/.test(nextText), `queue plan label was ${nextText}`);
     const queueTitle = await current().locator("[data-testid='button-queue-deal-q1'] .board-name").first().evaluate((el) => (el.textContent || "").trim());
     check(queueTitle === "Order q1", `queue title still includes the client: ${queueTitle}`);
     const queueCard = await current().locator("[data-testid='button-queue-deal-q1']").first().evaluate((el) => el.textContent || "");
@@ -1621,7 +1621,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneRefresh.length > 0 && phoneRefresh.every((display) => display === "none"), `phone queue refresh displays: ${phoneRefresh.join(",")}`);
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
     const phoneProduction = await current().locator("[data-testid='column-in-production']").first().evaluate((el) => el.textContent || "");
-    check(/Oct 2 · tentative/.test(phoneProduction), `phone queue date was ${phoneProduction}`);
+    check(/(?:Oct 2|Due today) · tentative/.test(phoneProduction), `phone queue date was ${phoneProduction}`);
     const phoneQueueTitle = await current().locator("[data-testid='button-queue-deal-q1'] .board-name").first().evaluate((el) => (el.textContent || "").trim());
     check(phoneQueueTitle === "Order q1", `phone queue title still includes the client: ${phoneQueueTitle}`);
 

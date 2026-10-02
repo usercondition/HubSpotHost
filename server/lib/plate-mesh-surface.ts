@@ -40,14 +40,25 @@ interface RawMesh {
   indices: Uint32Array;
 }
 
-/** Read-only view of the chunked bit grid. Layout matches the mesher's SparseBits. */
+/** Read-only sorted view of the chunked bit grid. No JS Map grows with a full plate. */
 export function occupancyFromChunks(keys: ArrayLike<number>, chunks: Uint32Array[]): Occupancy {
-  const map = new Map<number, Uint32Array>();
-  for (let i = 0; i < keys.length; i += 1) map.set(keys[i]!, chunks[i]!);
+  const find = (key: number): number => {
+    let lo = 0;
+    let hi = keys.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const value = keys[mid]!;
+      if (value === key) return mid;
+      if (value < key) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return -1;
+  };
   const get = (x: number, y: number, z: number) => {
     if (x < 0 || y < 0 || z < 0) return false;
     const key = (x >> 5) + (y >> 5) * CHUNK_STRIDE + (z >> 5) * CHUNK_STRIDE * CHUNK_STRIDE;
-    const chunk = map.get(key);
+    const index = find(key);
+    const chunk = index < 0 ? undefined : chunks[index];
     if (!chunk) return false;
     const bit = (x & 31) + ((y & 31) << 5) + ((z & 31) << 10);
     return (chunk[bit >> 5]! & (1 << (bit & 31))) !== 0;
@@ -55,7 +66,9 @@ export function occupancyFromChunks(keys: ArrayLike<number>, chunks: Uint32Array
   return {
     get,
     forEach(visit) {
-      for (const [key, chunk] of map) {
+      for (let chunkIndex = 0; chunkIndex < keys.length; chunkIndex += 1) {
+        const key = keys[chunkIndex]!;
+        const chunk = chunks[chunkIndex]!;
         const cz = Math.floor(key / (CHUNK_STRIDE * CHUNK_STRIDE));
         const cy = Math.floor((key % (CHUNK_STRIDE * CHUNK_STRIDE)) / CHUNK_STRIDE);
         const cx = key % CHUNK_STRIDE;
@@ -77,18 +90,75 @@ export function occupancyFromChunks(keys: ArrayLike<number>, chunks: Uint32Array
   };
 }
 
-export function meshSurface(occupancy: Occupancy, scale: MeshScale, gx: number, gy: number, gz: number): RawMesh | null {
+export function meshSurface(occupancy: Occupancy, scale: MeshScale, gx: number, gy: number, gz: number, smooth = true): RawMesh | null {
   const raw = surfaceNets(occupancy, gx, gy, gz);
   if (!raw || raw.indices.length < 3) return null;
-  smoothCrease(raw.positions, raw.indices);
+  if (smooth) smoothCrease(raw.positions, raw.indices);
   toMillimeters(raw.positions, scale);
   return raw;
+}
+
+const MAX_SURFACE_CELLS = 8_000_000;
+
+/** Open-addressed typed lookup for sparse surface cells. Keys are safe integer grid offsets. */
+class SparseCellIndex {
+  private keys = new Float64Array(1024);
+  private values = new Int32Array(1024);
+  private used = 0;
+
+  constructor() {
+    this.keys.fill(Number.NaN);
+    this.values.fill(-1);
+  }
+
+  private slot(key: number, keys = this.keys): number {
+    const mask = keys.length - 1;
+    const low = Math.floor(key % keys.length);
+    const high = Math.floor(key / keys.length) % keys.length;
+    let slot = Math.imul(low ^ high, 0x9e3779b1) & mask;
+    while (!Number.isNaN(keys[slot]!) && keys[slot] !== key) slot = (slot + 1) & mask;
+    return slot;
+  }
+
+  get(key: number): number {
+    const slot = this.slot(key);
+    return this.keys[slot] === key ? this.values[slot]! : -1;
+  }
+
+  set(key: number, value: number): void {
+    if (this.used >= MAX_SURFACE_CELLS) throw new Error("Plate mesh surface exceeds its typed-cell budget.");
+    if ((this.used + 1) * 10 >= this.keys.length * 7) this.grow();
+    const slot = this.slot(key);
+    if (Number.isNaN(this.keys[slot]!)) this.used += 1;
+    this.keys[slot] = key;
+    this.values[slot] = value;
+  }
+
+  private grow(): void {
+    if (this.used >= MAX_SURFACE_CELLS) throw new Error("Plate mesh surface exceeds its typed-cell budget.");
+    const next = new Float64Array(this.keys.length * 2);
+    const values = new Int32Array(next.length);
+    next.fill(Number.NaN);
+    values.fill(-1);
+    const oldKeys = this.keys;
+    const oldValues = this.values;
+    this.keys = next;
+    this.values = values;
+    for (let index = 0; index < oldKeys.length; index += 1) {
+      const key = oldKeys[index]!;
+      if (Number.isNaN(key)) continue;
+      const slot = this.slot(key, next);
+      next[slot] = key;
+      values[slot] = oldValues[index]!;
+    }
+  }
 }
 
 function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): RawMesh | null {
   const strideY = gx + 4;
   const strideZ = strideY * (gy + 4);
-  const cellOf = new Map<number, number>();
+  /** Sparse typed hash: indexes surface cells, never the full CTB volume or a JS Map. */
+  const cellOf = new SparseCellIndex();
   let sx = new Float64Array(256);
   let sy = new Float64Array(256);
   let sz = new Float64Array(256);
@@ -116,7 +186,7 @@ function surfaceNets(occupancy: Occupancy, gx: number, gy: number, gz: number): 
   const cell = (x: number, y: number, z: number): number => {
     const key = x + 1 + (y + 1) * strideY + (z + 1) * strideZ;
     const found = cellOf.get(key);
-    if (found !== undefined) return found;
+    if (found >= 0) return found;
     const index = cells;
     cells += 1;
     if (index >= sx.length) growCells();

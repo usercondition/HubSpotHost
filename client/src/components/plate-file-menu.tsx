@@ -75,6 +75,15 @@ function PlateMeshHost({ file, headers }: { file: PlateFileRecord; headers: Reco
           </button>
         ))}
       </div>
+      {file.meshState === "failed" ? (
+        <p className="absolute bottom-2 left-2 z-10 rounded bg-red-950/80 px-2 py-1 text-xs text-red-200" data-testid="text-mesh-failed">
+          3D build failed. Try regenerate.
+        </p>
+      ) : file.meshState === "preparing" ? (
+        <p className="absolute bottom-2 left-2 z-10 rounded bg-zinc-900/80 px-2 py-1 text-xs text-zinc-200" data-testid="text-mesh-preparing">
+          3D preparing
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -186,7 +195,11 @@ function PreviewPanel({
         ) : canLayers && mode === "model" ? (
           <div className="relative mb-3 grid h-72 place-items-stretch overflow-hidden rounded-md bg-black" data-testid="plate-model-view">
             {imageUrl ? <img src={imageUrl} alt="" className="h-full w-full object-contain" data-testid="img-plate-preview" /> : null}
-            {file.meshState !== "ready" ? (
+            {file.meshState === "failed" ? (
+              <p className="absolute bottom-2 left-2 text-xs text-red-300" data-testid="text-mesh-failed">
+                3D build failed. Try regenerate.
+              </p>
+            ) : file.meshState !== "ready" ? (
               <p className="absolute bottom-2 left-2 text-xs text-zinc-300" data-testid="text-mesh-preparing">
                 3D preparing
               </p>
