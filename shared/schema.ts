@@ -1940,6 +1940,40 @@ export const fulfillmentChecklists = sqliteTable("fulfillment_checklists", {
 
 export type FulfillmentChecklist = typeof fulfillmentChecklists.$inferSelect;
 
+export const SHIPMENT_STATUSES = [
+  "label created",
+  "in transit",
+  "out for delivery",
+  "delivered",
+  "exception",
+] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
+
+/** Read-only ShipStation shipment history. It never changes a HubSpot deal. */
+export const shipstationShipments = sqliteTable("shipstation_shipments", {
+  shipmentId: text("shipment_id").primaryKey(),
+  orderNumber: text("order_number").notNull().default(""),
+  shipToName: text("ship_to_name").notNull().default(""),
+  carrierCode: text("carrier_code").notNull().default(""),
+  serviceCode: text("service_code").notNull().default(""),
+  trackingNumber: text("tracking_number").notNull().default(""),
+  shipDate: text("ship_date").notNull().default(""),
+  shipmentCost: text("shipment_cost").notNull().default(""),
+  voided: integer("voided", { mode: "boolean" }).notNull().default(false),
+  status: text("status").notNull().$type<ShipmentStatus>().default("label created"),
+  lastEventAt: text("last_event_at"),
+  matchedDealId: text("matched_deal_id"),
+  matchedDealName: text("matched_deal_name"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+export type ShipstationShipment = typeof shipstationShipments.$inferSelect;
+
+export interface ShipstationShipmentView extends ShipstationShipment {
+  trackingUrl: string | null;
+  stale: boolean;
+}
+
 /** Shop-floor pickup/ship groups. Rank and blocker stay local; member dates stay in HubSpot. */
 export const priorityStackBundles = sqliteTable("priority_stack_bundles", {
   id: integer("id").primaryKey({ autoIncrement: true }),

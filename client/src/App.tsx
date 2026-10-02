@@ -25,6 +25,7 @@ import PlateLibraryPage from "@/pages/plate-library";
 import PrintersPage from "@/pages/printers";
 import ResinInventoryPage from "@/pages/resin-inventory";
 import ShippingLabelsPage from "@/pages/shipping-labels";
+import ShipmentsPage from "@/pages/shipments";
 import ProductionQueuePage from "@/pages/queue";
 import PriorityStackPage from "@/pages/priority-stack";
 import ClientsPage from "@/pages/clients";
@@ -44,6 +45,7 @@ function ShellRoutes() {
           <Route path="/focus" component={FloorFocusPage} />
           <Route path="/queue" component={ProductionQueuePage} />
           <Route path="/labels" component={ShippingLabelsPage} />
+          <Route path="/shipments" component={ShipmentsPage} />
           <Route path="/deals" component={DealsPage} />
           {/* Clients + Marketplace Brief stay routed but off the nav rail (declutter). */}
           <Route path="/clients" component={ClientsPage} />
