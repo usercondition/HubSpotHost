@@ -857,7 +857,7 @@ export function buildPriorityStack(
       hiddenCount += 1;
       continue;
     }
-    if (entry.doneAt && doneThisWeek(entry.doneAt, now)) continue;
+    if (entry.doneAt) continue;
     const steps = parseSteps(entry.stepsJson);
     const allDone = steps.length > 0 && steps.every((step) => step.done);
     const targetDate = entry.targetDate || addShipByCalendarDays(today, 7);
