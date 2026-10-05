@@ -879,6 +879,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(row.scroll <= row.box + 0.5, `desktop up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
       if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `desktop up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
     }
+    if (artifactPath("floor-up-next-desktop-1440.png")) {
+      await page.locator("[data-testid='panel-floor-up-next']").screenshot({ path: artifactPath("floor-up-next-desktop-1440.png")! });
+    }
 
     const current = () => page.locator("[data-testid='page-transition']").last();
     const checkStackGrid = async (label: string) => {
@@ -1444,6 +1447,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(row.overflow.length === 0, `phone up-next name clipped: ${row.text} ${row.overflow.join("|")}`);
       check(row.scroll <= row.box + 0.5, `phone up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
       if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `phone up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
+    }
+    if (artifactPath("floor-up-next-phone-390.png")) {
+      await page.locator("[data-testid='panel-floor-up-next']").screenshot({ path: artifactPath("floor-up-next-phone-390.png")! });
     }
 
     await page.getByTestId("button-mobile-nav-more").click();

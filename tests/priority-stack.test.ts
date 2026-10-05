@@ -378,6 +378,24 @@ test("store upsert, reorder, bundle, off-book, and done snapshot", () =>
     assert.equal(view.rows.some((row) => row.offbookId === off.id), false);
   }));
 
+test("done off-book orders stay out of active rows after the shop week rolls", () =>
+  withTempDb(() => {
+    const doneOnFriday = new Date("2026-10-02T20:00:00.000Z");
+    const off = createOffbook({ title: "Darell friend order", contactName: "Darell", mode: "pickup" });
+    markStackDone(`offbook:${off.id}`, [], doneOnFriday);
+    const doneAt = listStackState().entries.find((entry) => entry.id === off.id)?.doneAt;
+
+    const sameWeek = buildPriorityStack(queue([]), listStackState(), { now: doneOnFriday });
+    assert.equal(sameWeek.rows.some((row) => row.offbookId === off.id), false);
+    assert.equal(sameWeek.outTheDoor.some((row) => row.offbookId === off.id), true);
+
+    markStackDone(`offbook:${off.id}`, [], new Date("2026-10-05T20:00:00.000Z"));
+    const followingWeek = buildPriorityStack(queue([]), listStackState(), { now: new Date("2026-10-05T20:00:00.000Z") });
+    assert.equal(followingWeek.rows.some((row) => row.offbookId === off.id), false);
+    assert.equal(followingWeek.outTheDoor.some((row) => row.offbookId === off.id), false);
+    assert.equal(listStackState().entries.find((entry) => entry.id === off.id)?.doneAt, doneAt);
+  }));
+
 test("schemas reject a long blocker, a bad deal id, a bad date, and an unknown key", () => {
   assert.equal(updateStackEntrySchema.safeParse({ blocker: "x".repeat(501) }).success, false);
   assert.equal(createStackBundleSchema.safeParse({ label: "Simon", dealIds: ["nope", "12"] }).success, false);
