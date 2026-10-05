@@ -684,10 +684,12 @@
     overflow: visible;
     white-space: normal;
     text-overflow: unset;
+    overflow-wrap: anywhere;
   }
 
   .floor-next-client {
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .floor-next > :nth-child(3),
