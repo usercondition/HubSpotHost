@@ -9,7 +9,12 @@ const previousDbFile = process.env.ORDER_LINKS_DB_FILE;
 const dbFile = path.join(os.tmpdir(), `plate-download-tickets-${crypto.randomUUID()}.db`);
 process.env.ORDER_LINKS_DB_FILE = dbFile;
 const { getSqlite, resetOrderLinkStore } = await import("../server/lib/order-links");
-const { readDownloadTicket, saveDownloadTicket } = await import("../server/lib/plate-files");
+const {
+  consumeDownloadTicket,
+  peekDownloadTicket,
+  readDownloadSession,
+  saveDownloadTicket,
+} = await import("../server/lib/plate-files");
 
 test.after(() => {
   resetOrderLinkStore();
@@ -24,7 +29,7 @@ test.after(() => {
   }
 });
 
-test("download tickets store only a hash and consume once", () => {
+test("download tickets store only a hash and exchange once for a bounded session", () => {
   const ticket = saveDownloadTicket("drive-file");
   const row = getSqlite()
     .prepare(`SELECT token_hash FROM plate_download_tickets`)
@@ -32,13 +37,17 @@ test("download tickets store only a hash and consume once", () => {
 
   assert.equal(row.token_hash, crypto.createHash("sha256").update(ticket.token).digest("hex"));
   assert.notEqual(row.token_hash, ticket.token);
-  assert.equal(readDownloadTicket(ticket.token), "drive-file");
-  assert.equal(readDownloadTicket(ticket.token), null);
+  assert.equal(peekDownloadTicket(ticket.token), "drive-file");
+  const access = consumeDownloadTicket(ticket.token);
+  assert.equal(access?.driveFileId, "drive-file");
+  assert.equal(consumeDownloadTicket(ticket.token), null);
+  assert.equal(readDownloadSession(access!.session), "drive-file");
 });
 
 test("expired download tickets are rejected", () => {
   const issuedAt = new Date("2026-10-02T16:00:00.000Z");
   const ticket = saveDownloadTicket("expired-file", issuedAt);
 
-  assert.equal(readDownloadTicket(ticket.token, new Date("2026-10-02T16:06:00.000Z")), null);
+  assert.equal(peekDownloadTicket(ticket.token, new Date("2026-10-02T16:06:00.000Z")), null);
+  assert.equal(consumeDownloadTicket(ticket.token, new Date("2026-10-02T16:06:00.000Z")), null);
 });

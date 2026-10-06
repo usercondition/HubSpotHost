@@ -514,6 +514,11 @@ CREATE TABLE IF NOT EXISTS plate_download_tickets (
   drive_file_id TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plate_download_sessions (
+  session_hash TEXT PRIMARY KEY,
+  drive_file_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 `;
 
 const CREATE_FULFILLMENT_CHECKLISTS_SQL = `

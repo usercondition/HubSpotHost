@@ -62,7 +62,9 @@ import {
   attachPlateStl,
   linkPlatePrint,
   listPlateFiles,
-  readDownloadTicket,
+  consumeDownloadTicket,
+  peekDownloadTicket,
+  readDownloadSession,
   readPlatePreviewPng,
   recordUploadFailure,
   registerUploadedPlate,
@@ -179,6 +181,29 @@ function queryValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return "";
+}
+
+const DOWNLOAD_SESSION_COOKIE = "plate_download_session";
+
+function cookieValue(req: Request, name: string): string {
+  const pairs = (req.get("cookie") || "").split(";");
+  for (const pair of pairs) {
+    const [key, ...parts] = pair.trim().split("=");
+    if (key === name) return decodeURIComponent(parts.join("="));
+  }
+  return "";
+}
+
+function downloadSessionCookie(session: string, expiresAt: string): string {
+  const maxAge = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+  return [
+    `${DOWNLOAD_SESSION_COOKIE}=${encodeURIComponent(session)}`,
+    "Path=/api/plate-files/content",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAge}`,
+    ...(process.env.NODE_ENV === "production" ? ["Secure"] : []),
+  ].join("; ");
 }
 
 function attachmentName(name: string): string {
@@ -557,7 +582,19 @@ export function registerPlateLibraryRoutes(app: Express): void {
   });
 
   app.get("/api/plate-files/content", async (req: Request, res: Response) => {
-    const driveFileId = readDownloadTicket(queryValue(req.query.ticket));
+    const ticket = queryValue(req.query.ticket);
+    const session = cookieValue(req, DOWNLOAD_SESSION_COOKIE);
+    let driveFileId = session ? readDownloadSession(session) : null;
+    if (!driveFileId && req.method === "HEAD") {
+      driveFileId = ticket ? peekDownloadTicket(ticket) : null;
+    }
+    if (!driveFileId && req.method !== "HEAD" && ticket) {
+      const access = consumeDownloadTicket(ticket);
+      if (access) {
+        driveFileId = access.driveFileId;
+        res.setHeader("set-cookie", downloadSessionCookie(access.session, access.expiresAt));
+      }
+    }
     if (!driveFileId) return res.status(401).json({ ok: false, error: "That download link expired. Try Download again." });
     const file = getPlateFile(driveFileId);
     if (!file || file.source !== "upload") {

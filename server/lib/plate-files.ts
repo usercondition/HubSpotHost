@@ -558,6 +558,12 @@ function hashDownloadTicket(token: string): string {
   return crypto.createHash("sha256").update(token.trim(), "utf8").digest("hex");
 }
 
+export type DownloadTicketAccess = {
+  driveFileId: string;
+  session: string;
+  expiresAt: string;
+};
+
 export function saveDownloadTicket(
   driveFileId: string,
   now = new Date(),
@@ -572,13 +578,45 @@ export function saveDownloadTicket(
   return { token, expiresAt };
 }
 
-export function readDownloadTicket(token: string, now = new Date()): string | null {
+/** A HEAD probe must not consume a ticket before a browser starts its GET. */
+export function peekDownloadTicket(token: string, now = new Date()): string | null {
   const row = getSqlite()
-    .prepare(
-      `DELETE FROM plate_download_tickets
-       WHERE token_hash = ? AND expires_at > ?
-       RETURNING drive_file_id`,
-    )
+    .prepare(`SELECT drive_file_id FROM plate_download_tickets WHERE token_hash = ? AND expires_at > ?`)
     .get(hashDownloadTicket(token), now.toISOString()) as { drive_file_id: string } | undefined;
+  return row?.drive_file_id ?? null;
+}
+
+/**
+ * Atomically exchange a URL ticket for a same-origin session. The URL can be
+ * used once, while the browser can complete Range/refetch requests safely.
+ */
+export function consumeDownloadTicket(token: string, now = new Date()): DownloadTicketAccess | null {
+  const sqlite = getSqlite();
+  const session = crypto.randomBytes(24).toString("base64url");
+  const consume = sqlite.transaction(() => {
+    const row = sqlite
+      .prepare(
+        `DELETE FROM plate_download_tickets
+         WHERE token_hash = ? AND expires_at > ?
+         RETURNING drive_file_id, expires_at`,
+      )
+      .get(hashDownloadTicket(token), now.toISOString()) as
+      | { drive_file_id: string; expires_at: string }
+      | undefined;
+    if (!row) return null;
+    sqlite
+      .prepare(`INSERT INTO plate_download_sessions (session_hash, drive_file_id, expires_at) VALUES (?, ?, ?)`)
+      .run(hashDownloadTicket(session), row.drive_file_id, row.expires_at);
+    return { driveFileId: row.drive_file_id, session, expiresAt: row.expires_at };
+  });
+  return consume();
+}
+
+export function readDownloadSession(session: string, now = new Date()): string | null {
+  const sqlite = getSqlite();
+  sqlite.prepare(`DELETE FROM plate_download_sessions WHERE expires_at <= ?`).run(now.toISOString());
+  const row = sqlite
+    .prepare(`SELECT drive_file_id FROM plate_download_sessions WHERE session_hash = ? AND expires_at > ?`)
+    .get(hashDownloadTicket(session), now.toISOString()) as { drive_file_id: string } | undefined;
   return row?.drive_file_id ?? null;
 }

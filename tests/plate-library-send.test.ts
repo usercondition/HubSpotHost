@@ -194,12 +194,23 @@ test("prints plates link into the library once, and downloads stream with Range"
     });
     const ticketBody = await ticket.json();
     assert.equal(ticketBody.fallback, false);
+    const probe = await fetch(`${base}${ticketBody.url}`, { method: "HEAD" });
+    assert.equal(probe.status, 206);
     const ranged = await fetch(`${base}${ticketBody.url}`, { headers: { range: "bytes=0-3" } });
     assert.equal(ranged.status, 206);
     assert.equal(ranged.headers.get("content-range"), "bytes 0-3/400");
     assert.match(ranged.headers.get("content-disposition") || "", /Cerastus Body Only\.ctb/);
     assert.equal(await ranged.text(), "abcd");
     assert.equal(mediaRange, "bytes=0-3");
+    const sessionCookie = ranged.headers.get("set-cookie");
+    assert.ok(sessionCookie);
+    const refetch = await fetch(`${base}${ticketBody.url}`, {
+      headers: { range: "bytes=4-7", cookie: sessionCookie!.split(";")[0]! },
+    });
+    assert.equal(refetch.status, 206);
+    assert.equal(await refetch.text(), "abcd");
+    const replay = await fetch(`${base}${ticketBody.url}`, { headers: { range: "bytes=8-11" } });
+    assert.equal(replay.status, 401);
 
     const indexed = await fetch(`${base}/api/plate-files`, {
       method: "POST",
