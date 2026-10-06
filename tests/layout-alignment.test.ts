@@ -1153,6 +1153,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     if (artifactPath("stack-address-desktop-1440.png")) {
       await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
     }
+    if (artifactPath("stack-out-the-door-desktop-1440.png")) {
+      await current().getByTestId("stack-out-the-door").first().screenshot({ path: artifactPath("stack-out-the-door-desktop-1440.png")! });
+    }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
     assert.match(cash, /\$25/);
@@ -1456,6 +1459,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
     if (artifactPath("stack-address-phone-390.png")) {
       await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
+    if (artifactPath("stack-out-the-door-phone-390.png")) {
+      await current().getByTestId("stack-out-the-door").first().screenshot({ path: artifactPath("stack-out-the-door-phone-390.png")! });
     }
     if (artifactPath("stack-phone-390.png")) {
       await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
