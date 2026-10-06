@@ -30,19 +30,9 @@ export function stagePresentation(stage: string): OrderStatusPresentation {
  */
 export function orderStatusPresentation(input: {
   stage: string;
-  blocker?: string | null;
-  addressVerified?: boolean | null;
-  shippingRequired?: boolean;
   done?: boolean;
 }): OrderStatusPresentation {
   if (input.done) return { key: "done", label: "Done", short: "Done", tone: "good" };
-  const blocker = input.blocker?.toLowerCase() ?? "";
-  if (
-    input.shippingRequired !== false &&
-    (input.addressVerified === false || blocker.includes("address"))
-  ) {
-    return { key: "waiting-address", label: "Waiting on address", short: "Address", tone: "warn" };
-  }
   return stagePresentation(input.stage);
 }
 

@@ -11,6 +11,7 @@ import { shopDateLabel } from "@shared/ship-by";
 import { orderTitle as orderTitleFromName } from "@/lib/order-title";
 import type { FulfillmentChecklistView } from "@shared/schema";
 import type { StackTier } from "@shared/priority-stack";
+import { addressNeedsChase, addressStatusPill, type AddressStatus } from "@shared/ship-address";
 import { cn } from "@/lib/utils";
 import { orderStatusPresentation, type OrderStatusKey } from "@/lib/stage-chip";
 
@@ -39,6 +40,8 @@ export interface StackRowModel {
   amount: number | null;
   tier: StackTier;
   shippingRequired: boolean;
+  /** Live HubSpot ship-to readiness, enriched only for label-relevant work. */
+  addressStatus?: AddressStatus;
   dealId: string | null;
   offbookId: number | null;
   bundleId: number | null;
@@ -74,14 +77,19 @@ export interface OutstandingFilterOption {
   count: number;
 }
 
-export function statusForRow(row: Pick<StackRowModel, "stage" | "blocker" | "fulfillment" | "shippingRequired" | "doneAt">) {
+export function statusForRow(row: Pick<StackRowModel, "stage" | "doneAt">) {
   return orderStatusPresentation({
     stage: row.stage,
-    blocker: row.blocker,
-    addressVerified: row.fulfillment?.addressVerified,
-    shippingRequired: row.shippingRequired,
     done: Boolean(row.doneAt),
   });
+}
+
+/** Address readiness is an independent shipping flag, not a production stage. */
+export function addressFlagForRow(
+  row: Pick<StackRowModel, "addressStatus" | "shippingRequired">,
+) {
+  if (row.shippingRequired === false || !addressNeedsChase(row.addressStatus)) return null;
+  return addressStatusPill(row.addressStatus!);
 }
 
 export function outstandingFilterOptions(rows: StackRowModel[], today: string): OutstandingFilterOption[] {
@@ -180,7 +188,7 @@ function progressLabel(row: StackRowModel): string {
   return `${row.stage} · ${done}/${steps.length}`;
 }
 
-export function StatusChip({ row }: { row: Pick<StackRowModel, "stage" | "blocker" | "fulfillment" | "shippingRequired" | "doneAt"> }) {
+export function StatusChip({ row }: { row: Pick<StackRowModel, "stage" | "doneAt"> }) {
   const presentation = statusForRow(row);
   return (
     <span className={cn("stage-chip", `stage-${presentation.tone}`)} title={presentation.label}>

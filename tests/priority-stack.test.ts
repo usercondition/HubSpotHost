@@ -344,6 +344,21 @@ test("ship-ready and blocked deals stay on the stack when Queue hides those lane
   assert.deepEqual(view.rows.map((row) => row.dealId).sort(), ["1", "2", "3", "4"]);
 });
 
+test("stack preserves live HubSpot address readiness separately from production stage", () => {
+  const printing = deal({
+    dealId: "printing-address",
+    dealName: "Land Raider",
+    amount: 74.99,
+    shipBy: "2026-09-27",
+    stage: "Printing",
+    bucket: "in_production",
+    addressStatus: "missing",
+  });
+  const view = buildPriorityStack(queue([printing]), { entries: [], bundles: [] }, { now: NOW });
+  assert.equal(view.rows[0]?.stage, "Printing");
+  assert.equal(view.rows[0]?.addressStatus, "missing");
+});
+
 test("shop week ends on Sunday and LA rollover stays Friday night", () => {
   assert.equal(shopWeekEnd(new Date("2026-09-27T17:00:00.000Z")), "2026-09-27");
   assert.equal(shopWeekStart(new Date("2026-09-27T17:00:00.000Z")), "2026-09-21");

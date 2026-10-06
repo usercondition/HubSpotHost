@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/format";
 import { stackHref } from "@/lib/workflow";
 import {
   StatusChip,
+  addressFlagForRow,
   matchesOutstandingFilter,
   outstandingFilterOptions,
   statusForRow,
@@ -113,13 +114,17 @@ export function WorkHub({ needs, stack, today }: { needs: FloorNeed[]; stack: St
             {visible.length === 0 ? <p className="work-hub-empty">No outstanding orders match this view.</p> : visible.map((row) => {
               const date = targetLabel(row, today);
               const status = statusForRow(row);
+              const addressFlag = addressFlagForRow(row);
               return (
                 <Link key={row.key} href={orderHref(row)} className="work-hub-order" data-testid={`hub-order-${row.key}`}>
                   <span className="work-hub-order-name">
                     <strong>{orderTitle(row.name, row.contactName)}</strong>
                     <small>{row.contactName || (row.kind === "offbook" ? "Off-book" : row.kind === "bundle" ? `${row.members.length} orders bundled` : "Customer order")}</small>
                   </span>
-                  <StatusChip row={row} />
+                  <span className="work-hub-status">
+                    <StatusChip row={row} />
+                    {addressFlag ? <small className="work-hub-address-flag">{addressFlag.label}</small> : null}
+                  </span>
                   <span className={cn("work-hub-date", row.targetDate <= today && "is-due")} title={date}>
                     <strong>{daysLabel(row.targetDate, today)}</strong><small>{date}</small>
                   </span>
