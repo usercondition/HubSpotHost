@@ -3,16 +3,15 @@ import { Link } from "wouter";
 import { ListChecks, ListOrdered, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FloorBoard } from "@/components/floor-board";
+import { WorkHub } from "@/components/work-hub";
 import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
 import type { StackView } from "@/components/priority-stack-list";
 import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { buildFloorNeeds, fepDuePrinters } from "@/lib/floor-needs";
-import { floorGreeting, pacificDayLabel } from "@/lib/stage-chip";
+import { pacificDayLabel } from "@/lib/stage-chip";
 import { shipByCalendarDate } from "@shared/ship-by";
 import type {
   HealthResponse,
@@ -47,11 +46,10 @@ function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
 
 
 function TodaysWork() {
-  const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlockMutation = useOwnerUnlock({
-    successTitle: "Floor unlocked",
-    successDescription: "Queue, Orders, Prints, Intake, and Stats share this session.",
+    successTitle: "Work hub unlocked",
+    successDescription: "Your actions and outstanding orders are ready.",
   });
 
   const performance = useQuery<PerformanceResponse>({
@@ -109,9 +107,9 @@ function TodaysWork() {
       <div className="space-y-4">
         <HubspotSyncChip />
         <OwnerUnlockPanel
-          title="Unlock the floor"
-          description="See what needs plates, costs, or review — then jump into Queue."
-          buttonLabel="Unlock the floor"
+          title="Unlock the work hub"
+          description="See what needs attention and every outstanding order in one place."
+          buttonLabel="Unlock work hub"
           testIdPrefix="dashboard"
           pending={unlockMutation.isPending}
           onUnlock={(code) => unlockMutation.mutate(code)}
@@ -169,36 +167,8 @@ function TodaysWork() {
     fepDue,
   });
 
-  const plateSeconds = (productionQueue.data?.inProduction ?? []).reduce(
-    (sum, item) => sum + (item.totalPrintTimeSeconds ?? 0),
-    0,
-  );
-  const suggestions = resinReorder.data?.suggestions ?? [];
-  const resin = suggestions.find((item) => item.urgency === "ok") ?? suggestions[0] ?? null;
-
   return (
-    <FloorBoard
-      needs={floorNeeds}
-      today={today}
-      stack={stack.data}
-      inProduction={productionQueue.data?.summary.inProduction ?? 0}
-      waitingToPrint={productionQueue.data?.summary.nextPrint ?? 0}
-      plateHours={Math.round(plateSeconds / 3600)}
-      printers={(printers.data?.printers ?? []).filter((printer) => printer.status === "active")}
-      resin={resin}
-      intakeWaiting={pendingReview}
-      buyerLinks={awaitingClient}
-      replies={productionQueue.data?.summary.needsReply ?? 0}
-      syncIssues={health.data?.hubspotSync?.issueCount ?? 0}
-      onCopyChase={async (draft) => {
-        try {
-          await navigator.clipboard.writeText(draft);
-          toast({ title: "Chase draft copied", description: "Paste into Messenger or email — nothing was sent." });
-        } catch {
-          toast({ title: "Could not copy", description: draft.slice(0, 120), variant: "destructive" });
-        }
-      }}
-    />
+    <WorkHub needs={floorNeeds} stack={stack.data} today={today} />
   );
 }
 
@@ -218,8 +188,8 @@ export default function Dashboard() {
   return (
     <div className="mx-auto flex w-full max-w-[1208px] flex-col" data-testid="page-floor">
       <PageHeader
-        title={floorGreeting()}
-        subtitle={`What needs you right now · ${pacificDayLabel()}`}
+        title="Work hub"
+        subtitle={`Actions and outstanding orders · ${pacificDayLabel()}`}
         hideActionsOnPhone
         actions={
           <>
@@ -227,13 +197,13 @@ export default function Dashboard() {
             <Button asChild size="sm" variant="outline" className="h-8">
               <Link href="/stack">
                 <ListChecks className="h-3.5 w-3.5" />
-                Open Stack
+                Priority controls
               </Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="h-8" data-testid="link-floor-open-queue">
               <Link href="/queue">
                 <ListOrdered className="h-3.5 w-3.5" />
-                Queue
+                Print queue
               </Link>
             </Button>
           </>
