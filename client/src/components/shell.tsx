@@ -16,6 +16,7 @@ import {
   Lock,
   Menu,
   Moon,
+  PackageSearch,
   Printer,
   RefreshCw,
   Settings2,
@@ -138,7 +139,7 @@ const NAV: Array<{
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
   { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "never" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run", phone: "more" },
-  { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: Ship, testId: "link-nav-shipments", group: "Run", phone: "more" },
+  { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: PackageSearch, testId: "link-nav-shipments", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   {
     href: "/paid-orders",
