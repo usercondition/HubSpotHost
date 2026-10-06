@@ -16,7 +16,11 @@ import {
   StackCommitLine,
   StackRow,
   StackTotalsBar,
+  StatusChip,
+  matchesOutstandingFilter,
+  outstandingFilterOptions,
   rowsWithDividers,
+  type OutstandingFilter,
   type StackRowModel,
   type StackView,
 } from "@/components/priority-stack-list";
@@ -74,6 +78,7 @@ export default function PriorityStackPage() {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [outstandingFilter, setOutstandingFilter] = useState<OutstandingFilter>("all");
   const [offbookOpen, setOffbookOpen] = useState(false);
   const [bundleOpen, setBundleOpen] = useState(false);
 
@@ -159,6 +164,13 @@ export default function PriorityStackPage() {
 
   const data = stack.data;
   const lines = data ? rowsWithDividers(data.rows, data.totals) : [];
+  const filterOptions = data ? outstandingFilterOptions(data.rows, data.today) : [];
+  const visibleLines =
+    data && outstandingFilter !== "all"
+      ? data.rows
+          .filter((row) => matchesOutstandingFilter(row, outstandingFilter, data.today))
+          .map((row, index) => ({ type: "row" as const, row: { ...row, rank: index + 1 } }))
+      : lines;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col">
@@ -223,9 +235,32 @@ export default function PriorityStackPage() {
         ) : (
           <>
             <StackTotalsBar view={data} />
+            <section className="stack-outstanding" aria-labelledby="outstanding-title">
+              <div className="stack-outstanding-head">
+                <div>
+                  <h2 id="outstanding-title">Outstanding orders</h2>
+                  <p>Open in priority order — overdue first, then ship-by date.</p>
+                </div>
+                <span className="stack-open-count numeric">{data.rows.length} open</span>
+              </div>
+              <div className="stack-filter-bar" aria-label="Filter outstanding orders" data-testid="stack-filters">
+                {filterOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className="stack-filter"
+                    data-active={outstandingFilter === option.key}
+                    onClick={() => setOutstandingFilter(option.key)}
+                    data-testid={`stack-filter-${option.key}`}
+                  >
+                    {option.label} <span className="numeric">{option.count}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
             <div className="overflow-hidden rounded-lg border border-border" data-testid="stack-list">
               <StackColumnHead />
-              {lines.map((line) =>
+              {visibleLines.map((line) =>
                 line.type === "divider" ? (
                   <StackCommitLine key={line.label} label={line.label} amount={line.amount} />
                 ) : (
@@ -261,7 +296,9 @@ export default function PriorityStackPage() {
                   />
                 ),
               )}
-              {data.rows.length === 0 ? (
+              {visibleLines.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">No orders match this view.</p>
+              ) : data.rows.length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing open on the stack.</p>
               ) : null}
             </div>
@@ -287,7 +324,7 @@ export default function PriorityStackPage() {
                       </button>
                       {row.contactName ? <span className="stack-clip stack-sub">{row.contactName}</span> : null}
                     </span>
-                    <span className="stack-stage stack-clip text-sm">{row.shippingRequired ? "Shipped" : "Picked up"}</span>
+                    <span className="stack-stage"><StatusChip row={{ ...row, doneAt: row.doneAt ?? "done" }} /></span>
                     <span className="stack-blocker" />
                     <span className="stack-date" />
                     <span className="stack-money numeric text-sm">{row.amount == null ? "—" : formatMoney(row.amount)}</span>

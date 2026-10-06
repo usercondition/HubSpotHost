@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rowsWithDividers, targetLabel, type StackRowModel } from "../client/src/components/priority-stack-list";
+import {
+  matchesOutstandingFilter,
+  outstandingFilterOptions,
+  rowsWithDividers,
+  statusForRow,
+  targetLabel,
+  type StackRowModel,
+} from "../client/src/components/priority-stack-list";
 
 function row(partial: Partial<StackRowModel> & Pick<StackRowModel, "key" | "tier">): StackRowModel {
   return {
@@ -117,4 +124,25 @@ test("a tentative date is spelled out and set or plan stays for the rest", () =>
     "Oct 2 · tentative",
   );
   assert.equal(targetLabel(row({ key: "tent", tier: "committed", tentative: true }), today).includes("~"), false);
+});
+
+test("outstanding statuses surface an address hold ahead of a generic pipeline stage", () => {
+  const addressHold = row({
+    key: "address",
+    tier: "committed",
+    stage: "Ready to Ship",
+    blocker: "Needs address",
+    fulfillment: { addressVerified: false } as StackRowModel["fulfillment"],
+  });
+  const printing = row({ key: "printing", tier: "committed", stage: "Printing", blocker: "" });
+  const today = "2026-09-25";
+
+  assert.equal(statusForRow(addressHold).label, "Waiting on address");
+  assert.equal(statusForRow(printing).key, "printing");
+  assert.equal(matchesOutstandingFilter(addressHold, "waiting-address", today), true);
+  assert.equal(matchesOutstandingFilter(addressHold, "due", today), false);
+  assert.deepEqual(
+    outstandingFilterOptions([addressHold, printing], today).map((option) => [option.key, option.count]),
+    [["all", 2], ["attention", 1], ["waiting-address", 1], ["printing", 1]],
+  );
 });

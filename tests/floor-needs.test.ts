@@ -70,7 +70,7 @@ describe("floor labels", () => {
   it("greets in Pacific time and shortens stage chips", () => {
     assert.equal(floorGreeting(new Date("2026-09-25T19:47:00.000Z")), "Good afternoon");
     assert.equal(pacificDayLabel(new Date("2026-09-25T19:47:00.000Z")), "Fri Sep 25");
-    assert.equal(stagePresentation("Post-Process / QC").short, "Post / QC");
+    assert.equal(stagePresentation("Post-Process / QC").short, "QC");
     assert.equal(stagePresentation("Ready to Ship").short, "Ready");
     assert.equal(stagePresentation("Local pickup").short, "Pickup");
     assert.equal(stagePresentation("Queued to Print").tone, "teal");

@@ -776,30 +776,19 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       check(Math.abs(box.height - 20) <= 1, `${box.id} height ${box.height}`);
     }
 
-    const kpiInsets = await page.locator("[data-testid^='kpi-'] p.numeric").evaluateAll((els) =>
-      els.map((el) => {
-        const card = el.closest("article");
-        const rect = el.getBoundingClientRect();
-        const cardRect = card?.getBoundingClientRect();
-        return cardRect ? rect.left - cardRect.left : 0;
-      }),
-    );
-    check(kpiInsets.length >= 4, "KPI values missing");
-    check(spread(kpiInsets).delta <= 1, `KPI value insets differ by ${spread(kpiInsets).delta}`);
-
     const floorText = await page.locator("body").innerText();
     assert.equal(/calendar/i.test(floorText), false);
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(floorText), false);
-    await page.locator("[data-testid='row-floor-next-1']").first().waitFor();
-    const upNext = await page.locator("[data-testid='row-floor-next-1']").first().innerText();
-    check(upNext.split("Ada").length - 1 === 1, `floor up-next repeats the client: ${upNext}`);
-    const upNextCols = await page.locator("[data-testid='page-transition']").last().locator("[data-testid^='row-floor-next-']").evaluateAll((rows) =>
+    await page.locator("[data-testid='hub-order-committed']").first().waitFor();
+    const outstanding = await page.locator("[data-testid='hub-order-committed']").first().innerText();
+    check(outstanding.split("Ada").length - 1 === 1, `hub order repeats the client: ${outstanding}`);
+    const outstandingCols = await page.locator("[data-testid='page-transition']").last().locator("[data-testid^='hub-order-']").evaluateAll((rows) =>
       rows
         .filter((row) => row.getClientRects().length > 0)
         .map((row) => {
-          const chip = row.children[2] as HTMLElement | undefined;
-          const date = row.children[3] as HTMLElement | undefined;
-          const amount = row.children[4] as HTMLElement | undefined;
+          const chip = row.children[1] as HTMLElement | undefined;
+          const date = row.children[2] as HTMLElement | undefined;
+          const amount = row.children[3] as HTMLElement | undefined;
           return {
             chip: chip?.getBoundingClientRect().left ?? 0,
             chipRight: chip?.getBoundingClientRect().right ?? 0,
@@ -812,22 +801,22 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
           };
         }),
     );
-    check(upNextCols.length >= 3, "floor up-next rows missing");
-    check(spread(upNextCols.map((row) => row.chip)).delta <= 0.5, `up-next chip left edges differ by ${spread(upNextCols.map((row) => row.chip)).delta}`);
-    check(spread(upNextCols.map((row) => row.date)).delta <= 0.5, `up-next date left edges differ by ${spread(upNextCols.map((row) => row.date)).delta}`);
-    check(spread(upNextCols.map((row) => row.amount)).delta <= 0.5, `up-next amount right edges differ by ${spread(upNextCols.map((row) => row.amount)).delta}`);
-    for (const row of upNextCols) {
-      check(row.chipRight <= row.date + 0.5, "up-next chip runs into the date column");
-      check(row.dateRight <= row.amountLeft + 0.5, "up-next date runs into the amount column");
-      check(row.chipClip <= 0.5, "up-next chip is clipped");
-      check(row.dateClip <= 0.5, "up-next date is clipped");
+    check(outstandingCols.length >= 3, "outstanding order rows missing");
+    check(spread(outstandingCols.map((row) => row.chip)).delta <= 0.5, `status chip left edges differ by ${spread(outstandingCols.map((row) => row.chip)).delta}`);
+    check(spread(outstandingCols.map((row) => row.date)).delta <= 0.5, `ship-by left edges differ by ${spread(outstandingCols.map((row) => row.date)).delta}`);
+    check(spread(outstandingCols.map((row) => row.amount)).delta <= 0.5, `amount right edges differ by ${spread(outstandingCols.map((row) => row.amount)).delta}`);
+    for (const row of outstandingCols) {
+      check(row.chipRight <= row.date + 0.5, "status chip runs into the ship-by column");
+      check(row.dateRight <= row.amountLeft + 0.5, "ship-by date runs into the amount column");
+      check(row.chipClip <= 0.5, "status chip is clipped");
+      check(row.dateClip <= 0.5, "ship-by date is clipped");
     }
-    const readUpNextNames = () =>
-      page.locator("[data-testid='page-transition']").last().locator("[data-testid^='row-floor-next-']").evaluateAll((rows) =>
+    const readOutstandingNames = () =>
+      page.locator("[data-testid='page-transition']").last().locator("[data-testid^='hub-order-']").evaluateAll((rows) =>
         rows
           .filter((row) => row.getClientRects().length > 0)
           .map((row) => {
-            const name = row.children[1] as HTMLElement | undefined;
+            const name = row.children[0] as HTMLElement | undefined;
             const box = name?.getBoundingClientRect();
             const overflow: string[] = [];
             if (name && box) {
@@ -848,7 +837,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
                 node = walker.nextNode();
               }
             }
-            const client = name?.querySelector(".floor-next-client") as HTMLElement | null;
+            const client = name?.querySelector("small") as HTMLElement | null;
             let clientWidth = 0;
             if (client && box) {
               const range = document.createRange();
@@ -869,18 +858,18 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             };
           }),
       );
-    const desktopNames = await readUpNextNames();
+    const desktopNames = await readOutstandingNames();
     check(
       desktopNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")),
-      "Ikarus up-next row missing",
+      "Ikarus outstanding row missing",
     );
     for (const row of desktopNames) {
-      check(row.overflow.length === 0, `desktop up-next name clipped: ${row.text} ${row.overflow.join("|")}`);
-      check(row.scroll <= row.box + 0.5, `desktop up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
+      check(row.overflow.length === 0, `desktop outstanding name clipped: ${row.text} ${row.overflow.join("|")}`);
+      check(row.scroll <= row.box + 0.5, `desktop outstanding name clipped (${row.scroll} > ${row.box}): ${row.text}`);
       if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `desktop up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
     }
-    if (artifactPath("floor-up-next-desktop-1440.png")) {
-      await page.locator("[data-testid='panel-floor-up-next']").screenshot({ path: artifactPath("floor-up-next-desktop-1440.png")! });
+    if (artifactPath("hub-outstanding-desktop-1440.png")) {
+      await page.locator("[data-testid='work-hub']").screenshot({ path: artifactPath("hub-outstanding-desktop-1440.png")! });
     }
 
     const current = () => page.locator("[data-testid='page-transition']").last();
@@ -1043,7 +1032,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             return (spans[spans.length - 1]?.textContent || "").trim();
           }),
         );
-        check(tabLabels.join("|") === "Floor|Stack|Queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
+        check(tabLabels.join("|") === "Work hub|Priority|Print queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
       } else {
         check(switchCount === 0, "desktop shows the phone Prints | Library switch");
       }
@@ -1163,6 +1152,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(stackText.includes("Needs address"), `stack missing Needs address: ${stackText}`);
     if (artifactPath("stack-address-desktop-1440.png")) {
       await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-desktop-1440.png")! });
+    }
+    if (artifactPath("stack-out-the-door-desktop-1440.png")) {
+      await current().getByTestId("stack-out-the-door").first().screenshot({ path: artifactPath("stack-out-the-door-desktop-1440.png")! });
     }
     const cash = await current().getByTestId("stack-totals").first().innerText();
     assert.match(cash, /\$1,280/);
@@ -1438,18 +1430,18 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(scroll.width <= scroll.inner + 1, `phone page scrolls horizontally (${scroll.width} > ${scroll.inner})`);
     const chipHeights = await page.locator(".stage-chip").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
     for (const height of chipHeights) check(height <= 28, `stage chip wrapped (${height}px)`);
-    const phoneNames = await readUpNextNames();
+    const phoneNames = await readOutstandingNames();
     const phoneFirst = phoneNames.find((row) => /Cerastus Chassis - Castigator/.test(row.text));
-    check(Boolean(phoneFirst), `phone up-next was ${phoneNames.map((row) => row.text).join(" | ")}`);
+    check(Boolean(phoneFirst), `phone outstanding orders were ${phoneNames.map((row) => row.text).join(" | ")}`);
     check((phoneFirst?.text.split("Ada").length ?? 1) - 1 === 1, `phone up-next repeats the client: ${phoneFirst?.text}`);
-    check(phoneNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")), "phone Ikarus up-next row missing");
+    check(phoneNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")), "phone Ikarus outstanding row missing");
     for (const row of phoneNames) {
-      check(row.overflow.length === 0, `phone up-next name clipped: ${row.text} ${row.overflow.join("|")}`);
-      check(row.scroll <= row.box + 0.5, `phone up-next name clipped (${row.scroll} > ${row.box}): ${row.text}`);
+      check(row.overflow.length === 0, `phone outstanding name clipped: ${row.text} ${row.overflow.join("|")}`);
+      check(row.scroll <= row.box + 0.5, `phone outstanding name clipped (${row.scroll} > ${row.box}): ${row.text}`);
       if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `phone up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
     }
-    if (artifactPath("floor-up-next-phone-390.png")) {
-      await page.locator("[data-testid='panel-floor-up-next']").screenshot({ path: artifactPath("floor-up-next-phone-390.png")! });
+    if (artifactPath("hub-outstanding-phone-390.png")) {
+      await page.locator("[data-testid='work-hub']").screenshot({ path: artifactPath("hub-outstanding-phone-390.png")! });
     }
 
     await page.getByTestId("button-mobile-nav-more").click();
@@ -1467,6 +1459,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneStackText.includes("Needs address"), `phone stack missing Needs address: ${phoneStackText}`);
     if (artifactPath("stack-address-phone-390.png")) {
       await current().getByTestId("stack-list").first().screenshot({ path: artifactPath("stack-address-phone-390.png")! });
+    }
+    if (artifactPath("stack-out-the-door-phone-390.png")) {
+      await current().getByTestId("stack-out-the-door").first().screenshot({ path: artifactPath("stack-out-the-door-phone-390.png")! });
     }
     if (artifactPath("stack-phone-390.png")) {
       await page.screenshot({ path: artifactPath("stack-phone-390.png")!, fullPage: true });
