@@ -398,15 +398,15 @@ export function buildProductionQueue(snapshot: PerformanceResponse): ProductionQ
 }
 
 /**
- * Deals Labels shows in the order pick list (and Floor may chip once ship-side).
- * Includes in-production rows so Post-Process / QC still get HubSpot address
- * enrichment without being treated as ship-ready.
+ * Stack and Labels show every open order, so enrich all shipping rows. This
+ * keeps the secondary address flag accurate without letting it replace the
+ * production stage.
  */
 export function queueItemsForShipAddressEnrichment(
   queue: ProductionQueueResponse,
 ): ProductionQueueItem[] {
   const targets = new Map<string, ProductionQueueItem>();
-  for (const item of [...queue.shipReady, ...queue.readyToPack, ...queue.inProduction]) {
+  for (const item of [...queue.nextPrint, ...queue.inProduction, ...queue.shipReady, ...queue.readyToPack]) {
     // Pickup orders never need HubSpot ship-to enrichment.
     if (item.shippingRequired === false || item.addressStatus === "pickup") continue;
     targets.set(item.dealId, item);

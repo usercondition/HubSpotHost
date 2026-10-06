@@ -11,7 +11,7 @@ import {
   invalidateDealContactCache,
   buildDealOpsDetail,
 } from "../server/lib/deal-ops";
-import { attachShipAddressReadiness } from "../server/lib/production-queue";
+import { attachShipAddressReadiness, queueItemsForShipAddressEnrichment } from "../server/lib/production-queue";
 import { loadProductionQueue } from "../server/lib/queue-loader";
 import { resetOrderLinkStore } from "../server/lib/order-links";
 import { buildTrackerAssistantQueue } from "../server/lib/tracker-assistant";
@@ -121,6 +121,13 @@ function fullContact(id: string) {
     },
   };
 }
+
+test("address enrichment includes next-print orders shown in the Stack", () => {
+  const next = { ...shipReadyItem("next-print"), stage: "Waiting on printer", bucket: "next_print" as const };
+  const queue = queueOf([]);
+  queue.nextPrint = [next];
+  assert.deepEqual(queueItemsForShipAddressEnrichment(queue).map((item) => item.dealId), ["next-print"]);
+});
 
 describe("address rate limit", { concurrency: 1 }, () => {
   const previousToken = process.env.HUBSPOT_ACCESS_TOKEN;

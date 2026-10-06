@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  addressFlagForRow,
   matchesOutstandingFilter,
   outstandingFilterOptions,
   rowsWithDividers,
@@ -126,23 +127,25 @@ test("a tentative date is spelled out and set or plan stays for the rest", () =>
   assert.equal(targetLabel(row({ key: "tent", tier: "committed", tentative: true }), today).includes("~"), false);
 });
 
-test("outstanding statuses surface an address hold ahead of a generic pipeline stage", () => {
+test("outstanding status keeps production stage primary and shows a verified address hold as a secondary flag", () => {
   const addressHold = row({
     key: "address",
     tier: "committed",
-    stage: "Ready to Ship",
+    stage: "Printing",
     blocker: "Needs address",
+    addressStatus: "missing",
     fulfillment: { addressVerified: false } as StackRowModel["fulfillment"],
   });
   const printing = row({ key: "printing", tier: "committed", stage: "Printing", blocker: "" });
   const today = "2026-09-25";
 
-  assert.equal(statusForRow(addressHold).label, "Waiting on address");
+  assert.equal(statusForRow(addressHold).label, "Printing");
+  assert.equal(addressFlagForRow(addressHold)?.label, "Needs address");
   assert.equal(statusForRow(printing).key, "printing");
-  assert.equal(matchesOutstandingFilter(addressHold, "waiting-address", today), true);
+  assert.equal(matchesOutstandingFilter(addressHold, "waiting-address", today), false);
   assert.equal(matchesOutstandingFilter(addressHold, "due", today), false);
   assert.deepEqual(
     outstandingFilterOptions([addressHold, printing], today).map((option) => [option.key, option.count]),
-    [["all", 2], ["attention", 1], ["waiting-address", 1], ["printing", 1]],
+    [["all", 2], ["attention", 1], ["printing", 2]],
   );
 });
