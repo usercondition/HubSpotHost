@@ -13,7 +13,7 @@ import {
   type PrintPlateBit,
 } from "../../shared/schema";
 import { labelFromStlFileName, normalizeStlFileName } from "../../shared/stl-names";
-import { getDb } from "./order-links";
+import { getDb, getSqlite } from "./order-links";
 
 export const DEFAULT_ITEM_GROUP = "Kit";
 
@@ -219,10 +219,6 @@ export function listOrderPartSummaries(limit = 300): OrderPartSummary[] {
     .slice(0, Math.max(1, Math.min(limit, 500)));
 }
 
-function partKey(itemGroup: string, fileName: string): string {
-  return `${normalizeItemGroup(itemGroup).toLowerCase()}::${fileName.toLowerCase()}`;
-}
-
 export function importOrderParts(
   dealId: string,
   input: ImportOrderPartsInput,
@@ -237,45 +233,40 @@ export function importOrderParts(
   ];
   const resolved = resolveImportItemGroups(rawEntries, input.defaultItemGroup);
 
-  const existing = new Map(
-    listOrderParts(id).map((part) => [partKey(part.itemGroup, part.fileName), part] as const),
-  );
   const stamp = nowIso();
-  let added = 0;
-
-  for (const entry of resolved) {
-    const key = partKey(entry.itemGroup, entry.fileName);
-    if (existing.has(key)) continue;
-    getDb()
-      .insert(orderParts)
-      .values({
-        hubspotDealId: id,
-        hubspotDealName: dealName,
-        itemGroup: entry.itemGroup,
-        fileName: entry.fileName,
-        label: labelFromStlFileName(entry.fileName),
-        status: "needed",
-        printFileRecordId: null,
-        printPlateBitId: null,
-        createdAt: stamp,
-        updatedAt: stamp,
-      })
-      .run();
-    existing.set(key, null as unknown as OrderPart);
-    added += 1;
-  }
+  const sqlite = getSqlite();
+  const added = sqlite.transaction(() => {
+    const insert = sqlite.prepare(`
+      INSERT INTO order_parts (
+        hubspot_deal_id, hubspot_deal_name, item_group, file_name, label, status,
+        print_file_record_id, print_plate_bit_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'needed', NULL, NULL, ?, ?)
+      ON CONFLICT(hubspot_deal_id, item_group, file_name) DO NOTHING
+    `);
+    let count = 0;
+    for (const entry of resolved) {
+      const result = insert.run(
+        id,
+        dealName,
+        entry.itemGroup,
+        entry.fileName,
+        labelFromStlFileName(entry.fileName),
+        stamp,
+        stamp,
+      );
+      count += Number(result.changes ?? 0);
+    }
+    if (input.dealName?.trim()) {
+      sqlite
+        .prepare(`UPDATE order_parts SET hubspot_deal_name = ?, updated_at = ? WHERE hubspot_deal_id = ?`)
+        .run(dealName, stamp, id);
+    }
+    return count;
+  })();
 
   if (added === 0 && rawEntries.length > 0) {
     const hadStl = rawEntries.some((entry) => Boolean(normalizeStlFileName(entry.fileName)));
     if (!hadStl) return { ok: false, error: "Drop .stl files (or a zip of them) to build the parts list." };
-  }
-
-  if (input.dealName?.trim()) {
-    getDb()
-      .update(orderParts)
-      .set({ hubspotDealName: dealName, updatedAt: stamp })
-      .where(eq(orderParts.hubspotDealId, id))
-      .run();
   }
 
   const parts = listOrderParts(id);

@@ -139,6 +139,20 @@ test("import kit parts then plate drops subtract from the order list", () => {
   assert.ok(listOrderParts("1234567890").some((part) => part.fileName === "39 Thigh Left.stl"));
 });
 
+test("simultaneous imports are idempotent and never duplicate order parts", async () => {
+  const dealId = "4455667788";
+  const input = {
+    dealName: "Concurrent kit",
+    fileNames: ["Head.stl", "Torso.stl", "Leg.stl"],
+  };
+  const results = await Promise.all(
+    Array.from({ length: 20 }, () => Promise.resolve().then(() => importOrderParts(dealId, input))),
+  );
+  assert.ok(results.every((result) => result.ok));
+  assert.equal(results.reduce((count, result) => count + (result.ok ? result.added : 0), 0), 3);
+  assert.deepEqual(listOrderParts(dealId).map((part) => part.fileName), ["Head.stl", "Leg.stl", "Torso.stl"]);
+});
+
 test("multi-item orders keep colliding STL names in separate item groups", () => {
   const dealId = "9988776655";
   const acastus = importOrderParts(dealId, {
