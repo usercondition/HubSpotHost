@@ -1001,8 +1001,7 @@
     .work-hub-action-date { display: none; }
     .work-hub-controls { align-items: flex-start; flex-direction: column; gap: 8px; padding: 8px 10px; }
     .work-hub-filter-scroll { width: 100%; }
-    .work-hub-sort { align-self: flex-end; margin-top: -36px; }
-    .work-hub-filter-scroll { padding-right: 112px; }
+    .work-hub-sort { align-self: flex-end; }
     .work-hub-table-head { display: none; }
     .work-hub-order { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name amount" "status date"; row-gap: 5px; min-height: 0; padding: 10px 12px; }
     .work-hub-order-name { grid-area: name; }
