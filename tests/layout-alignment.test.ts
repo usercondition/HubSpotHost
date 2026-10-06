@@ -1032,7 +1032,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             return (spans[spans.length - 1]?.textContent || "").trim();
           }),
         );
-        check(tabLabels.join("|") === "Floor|Stack|Queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
+        check(tabLabels.join("|") === "Work hub|Priority|Print queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
       } else {
         check(switchCount === 0, "desktop shows the phone Prints | Library switch");
       }
