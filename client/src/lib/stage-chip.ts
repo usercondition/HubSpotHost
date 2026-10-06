@@ -1,17 +1,39 @@
 /** Shared stage chip labels. Phone uses the short form so the chip is not clipped. */
 
 export type StageTone = "teal" | "fly" | "warn" | "good" | "shop" | "neutral";
+export type OrderStatusKey = "queued" | "printing" | "review" | "waiting-address" | "ready" | "pickup" | "done" | "open";
 
-export function stagePresentation(stage: string): { label: string; short: string; tone: StageTone } {
+export interface OrderStatusPresentation {
+  key: OrderStatusKey;
+  label: string;
+  short: string;
+  tone: StageTone;
+}
+
+export function stagePresentation(stage: string): OrderStatusPresentation {
   const value = stage.toLowerCase();
-  if (value.includes("post") || value.includes("qc")) return { label: stage, short: "Post / QC", tone: "warn" };
-  if (value.includes("ready") || value.includes("shipped")) return { label: stage, short: "Ready", tone: "good" };
+  if (value.includes("post") || value.includes("qc")) return { key: "review", label: "Post-process / QC", short: "QC", tone: "warn" };
+  if (value.includes("ready")) return { key: "ready", label: "Ready to ship", short: "Ready", tone: "good" };
+  if (value.includes("shipped") || value.includes("picked up")) return { key: "done", label: "Done", short: "Done", tone: "good" };
   if (value.includes("pickup") || value.includes("off-book") || value.includes("offbook")) {
-    return { label: stage, short: "Pickup", tone: "shop" };
+    return { key: "pickup", label: "Pickup", short: "Pickup", tone: "shop" };
   }
-  if (value.includes("queue") || value.includes("plate")) return { label: stage, short: "Queued", tone: "teal" };
-  if (value.includes("print")) return { label: stage, short: "Printing", tone: "fly" };
-  return { label: stage || "Open", short: stage || "Open", tone: "neutral" };
+  if (value.includes("queue") || value.includes("plate")) return { key: "queued", label: "Queued to print", short: "Queued", tone: "teal" };
+  if (value.includes("print")) return { key: "printing", label: "Printing", short: "Printing", tone: "fly" };
+  return { key: "open", label: stage || "Open", short: stage || "Open", tone: "neutral" };
+}
+
+/**
+ * The checklist can identify an address hold even while HubSpot's pipeline
+ * stage says "Ready to Ship". Use it everywhere status is presented so the
+ * operator sees the actionable state first.
+ */
+export function orderStatusPresentation(input: {
+  stage: string;
+  done?: boolean;
+}): OrderStatusPresentation {
+  if (input.done) return { key: "done", label: "Done", short: "Done", tone: "good" };
+  return stagePresentation(input.stage);
 }
 
 export function floorGreeting(now: Date = new Date()): string {

@@ -22,6 +22,7 @@ import {
   Ship,
   ShoppingBag,
   Sun,
+  Tag,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
@@ -132,12 +133,12 @@ const NAV: Array<{
   group: NavGroup;
   phone?: "tab" | "more" | "never";
 }> = [
-  { href: "/", label: "Floor", title: "Today’s floor board", icon: LayoutDashboard, testId: "link-nav-home", group: "Run", phone: "tab" },
-  { href: "/stack", label: "Stack", title: "This week's priority stack", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
-  { href: "/queue", label: "Queue", title: "Production queue", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
+  { href: "/", label: "Work hub", title: "Actions and outstanding orders", icon: LayoutDashboard, testId: "link-nav-home", group: "Run", phone: "tab" },
+  { href: "/stack", label: "Priority", title: "Priority order and fulfillment controls", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
+  { href: "/queue", label: "Print queue", title: "Next print and in-production jobs", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
   { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "never" },
-  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Ship, testId: "link-nav-labels", group: "Run", phone: "more" },
+  { href: "/labels", label: "Labels", title: "Shipping labels", icon: Tag, testId: "link-nav-labels", group: "Run", phone: "more" },
   { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: Ship, testId: "link-nav-shipments", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   {
@@ -152,7 +153,7 @@ const NAV: Array<{
   { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep", phone: "more" },
   { href: "/expenses", label: "Expenses", title: "Shop overhead", icon: ShoppingBag, testId: "link-nav-expenses", group: "Keep", phone: "more" },
-  { href: "/deals", label: "Orders", title: "HubSpot stage board (mirror)", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
+  { href: "/deals", label: "HubSpot board", title: "Full HubSpot stage board", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Office", phone: "more" },

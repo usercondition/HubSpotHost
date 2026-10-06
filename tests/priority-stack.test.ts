@@ -344,6 +344,21 @@ test("ship-ready and blocked deals stay on the stack when Queue hides those lane
   assert.deepEqual(view.rows.map((row) => row.dealId).sort(), ["1", "2", "3", "4"]);
 });
 
+test("stack preserves live HubSpot address readiness separately from production stage", () => {
+  const printing = deal({
+    dealId: "printing-address",
+    dealName: "Land Raider",
+    amount: 74.99,
+    shipBy: "2026-09-27",
+    stage: "Printing",
+    bucket: "in_production",
+    addressStatus: "missing",
+  });
+  const view = buildPriorityStack(queue([printing]), { entries: [], bundles: [] }, { now: NOW });
+  assert.equal(view.rows[0]?.stage, "Printing");
+  assert.equal(view.rows[0]?.addressStatus, "missing");
+});
+
 test("shop week ends on Sunday and LA rollover stays Friday night", () => {
   assert.equal(shopWeekEnd(new Date("2026-09-27T17:00:00.000Z")), "2026-09-27");
   assert.equal(shopWeekStart(new Date("2026-09-27T17:00:00.000Z")), "2026-09-21");
@@ -376,6 +391,24 @@ test("store upsert, reorder, bundle, off-book, and done snapshot", () =>
     assert.equal(view.outTheDoor[0]?.shippingRequired, false);
     assert.equal(view.totals.outTheDoor, view.outTheDoor[0]?.amount ?? 0);
     assert.equal(view.rows.some((row) => row.offbookId === off.id), false);
+  }));
+
+test("done off-book orders stay out of active rows after the shop week rolls", () =>
+  withTempDb(() => {
+    const doneOnFriday = new Date("2026-10-02T20:00:00.000Z");
+    const off = createOffbook({ title: "Darell friend order", contactName: "Darell", mode: "pickup" });
+    markStackDone(`offbook:${off.id}`, [], doneOnFriday);
+    const doneAt = listStackState().entries.find((entry) => entry.id === off.id)?.doneAt;
+
+    const sameWeek = buildPriorityStack(queue([]), listStackState(), { now: doneOnFriday });
+    assert.equal(sameWeek.rows.some((row) => row.offbookId === off.id), false);
+    assert.equal(sameWeek.outTheDoor.some((row) => row.offbookId === off.id), true);
+
+    markStackDone(`offbook:${off.id}`, [], new Date("2026-10-05T20:00:00.000Z"));
+    const followingWeek = buildPriorityStack(queue([]), listStackState(), { now: new Date("2026-10-05T20:00:00.000Z") });
+    assert.equal(followingWeek.rows.some((row) => row.offbookId === off.id), false);
+    assert.equal(followingWeek.outTheDoor.some((row) => row.offbookId === off.id), false);
+    assert.equal(listStackState().entries.find((entry) => entry.id === off.id)?.doneAt, doneAt);
   }));
 
 test("schemas reject a long blocker, a bad deal id, a bad date, and an unknown key", () => {

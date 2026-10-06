@@ -11,8 +11,9 @@ import { shopDateLabel } from "@shared/ship-by";
 import { orderTitle as orderTitleFromName } from "@/lib/order-title";
 import type { FulfillmentChecklistView } from "@shared/schema";
 import type { StackTier } from "@shared/priority-stack";
+import { addressNeedsChase, addressStatusPill, type AddressStatus } from "@shared/ship-address";
 import { cn } from "@/lib/utils";
-import { stagePresentation } from "@/lib/stage-chip";
+import { orderStatusPresentation, type OrderStatusKey } from "@/lib/stage-chip";
 
 export interface StackStep {
   label: string;
@@ -39,6 +40,8 @@ export interface StackRowModel {
   amount: number | null;
   tier: StackTier;
   shippingRequired: boolean;
+  /** Live HubSpot ship-to readiness, enriched only for label-relevant work. */
+  addressStatus?: AddressStatus;
   dealId: string | null;
   offbookId: number | null;
   bundleId: number | null;
@@ -64,6 +67,60 @@ export interface StackView {
     offBookUnpriced: number;
   };
   hiddenCount: number;
+}
+
+export type OutstandingFilter = "all" | "attention" | "due" | OrderStatusKey;
+
+export interface OutstandingFilterOption {
+  key: OutstandingFilter;
+  label: string;
+  count: number;
+}
+
+export function statusForRow(row: Pick<StackRowModel, "stage" | "doneAt">) {
+  return orderStatusPresentation({
+    stage: row.stage,
+    done: Boolean(row.doneAt),
+  });
+}
+
+/** Address readiness is an independent shipping flag, not a production stage. */
+export function addressFlagForRow(
+  row: Pick<StackRowModel, "addressStatus" | "shippingRequired">,
+) {
+  if (row.shippingRequired === false || !addressNeedsChase(row.addressStatus)) return null;
+  return addressStatusPill(row.addressStatus!);
+}
+
+export function outstandingFilterOptions(rows: StackRowModel[], today: string): OutstandingFilterOption[] {
+  const counts = new Map<OutstandingFilter, number>([["all", rows.length]]);
+  for (const row of rows) {
+    const status = statusForRow(row).key;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+    if (row.blocker || row.warning) counts.set("attention", (counts.get("attention") ?? 0) + 1);
+    if (row.targetDate <= today) counts.set("due", (counts.get("due") ?? 0) + 1);
+  }
+  const labels: Array<[OutstandingFilter, string]> = [
+    ["all", "All"],
+    ["attention", "Needs attention"],
+    ["due", "Due now"],
+    ["waiting-address", "Waiting on address"],
+    ["printing", "Printing"],
+    ["review", "Post-process / QC"],
+    ["ready", "Ready to ship"],
+    ["queued", "Queued to print"],
+    ["pickup", "Pickup"],
+  ];
+  return labels
+    .map(([key, label]) => ({ key, label, count: counts.get(key) ?? 0 }))
+    .filter((option) => option.key === "all" || option.count > 0);
+}
+
+export function matchesOutstandingFilter(row: StackRowModel, filter: OutstandingFilter, today: string): boolean {
+  if (filter === "all") return true;
+  if (filter === "attention") return Boolean(row.blocker || row.warning);
+  if (filter === "due") return row.targetDate <= today;
+  return statusForRow(row).key === filter;
 }
 
 const FULFILLMENT_STEPS: Array<{ key: keyof FulfillmentChecklistView; label: string; shipOnly?: boolean }> = [
@@ -129,6 +186,17 @@ function progressLabel(row: StackRowModel): string {
   if (!checklist) return row.stage;
   const done = steps.filter((step) => checklist[step.key] === true).length;
   return `${row.stage} · ${done}/${steps.length}`;
+}
+
+export function StatusChip({ row }: { row: Pick<StackRowModel, "stage" | "doneAt"> }) {
+  const presentation = statusForRow(row);
+  return (
+    <span className={cn("stage-chip", `stage-${presentation.tone}`)} title={presentation.label}>
+      <i />
+      <span className="stack-stage-full">{presentation.label}</span>
+      <span className="stack-stage-short">{presentation.short}</span>
+    </span>
+  );
 }
 
 export function StackTotalsBar({ view }: { view: StackView }) {
@@ -269,15 +337,8 @@ function ChecklistPopover({
         }));
 
   const progress = progressLabel(row);
-  const presentation = stagePresentation(row.stage || row.name);
   const done = steps.filter((step) => step.done).length;
-  const chip = (
-    <span className={cn("stage-chip", `stage-${presentation.tone}`)} title={presentation.label}>
-      <i />
-      <span className="stack-stage-full">{presentation.label}</span>
-      <span className="stack-stage-short">{presentation.short}</span>
-    </span>
-  );
+  const chip = <StatusChip row={row} />;
   if (row.kind === "bundle") {
     const ready = row.members.filter((member) => member.fulfillment?.shipReady || member.fulfillment?.packingDone).length;
     return (
@@ -598,7 +659,7 @@ export function StackRow({
               </button>
             </span>
             <div className="stack-facts">
-              <span className="stack-stage stack-desktop-only stack-clip text-sm" title={member.stage}>{member.stage}</span>
+              <span className="stack-stage stack-desktop-only"><StatusChip row={member} /></span>
               <div className="stack-blocker min-w-0">
                 <div className="stack-blocker-line">
                   <PhoneSub row={member} />
@@ -616,7 +677,7 @@ export function StackRow({
                 {targetLabel(member, today)}
               </span>
               <div className="stack-mobile-actions items-center gap-2">
-                <span className="min-w-0 truncate text-xs text-muted-foreground">{member.stage}</span>
+                <StatusChip row={member} />
                 <span className="ml-auto shrink-0 whitespace-nowrap text-xs">{targetLabel(member, today)}</span>
               </div>
             </div>

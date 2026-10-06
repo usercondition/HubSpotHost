@@ -56,6 +56,7 @@ export interface PriorityStackRow {
   amount: number | null;
   tier: StackTier;
   shippingRequired: boolean;
+  addressStatus: ProductionQueueItem["addressStatus"] | null;
   dealId: string | null;
   offbookId: number | null;
   bundleId: number | null;
@@ -733,6 +734,7 @@ export function buildPriorityStack(
       amount: roundMoney(item.amount),
       tier: stackTier(item.shipBy, now, (entry?.tierOverride as StackTier | null) ?? null),
       shippingRequired: item.shippingRequired,
+      addressStatus: item.addressStatus,
       dealId: item.dealId,
       offbookId: null,
       bundleId: entry?.bundleId ?? null,
@@ -782,6 +784,7 @@ export function buildPriorityStack(
       amount: parseStackAmount(entry.doneAmount),
       tier: "committed",
       shippingRequired: true,
+      addressStatus: null,
       dealId: entry.hubspotDealId,
       offbookId: null,
       bundleId: entry.bundleId,
@@ -835,6 +838,7 @@ export function buildPriorityStack(
       amount,
       tier: stackTier(targetDate, now, (bundle.tierOverride as StackTier | null) ?? null),
       shippingRequired: bundle.fulfillmentMode !== "pickup",
+      addressStatus: null,
       dealId: null,
       offbookId: null,
       bundleId: bundle.id,
@@ -857,7 +861,7 @@ export function buildPriorityStack(
       hiddenCount += 1;
       continue;
     }
-    if (entry.doneAt && doneThisWeek(entry.doneAt, now)) continue;
+    if (entry.doneAt) continue;
     const steps = parseSteps(entry.stepsJson);
     const allDone = steps.length > 0 && steps.every((step) => step.done);
     const targetDate = entry.targetDate || addShipByCalendarDays(today, 7);
@@ -882,6 +886,7 @@ export function buildPriorityStack(
       amount,
       tier: stackTier(targetDate, now, (entry.tierOverride as StackTier | null) ?? null),
       shippingRequired: entry.fulfillmentMode !== "pickup",
+      addressStatus: null,
       dealId: null,
       offbookId: entry.id,
       bundleId: null,
@@ -935,6 +940,7 @@ export function buildPriorityStack(
       amount: parseStackAmount(entry.doneAmount),
       tier: "committed",
       shippingRequired: entry.fulfillmentMode !== "pickup",
+      addressStatus: null,
       dealId: entry.hubspotDealId,
       offbookId: entry.kind === "offbook" ? entry.id : null,
       bundleId: entry.bundleId,
