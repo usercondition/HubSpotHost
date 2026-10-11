@@ -157,8 +157,8 @@ type SetupSection =
   | "endpoints";
 
 const SETUP_NAV: Array<{ id: SetupSection; label: string }> = [
-  { id: "appearance", label: "Appearance" },
   { id: "overview", label: "Overview" },
+  { id: "appearance", label: "Appearance" },
   { id: "telegram", label: "Telegram" },
   { id: "routes", label: "Daily routes" },
   { id: "environment", label: "Environment" },
