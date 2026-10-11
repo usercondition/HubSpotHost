@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { GoogleDriveConnect } from "@/components/google-drive-connect";
+import { ThemePicker } from "@/components/shell";
 import { CodeLine } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -146,6 +147,7 @@ const DAILY_ROUTES = [
 ];
 
 type SetupSection =
+  | "appearance"
   | "overview"
   | "telegram"
   | "routes"
@@ -155,6 +157,7 @@ type SetupSection =
   | "endpoints";
 
 const SETUP_NAV: Array<{ id: SetupSection; label: string }> = [
+  { id: "appearance", label: "Appearance" },
   { id: "overview", label: "Overview" },
   { id: "telegram", label: "Telegram" },
   { id: "routes", label: "Daily routes" },
@@ -215,8 +218,24 @@ export default function Setup() {
           {title}
         </h1>
 
+        {section === "appearance" ? (
+          <SettingsCard title="Workspace theme" testId="panel-setup-appearance">
+            <p className="mb-4 text-sm text-muted-foreground">
+              Saved in this browser. Dark is the current shop look. Chillsynth is a Nightride-style
+              sunset on black — it does not change how orders or HubSpot work.
+            </p>
+            <ThemePicker />
+          </SettingsCard>
+        ) : null}
+
         {section === "overview" ? (
           <div className="space-y-4">
+            <SettingsCard title="Appearance" testId="panel-setup-overview-appearance">
+              <p className="mb-4 text-sm text-muted-foreground">
+                Pick Dark, Light, or Chillsynth. The choice stays on this computer.
+              </p>
+              <ThemePicker />
+            </SettingsCard>
             <GoogleDriveConnect />
             {health.data?.storage?.warning ? (
               <SettingsCard title="Production data durability" testId="panel-setup-storage">
