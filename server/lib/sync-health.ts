@@ -2,7 +2,6 @@
  * Compare HubSpot Print Orders with Print Ops local state and report drift.
  * Health reads a cache. The owner route returns the per-deal detail.
  */
-import { shopWeekEnd, shopWeekStart } from "../../shared/priority-stack";
 import { printOrderStageLooksArchived, type HubspotSyncSummary } from "../../shared/schema";
 import { shipByCalendarDate } from "../../shared/ship-by";
 import { dropNotFoundSampleAudit, listAttempts, type AuditEntry } from "./audit";
@@ -158,10 +157,8 @@ function dayKey(value: string | null | undefined): string {
   return shipByCalendarDate(parsed);
 }
 
-function doneThisWeek(doneAt: string | null, now: Date): boolean {
-  if (!doneAt) return false;
-  const day = dayKey(doneAt);
-  return day >= shopWeekStart(now) && day <= shopWeekEnd(now);
+function locallyDone(doneAt: string | null): boolean {
+  return Boolean(String(doneAt ?? "").trim());
 }
 
 function item(
@@ -246,7 +243,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
       ));
     }
 
-    if (remote?.found && remote.closedWon && referenced && !doneThisWeek(local.doneAt, now)) {
+    if (remote?.found && remote.closedWon && referenced && !locallyDone(local.doneAt)) {
       items.push(item(
         "closedNotDone",
         local.dealId,
@@ -254,11 +251,11 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
         local.doneAt,
         remote.stage,
         false,
-        "HubSpot has this deal Completed or Closed Won, but the Stack has not marked it done this week.",
+        "HubSpot has this deal Completed or Closed Won, but the Stack has not marked it done.",
       ));
     }
 
-    if (remote?.found && !remote.closed && doneThisWeek(local.doneAt, now)) {
+    if (remote?.found && !remote.closed && locallyDone(local.doneAt)) {
       items.push(item(
         "doneStillOpen",
         local.dealId,

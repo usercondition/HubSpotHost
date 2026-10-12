@@ -12,6 +12,7 @@ import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { registerRoutes } from "../server/routes";
 import { fulfillmentChecklists } from "../shared/schema";
 import { registerSyncHealthJobScheduler } from "../server/lib/print-ops-jobs";
+import { shopWeekEnd, shopWeekStart } from "../shared/priority-stack";
 import {
   applySyncRepairs,
   clearCachedSyncHealthForTest,
@@ -283,7 +284,7 @@ test("reconcile logs each issue in one line without notes or suggestedFix", () =
   assert.deepEqual(quiet, ["[sync-health] reconcile done status=ok issues=0"]);
 });
 
-test("Stack done still open in HubSpot, and Closed Won not done this week", () => {
+test("Stack done still open in HubSpot, and Closed Won not marked done", () => {
   const report = compareSyncHealth(input({
     hubspotById: {
       "51": remote({ dealId: "51", stage: "Ready to Ship" }),
@@ -291,11 +292,45 @@ test("Stack done still open in HubSpot, and Closed Won not done this week", () =
     },
     localDeals: [
       local({ dealId: "51", doneAt: "2026-09-25T16:00:00.000Z" }),
-      local({ dealId: "52", doneAt: "2026-08-01T16:00:00.000Z" }),
+      local({ dealId: "52", doneAt: null }),
     ],
   }));
   assert.deepEqual(kinds(report), ["doneStillOpen", "closedNotDone"]);
   assert.deepEqual(report.repairs, []);
+});
+
+test("a prior-week local done still counts as done after shop-week rollover", () => {
+  const lastWeekDone = "2026-10-09T20:00:00.000Z";
+  const sundayPt = new Date("2026-10-12T06:59:00.000Z");
+  const mondayPt = new Date("2026-10-12T07:01:00.000Z");
+  assert.equal(shopWeekEnd(sundayPt), "2026-10-11");
+  assert.equal(shopWeekStart(sundayPt), "2026-10-05");
+  assert.equal(shopWeekEnd(mondayPt), "2026-10-18");
+  assert.equal(shopWeekStart(mondayPt), "2026-10-12");
+
+  const deals = {
+    hubspotById: {
+      "81": remote({ dealId: "81", stage: "Ready to Ship" }),
+      "82": remote({ dealId: "82", stage: "Completed", closed: true, closedWon: true }),
+      "83": remote({ dealId: "83", stage: "Completed", closed: true, closedWon: true }),
+    },
+    localDeals: [
+      local({ dealId: "81", doneAt: lastWeekDone }),
+      local({ dealId: "82", doneAt: lastWeekDone }),
+      local({ dealId: "83", doneAt: null }),
+    ],
+  };
+
+  const before = compareSyncHealth(input({ ...deals, now: sundayPt }));
+  const after = compareSyncHealth(input({ ...deals, now: mondayPt }));
+  assert.deepEqual(kinds(before), ["doneStillOpen", "closedNotDone"]);
+  assert.deepEqual(kinds(after), ["doneStillOpen", "closedNotDone"]);
+  assert.equal(before.items.find((item) => item.kind === "doneStillOpen")?.dealId, "81");
+  assert.equal(after.items.find((item) => item.kind === "doneStillOpen")?.dealId, "81");
+  assert.equal(before.items.find((item) => item.kind === "closedNotDone")?.dealId, "83");
+  assert.equal(after.items.find((item) => item.kind === "closedNotDone")?.dealId, "83");
+  assert.equal(after.summary.counts.closedNotDone, 1);
+  assert.equal(after.summary.issueCount, before.summary.issueCount);
 });
 
 test("failed writes are the latest audit error, and a later success clears them", () => {
