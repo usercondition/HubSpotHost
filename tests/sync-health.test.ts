@@ -16,6 +16,8 @@ import {
   applySyncRepairs,
   clearCachedSyncHealthForTest,
   compareSyncHealth,
+  formatSyncHealthIssueLog,
+  logReconcileDone,
   placeholderSyncSummary,
   presentSyncSummary,
   resetSyncHealthScheduleForTest,
@@ -231,6 +233,54 @@ test("$0 actual shipping against a blank HubSpot cost is not drift", () => {
   assert.deepEqual(kinds(postage), ["costs"]);
   assert.equal(postage.items[0]?.field, "print_actual_shipping_cost");
   assert.deepEqual(postage.repairs, []);
+});
+
+test("reconcile logs each issue in one line without notes or suggestedFix", () => {
+  const report = compareSyncHealth(input({
+    openDealIds: ["11"],
+    hubspotById: {
+      "11": remote({ dealId: "11", stage: "Ready to Ship" }),
+      "31": remote({ dealId: "31" }),
+    },
+    localDeals: [local({
+      dealId: "31",
+      tracking: "1ZLOCAL",
+      shipNotes: "leave at Alice's side door",
+    })],
+  }));
+  report.items[0].suggestedFix = "Customer Alice paid 59.99";
+
+  const lines = report.items.map((row) => formatSyncHealthIssueLog(row));
+  assert.equal(lines.length, 3);
+  assert.equal(lines[0], "[sync-health] issue kind=missingInOps deal=11 field=- local=- hubspot=Ready to Ship");
+  assert.equal(lines[1], "[sync-health] issue kind=tracking deal=31 field=print_tracking_number local=1ZLOCAL hubspot=-");
+  assert.equal(lines[2], "[sync-health] issue kind=shipNotes deal=31 field=print_ship_notes local=set hubspot=-");
+  assert.equal(lines.some((line) => /Alice|side door|59\.99|leave at/.test(line)), false);
+  assert.equal(lines.every((line) => !line.includes("\n")), true);
+
+  const info: string[] = [];
+  const original = console.info;
+  console.info = ((message?: unknown) => {
+    info.push(String(message ?? ""));
+  }) as typeof console.info;
+  try {
+    logReconcileDone(report);
+  } finally {
+    console.info = original;
+  }
+  assert.equal(info[0], "[sync-health] reconcile done status=warn issues=3");
+  assert.deepEqual(info.slice(1), lines);
+
+  const quiet: string[] = [];
+  console.info = ((message?: unknown) => {
+    quiet.push(String(message ?? ""));
+  }) as typeof console.info;
+  try {
+    logReconcileDone(compareSyncHealth(input()));
+  } finally {
+    console.info = original;
+  }
+  assert.deepEqual(quiet, ["[sync-health] reconcile done status=ok issues=0"]);
 });
 
 test("Stack done still open in HubSpot, and Closed Won not done this week", () => {
