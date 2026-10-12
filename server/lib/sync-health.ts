@@ -737,8 +737,32 @@ export function appendDurableFailures(report: SyncHealthReport): void {
   report.summary.writes = liveWriteCounts();
 }
 
-function logReconcileDone(report: SyncHealthReport): void {
+const SYNC_LOG_VALUE_MAX = 80;
+const PII_FIELDS = new Set(["print_ship_notes", "notes"]);
+
+function sanitizeSyncLogValue(kind: SyncDriftKind, field: string | null, value: string | null): string {
+  if (kind === "shipNotes" || (field != null && PII_FIELDS.has(field))) {
+    return blank(value) ? "-" : "set";
+  }
+  const raw = String(value ?? "").trim().replace(/\s+/g, " ");
+  if (!raw) return "-";
+  return raw.length > SYNC_LOG_VALUE_MAX ? `${raw.slice(0, SYNC_LOG_VALUE_MAX - 3)}...` : raw;
+}
+
+/** One Railway-safe line for a single drift item. No notes, names, or suggestedFix text. */
+export function formatSyncHealthIssueLog(row: SyncDriftItem): string {
+  const deal = row.dealId?.trim() || "-";
+  const field = row.field?.trim() || "-";
+  const local = sanitizeSyncLogValue(row.kind, row.field, row.local);
+  const hubspot = sanitizeSyncLogValue(row.kind, row.field, row.hubspot);
+  return `[sync-health] issue kind=${row.kind} deal=${deal} field=${field} local=${local} hubspot=${hubspot}`;
+}
+
+export function logReconcileDone(report: SyncHealthReport): void {
   console.info(`[sync-health] reconcile done status=${report.summary.status} issues=${report.summary.issueCount}`);
+  for (const row of report.items) {
+    console.info(formatSyncHealthIssueLog(row));
+  }
 }
 
 async function runSyncHealthCheckBody(now: Date): Promise<SyncHealthReport> {
