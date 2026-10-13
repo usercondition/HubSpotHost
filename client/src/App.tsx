@@ -27,6 +27,14 @@ import ResinInventoryPage from "@/pages/resin-inventory";
 import ShippingLabelsPage from "@/pages/shipping-labels";
 import ShipmentsPage from "@/pages/shipments";
 import ProductionQueuePage from "@/pages/queue";
+const WorkshopPage = lazy(() => import("@/pages/workshop"));
+function WorkshopRoute() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Workshop…</div>}>
+      <WorkshopPage />
+    </Suspense>
+  );
+}
 import PriorityStackPage from "@/pages/priority-stack";
 import ClientsPage from "@/pages/clients";
 import ClientOrder from "@/pages/client-order";
@@ -44,6 +52,7 @@ function ShellRoutes() {
           <Route path="/focus/:kind" component={FloorFocusPage} />
           <Route path="/focus" component={FloorFocusPage} />
           <Route path="/queue" component={ProductionQueuePage} />
+          <Route path="/workshop" component={WorkshopRoute} />
           <Route path="/labels" component={ShippingLabelsPage} />
           <Route path="/shipments" component={ShipmentsPage} />
           <Route path="/deals" component={DealsPage} />

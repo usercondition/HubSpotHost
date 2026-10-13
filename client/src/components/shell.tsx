@@ -7,6 +7,7 @@ import {
   Boxes,
   ClipboardCheck,
   ExternalLink,
+  Factory,
   FileUp,
   LayoutDashboard,
   Library,
@@ -34,39 +35,56 @@ import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
 import { formatPacificSnapshot, syncPillCopy } from "@/lib/sync-status";
 import { cn } from "@/lib/utils";
+import { applyTheme, nextTheme, parseTheme, THEME_KEY, THEME_OPTIONS, type Theme } from "@/lib/theme";
+import {
+  readWorkspaceView,
+  WORKSPACE_VIEW_OPTIONS,
+  writeWorkspaceView,
+  type WorkspaceView,
+} from "@/lib/workspace-view";
 
 /* ---------------------------------------------------------------- theme --- */
 
-type Theme = "dark" | "light";
-
-const THEME_KEY = "print-ops-theme-shop";
-
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
+const ThemeContext = createContext<{
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  cycle: () => void;
+}>({
   theme: "dark",
-  toggle: () => {},
+  setTheme: () => {},
+  cycle: () => {},
 });
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
-    const saved = window.localStorage.getItem(THEME_KEY);
-    if (saved === "light" || saved === "dark") return saved;
-    return "dark";
+    return parseTheme(window.localStorage.getItem(THEME_KEY));
   });
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
-    root.style.colorScheme = theme;
+    applyTheme(theme);
     window.localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   const value = useMemo(
-    () => ({ theme, toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")) }),
+    () => ({
+      theme,
+      setTheme,
+      cycle: () => setTheme((current) => nextTheme(current)),
+    }),
     [theme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
+function ThemeIcon({ theme, className }: { theme: Theme; className?: string }) {
+  if (theme === "light") return <Sun className={className} />;
+  return <Moon className={className} />;
 }
 
 export function ThemeToggle({
@@ -78,14 +96,16 @@ export function ThemeToggle({
   testId?: string;
   rail?: boolean;
 }) {
-  const { theme, toggle } = useContext(ThemeContext);
-  const label = theme === "dark" ? "Light mode" : "Dark mode";
+  const { theme, cycle } = useTheme();
+  const current = THEME_OPTIONS.find((option) => option.id === theme) ?? THEME_OPTIONS[0];
+  const upcoming = THEME_OPTIONS.find((option) => option.id === nextTheme(theme)) ?? THEME_OPTIONS[0];
+  const label = current.label;
   return (
     <button
       type="button"
-      onClick={toggle}
-      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      title={label}
+      onClick={cycle}
+      aria-label={`Theme: ${current.label}. Click for ${upcoming.label}`}
+      title={`Theme: ${current.label}. Click for ${upcoming.label}`}
       data-testid={testId}
       className={cn(
         rail
@@ -94,9 +114,84 @@ export function ThemeToggle({
         className,
       )}
     >
-      {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+      <ThemeIcon theme={theme} className="h-4 w-4 shrink-0" />
       {rail ? <span className="truncate">{label}</span> : null}
     </button>
+  );
+}
+
+export function ThemePicker({ className }: { className?: string }) {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className={cn("grid gap-3 sm:grid-cols-2", className)} data-testid="theme-picker">
+      {THEME_OPTIONS.map((option) => {
+        const active = theme === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setTheme(option.id)}
+            aria-pressed={active}
+            data-theme-option={option.id}
+            data-testid={`button-theme-${option.id}`}
+            className={cn(
+              "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors",
+              active
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-background/40 text-muted-foreground hover:border-primary/40 hover:text-foreground",
+            )}
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <ThemeIcon theme={option.id} className="h-4 w-4 shrink-0" />
+              {option.label}
+            </span>
+            <span className="text-xs leading-5 text-muted-foreground">{option.hint}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function WorkspaceViewPicker({ className }: { className?: string }) {
+  const [, setLocation] = useLocation();
+  const [view, setView] = useState<WorkspaceView>(() => readWorkspaceView());
+
+  useEffect(() => {
+    writeWorkspaceView(view);
+  }, [view]);
+
+  return (
+    <div className={cn("grid gap-3 sm:grid-cols-2", className)} data-testid="workspace-view-picker">
+      {WORKSPACE_VIEW_OPTIONS.map((option) => {
+        const active = view === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => {
+              setView(option.id);
+              writeWorkspaceView(option.id);
+              if (option.id === "workshop") setLocation("/workshop");
+            }}
+            aria-pressed={active}
+            data-testid={`button-workspace-view-${option.id}`}
+            className={cn(
+              "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors",
+              active
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-background/40 text-muted-foreground hover:border-primary/40 hover:text-foreground",
+            )}
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              {option.id === "workshop" ? <Factory className="h-4 w-4 shrink-0" /> : <LayoutDashboard className="h-4 w-4 shrink-0" />}
+              {option.label}
+            </span>
+            <span className="text-xs leading-5 text-muted-foreground">{option.hint}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -136,6 +231,7 @@ const NAV: Array<{
   { href: "/", label: "Work hub", title: "Actions and outstanding orders", icon: LayoutDashboard, testId: "link-nav-home", group: "Run", phone: "tab" },
   { href: "/stack", label: "Priority", title: "Priority order and fulfillment controls", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
   { href: "/queue", label: "Print queue", title: "Next print and in-production jobs", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
+  { href: "/workshop", label: "Workshop", title: "Optional 3D shop floor", icon: Factory, testId: "link-nav-workshop", group: "Run", phone: "more" },
   { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
   { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "never" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Tag, testId: "link-nav-labels", group: "Run", phone: "more" },
@@ -389,7 +485,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="scroll-pane relative z-[1] min-h-0 min-w-0 flex-1 bg-transparent pb-24 md:pb-0" data-scroll-pane>
+        <main
+          className="scroll-pane relative z-[1] min-h-0 min-w-0 flex-1 bg-transparent pb-24 md:pb-0"
+          data-scroll-pane
+          data-workshop={pathOnly === "/workshop" ? "true" : undefined}
+        >
           {pathOnly === "/prints" || pathOnly === "/library" ? (
             <div className="px-4 pt-3 md:hidden">
               <PrintsLibrarySwitch />

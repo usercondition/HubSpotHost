@@ -72,6 +72,11 @@ export function queueDealHref(dealId: string): string {
   return `/queue?dealId=${encodeURIComponent(dealId)}`;
 }
 
+export function workshopHref(dealId?: string | null): string {
+  const id = String(dealId ?? "").trim();
+  return id ? `/workshop?dealId=${encodeURIComponent(id)}` : "/workshop";
+}
+
 export function stackHref(dealId?: string | null): string {
   const id = String(dealId ?? "").trim();
   return id ? `/stack?dealId=${encodeURIComponent(id)}` : "/stack";
