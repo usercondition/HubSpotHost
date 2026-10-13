@@ -22,6 +22,7 @@ import {
   Ship,
   ShoppingBag,
   Sun,
+  Sunset,
   Tag,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
@@ -33,40 +34,52 @@ import { useOwnerSession } from "@/hooks/use-owner-session";
 import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
 import { formatPacificSnapshot, syncPillCopy } from "@/lib/sync-status";
+import { applyTheme, nextTheme, parseTheme, THEME_KEY, THEME_OPTIONS, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------------------------------------- theme --- */
 
-type Theme = "dark" | "light";
-
-const THEME_KEY = "print-ops-theme-shop";
-
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
+const ThemeContext = createContext<{
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  cycle: () => void;
+}>({
   theme: "dark",
-  toggle: () => {},
+  setTheme: () => {},
+  cycle: () => {},
 });
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
-    const saved = window.localStorage.getItem(THEME_KEY);
-    if (saved === "light" || saved === "dark") return saved;
-    return "dark";
+    return parseTheme(window.localStorage.getItem(THEME_KEY));
   });
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
-    root.style.colorScheme = theme;
+    applyTheme(theme);
     window.localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   const value = useMemo(
-    () => ({ theme, toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")) }),
+    () => ({
+      theme,
+      setTheme,
+      cycle: () => setTheme((current) => nextTheme(current)),
+    }),
     [theme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
+function ThemeIcon({ theme, className }: { theme: Theme; className?: string }) {
+  if (theme === "light") return <Sun className={className} />;
+  if (theme === "chillsynth") return <Sunset className={className} />;
+  return <Moon className={className} />;
 }
 
 export function ThemeToggle({
@@ -78,14 +91,16 @@ export function ThemeToggle({
   testId?: string;
   rail?: boolean;
 }) {
-  const { theme, toggle } = useContext(ThemeContext);
-  const label = theme === "dark" ? "Light mode" : "Dark mode";
+  const { theme, cycle } = useTheme();
+  const current = THEME_OPTIONS.find((option) => option.id === theme) ?? THEME_OPTIONS[0];
+  const upcoming = THEME_OPTIONS.find((option) => option.id === nextTheme(theme)) ?? THEME_OPTIONS[0];
+  const label = current.label;
   return (
     <button
       type="button"
-      onClick={toggle}
-      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      title={label}
+      onClick={cycle}
+      aria-label={`Theme: ${current.label}. Click for ${upcoming.label}`}
+      title={`Theme: ${current.label}. Click for ${upcoming.label}`}
       data-testid={testId}
       className={cn(
         rail
@@ -94,9 +109,43 @@ export function ThemeToggle({
         className,
       )}
     >
-      {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+      <ThemeIcon theme={theme} className="h-4 w-4 shrink-0" />
       {rail ? <span className="truncate">{label}</span> : null}
     </button>
+  );
+}
+
+export function ThemePicker({ className }: { className?: string }) {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className={cn("grid gap-3 sm:grid-cols-3", className)} data-testid="theme-picker">
+      {THEME_OPTIONS.map((option) => {
+        const active = theme === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setTheme(option.id)}
+            aria-pressed={active}
+            data-theme-option={option.id}
+            data-testid={`button-theme-${option.id}`}
+            className={cn(
+              "theme-swatch flex flex-col items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+              active
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-background/40 text-muted-foreground hover:border-primary/40 hover:text-foreground",
+            )}
+          >
+            <span className="theme-swatch-preview" data-swatch={option.id} aria-hidden />
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <ThemeIcon theme={option.id} className="h-4 w-4 shrink-0" />
+              {option.label}
+            </span>
+            <span className="text-xs leading-5 text-muted-foreground">{option.hint}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
