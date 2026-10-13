@@ -16,12 +16,12 @@ export default function WorkshopCanvas(props: WorkshopCanvasProps) {
         powerPreference: "high-performance",
         stencil: false,
       }}
-      camera={{ position: [8.4, 7.2, 8.6], fov: 30, near: 0.2, far: 60 }}
+      camera={{ position: [7.2, 6.1, 7.6], fov: 32, near: 0.2, far: 60 }}
       frameloop={reduceMotion ? "demand" : "always"}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = dark ? 0.88 : 1.05;
-        gl.setClearColor(dark ? "#12100e" : "#ebe4da", 1);
+        gl.setClearColor(dark ? "#1a1612" : "#ebe4da", 1);
       }}
       onPointerMissed={() => props.onHover(null)}
     >
@@ -35,8 +35,8 @@ export default function WorkshopCanvas(props: WorkshopCanvasProps) {
         autoRotateSpeed={0.22}
         minPolarAngle={0.55}
         maxPolarAngle={1.15}
-        minDistance={9}
-        maxDistance={16}
+        minDistance={8}
+        maxDistance={15}
         target={[0, 0.35, 0]}
       />
     </Canvas>

@@ -45,24 +45,24 @@ type Palette = {
 function palette(dark: boolean): Palette {
   if (dark) {
     return {
-      void: "#12100e",
-      fog: "#1a1714",
-      slab: "#3c352e",
-      slabEdge: "#2a241f",
-      wall: "#2f2923",
-      peg: "#4a4036",
-      wood: "#6a5340",
-      woodDark: "#4a3a2d",
-      metal: "#3a3836",
-      printer: "#2c2a28",
+      void: "#1a1612",
+      fog: "#241e18",
+      slab: "#6a5d50",
+      slabEdge: "#4e443a",
+      wall: "#5a5148",
+      peg: "#7a6e62",
+      wood: "#8a6a4e",
+      woodDark: "#5c4636",
+      metal: "#5a5652",
+      printer: "#3d3a38",
       screenIdle: "#1c1824",
-      uv: "#8d78ff",
-      wash: "#3e4a52",
+      uv: "#9b88ff",
+      wash: "#4e5c64",
       lamp: "#f0c27a",
-      token: "#d4923a",
-      tokenDue: "#e0a45a",
-      tokenOverdue: "#c45c3a",
-      paper: "#d9cbb8",
+      token: "#e0a45a",
+      tokenDue: "#f0c27a",
+      tokenOverdue: "#d46a48",
+      paper: "#e6d6c2",
       label: "#f3e6d4",
     };
   }
@@ -170,11 +170,15 @@ function ResinToken({
         event.stopPropagation();
         onHover(null);
       }}
-      onClick={(event) => {
+      onPointerDown={(event) => {
         event.stopPropagation();
         onSelect(order.dealId);
       }}
     >
+      <mesh position={[0, 0.2, 0]}>
+        <sphereGeometry args={[0.32, 10, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <mesh position={[0, 0.03, 0]} castShadow={false}>
         <cylinderGeometry args={[0.13, 0.15, 0.05, 10]} />
         {clay(colors.woodDark)}
@@ -266,7 +270,14 @@ function ResinPrinter({
 
 function StationLabel({ text, dark }: { text: string; dark: boolean }) {
   return (
-    <Html position={[0, 1.18, 0]} center distanceFactor={9} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+    <Html
+      position={[0, 0.92, 0.42]}
+      center
+      distanceFactor={9}
+      zIndexRange={[10, 0]}
+      wrapperClass="workshop-html-label"
+      style={{ pointerEvents: "none" }}
+    >
       <div className={dark ? "workshop-pin workshop-pin-dark" : "workshop-pin"}>{text}</div>
     </Html>
   );
@@ -391,12 +402,12 @@ function Pegboard({
   dark: boolean;
 }) {
   return (
-    <group position={[0, 1.15, -3.28]}>
-      <RoundedBox args={[8.6, 1.55, 0.1]} radius={0.04} smoothness={3}>
+    <group position={[0, 1.55, -3.28]}>
+      <RoundedBox args={[8.6, 1.45, 0.1]} radius={0.04} smoothness={3}>
         {clay(colors.wall)}
       </RoundedBox>
       {[-3, -1, 1, 3].map((x) =>
-        [0.35, 0, -0.35].map((y) => (
+        [0.4, 0.05, -0.3].map((y) => (
           <mesh key={`${x}-${y}`} position={[x, y, 0.08]}>
             <cylinderGeometry args={[0.035, 0.035, 0.08, 8]} />
             {clay(colors.peg)}
@@ -408,7 +419,7 @@ function Pegboard({
         const lit = tag.tone === "green" ? "#7dce8a" : tag.tone === "amber" ? "#e0a45a" : "#8a8076";
         const intensity = tag.tone === "off" ? 0 : dark ? 1.4 : 0.55;
         return (
-          <group key={tag.id} position={[x, -0.15, 0.12]}>
+          <group key={tag.id} position={[x, 0.12, 0.12]}>
             <RoundedBox args={[0.72, 0.42, 0.06]} radius={0.04} smoothness={3}>
               {clay(colors.paper, { emissive: lit, emissiveIntensity: intensity * 0.35 })}
             </RoundedBox>
@@ -417,7 +428,13 @@ function Pegboard({
               {clay(colors.metal)}
             </mesh>
             <pointLight position={[0, 0, 0.2]} color={lit} intensity={intensity} distance={1.8} />
-            <Html position={[0, -0.02, 0.05]} center distanceFactor={10} style={{ pointerEvents: "none" }}>
+            <Html
+              position={[0, -0.02, 0.05]}
+              center
+              distanceFactor={10}
+              wrapperClass="workshop-html-label"
+              style={{ pointerEvents: "none" }}
+            >
               <div className={dark ? "workshop-tag-label workshop-tag-label-dark" : "workshop-tag-label"}>
                 {tag.label}
               </div>
@@ -462,14 +479,16 @@ export function WorkshopScene({
       <color attach="background" args={[colors.void]} />
       <fog attach="fog" args={[colors.fog, 12, 28]} />
       <hemisphereLight
-        args={[dark ? "#9aa4c8" : "#fff4e8", dark ? "#1b1612" : "#8d7f70", dark ? 0.28 : 0.62]}
+        args={[dark ? "#c8b8a4" : "#fff4e8", dark ? "#2a221c" : "#8d7f70", dark ? 0.55 : 0.62]}
       />
       {!dark ? (
         <directionalLight position={[6, 9, 4]} intensity={1.15} color="#fff1de" />
       ) : (
-        <directionalLight position={[4, 6, 3]} intensity={0.18} color="#6d645c" />
+        <directionalLight position={[5, 8, 5]} intensity={0.55} color="#d9c4a0" />
       )}
-      {!dark ? <directionalLight position={[-5, 4, -2]} intensity={0.28} color="#d7e2ee" /> : null}
+      {!dark ? <directionalLight position={[-5, 4, -2]} intensity={0.28} color="#d7e2ee" /> : (
+        <directionalLight position={[-3, 3, 4]} intensity={0.22} color="#8d78ff" />
+      )}
 
       <RoundedBox args={[10.2, 0.28, 7.3]} radius={0.12} smoothness={4} position={[0, -0.14, 0]}>
         {clay(colors.slab)}

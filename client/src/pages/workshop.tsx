@@ -1,8 +1,8 @@
 import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "framer-motion";
-import { PageHeader, useTheme } from "@/components/shell";
-import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
+import { useTheme } from "@/components/shell";
+import { useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { apiRequest } from "@/lib/queryClient";
 import { readHashQueryParam, stripDealIdFromLocation } from "@/lib/workflow";
 import { detectWebGL } from "@/lib/workshop-webgl";
@@ -59,7 +59,7 @@ class CanvasErrorBoundary extends Component<{ children: ReactNode; onFail: () =>
 }
 
 export default function WorkshopPage() {
-  const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const { ownerCode, isUnlocked, headers, codeDraft, setCodeDraft } = useOwnerSession();
   const unlock = useOwnerUnlock({
     successTitle: "Workshop unlocked",
     successDescription: "Live orders on the shop floor. This view does not write to HubSpot.",
@@ -173,48 +173,49 @@ export default function WorkshopPage() {
 
   return (
     <div className="workshop-page" data-testid="page-workshop" data-sample={usingSample ? "true" : "false"}>
-      <PageHeader
-        title="Workshop"
-        subtitle="Optional 3D shop floor. Read-only — HubSpot is not written from here."
-        hideActionsOnPhone
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {usingSample ? (
-              <span className="workshop-sample-flag" data-testid="status-workshop-sample">
-                Sample shop data
-              </span>
-            ) : null}
-            {isUnlocked && liveQueue ? (
-              <button
-                type="button"
-                className="workshop-chip"
-                data-testid="button-workshop-sample-toggle"
-                onClick={() => {
-                  setSample((value) => !value);
-                  setSelectedDealId(null);
-                }}
-              >
-                {sample ? "Show live orders" : "Preview sample shop"}
-              </button>
-            ) : null}
-          </div>
-        }
-      />
-
-      {!isUnlocked ? (
-        <div className="px-4 pb-3 md:px-8">
-          <OwnerUnlockPanel
-            title="Unlock Workshop"
-            description="Same owner code as Stack. Live tokens stay read-only."
-            buttonLabel="Unlock"
-            testIdPrefix="workshop"
-            pending={unlock.isPending}
-            onUnlock={(code) => unlock.mutate(code)}
-          />
-        </div>
-      ) : null}
-
       <div className="workshop-strip" data-testid="status-workshop-strip">
+        {usingSample ? (
+          <span className="workshop-sample-flag" data-testid="status-workshop-sample">
+            Sample shop data
+          </span>
+        ) : null}
+        {isUnlocked && liveQueue ? (
+          <button
+            type="button"
+            className="workshop-chip"
+            data-testid="button-workshop-sample-toggle"
+            onClick={() => {
+              setSample((value) => !value);
+              setSelectedDealId(null);
+            }}
+          >
+            {sample ? "Show live orders" : "Preview sample shop"}
+          </button>
+        ) : null}
+        {!isUnlocked ? (
+          <form
+            className="workshop-unlock-float"
+            data-testid="panel-workshop-unlock"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const code = codeDraft.trim();
+              if (code) unlock.mutate(code);
+            }}
+          >
+            <input
+              type="password"
+              autoComplete="off"
+              value={codeDraft}
+              onChange={(event) => setCodeDraft(event.target.value)}
+              placeholder="Owner code"
+              aria-label="Owner access code"
+              data-testid="input-workshop-owner-code"
+            />
+            <button type="submit" data-testid="button-unlock-workshop" disabled={unlock.isPending || !codeDraft.trim()}>
+              Unlock live
+            </button>
+          </form>
+        ) : null}
         {WORKSHOP_STATIONS.map((station) => (
           <span key={station.id} className="workshop-strip-item">
             {station.label}
@@ -229,6 +230,19 @@ export default function WorkshopPage() {
           Printers
           <strong>{printerStatusLabel({ printers: displayQueue.printers, printing })}</strong>
         </span>
+      </div>
+
+      <div className="sr-only" data-testid="list-workshop-tokens">
+        {orders.map((order) => (
+          <button
+            key={order.dealId}
+            type="button"
+            data-testid={`button-workshop-token-${order.dealId}`}
+            onClick={() => setSelectedDealId(order.dealId)}
+          >
+            {order.dealName}
+          </button>
+        ))}
       </div>
 
       <div className="workshop-stage">

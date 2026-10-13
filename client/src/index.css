@@ -2268,7 +2268,7 @@
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
-  padding: 0 1rem 0.5rem;
+  padding: 0.65rem 1rem 0.5rem;
   scrollbar-width: none;
 }
 
@@ -2370,6 +2370,7 @@
 
 .workshop-sample-flag {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   border-radius: 999px;
   border: 1px solid hsl(var(--workshop-amber) / 0.45);
@@ -2377,6 +2378,7 @@
   padding: 0.2rem 0.65rem;
   font-size: 0.75rem;
   color: hsl(var(--workshop-amber));
+  white-space: nowrap;
 }
 
 .workshop-chip {
@@ -2390,6 +2392,42 @@
 
 .workshop-chip:hover {
   color: hsl(var(--foreground));
+}
+
+.workshop-unlock-float {
+  display: inline-flex;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.workshop-unlock-float input {
+  height: 2rem;
+  min-width: 8rem;
+  flex: 1;
+  max-width: 14rem;
+  border-radius: 0.4rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  padding: 0 0.6rem;
+  font-size: 0.75rem;
+}
+
+.workshop-unlock-float button {
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: 0.4rem;
+  background: hsl(var(--primary));
+  padding: 0 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--primary-foreground));
+}
+
+.workshop-html-label {
+  pointer-events: none !important;
+  z-index: 2 !important;
 }
 
 .workshop-pin,
@@ -2416,7 +2454,7 @@
   position: absolute;
   top: 0.75rem;
   left: 0.75rem;
-  z-index: 4;
+  z-index: 21;
   max-width: 16rem;
   border-radius: 0.65rem;
   border: 1px solid hsl(var(--border));
@@ -2431,7 +2469,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 5;
+  z-index: 20;
   display: flex;
   width: min(22rem, 100%);
   flex-direction: column;
