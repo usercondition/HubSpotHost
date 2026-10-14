@@ -6,27 +6,30 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: "0.75rem", /* 12px cards */
-        md: "0.375rem", /* 6px buttons */
+        lg: "0.5rem", /* 8px cards */
+        md: "0.5rem", /* 8px buttons */
         sm: "0.375rem", /* 6px chips */
-        xl: "1rem", /* phone sheet */
+        xl: "0.5rem", /* sheets match cards */
       },
       colors: {
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
-        border: "hsl(var(--border) / <alpha-value>)",
-        input: "hsl(var(--input) / <alpha-value>)",
+        border: "hsl(var(--border) / calc(<alpha-value> * var(--border-alpha-scale)))",
+        input: "hsl(var(--input) / calc(<alpha-value> * var(--border-alpha-scale)))",
         card: {
           DEFAULT: "hsl(var(--card) / <alpha-value>)",
           foreground: "hsl(var(--card-foreground) / <alpha-value>)",
-          border: "hsl(var(--card-border) / <alpha-value>)",
+          border: "hsl(var(--card-border) / calc(<alpha-value> * var(--border-alpha-scale)))",
         },
         popover: {
           DEFAULT: "hsl(var(--popover) / <alpha-value>)",
           foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
-          border: "hsl(var(--popover-border) / <alpha-value>)",
+          border: "hsl(var(--popover-border) / calc(<alpha-value> * var(--border-alpha-scale)))",
         },
+        good: "hsl(var(--good) / <alpha-value>)",
+        warn: "hsl(var(--warn) / <alpha-value>)",
+        bad: "hsl(var(--bad) / <alpha-value>)",
         primary: {
           DEFAULT: "hsl(var(--primary) / <alpha-value>)",
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
@@ -64,7 +67,7 @@ export default {
           ring: "hsl(var(--sidebar-ring) / <alpha-value>)",
           DEFAULT: "hsl(var(--sidebar) / <alpha-value>)",
           foreground: "hsl(var(--sidebar-foreground) / <alpha-value>)",
-          border: "hsl(var(--sidebar-border) / <alpha-value>)",
+          border: "hsl(var(--sidebar-border) / calc(<alpha-value> * var(--border-alpha-scale)))",
         },
         "sidebar-primary": {
           DEFAULT: "hsl(var(--sidebar-primary) / <alpha-value>)",

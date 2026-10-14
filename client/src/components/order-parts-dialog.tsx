@@ -270,7 +270,7 @@ export function OrderPartsDialog({
                 className={cn(
                   "rounded border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
                   group.remaining === 0
-                    ? "border-chart-4/30 bg-chart-4/10 text-chart-4"
+                    ? "border-warn/30 bg-warn/15 text-warn"
                     : "border-border bg-muted text-muted-foreground",
                 )}
               >

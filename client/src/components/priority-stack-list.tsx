@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronUp, MoreHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, ChevronUp, MoreHorizontal } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -581,7 +581,12 @@ export function StackRow({
             {row.isNew ? <span className="ml-1 text-xs text-primary">new</span> : null}
           </span>
           {row.kind === "offbook" ? <span className="stack-auto">off-book</span> : null}
-          {row.kind === "bundle" ? <span className="shrink-0 text-xs text-muted-foreground">{expanded ? "▾" : "▸"} {row.members.length}</span> : null}
+          {row.kind === "bundle" ? (
+            <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {row.members.length}
+            </span>
+          ) : null}
         </span>
         <span className="stack-clip stack-sub">{rowSubtitle(row)}</span>
       </button>

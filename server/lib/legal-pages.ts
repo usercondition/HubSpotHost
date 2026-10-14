@@ -18,22 +18,23 @@ function page(title: string, body: string): string {
   <title>${title} · Print Ops</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap" rel="stylesheet">
   <style>
     :root { color-scheme: dark; }
     body {
       margin: 0;
-      background: hsl(240 4% 3%);
-      color: hsl(0 0% 97%);
-      font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+      background: #171717;
+      color: #fafafa;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-feature-settings: "ss01", "cv11";
     }
     main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
     .brand { margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em; }
     h1 { margin: 0.75rem 0 0; font-size: 1.75rem; letter-spacing: -0.03em; font-weight: 600; }
     h2 { margin: 1.75rem 0 0.4rem; font-size: 1rem; font-weight: 600; }
-    p, li { color: hsl(240 5% 74%); font-size: 0.95rem; line-height: 1.55; }
+    p, li { color: #a1a1a1; font-size: 0.95rem; line-height: 1.55; }
     ul { padding-left: 1.15rem; }
-    a { color: hsl(186 72% 58%); }
+    a { color: #e5e5e5; }
     nav { margin-top: 2rem; font-size: 0.875rem; }
     nav a { margin-right: 1rem; }
   </style>

@@ -479,8 +479,8 @@ export default function DealsPage() {
                       <div
                         className={cn(
                           "queue-lane-header",
-                          column.closed && /lost/i.test(column.label) && "bg-destructive/10",
-                          column.closed && !/lost/i.test(column.label) && "bg-chart-4/10",
+                          column.closed && /lost/i.test(column.label) && "bg-bad/15",
+                          column.closed && !/lost/i.test(column.label) && "bg-warn/15",
                         )}
                       >
                         <div className="flex w-full items-baseline justify-between gap-2">

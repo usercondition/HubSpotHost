@@ -35,7 +35,7 @@ function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
     <Link
       href="/setup"
       data-testid="panel-system-status"
-      className="inline-flex items-center gap-1.5 rounded-md border border-chart-4/40 bg-chart-4/10 px-2.5 py-1 text-sm font-medium text-chart-4 hover:bg-chart-4/15"
+      className="inline-flex items-center gap-1.5 rounded-md border border-warn/40 bg-warn/15 px-2.5 py-1 text-sm font-medium text-warn hover:bg-warn/20"
       title={storageWarn || "HubSpot writes or webhook need a quick check"}
     >
       <SlidersHorizontal className="h-3 w-3" />

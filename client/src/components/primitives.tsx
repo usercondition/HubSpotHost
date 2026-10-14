@@ -8,16 +8,16 @@ type Tone = "neutral" | "good" | "warn" | "bad";
 
 const TONE_TEXT: Record<Tone, string> = {
   neutral: "text-muted-foreground",
-  good: "text-accent",
-  warn: "text-chart-4",
-  bad: "text-destructive",
+  good: "text-good",
+  warn: "text-warn",
+  bad: "text-bad",
 };
 
 const TONE_PILL: Record<Tone, string> = {
-  neutral: "border-transparent bg-transparent text-muted-foreground",
-  good: "border-transparent bg-accent/10 text-accent",
-  warn: "border-transparent bg-chart-4/10 text-chart-4",
-  bad: "border-transparent bg-destructive/10 text-destructive",
+  neutral: "border-transparent bg-muted/80 text-muted-foreground",
+  good: "border-transparent bg-good/15 text-good",
+  warn: "border-transparent bg-warn/15 text-warn",
+  bad: "border-transparent bg-bad/15 text-bad",
 };
 
 export function StatusPill({

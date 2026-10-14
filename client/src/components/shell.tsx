@@ -60,6 +60,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
     window.localStorage.setItem(THEME_KEY, theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "dark" ? "#171717" : "#FAFAFA");
   }, [theme]);
 
   const value = useMemo(

@@ -65,7 +65,7 @@ export function HubspotSyncChip() {
       trigger={
         <button
           type="button"
-          className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border border-transparent bg-chart-4/10 px-2 py-1 text-[0.8125rem] font-semibold text-chart-4"
+          className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border border-transparent bg-warn/15 px-2 py-1 text-[0.8125rem] font-semibold text-warn"
           data-testid="button-hubspot-sync"
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
