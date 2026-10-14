@@ -327,6 +327,8 @@ For the initial single-service setup:
    GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=…
    SHIPBY_GCAL_SCHEDULE_ENABLED=true
    SHIPBY_GCAL_INTERVAL_MINUTES=20
+   # Optional Nerve dashboard (GET /api/ops/orders-summary):
+   # NERVE_READ_TOKEN=<long random bearer token; endpoint disabled when unset>
    ```
 
    After deploy, unlock the Command center and use **Send briefing** / **Send health nudge** on the tracker panel to verify. With schedules enabled, morning digests and mid-day health nudges send automatically. Ship-by Google Calendar sync runs on its own interval (or `POST /api/cron/shipby-gcal`) and skips when Google credentials are unset.
@@ -516,6 +518,7 @@ the date immediately returns the order to the derived physical plan.
 | `POST /api/order-links/:id/expire` | Protected. Manually expires a link. |
 | `POST /api/order-links/:id/create-order` | Protected. The only HubSpot-writing route in this flow. Requires `paymentVerified: true`. |
 | `GET /api/production-queue` | Protected. Next print / in production / ship-ready / blocked buckets, plus ordered `needsReply` and `readyToPack` digest lists (each row includes `dealId` and `dealName`). `needsReply` reflects HubSpot `print_needs_reply`; `readyToPack` is ship-ready work missing packing, a real label, or tracking. |
+| `GET /api/ops/orders-summary` | Read-only Nerve dashboard feed. Bearer `NERVE_READ_TOKEN` (503 if unset, 401 if missing/wrong). Returns open / overdue / due-today counts and a `{date, stage, status}` ship-by list. No buyer names, emails, addresses, deal IDs, or payment data. |
 | `GET /api/deal-ops/:dealId` | Protected. Costs, checklist, plates, packing slip, failures for one deal. |
 | `PATCH /api/deal-ops/:dealId/costs` | Protected. Writes HubSpot cost inputs (gated) and recalculates margin. |
 | `POST /api/deal-ops/:dealId/stage` | Protected. Advances Print Orders `dealstage` (gated). |
