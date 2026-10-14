@@ -13,6 +13,7 @@ import Operations from "@/pages/operations";
 import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
 import MarketplaceBriefPage from "@/pages/marketplace-brief";
+import InboxPage from "@/pages/inbox";
 import OrderLinks from "@/pages/order-links";
 import Expenses from "@/pages/expenses";
 const Performance = lazy(() => import("@/pages/performance"));
@@ -54,6 +55,7 @@ function ShellRoutes() {
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />
           <Route path="/marketplace-brief" component={MarketplaceBriefPage} />
+          <Route path="/inbox" component={InboxPage} />
           <Route path="/supplies" component={Supplies} />
           <Route path="/prints" component={Prints} />
           <Route path="/library" component={PlateLibraryPage} />

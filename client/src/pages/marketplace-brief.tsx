@@ -247,6 +247,7 @@ You: Let me know whenever you're ready`,
         />
       ) : (
         <>
+          <Panel title="Mac inbox" description="Hermes cards from the Mac, with editable replies and follow-ups."><p className="text-sm"><Link className="hs-link font-medium" href="/inbox">Open the Inbox tab →</Link></p></Panel>
           <Panel title="How to run" description="Chrome helper scans Messenger / Marketplace and opens this page with the secretary summary.">
             <p className="text-sm text-muted-foreground">
               In Comet, open Messenger / Marketplace and leave the left chat list visible → extension →{" "}
