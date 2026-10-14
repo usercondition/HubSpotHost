@@ -122,7 +122,7 @@ export function AttentionBell({ rail = false }: { rail?: boolean }) {
             trigger={
               <button
                 type="button"
-                className="w-full rounded-md bg-chart-4/10 px-3 py-2 text-left"
+                className="w-full rounded-md bg-warn/15 px-3 py-2 text-left"
                 data-testid="row-attention-bell-hubspot-sync"
               >
                 <p className="text-sm font-semibold text-chart-4">{syncChipLabel(health.data?.hubspotSync)}</p>

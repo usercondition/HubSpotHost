@@ -561,7 +561,7 @@ export default function PaidOrders() {
                         "rounded-md border p-3 text-xs",
                         assistHints.paymentLanguageDetected
                           ? "border-primary/25 bg-primary/5"
-                          : "border-amber-500/35 bg-amber-500/5",
+                          : "border-warn/35 bg-warn/15",
                       )}
                       data-testid="panel-payment-detection"
                     >
@@ -569,7 +569,7 @@ export default function PaidOrders() {
                         {assistHints.paymentLanguageDetected ? (
                           <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                         ) : (
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
                         )}
                         <div>
                           <p className="font-medium text-foreground">

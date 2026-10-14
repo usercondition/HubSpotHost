@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   Loader2,
+  RefreshCw,
   Ship,
   AlertTriangle,
   ExternalLink,
@@ -1413,7 +1414,7 @@ export function ShipEngineBuyPanel({
             onClick={() => void statusQuery.refetch()}
             data-testid="button-shipengine-refresh-funds"
           >
-            {statusQuery.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "↻"}
+            {statusQuery.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
         </div>
       </div>

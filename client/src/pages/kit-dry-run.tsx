@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Check,
   CheckCircle2,
   ExternalLink,
   FolderOpen,
@@ -809,7 +810,7 @@ export default function KitDryRunPage() {
                             checked ? "border-primary bg-primary text-primary-foreground" : "border-border",
                           )}
                         >
-                          {checked ? "✓" : ""}
+                          {checked ? <Check className="h-3 w-3" /> : null}
                         </span>
                         <span className="min-w-0 flex-1 truncate font-medium">{bit.label}</span>
                         <span className="shrink-0 text-[0.6875rem] uppercase tracking-wide text-muted-foreground">

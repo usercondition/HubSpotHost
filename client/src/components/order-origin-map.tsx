@@ -30,9 +30,9 @@ function summary(orders: number, revenue: number, priced: number): string {
 }
 
 function shade(value: number, max: number, revenue: boolean): string {
-  if (value <= 0 || max <= 0) return "hsl(240 4% 13%)";
+  if (value <= 0 || max <= 0) return "#262626";
   const t = Math.sqrt(value / max);
-  return revenue ? `hsl(158 48% ${18 + t * 30}%)` : `hsl(186 72% ${16 + t * 32}%)`;
+  return revenue ? `hsl(160 84% ${16 + t * 28}%)` : `hsl(0 0% ${18 + t * 40}%)`;
 }
 
 function shapes(atlas: { objects: Record<string, unknown> }, objectName: string, width: number, height: number, world: boolean): { shapes: Shape[]; project: (lon: number, lat: number) => [number, number] | null } {
@@ -200,7 +200,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
           onLostPointerCapture={() => { pointers.current.clear(); pinch.current = null; drag.current = null; }}
           onPointerLeave={() => setFocus(null)}
         >
-          <rect width="960" height="500" fill="hsl(240 4% 5%)" onClick={() => { setSelected(null); setLocked(null); }} />
+          <rect width="960" height="500" fill="#171717" onClick={() => { setSelected(null); setLocked(null); }} />
           <g transform={`translate(${480 + view.x} ${250 + view.y}) scale(${view.k}) translate(-480 -250)`}>
             {map.shapes.map((shape) => {
               const row = world ? countryValue.get(shape.name) : stateValue.get(shape.id);
@@ -212,7 +212,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
                   data-testid={`origin-state-${shape.id}`}
                   d={shape.d}
                   fill={shade(value, max, byRevenue)}
-                  stroke={hot ? "hsl(186 72% 72%)" : "hsl(240 5% 22%)"}
+                  stroke={hot ? "#e5e5e5" : "rgba(255,255,255,0.10)"}
                   strokeWidth={hot ? 1.4 : 0.6}
                   style={{ transition: "fill 180ms ease, stroke 180ms ease" }}
                   onMouseEnter={() => setFocus({ kind: world ? "country" : "state", id: world ? shape.name : shape.id })}
@@ -241,8 +241,8 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
                     cx={point[0]}
                     cy={point[1]}
                     r={radius}
-                    fill="hsl(186 72% 62% / 0.9)"
-                    stroke="hsl(240 4% 6%)"
+                    fill="hsl(160 84% 52% / 0.9)"
+                    stroke="#171717"
                     strokeWidth={1}
                     style={{ transition: "r 180ms ease" }}
                     onClick={(event) => {
@@ -260,12 +260,12 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
               return (
                 <g onMouseEnter={() => setFocus({ kind: "pickup", id: "pickup" })} onMouseLeave={() => setFocus(null)}>
                   <circle cx={point[0]} cy={point[1]} r={14} fill="transparent" />
-                  <circle cx={point[0]} cy={point[1]} r={6} fill="none" stroke="hsl(158 50% 58%)" strokeWidth={2} />
+                  <circle cx={point[0]} cy={point[1]} r={6} fill="none" stroke="hsl(160 84% 52%)" strokeWidth={2} />
                   <circle
                     cx={point[0]}
                     cy={point[1]}
                     r={2.5}
-                    fill="hsl(158 50% 58%)"
+                    fill="hsl(160 84% 52%)"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelected("pickup");
@@ -282,12 +282,12 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
       <div className="mt-3 space-y-2" data-testid="stats-origin-legend">
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-2">
-            <span className="h-2 w-16 rounded-full" style={{ background: byRevenue ? "linear-gradient(90deg, hsl(158 48% 18%), hsl(158 48% 48%))" : "linear-gradient(90deg, hsl(186 72% 16%), hsl(186 72% 48%))" }} />
+            <span className="h-2 w-16 rounded-full" style={{ background: byRevenue ? "linear-gradient(90deg, hsl(160 84% 16%), hsl(160 84% 52%))" : "linear-gradient(90deg, #262626, #e5e5e5)" }} />
             {byRevenue ? "Less revenue" : "Fewer orders"} to more
           </span>
           {origins.pickup.orders > 0 ? (
             <button type="button" className="inline-flex items-center gap-1.5" onClick={() => setSelected((current) => (current === "pickup" ? null : "pickup"))}>
-              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[hsl(158_50%_58%)]" />
+              <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-good" />
               Local pickup · San Diego <span className="numeric inline-block w-8 text-right">({origins.pickup.orders})</span>
             </button>
           ) : null}
@@ -295,7 +295,7 @@ export function OrderOriginMap({ origins }: { origins: OrderOrigins }) {
             Unknown location <span className="numeric inline-block w-8 text-right">({origins.unknown})</span>
           </button>
         </div>
-        {origins.incomplete ? <p className="text-sm text-amber-700 dark:text-amber-300" data-testid="stats-origin-busy">{origins.busy ? "HubSpot busy, map may be incomplete." : "Map data incomplete, retry."}</p> : null}
+        {origins.incomplete ? <p className="text-sm text-warn" data-testid="stats-origin-busy">{origins.busy ? "HubSpot busy, map may be incomplete." : "Map data incomplete, retry."}</p> : null}
         <p className="text-sm" data-testid="stats-origin-detail">{detail()}</p>
         {selected ? (
           <ul className="divide-y divide-border/70" data-testid="stats-origin-orders">

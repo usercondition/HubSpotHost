@@ -373,7 +373,7 @@ export default function ClientOrder() {
 
         {state.kind === "ready" && submitted && (
           <div
-            className="rounded-lg border border-chart-4/40 bg-chart-4/10 p-6"
+            className="rounded-lg border border-warn/40 bg-warn/15 p-6"
             data-testid="panel-client-submitted"
           >
             <CheckCircle2 className="h-6 w-6 text-chart-4" />
@@ -695,7 +695,7 @@ export default function ClientOrder() {
 
               {error && (
                 <p
-                  className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                  className="rounded-md border border-bad/40 bg-bad/15 p-3 text-sm text-bad"
                   role="alert"
                   data-testid="text-client-error"
                 >

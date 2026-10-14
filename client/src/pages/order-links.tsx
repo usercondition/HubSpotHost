@@ -1290,7 +1290,7 @@ function ReviewDialog({
 
             {createdDeal || link.hubspotDealId ? (
               <div className="space-y-3" data-testid="panel-review-created-handoff">
-                <p className="numeric rounded-md border border-chart-4/40 bg-chart-4/10 p-3 text-xs text-chart-4" data-testid="text-review-hubspot-ids">
+                <p className="numeric rounded-md border border-warn/40 bg-warn/15 p-3 text-xs text-warn" data-testid="text-review-hubspot-ids">
                   HubSpot contact {link.hubspotContactId || "created"}
                   {(createdDeal?.deals?.length ?? parseHubSpotDealsJson(link.hubspotDealsJson).length) > 1
                     ? ` · ${createdDeal?.deals?.length ?? parseHubSpotDealsJson(link.hubspotDealsJson).length} Print Orders`
