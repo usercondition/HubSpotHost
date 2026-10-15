@@ -105,6 +105,57 @@ export function ThemeToggle({
 
 /* ----------------------------------------------------------------- mark --- */
 
+
+const APP_LINKS: Array<{ href: string; label: string; current?: boolean; testId: string }> = [
+  { href: "https://miguels-mac-mini.tailc0d52c.ts.net/nerve/", label: "Nerve", testId: "link-app-nerve" },
+  { href: "https://miguels-mac-mini.tailc0d52c.ts.net/", label: "Paperclip", testId: "link-app-paperclip" },
+  { href: "/", label: "Print Ops", current: true, testId: "link-app-printops" },
+  { href: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board", label: "HubSpot", testId: "link-app-hubspot" },
+];
+
+function AppSwitcher({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1", compact && "flex-nowrap", className)} data-testid="app-switcher" aria-label="Apps">
+      {APP_LINKS.map((a) =>
+        a.current ? (
+          <span
+            key={a.label}
+            data-testid={a.testId}
+            aria-current="page"
+            className={cn(
+              "inline-flex h-7 items-center rounded-md border border-border/60 bg-muted px-2 text-[12px] font-medium text-foreground",
+              compact && "shrink-0 px-1.5",
+            )}
+          >
+            {a.label}
+          </span>
+        ) : (
+          <a
+            key={a.label}
+            href={a.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid={a.testId}
+            className={cn(
+              "inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              compact && "shrink-0 px-1.5",
+            )}
+          >
+            {a.label}
+            <ExternalLink className={cn("h-3 w-3 opacity-60", compact && "hidden xl:block")} />
+          </a>
+        ),
+      )}
+    </div>
+  );
+}
+
 export function Mark({ className }: { className?: string }) {
   return (
     <svg
@@ -318,17 +369,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="ops-rail-foot">
           <OpsAssistantSheet rail />
           <ThemeToggle rail />
-          <a
-            href="https://app.hubspot.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="HubSpot CRM"
-            data-testid="link-sidebar-hubspot"
-            className="ops-rail-link"
-          >
-            <ExternalLink className="h-4 w-4 shrink-0" />
-            <span className="truncate">HubSpot</span>
-          </a>
+          <div className="px-2 pb-1">
+            <p className="ops-rail-label">Apps</p>
+            <AppSwitcher className="flex-col items-stretch" />
+          </div>
           <div className="ops-owner">
             <span className="ops-avatar" aria-hidden>
               O
@@ -363,6 +407,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ) : null}
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
+            <AppSwitcher className="mr-1 hidden lg:flex" compact />
             <SyncPill />
             <AttentionBell />
             <RefreshButton testId="button-refresh-workspace" />
@@ -418,6 +463,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
             <OpsAssistantSheet rail />
             <ThemeToggle rail />
+            <p className="ops-rail-label px-1 pt-2">Apps</p>
+            <AppSwitcher className="flex-col items-stretch px-1" />
           </div>
         ) : null}
 
