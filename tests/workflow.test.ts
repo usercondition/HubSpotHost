@@ -11,7 +11,13 @@ import {
   hubspotDealsListHref,
   isFloorFocusKind,
   printsDealHref,
+  workshopHref,
 } from "../client/src/lib/workflow";
+
+test("workshop deep links stay on the optional 3D view", () => {
+  assert.equal(workshopHref(), "/workshop");
+  assert.equal(workshopHref("9001"), "/workshop?dealId=9001");
+});
 
 test("HubSpot deal deep links require a portal id", () => {
   assert.equal(

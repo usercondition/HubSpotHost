@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { GoogleDriveConnect } from "@/components/google-drive-connect";
+import { ThemePicker, WorkspaceViewPicker } from "@/components/shell";
 import { CodeLine } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,7 @@ const DAILY_ROUTES = [
   { path: "/#/", note: "Floor workspace — icon rail is Run → Take → Keep → Office" },
   { path: "/#/stack", note: "Priority stack — this week, blockers, bundles, off-book" },
   { path: "/#/queue", note: "Printer queue — next print and in production" },
+  { path: "/#/workshop", note: "Optional 3D shop floor — read-only tokens on station desks" },
   { path: "/#/orders", note: "Paid order intake links and review queue" },
   { path: "/#/prints", note: "Attach Chitubox plates; deep-link with ?dealId=" },
   { path: "/#/supplies", note: "Amazon/receipt supply ledger" },
@@ -147,6 +149,7 @@ const DAILY_ROUTES = [
 
 type SetupSection =
   | "overview"
+  | "appearance"
   | "telegram"
   | "routes"
   | "environment"
@@ -156,6 +159,7 @@ type SetupSection =
 
 const SETUP_NAV: Array<{ id: SetupSection; label: string }> = [
   { id: "overview", label: "Overview" },
+  { id: "appearance", label: "Appearance" },
   { id: "telegram", label: "Telegram" },
   { id: "routes", label: "Daily routes" },
   { id: "environment", label: "Environment" },
@@ -215,8 +219,34 @@ export default function Setup() {
           {title}
         </h1>
 
+        {section === "appearance" ? (
+          <div className="space-y-4">
+            <SettingsCard title="Workspace theme" testId="panel-setup-appearance">
+              <p className="mb-4 text-sm text-muted-foreground">
+                Saved in this browser. Dark is the current shop look. Workshop is a separate view, not a color theme.
+              </p>
+              <ThemePicker />
+            </SettingsCard>
+            <SettingsCard title="Workspace view" testId="panel-setup-workspace-view">
+              <p className="mb-4 text-sm text-muted-foreground">
+                Standard keeps Work hub as home. Workshop is an optional 3D shop floor. It only reads live data.
+              </p>
+              <WorkspaceViewPicker />
+            </SettingsCard>
+          </div>
+        ) : null}
+
         {section === "overview" ? (
           <div className="space-y-4">
+            <SettingsCard title="Appearance" testId="panel-setup-overview-appearance">
+              <p className="mb-4 text-sm text-muted-foreground">
+                Pick Dark or Light, and optionally open the 3D Workshop view. The choice stays on this computer.
+              </p>
+              <ThemePicker />
+              <div className="mt-4">
+                <WorkspaceViewPicker />
+              </div>
+            </SettingsCard>
             <GoogleDriveConnect />
             {health.data?.storage?.warning ? (
               <SettingsCard title="Production data durability" testId="panel-setup-storage">
