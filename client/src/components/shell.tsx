@@ -113,16 +113,25 @@ const APP_LINKS: Array<{ href: string; label: string; current?: boolean; testId:
   { href: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board", label: "HubSpot", testId: "link-app-hubspot" },
 ];
 
-function AppSwitcher({ className }: { className?: string }) {
+function AppSwitcher({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   return (
-    <div className={cn("flex flex-wrap items-center gap-1", className)} data-testid="app-switcher" aria-label="Apps">
+    <div className={cn("flex flex-wrap items-center gap-1", compact && "flex-nowrap", className)} data-testid="app-switcher" aria-label="Apps">
       {APP_LINKS.map((a) =>
         a.current ? (
           <span
             key={a.label}
             data-testid={a.testId}
             aria-current="page"
-            className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted px-2 text-[12px] font-medium text-foreground"
+            className={cn(
+              "inline-flex h-7 items-center rounded-md border border-border/60 bg-muted px-2 text-[12px] font-medium text-foreground",
+              compact && "shrink-0 px-1.5",
+            )}
           >
             {a.label}
           </span>
@@ -133,10 +142,13 @@ function AppSwitcher({ className }: { className?: string }) {
             target="_blank"
             rel="noopener noreferrer"
             data-testid={a.testId}
-            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className={cn(
+              "inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              compact && "shrink-0 px-1.5",
+            )}
           >
             {a.label}
-            <ExternalLink className="h-3 w-3 opacity-60" />
+            <ExternalLink className={cn("h-3 w-3 opacity-60", compact && "hidden xl:block")} />
           </a>
         ),
       )}
@@ -395,7 +407,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ) : null}
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
-            <AppSwitcher className="mr-1 hidden lg:flex" />
+            <AppSwitcher className="mr-1 hidden lg:flex" compact />
             <SyncPill />
             <AttentionBell />
             <RefreshButton testId="button-refresh-workspace" />
