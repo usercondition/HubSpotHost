@@ -221,7 +221,12 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
   for (const local of input.localDeals) {
     const remote = hubspot[local.dealId];
     const referenced = local.inQueue || local.inStack;
-    if (referenced && (!remote || !remote.found)) {
+    // A Stack record left behind for a deal that is done, or closed-lost/cancelled
+    // in HubSpot, is history, not an open-board row. Only the live Queue counts then.
+    const closedLost = Boolean(remote?.found && remote.closed && !remote.closedWon);
+    if (!local.inQueue && closedLost) continue;
+    const doneStackOnly = !local.inQueue && locallyDone(local.doneAt);
+    if (referenced && !doneStackOnly && (!remote || !remote.found)) {
       items.push(item(
         "orphans",
         local.dealId,
@@ -231,7 +236,7 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
         false,
         "Print Ops still has this deal, but HubSpot does not. Remove the local row if the deal was deleted.",
       ));
-    } else if (referenced && remote?.closed && !remote.closedWon) {
+    } else if (referenced && !doneStackOnly && remote?.closed && !remote.closedWon) {
       items.push(item(
         "orphans",
         local.dealId,
