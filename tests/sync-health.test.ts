@@ -773,3 +773,21 @@ test("health summary is stale when the last check is older than twice the interv
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("Stack-only records for closed-lost or done deals are not orphans and skip ship-by", () => {
+  const report = compareSyncHealth(input({
+    hubspotById: {
+      "31": remote({ dealId: "31", closed: true, closedWon: false, stage: "Lost / Cancelled", shipBy: "2026-10-11" }),
+      "32": remote({ dealId: "32", closed: true, closedWon: false, stage: "Lost / Cancelled" }),
+      "33": remote({ dealId: "33", closed: true, closedWon: false, stage: "Lost / Cancelled" }),
+    },
+    localDeals: [
+      local({ dealId: "31", inQueue: false, inStack: true }),
+      local({ dealId: "32", inQueue: false, inStack: true, doneAt: "2026-09-20T12:00:00.000Z" }),
+      local({ dealId: "33", inQueue: true, inStack: true }),
+      local({ dealId: "34", inQueue: false, inStack: true, doneAt: "2026-09-20T12:00:00.000Z" }),
+    ],
+  }));
+  assert.equal(report.items.some((item) => ["31", "32", "34"].includes(item.dealId)), false);
+  assert.deepEqual(report.items.filter((item) => item.dealId === "33").map((item) => item.kind), ["orphans"]);
+});
