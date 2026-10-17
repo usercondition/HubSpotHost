@@ -295,7 +295,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathOnly = location.split("?")[0] || "/";
   const { isUnlocked, lock } = useOwnerSession();
   const shop = useShopCounts();
-  const activeItem = NAV.find((item) => item.href === pathOnly || (item.href === "/nerve" && pathOnly.startsWith("/nerve/")));
+  const activeItem = NAV.find((item) => item.href === pathOnly);
   const activeGroup = activeItem?.group ?? "Run";
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = PHONE_MORE.some((item) => item.href === pathOnly);

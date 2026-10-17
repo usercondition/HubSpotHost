@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRoute } from "wouter";
-import { Activity, Bot, HeartPulse, LayoutDashboard, Lock, MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
-import { PageHeader } from "@/components/shell";
+import { Activity, ArrowLeft, Bot, HeartPulse, LayoutDashboard, Lock, MessagesSquare, Radar, RefreshCw, WifiOff } from "lucide-react";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,41 +153,91 @@ export default function NervePage() {
     retry: false,
   });
 
+  const body =
+    tab === "chat" ? (
+      <Coming what="FB Marketplace Chat (inbox, send under the Mac mini lock, archive/delete) lands in a later phase. Use Nerve v3 meanwhile." />
+    ) : tab === "agents" ? (
+      <Coming what="Agents (Paperclip/Hermes runs, Intern digests) lands in a later phase." />
+    ) : !key ? (
+      <Unlock />
+    ) : q.isLoading ? (
+      <Skeleton className="h-64 w-full" />
+    ) : q.error ? (
+      <ErrorState err={q.error} retry={() => q.refetch()} />
+    ) : q.data ? (
+      tab === "health" ? <Health m={q.data} /> : <Overview m={q.data} />
+    ) : null;
+  const current = TABS.find((t) => t.id === tab)!;
+
   return (
-    <div className="pb-24">
-      <PageHeader title="Nerve" subtitle="Mac mini system view, read-only. Loads from the Mac mini over Tailscale; nothing is stored on Print Ops." />
-      <div className="px-4 md:px-8">
-        <nav aria-label="Nerve sections" className="mb-4 flex flex-wrap gap-1 border-b border-border/60 pb-2" data-testid="nav-nerve-sub">
+    <div className="ops-shell flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground md:flex-row" data-testid="nerve-window">
+      {/* Desktop: Nerve's own sidebar. No Print Ops nav, labels or app list in here. */}
+      <aside className="ops-rail hidden md:flex" aria-label="Nerve">
+        <div className="ops-brand" data-testid="nerve-brand">
+          <span className="ops-mark-wrap">
+            <Radar className="h-4 w-4 text-primary-foreground" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[15px] font-semibold tracking-tight text-foreground">Nerve</span>
+            <span className="block truncate text-[11px] text-[hsl(var(--text-3))]">Mac mini · read-only</span>
+          </span>
+        </div>
+        <nav aria-label="Nerve navigation" className="ops-rail-nav" data-testid="nav-nerve-sub">
           {TABS.map((t) => (
             <Link
               key={t.id}
               href={`/nerve/${t.id}`}
               data-testid={`link-nerve-${t.id}`}
               aria-current={tab === t.id ? "page" : undefined}
-              className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                tab === t.id && "bg-muted font-semibold text-foreground",
-              )}
+              className={cn("ops-rail-link", tab === t.id && "bg-[hsl(var(--raised))] font-semibold text-foreground")}
             >
-              <t.icon className="h-4 w-4" />
-              {t.label}
+              <t.icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{t.label}</span>
             </Link>
           ))}
         </nav>
-        {tab === "chat" ? (
-          <Coming what="FB Marketplace Chat (inbox, send under the Mac mini lock, archive/delete) lands in a later phase. Use Nerve v3 meanwhile." />
-        ) : tab === "agents" ? (
-          <Coming what="Agents (Paperclip/Hermes runs, Intern digests) lands in a later phase." />
-        ) : !key ? (
-          <Unlock />
-        ) : q.isLoading ? (
-          <Skeleton className="h-64 w-full" />
-        ) : q.error ? (
-          <ErrorState err={q.error} retry={() => q.refetch()} />
-        ) : q.data ? (
-          tab === "health" ? <Health m={q.data} /> : <Overview m={q.data} />
-        ) : null}
-      </div>
+        <div className="ops-rail-foot">
+          <Link href="/" className="ops-rail-link" data-testid="link-nerve-back">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span className="truncate">Back to Print Ops</span>
+          </Link>
+        </div>
+      </aside>
+
+      {/* Phone: Nerve top bar with Back, bottom tabs. */}
+      <header className="ops-phone-bar flex items-center justify-between md:hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="ops-mark-wrap">
+            <Radar className="h-4 w-4 text-primary-foreground" />
+          </span>
+          <span className="truncate text-[15px] font-semibold">Nerve · {current.label}</span>
+        </div>
+        <Link href="/" className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted" data-testid="link-nerve-back-mobile">
+          <ArrowLeft className="h-4 w-4" /> Print Ops
+        </Link>
+      </header>
+
+      <main className="min-w-0 flex-1 overflow-y-auto pb-24 md:pb-8">
+        <header className="px-4 pb-2 pt-4 md:px-8 md:pt-8">
+          <h1 className="ops-page-title" data-testid="text-nerve-title">{current.label}</h1>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">Loads from the Mac mini over Tailscale; nothing is stored on Print Ops.</p>
+        </header>
+        <div className="px-4 md:px-8">{body}</div>
+      </main>
+
+      <nav aria-label="Nerve tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-background md:hidden">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            href={`/nerve/${t.id}`}
+            data-testid={`link-nerve-tab-${t.id}`}
+            className={cn("flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] text-muted-foreground", tab === t.id && "font-semibold text-foreground")}
+          >
+            <t.icon className="h-5 w-5" />
+            {t.label}
+          </Link>
+        ))}
+      </nav>
     </div>
   );
 }

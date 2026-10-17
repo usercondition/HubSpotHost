@@ -71,8 +71,6 @@ function ShellRoutes() {
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
           <Route path="/performance" component={PerformanceRoute} />
           <Route path="/setup" component={Setup} />
-          {NERVE_SECTION_ENABLED ? <Route path="/nerve/:tab" component={NervePage} /> : null}
-          {NERVE_SECTION_ENABLED ? <Route path="/nerve" component={NervePage} /> : null}
           <Route component={NotFound} />
         </Switch>
       </AppShell>
@@ -91,6 +89,9 @@ function App() {
               {/* Public buyer form. Legacy /client-order path still works. */}
               <Route path="/order-form/:token" component={ClientOrder} />
               <Route path="/client-order/:token" component={ClientOrder} />
+              {/* Nerve: full-window takeover with its own shell (flag off by default). */}
+              {NERVE_SECTION_ENABLED ? <Route path="/nerve/:tab" component={NervePage} /> : null}
+              {NERVE_SECTION_ENABLED ? <Route path="/nerve" component={NervePage} /> : null}
               <Route component={ShellRoutes} />
             </Switch>
           </Router>
