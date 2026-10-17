@@ -16,6 +16,7 @@ import Setup from "@/pages/setup";
 import PaidOrders from "@/pages/paid-orders";
 import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import InboxPage from "@/pages/inbox";
+import FilesPage from "@/pages/files";
 import OrderLinks from "@/pages/order-links";
 import Expenses from "@/pages/expenses";
 import QuotePage from "@/pages/quote";
@@ -59,6 +60,7 @@ function ShellRoutes() {
           <Route path="/paid-orders" component={PaidOrders} />
           <Route path="/marketplace-brief" component={MarketplaceBriefPage} />
           <Route path="/inbox" component={InboxPage} />
+          <Route path="/files" component={FilesPage} />
           <Route path="/supplies" component={Supplies} />
           <Route path="/prints" component={Prints} />
           <Route path="/library" component={PlateLibraryPage} />

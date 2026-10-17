@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   ExternalLink,
   FileUp,
+  FolderSearch,
   LayoutDashboard,
   Library,
   Link2,
@@ -199,6 +200,7 @@ const NAV: Array<{
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Tag, testId: "link-nav-labels", group: "Run", phone: "more" },
   { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: Ship, testId: "link-nav-shipments", group: "Run", phone: "more" },
   { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Take", phone: "more" },
+  { href: "/files", label: "Files", title: "Search Drive files", icon: FolderSearch, testId: "link-nav-files", group: "Take", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   { href: "/quote", label: "Quote", title: "STL Quote", icon: Calculator, testId: "link-nav-quote", group: "Take", phone: "more" },
   {
