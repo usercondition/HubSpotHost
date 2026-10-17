@@ -17,6 +17,7 @@ import {
   Menu,
   MessagesSquare,
   Moon,
+  Radar,
   Printer,
   RefreshCw,
   Settings2,
@@ -35,6 +36,7 @@ import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
 import { formatPacificSnapshot, syncPillCopy } from "@/lib/sync-status";
 import { cn } from "@/lib/utils";
+import { NERVE_SECTION_ENABLED } from "@/lib/nerve";
 
 /* ---------------------------------------------------------------- theme --- */
 
@@ -212,6 +214,9 @@ const NAV: Array<{
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Office", phone: "more" },
+  ...(NERVE_SECTION_ENABLED
+    ? [{ href: "/nerve", label: "Nerve", title: "Nerve (Mac mini, Tailscale only)", icon: Radar, testId: "link-nav-nerve", group: "Office" as NavGroup, phone: "more" as const }]
+    : []),
 ];
 
 const GROUPS: Array<{ id: NavGroup; hint: string }> = [
