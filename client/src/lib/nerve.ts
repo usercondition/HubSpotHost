@@ -2,53 +2,95 @@
  * Nerve section (feature flag, OFF by default).
  *
  * Enable at build time with VITE_NERVE_SECTION_ENABLED=true (Railway variable, needs a rebuild).
- * Data never passes through this server: the browser fetches the Mac mini's Nerve API over
- * Tailscale (option A in ~/nerve-center/docs/plan-nerve-printops-merge-20261017.md). Off the tailnet
- * the section shows a "Connect Tailscale" state and the rest of Print Ops is unaffected.
- *
- * Auth: the Nerve key is typed in by the owner and held in page memory only (never storage, cookies,
- * the bundle, or Railway). Sent as header x-nerve-key. The Mac mini only allows this origin to GET
- * read-only paths. Print Ops never sends, archives or deletes through this API.
+ * Data path (Option B): the browser fetches the Mac mini's Nerve API directly over Tailscale. Nerve stays
+ * private (tailnet only). There is no separate Nerve key prompt: an unlocked Print Ops session gets the key
+ * from GET /api/nerve/session-key (owner-code guarded) and holds it in page memory only, never in storage.
+ * Nerve failures (offline, Nerve 401) never touch the Print Ops owner session.
  */
 export const NERVE_SECTION_ENABLED = import.meta.env.VITE_NERVE_SECTION_ENABLED === "true";
 export const NERVE_API_BASE: string =
   (import.meta.env.VITE_NERVE_API_BASE as string | undefined) || "https://miguels-mac-mini.tailc0d52c.ts.net/nerve";
 
-let nerveKey: string | null = null;
-const listeners = new Set<() => void>();
-export function getNerveKey() {
-  return nerveKey;
-}
-export function setNerveKey(k: string | null) {
-  nerveKey = k && k.trim() ? k.trim() : null;
-  listeners.forEach((fn) => fn());
-}
-export function onNerveKeyChange(fn: () => void) {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
+/** Legacy storage names an older build might have used for a Nerve key. Removed on load; never written. */
+const LEGACY_NERVE_STORAGE_KEYS = ["nerve-key", "nerveKey", "print-ops-nerve-key", "x-nerve-key"];
+export function clearLegacyNerveKeyStorage() {
+  for (const store of [globalThis.localStorage, globalThis.sessionStorage]) {
+    if (!store) continue;
+    for (const k of LEGACY_NERVE_STORAGE_KEYS) {
+      try {
+        store.removeItem(k);
+      } catch {
+        /* blocked storage */
+      }
+    }
+  }
 }
 
 export type NerveError = { kind: "locked" | "offline" | "error"; message: string };
 
-export async function nerveGet<T>(path: string): Promise<T> {
-  if (!nerveKey) throw { kind: "locked", message: "Enter the Nerve key to load this section." } satisfies NerveError;
+/**
+ * Read a Nerve path through the Print Ops server. ownerCode is the Print Ops key already in the owner
+ * session. A Nerve-side failure is never reported as 401, so it can't lock the Print Ops session.
+ */
+// Page memory only, tied to the owner code it was fetched with. Never written to storage.
+let memKey: { owner: string; key: string } | null = null;
+let inflight: Promise<string> | null = null;
+
+export function forgetNerveKey() {
+  memKey = null;
+  inflight = null;
+}
+
+async function nerveKeyFor(ownerCode: string): Promise<string> {
+  if (memKey && memKey.owner === ownerCode) return memKey.key;
+  if (!inflight) {
+    inflight = (async () => {
+      let res: Response;
+      try {
+        // Plain fetch, not apiRequest: a failure here must never fire the owner-auth-failure lock.
+        res = await fetch("/api/nerve/session-key", {
+          headers: { "x-paid-order-access-code": ownerCode },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch {
+        throw { kind: "error", message: "Can't reach Print Ops. Check your connection and retry." } satisfies NerveError;
+      }
+      if (res.status === 401) throw { kind: "locked", message: "Print Ops key was not accepted. Lock and unlock Print Ops again." } satisfies NerveError;
+      if (res.status === 503) throw { kind: "error", message: "Nerve is not configured on the server yet." } satisfies NerveError;
+      if (!res.ok) throw { kind: "error", message: `Print Ops answered ${res.status}.` } satisfies NerveError;
+      const body = (await res.json()) as { key?: string };
+      if (!body.key) throw { kind: "error", message: "Nerve is not configured on the server yet." } satisfies NerveError;
+      memKey = { owner: ownerCode, key: body.key };
+      return body.key;
+    })().finally(() => {
+      inflight = null;
+    });
+  }
+  return inflight;
+}
+
+const OFFLINE: NerveError = { kind: "offline", message: "Nerve offline. Connect this device to Tailscale and retry." };
+
+/** Read a Nerve path directly from the Mac mini over Tailscale, using the server-supplied key. */
+export async function nerveGet<T>(path: string, ownerCode: string): Promise<T> {
+  if (!ownerCode) throw { kind: "locked", message: "Unlock Print Ops to load Nerve." } satisfies NerveError;
+  const key = await nerveKeyFor(ownerCode);
   let res: Response;
   try {
     res = await fetch(NERVE_API_BASE + path, {
       method: "GET",
-      headers: { "x-nerve-key": nerveKey },
+      headers: { "x-nerve-key": key },
       credentials: "omit",
       cache: "no-store",
       signal: AbortSignal.timeout(12000),
     });
   } catch {
-    throw { kind: "offline", message: "Can't reach the Mac mini. Connect Tailscale on this device and retry." } satisfies NerveError;
+    throw OFFLINE;
   }
-  if (res.status === 401) {
-    setNerveKey(null);
-    throw { kind: "locked", message: "Nerve key was not accepted." } satisfies NerveError;
+  if (res.status === 401 || res.status === 403) {
+    forgetNerveKey(); // refetch from the server next time (e.g. key rotated); Print Ops session untouched
+    throw { kind: "error", message: "Nerve didn't accept the server's key. Retry, or check NERVE_KEY on Railway." } satisfies NerveError;
   }
   if (!res.ok) throw { kind: "error", message: `Nerve answered ${res.status}.` } satisfies NerveError;
   return (await res.json()) as T;
