@@ -109,7 +109,6 @@ export function ThemeToggle({
 
 
 const APP_LINKS: Array<{ href: string; label: string; current?: boolean; testId: string }> = [
-  { href: "https://miguels-mac-mini.tailc0d52c.ts.net/nerve/", label: "Nerve", testId: "link-app-nerve" },
   { href: "https://miguels-mac-mini.tailc0d52c.ts.net/", label: "Paperclip", testId: "link-app-paperclip" },
   { href: "/", label: "Print Ops", current: true, testId: "link-app-printops" },
   { href: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board", label: "HubSpot", testId: "link-app-hubspot" },

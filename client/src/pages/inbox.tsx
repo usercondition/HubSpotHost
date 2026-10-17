@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { useLocation, useSearch } from "wouter";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Inbox as InboxIcon, Loader2, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Inbox as InboxIcon, Loader2, MessagesSquare, RefreshCw, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { FollowupDialog, type FollowupDraft } from "@/components/followup-dialog";
 import type { Followup, InboxCardView } from "@shared/inbox";
+import { InboxChat } from "@/components/inbox-chat";
+import { NERVE_SECTION_ENABLED } from "@/lib/nerve";
 
 type CardsResponse = {
   ok: boolean;
@@ -21,6 +23,24 @@ type CardsResponse = {
   pushConfigured: boolean;
   notionConfigured: boolean;
 };
+
+/** Query string inside the hash route (`#/inbox?tab=chats&thread=…`), reactive to hash changes. */
+function useHashSearch(): string {
+  const hash = useSyncExternalStore(
+    (cb) => {
+      window.addEventListener("hashchange", cb);
+      window.addEventListener("popstate", cb);
+      return () => {
+        window.removeEventListener("hashchange", cb);
+        window.removeEventListener("popstate", cb);
+      };
+    },
+    () => window.location.hash,
+    () => "",
+  );
+  const i = hash.indexOf("?");
+  return i >= 0 ? hash.slice(i + 1) : window.location.search.replace(/^\?/, "");
+}
 
 const CATEGORY_ORDER: Record<string, number> = { hot: 0, question: 1, waiting: 2, spam: 9 };
 
@@ -199,9 +219,15 @@ export default function InboxPage() {
   const queryClient = useQueryClient();
   const { isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({ successTitle: "Inbox unlocked" });
-  const search = useSearch();
+  const search = useHashSearch();
   const [, navigate] = useLocation();
-  const tab = new URLSearchParams(search).get("tab") === "followups" ? "followups" : "cards";
+  const sp = new URLSearchParams(search);
+  const rawTab = sp.get("tab");
+  // Chats (read-only, from the Mac mini) is the default Inbox view when the Nerve link is enabled; Cards + Follow-ups stay as before.
+  const tab: "chats" | "cards" | "followups" =
+    rawTab === "followups" ? "followups" : rawTab === "cards" || !NERVE_SECTION_ENABLED ? "cards" : "chats";
+  const chatThread = sp.get("thread");
+  const openThread = (uid: string | null) => navigate(uid ? `/inbox?tab=chats&thread=${encodeURIComponent(uid)}` : "/inbox?tab=chats");
   const [filter, setFilter] = useState<"needs" | "all">("needs");
   const [marking, setMarking] = useState<{ card: InboxCardView; status: "replied" | "handled"; reply: string } | null>(null);
 
@@ -252,7 +278,7 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Client chats from the Mac inbox. Edit replies here; sending stays manual."
+        subtitle="Client chats, suggested replies and follow-ups. Sending stays manual."
         actions={
           isUnlocked ? (
             <Button size="sm" variant="outline" onClick={() => { void cardsQuery.refetch(); void followupsQuery.refetch(); }}>
@@ -274,20 +300,27 @@ export default function InboxPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2" role="tablist">
-              <Button size="sm" variant={tab === "cards" ? "default" : "outline"} onClick={() => navigate("/inbox")} data-testid="tab-inbox-cards">
-                <InboxIcon className="h-4 w-4" /> Cards
+              {NERVE_SECTION_ENABLED ? (
+                <Button size="sm" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
+                  <MessagesSquare className="h-4 w-4" /> Chats
+                </Button>
+              ) : null}
+              <Button size="sm" variant={tab === "cards" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=cards")} data-testid="tab-inbox-cards">
+                <InboxIcon className="h-4 w-4" /> Replies
               </Button>
               <Button size="sm" variant={tab === "followups" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=followups")} data-testid="tab-inbox-followups">
                 Follow-ups{dueCount ? ` (${dueCount} due)` : ""}
               </Button>
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ml-auto text-xs text-muted-foreground max-sm:w-full max-sm:ml-0">
                 Mac sync: {fmtTime(cardsQuery.data?.lastPushAt ?? null)}
                 {cardsQuery.data && !cardsQuery.data.pushConfigured ? " · push not configured" : ""}
                 {cardsQuery.data && !cardsQuery.data.notionConfigured ? " · Notion not configured (local only)" : ""}
               </span>
             </div>
 
-            {tab === "cards" ? (
+            {tab === "chats" ? (
+              <InboxChat selected={chatThread} onSelect={openThread} />
+            ) : tab === "cards" ? (
               <Panel
                 title={`Cards (${cards.length})`}
                 actions={

@@ -2,13 +2,13 @@
  * Nerve section (feature flag, OFF by default).
  *
  * Enable at build time with VITE_NERVE_SECTION_ENABLED=true (Railway variable, needs a rebuild).
- * Data never passes through this server: the browser fetches the Mac mini's Nerve v3 API over
+ * Data never passes through this server: the browser fetches the Mac mini's Nerve API over
  * Tailscale (option A in ~/nerve-center/docs/plan-nerve-printops-merge-20261017.md). Off the tailnet
  * the section shows a "Connect Tailscale" state and the rest of Print Ops is unaffected.
  *
  * Auth: the Nerve key is typed in by the owner and held in page memory only (never storage, cookies,
- * the bundle, or Railway). Sent as header x-nerve-key. Nerve v3 only allows this origin to GET
- * read-only paths; every write (send, archive, delete) stays on the Mac mini under the FB lock.
+ * the bundle, or Railway). Sent as header x-nerve-key. The Mac mini only allows this origin to GET
+ * read-only paths. Print Ops never sends, archives or deletes through this API.
  */
 export const NERVE_SECTION_ENABLED = import.meta.env.VITE_NERVE_SECTION_ENABLED === "true";
 export const NERVE_API_BASE: string =
@@ -63,7 +63,8 @@ export type NerveModel = {
     status: { red: string[]; stale: string[]; unknown: string[]; allClear: boolean; oldest?: { title: string; ageS: number } };
     sections: Array<{ id: string; title: string; tiles: NerveTile[] }>;
   };
-  agents: Array<{ name: string; role?: string; status: string; model?: string; last_heartbeat_at?: string; paused_at?: string | null }>;
+  agents: Array<{ name: string; role?: string; status: string; model?: string; adapter_type?: string; b?: number; s?: number; last_heartbeat_at?: string; paused_at?: string | null; planned?: boolean }>;
+  needs?: Array<{ t: string; s?: string; st?: string }>;
   runs: NerveRun[];
   issues: NerveIssue[];
   runCounts: Array<{ agent: string; status: string; n: number }>;
@@ -73,16 +74,19 @@ export type NerveModel = {
   refresh?: { running: boolean; dataAgeMs: number; lastResult?: string; staleMin: number };
 };
 
-/* GET /api/messages and /api/messages/thread (read-only). */
+/* GET /api/messages and /api/messages/thread (read-only). Rendered by the Print Ops Inbox (Chats tab), not by Nerve. */
 export type NerveThreadSummary = {
-  uid: string; name: string; listing: string; when: string; owes: boolean; handled: boolean;
-  category: string; stage: string; last: string; lastSpeaker: string; archived: boolean; deleted: boolean; source: string;
+  uid: string; name: string; listing: string; when: string; at?: string | null; sortAt?: string | null; owes: boolean; handled: boolean;
+  category: string; stage: string; last: string; lastSpeaker: string; archived: boolean; deleted: boolean; softDeleted?: boolean; source: string;
 };
 export type NerveThreadList = { updated: string; threads: NerveThreadSummary[] };
-export type NerveMessage = { id: string; who: string; when: string; at: number; text: string; divider: boolean; dividerLabel: string };
+export type NerveMessage = {
+  id: string; who: string; when: string; at: number; text: string; divider: boolean; dividerLabel: string;
+  attachments?: Array<{ kind?: string; label?: string }>;
+};
 export type NerveThread = {
   uid: string; name: string; listing: string; stage: string; owes: boolean; summary: string; nextAction: string;
-  messages: NerveMessage[]; total: number; hasMore: boolean; updated: string;
+  messages: NerveMessage[]; total?: number; hasMore: boolean; updated: string; archived?: boolean; deleted?: boolean;
 };
-export type NerveRun = { id: string; agent: string; status: string; error_code?: string | null; created_at: string; finished_at?: string | null; issue?: string; title?: string };
+export type NerveRun = { id: string; agent: string; status: string; error_code?: string | null; err?: string; created_at: string; started_at?: string | null; finished_at?: string | null; issue?: string; title?: string };
 export type NerveIssue = { identifier: string; title: string; status: string; agent: string; updated_at: string };
