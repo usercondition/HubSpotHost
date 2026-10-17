@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { getNerveKey, nerveGet, onNerveKeyChange, setNerveKey } from "@/lib/nerve";
 import type { NerveError, NerveModel, NerveTile } from "@/lib/nerve";
 
-type Tone = "neutral" | "good" | "warn" | "bad";
+type Tone = "neutral" | "good" | "bad";
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "chat", label: "Chat", icon: MessagesSquare },
@@ -24,7 +24,6 @@ const toneOf = (s: string | undefined): Tone => {
   const v = String(s || "").toLowerCase();
   if (["ok", "up", "green", "running", "idle", "good"].includes(v)) return "good";
   if (["red", "down", "bad", "error", "failed"].includes(v)) return "bad";
-  if (["stale", "grace", "warn", "yellow", "late", "paused"].includes(v)) return "warn";
   return "neutral";
 };
 const age = (s?: number) => (s == null ? "" : s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`);
@@ -58,7 +57,7 @@ function ErrorState({ err, retry }: { err: NerveError; retry: () => void }) {
   return (
     <Panel title={err.kind === "offline" ? "Connect Tailscale" : "Nerve unavailable"} description={err.message} testId="panel-nerve-error">
       <div className="flex items-center gap-2">
-        <StatusPill tone={err.kind === "offline" ? "warn" : "bad"} icon={WifiOff} label={err.kind === "offline" ? "Off tailnet" : "Error"} />
+        <StatusPill tone={err.kind === "offline" ? "neutral" : "bad"} icon={WifiOff} label={err.kind === "offline" ? "Off tailnet" : "Error"} />
         <Button variant="outline" size="sm" onClick={retry} data-testid="button-nerve-retry">
           <RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry
         </Button>
@@ -87,8 +86,8 @@ function Overview({ m }: { m: NerveModel }) {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="System" value={v.systemRed.length ? `${v.systemRed.length} red` : "All clear"} hint={v.systemRed.join(", ") || "No red checks"} icon={Activity} tone={v.systemRed.length ? "bad" : "good"} testId="stat-nerve-system" />
-        <StatCard label="Stale / unknown" value={`${v.stale.length} / ${v.unknown.length}`} hint={[...v.stale, ...v.unknown].join(", ") || "Fresh"} icon={HeartPulse} tone={v.stale.length || v.unknown.length ? "warn" : "good"} testId="stat-nerve-stale" />
-        <StatCard label="Needs you" value={String(v.needs)} hint="Open items on the Nerve board" icon={LayoutDashboard} tone={v.needs ? "warn" : "good"} testId="stat-nerve-needs" />
+        <StatCard label="Stale / unknown" value={`${v.stale.length} / ${v.unknown.length}`} hint={[...v.stale, ...v.unknown].join(", ") || "Fresh"} icon={HeartPulse} tone="neutral" testId="stat-nerve-stale" />
+        <StatCard label="Needs you" value={String(v.needs)} hint="Open items on the Nerve board" icon={LayoutDashboard} tone="neutral" testId="stat-nerve-needs" />
         <StatCard label="Agents running" value={`${running} / ${m.agents.length}`} hint="Paperclip agents" icon={Bot} testId="stat-nerve-agents" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
