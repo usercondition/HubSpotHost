@@ -1180,7 +1180,8 @@
 
   /* Settings surface — Patreon-adjacent: subnav + large title + soft card */
   .settings-shell {
-    @apply grid min-h-full gap-0 md:grid-cols-[13.5rem_minmax(0,1fr)];
+    /* minmax(0,1fr) on phones: the scrolling section nav must not widen the page. */
+    @apply grid min-h-full grid-cols-[minmax(0,1fr)] gap-0 md:grid-cols-[13.5rem_minmax(0,1fr)];
   }
 
   .settings-nav {
@@ -1192,7 +1193,7 @@
   }
 
   .settings-nav-link {
-    @apply flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground;
+    @apply flex w-auto items-center md:w-full rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground;
   }
 
   .settings-nav-link[data-active="true"] {
@@ -2307,3 +2308,105 @@
   background: hsl(var(--background) / 0.55); color: inherit;
 }
 .imsg-me .imsg-link { background: hsl(0 0% 100% / 0.22); }
+
+/* ------------------------------------------------------------------------
+ * Phones (< md, same breakpoint as the phone shell). Desktop is untouched.
+ * Touch targets >= 44px, 16px form text (no iOS zoom-on-focus), no sideways scroll.
+ * ---------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  button:not([role="switch"]):not([role="checkbox"]):not([role="radio"]):not(.text-left):not(.stack-row button),
+  [role="tab"]:not(.prints-library-switch a),
+  [role="button"],
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+  .ops-phone-bar a,
+  a.inline-flex:not(.prints-library-switch a),
+  a.flex:not(.prints-library-switch a) {
+    min-height: 44px;
+  }
+  button:not([role="switch"]):not([role="checkbox"]):not([role="radio"]):not(.stack-row button),
+  .ops-phone-bar a {
+    min-width: 44px;
+  }
+  /* Text-style buttons inside dense rows (names, dates, checklists): a little taller, plus a 44px invisible tap band,
+     so rows stay compact and neighbouring lines overlap by at most a few pixels. */
+  button.text-left:not([role="switch"]):not([role="checkbox"]):not([role="radio"]):not(.stack-row button) {
+    min-height: 32px;
+    position: relative;
+  }
+  button.text-left:not([role="switch"]):not([role="checkbox"]):not([role="radio"])::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
+  }
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]) {
+    font-size: 16px;
+  }
+  a.inline-flex:not(.prints-library-switch a) {
+    min-width: 44px;
+  }
+  .ops-more-sheet a,
+  .ops-more-sheet button,
+  .work-hub-open {
+    min-height: 44px;
+  }
+  /* Inline text links keep their look; an invisible 44px tap area is added around them. */
+  .tap-ext,
+  .imsg-link {
+    position: relative;
+  }
+  .tap-ext::after,
+  .imsg-link::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+  /* Priority rows and the Prints | Library switch have a fixed compact design (tests/layout-alignment):
+     their boxes keep their size and get an invisible 44px tap band instead. */
+  .stack-row button,
+  .prints-library-switch a {
+    position: relative;
+  }
+  .stack-row button::after,
+  .prints-library-switch a::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  /* Switches/checkboxes keep their look; the tap area grows around them. */
+  [role="switch"],
+  [role="checkbox"],
+  [role="radio"] {
+    position: relative;
+  }
+  [role="switch"]::after,
+  [role="checkbox"]::after,
+  [role="radio"]::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
+  }
+  pre,
+  code {
+    overflow-wrap: anywhere;
+  }
+}

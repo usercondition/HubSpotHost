@@ -106,7 +106,7 @@ function QueueCard({
           {needsPlates ? (
             <Link
               href={printsDealHref(item.dealId)}
-              className="text-xs font-semibold text-primary"
+              className="tap-ext text-xs font-semibold text-primary"
               data-testid={`link-queue-plates-${item.dealId}`}
               onClick={(event) => event.stopPropagation()}
             >
@@ -351,7 +351,7 @@ export default function ProductionQueuePage() {
 
             <p className="text-sm text-muted-foreground" data-testid="text-queue-stack-link">
               Ready to ship ({data.shipReady.length}) and blocked ({data.blocked.length}) orders are on the{" "}
-              <Link href={stackHref()} className="font-medium text-primary hover:underline" data-testid="link-queue-stack">
+              <Link href={stackHref()} className="tap-ext font-medium text-primary hover:underline" data-testid="link-queue-stack">
                 Stack
               </Link>
               .
