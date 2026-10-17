@@ -63,10 +63,26 @@ export type NerveModel = {
     status: { red: string[]; stale: string[]; unknown: string[]; allClear: boolean; oldest?: { title: string; ageS: number } };
     sections: Array<{ id: string; title: string; tiles: NerveTile[] }>;
   };
-  agents: Array<{ name: string; status: string }>;
+  agents: Array<{ name: string; role?: string; status: string; model?: string; last_heartbeat_at?: string; paused_at?: string | null }>;
+  runs: NerveRun[];
+  issues: NerveIssue[];
   runCounts: Array<{ agent: string; status: string; n: number }>;
   hc: Array<{ name: string; status: string; last_ping?: string }>;
   services: Array<{ name: string; what?: string; monitor?: string; state: string; red?: string }>;
   verdict: { systemRed: string[]; stale: string[]; unknown: string[]; needs: number };
   refresh?: { running: boolean; dataAgeMs: number; lastResult?: string; staleMin: number };
 };
+
+/* GET /api/messages and /api/messages/thread (read-only). */
+export type NerveThreadSummary = {
+  uid: string; name: string; listing: string; when: string; owes: boolean; handled: boolean;
+  category: string; stage: string; last: string; lastSpeaker: string; archived: boolean; deleted: boolean; source: string;
+};
+export type NerveThreadList = { updated: string; threads: NerveThreadSummary[] };
+export type NerveMessage = { id: string; who: string; when: string; at: number; text: string; divider: boolean; dividerLabel: string };
+export type NerveThread = {
+  uid: string; name: string; listing: string; stage: string; owes: boolean; summary: string; nextAction: string;
+  messages: NerveMessage[]; total: number; hasMore: boolean; updated: string;
+};
+export type NerveRun = { id: string; agent: string; status: string; error_code?: string | null; created_at: string; finished_at?: string | null; issue?: string; title?: string };
+export type NerveIssue = { identifier: string; title: string; status: string; agent: string; updated_at: string };

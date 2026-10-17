@@ -90,6 +90,7 @@ function App() {
               <Route path="/order-form/:token" component={ClientOrder} />
               <Route path="/client-order/:token" component={ClientOrder} />
               {/* Nerve: full-window takeover with its own shell (flag off by default). */}
+              {NERVE_SECTION_ENABLED ? <Route path="/nerve/:tab/:sub" component={NervePage} /> : null}
               {NERVE_SECTION_ENABLED ? <Route path="/nerve/:tab" component={NervePage} /> : null}
               {NERVE_SECTION_ENABLED ? <Route path="/nerve" component={NervePage} /> : null}
               <Route component={ShellRoutes} />
