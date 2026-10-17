@@ -310,7 +310,7 @@ export default function NervePage() {
       <main className="min-w-0 flex-1 overflow-y-auto pb-24 md:pb-8">
         <header className="px-4 pb-2 pt-4 md:px-8 md:pt-8">
           <h1 className="ops-page-title" data-testid="text-nerve-title">{current.label}</h1>
-          <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">Loads from the Mac mini through Print Ops, read-only. Unlocks with your Print Ops key.</p>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">Loads from the Mac mini over Tailscale, read-only. Unlocks with your Print Ops key.</p>
         </header>
         <div className="px-4 md:px-8">{body}</div>
       </main>

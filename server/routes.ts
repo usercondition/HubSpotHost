@@ -78,7 +78,7 @@ import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerInboxRoutes } from "./lib/inbox-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
-import { registerNerveProxyRoutes } from "./lib/nerve-proxy";
+import { registerNerveSessionKeyRoute } from "./lib/nerve-session-key";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
 import { registerPrinterRoutes } from "./lib/printer-routes";
 import { firstIssue } from "./lib/validation";
@@ -1093,7 +1093,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerExpenseRoutes(app, rejectUnsecuredIntake);
   registerInboxRoutes(app, rejectUnsecuredIntake, rejectUnsecuredOwnerDigestCron);
   registerOpsSummaryRoutes(app);
-  registerNerveProxyRoutes(app);
+  registerNerveSessionKeyRoute(app);
 
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
