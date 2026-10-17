@@ -2,54 +2,48 @@
  * Nerve section (feature flag, OFF by default).
  *
  * Enable at build time with VITE_NERVE_SECTION_ENABLED=true (Railway variable, needs a rebuild).
- * Data never passes through this server: the browser fetches the Mac mini's Nerve API over
- * Tailscale (option A in ~/nerve-center/docs/plan-nerve-printops-merge-20261017.md). Off the tailnet
- * the section shows a "Connect Tailscale" state and the rest of Print Ops is unaffected.
- *
- * Auth: the Nerve key is typed in by the owner and held in page memory only (never storage, cookies,
- * the bundle, or Railway). Sent as header x-nerve-key. The Mac mini only allows this origin to GET
- * read-only paths. Print Ops never sends, archives or deletes through this API.
+ * Data goes through the Print Ops server: GET /api/nerve/* (server/lib/nerve-proxy.ts) authenticated with
+ * the normal Print Ops owner code. The server adds the Nerve key from its own env (NERVE_KEY); the
+ * browser never asks for, holds, or stores a Nerve key. Read-only paths only.
  */
 export const NERVE_SECTION_ENABLED = import.meta.env.VITE_NERVE_SECTION_ENABLED === "true";
-export const NERVE_API_BASE: string =
-  (import.meta.env.VITE_NERVE_API_BASE as string | undefined) || "https://miguels-mac-mini.tailc0d52c.ts.net/nerve";
-
-let nerveKey: string | null = null;
-const listeners = new Set<() => void>();
-export function getNerveKey() {
-  return nerveKey;
-}
-export function setNerveKey(k: string | null) {
-  nerveKey = k && k.trim() ? k.trim() : null;
-  listeners.forEach((fn) => fn());
-}
-export function onNerveKeyChange(fn: () => void) {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
+/** Legacy storage names an older build might have used for a Nerve key. Removed on load; never written. */
+const LEGACY_NERVE_STORAGE_KEYS = ["nerve-key", "nerveKey", "print-ops-nerve-key", "x-nerve-key"];
+export function clearLegacyNerveKeyStorage() {
+  for (const store of [globalThis.localStorage, globalThis.sessionStorage]) {
+    if (!store) continue;
+    for (const k of LEGACY_NERVE_STORAGE_KEYS) {
+      try {
+        store.removeItem(k);
+      } catch {
+        /* blocked storage */
+      }
+    }
+  }
 }
 
 export type NerveError = { kind: "locked" | "offline" | "error"; message: string };
 
-export async function nerveGet<T>(path: string): Promise<T> {
-  if (!nerveKey) throw { kind: "locked", message: "Enter the Nerve key to load this section." } satisfies NerveError;
+/**
+ * Read a Nerve path through the Print Ops server. ownerCode is the Print Ops key already in the owner
+ * session. A Nerve-side failure is never reported as 401, so it can't lock the Print Ops session.
+ */
+export async function nerveGet<T>(path: string, ownerCode: string): Promise<T> {
+  if (!ownerCode) throw { kind: "locked", message: "Unlock Print Ops to load Nerve." } satisfies NerveError;
   let res: Response;
   try {
-    res = await fetch(NERVE_API_BASE + path, {
+    res = await fetch("/api/nerve" + path, {
       method: "GET",
-      headers: { "x-nerve-key": nerveKey },
-      credentials: "omit",
+      headers: { "x-paid-order-access-code": ownerCode },
       cache: "no-store",
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(15000),
     });
   } catch {
-    throw { kind: "offline", message: "Can't reach the Mac mini. Connect Tailscale on this device and retry." } satisfies NerveError;
+    throw { kind: "offline", message: "Can't reach Print Ops. Check your connection and retry." } satisfies NerveError;
   }
-  if (res.status === 401) {
-    setNerveKey(null);
-    throw { kind: "locked", message: "Nerve key was not accepted." } satisfies NerveError;
-  }
+  if (res.status === 401) throw { kind: "locked", message: "Print Ops key was not accepted." } satisfies NerveError;
+  if (res.status === 502) throw { kind: "offline", message: "The server can't reach Nerve on the Mac mini right now." } satisfies NerveError;
+  if (res.status === 503) throw { kind: "error", message: "Nerve is not configured on the server yet." } satisfies NerveError;
   if (!res.ok) throw { kind: "error", message: `Nerve answered ${res.status}.` } satisfies NerveError;
   return (await res.json()) as T;
 }

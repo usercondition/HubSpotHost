@@ -7,7 +7,7 @@ import { nerveGet } from "@/lib/nerve";
 import type { NerveError, NerveThread, NerveThreadList, NerveThreadSummary } from "@/lib/nerve";
 import { attachmentLabel, buildChatItems, initialOf, listTime, splitLinks, visibleThreads } from "@/lib/nerve-chat";
 import type { ChatItem } from "@/lib/nerve-chat";
-import { NerveErrorState, NerveUnlock, useNerveKey } from "@/components/nerve-common";
+import { NerveErrorState, NerveUnlock, useNerveAccess } from "@/components/nerve-common";
 
 /**
  * Inbox > Chats: iMessage-style, read-only view of the FB Marketplace threads on the Mac mini.
@@ -15,11 +15,11 @@ import { NerveErrorState, NerveUnlock, useNerveKey } from "@/components/nerve-co
  * replies will come later through the approval flow.
  */
 export function InboxChat({ selected, onSelect }: { selected: string | null; onSelect: (uid: string | null) => void }) {
-  const key = useNerveKey();
+  const key = useNerveAccess();
   const [q, setQ] = useState("");
   const list = useQuery<NerveThreadList, NerveError>({
     queryKey: ["nerve", "/api/messages", key],
-    queryFn: () => nerveGet<NerveThreadList>("/api/messages"),
+    queryFn: () => nerveGet<NerveThreadList>("/api/messages", key),
     enabled: !!key,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
@@ -34,7 +34,7 @@ export function InboxChat({ selected, onSelect }: { selected: string | null; onS
   const hidden = !!selected && !!list.data && !visibleThreads(list.data.threads).some((t) => t.uid === selected);
   const uid = hidden ? null : selected;
 
-  if (!key) return <NerveUnlock title="Unlock chats" description="Nerve key, held in this tab's memory only. Works on a device connected to Tailscale." />;
+  if (!key) return <NerveUnlock title="Unlock Print Ops to see chats" />;
   if (list.isLoading) return <Skeleton className="h-[60vh] w-full" />;
   if (list.error) return <NerveErrorState err={list.error} retry={() => list.refetch()} />;
   const owes = threads.filter((t) => t.owes).length;
@@ -130,11 +130,11 @@ function ThreadRow({ t, active, onClick }: { t: NerveThreadSummary; active: bool
 }
 
 function Conversation({ uid, onBack }: { uid: string; onBack: () => void }) {
-  const key = useNerveKey();
+  const key = useNerveAccess();
   const [showSummary, setShowSummary] = useState(false);
   const thread = useQuery<NerveThread, NerveError>({
     queryKey: ["nerve", "/api/messages/thread", uid, key],
-    queryFn: () => nerveGet<NerveThread>(`/api/messages/thread?uid=${encodeURIComponent(uid)}&limit=80`),
+    queryFn: () => nerveGet<NerveThread>(`/api/messages/thread?uid=${encodeURIComponent(uid)}&limit=80`, key),
     enabled: !!key,
     refetchInterval: 30_000,
     retry: false,

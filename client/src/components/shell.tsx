@@ -214,7 +214,7 @@ const NAV: Array<{
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
   { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Office", phone: "more" },
   ...(NERVE_SECTION_ENABLED
-    ? [{ href: "/nerve", label: "Nerve", title: "Nerve (Mac mini, Tailscale only)", icon: Radar, testId: "link-nav-nerve", group: "Office" as NavGroup, phone: "more" as const }]
+    ? [{ href: "/nerve", label: "Nerve", title: "Nerve (Mac mini, read-only)", icon: Radar, testId: "link-nav-nerve", group: "Office" as NavGroup, phone: "more" as const }]
     : []),
 ];
 

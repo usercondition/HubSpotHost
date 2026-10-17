@@ -39,8 +39,7 @@ import NotFound from "@/pages/not-found";
 /** Owner-facing routes live inside the operations shell. */
 function ShellRoutes() {
   return (
-    <OwnerSessionProvider>
-      <AppShell>
+    <AppShell>
         <Switch>
           <Route path="/" component={Dashboard} />
           <Route path="/stack" component={PriorityStackPage} />
@@ -74,7 +73,6 @@ function ShellRoutes() {
           <Route component={NotFound} />
         </Switch>
       </AppShell>
-    </OwnerSessionProvider>
   );
 }
 
@@ -84,6 +82,8 @@ function App() {
       <ThemeProvider>
         <TooltipProvider>
           <Toaster />
+          {/* One owner session for Print Ops and Nerve: Nerve unlocks with the same Print Ops key. */}
+          <OwnerSessionProvider>
           <Router hook={useAppHashLocation}>
             <Switch>
               {/* Public buyer form. Legacy /client-order path still works. */}
@@ -96,6 +96,7 @@ function App() {
               <Route component={ShellRoutes} />
             </Switch>
           </Router>
+          </OwnerSessionProvider>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

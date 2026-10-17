@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { nerveGet } from "@/lib/nerve";
 import type { NerveError, NerveModel, NerveTile } from "@/lib/nerve";
-import { NerveErrorState, NerveUnlock, useNerveKey } from "@/components/nerve-common";
+import { NerveErrorState, NerveUnlock, useNerveAccess } from "@/components/nerve-common";
 
 type Tone = "neutral" | "good" | "bad";
 const TABS = [
@@ -236,10 +236,10 @@ export default function NervePage() {
   const [, p2] = useRoute<{ tab: string; sub: string }>("/nerve/:tab/:sub");
   const params = p2 ?? p1;
   const tab: TabId = (TABS.find((t) => t.id === params?.tab)?.id ?? "overview") as TabId;
-  const key = useNerveKey();
+  const key = useNerveAccess();
   const q = useQuery<NerveModel, NerveError>({
     queryKey: ["nerve", "/api/v3", key],
-    queryFn: () => nerveGet<NerveModel>("/api/v3"),
+    queryFn: () => nerveGet<NerveModel>("/api/v3", key),
     enabled: !!key,
     refetchInterval: 60_000,
     retry: false,
@@ -310,7 +310,7 @@ export default function NervePage() {
       <main className="min-w-0 flex-1 overflow-y-auto pb-24 md:pb-8">
         <header className="px-4 pb-2 pt-4 md:px-8 md:pt-8">
           <h1 className="ops-page-title" data-testid="text-nerve-title">{current.label}</h1>
-          <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">Loads from the Mac mini over Tailscale; nothing is stored on Print Ops.</p>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-[hsl(var(--text-2))]">Loads from the Mac mini through Print Ops, read-only. Unlocks with your Print Ops key.</p>
         </header>
         <div className="px-4 md:px-8">{body}</div>
       </main>
