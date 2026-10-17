@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Switch, Route, Router } from "wouter";
+import NervePage from "@/pages/nerve";
+import { NERVE_SECTION_ENABLED } from "@/lib/nerve";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { useAppHashLocation } from "./lib/hash-location";
@@ -69,6 +71,8 @@ function ShellRoutes() {
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
           <Route path="/performance" component={PerformanceRoute} />
           <Route path="/setup" component={Setup} />
+          {NERVE_SECTION_ENABLED ? <Route path="/nerve/:tab" component={NervePage} /> : null}
+          {NERVE_SECTION_ENABLED ? <Route path="/nerve" component={NervePage} /> : null}
           <Route component={NotFound} />
         </Switch>
       </AppShell>
