@@ -397,7 +397,7 @@ export default function OrderLinks() {
               >
                 <p className="mb-3 text-xs text-muted-foreground">
                   Already have the buyer’s details?{" "}
-                  <Link href="/paid-orders" className="hs-link font-medium" data-testid="link-intake-to-manual">
+                  <Link href="/paid-orders" className="tap-ext hs-link font-medium" data-testid="link-intake-to-manual">
                     Use Manual entry
                   </Link>
                   .
