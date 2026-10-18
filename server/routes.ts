@@ -80,6 +80,7 @@ import { registerStlQuoteRoutes } from "./lib/stl-quote-routes";
 import { registerInboxRoutes } from "./lib/inbox-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
 import { registerNerveSessionKeyRoute } from "./lib/nerve-session-key";
+import { registerDriveFilesRoutes } from "./lib/drive-files";
 import { registerPerformanceRoutes, refreshPrintFileStagesFromHubSpot } from "./lib/performance-routes";
 import { registerPrinterRoutes } from "./lib/printer-routes";
 import { firstIssue } from "./lib/validation";
@@ -1096,6 +1097,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerInboxRoutes(app, rejectUnsecuredIntake, rejectUnsecuredOwnerDigestCron);
   registerOpsSummaryRoutes(app);
   registerNerveSessionKeyRoute(app);
+  registerDriveFilesRoutes(app, rejectUnsecuredIntake);
 
   /**
    * Owner-only returning-buyer lookup. Matches a Marketplace username to the
