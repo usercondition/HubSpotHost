@@ -243,3 +243,49 @@ test("risk text joins card risk, analysis flags and note", () => {
   assert.equal(live.riskText(c), "Wants it shipped tomorrow · low budget · asked twice");
   assert.equal(live.riskText(normalizeInboxPayload({ threads: { b: card("b") } }).cards[0]), "");
 });
+
+test("inbox gaps: photo/attachment-only messages are kept (thumbnail or placeholder) and not-in-latest chats are flagged", () => {
+  const p = normalizeInboxPayload({
+    threads: {
+      a: card("a", {
+        full_history: true,
+        thread: [
+          { who: "buyer", when: "x", at: "2026-10-17T14:30", text: "pic", attachments: [] },
+          { who: "buyer", when: "x", at: "2026-10-17T14:31", text: "", attachments: [{ kind: "image", thumb: "https://scontent.example/t.jpg", url: "javascript:alert(1)" }] },
+          { who: "buyer", when: "x", at: "2026-10-17T14:32", text: "", attachments: [{ kind: "weird" }] },
+          { who: "buyer", when: "x", at: "2026-10-17T14:33", text: "   " },
+        ],
+      }),
+      b: card("b", { not_in_latest: true, last_scraped: "2026-10-17T20:07:44" }),
+    },
+  });
+  const a = p.cards.find((c) => c.id === "a")!;
+  assert.equal(a.history.length, 3, "blank row dropped, attachment rows kept");
+  assert.equal(a.history[1].attachments?.[0].thumb, "https://scontent.example/t.jpg");
+  assert.equal(a.history[1].attachments?.[0].url, "", "non-https url rejected");
+  assert.equal(a.history[2].attachments?.[0].kind, "attachment");
+  assert.equal(a.notInLatestRead, false);
+  const b = p.cards.find((c) => c.id === "b")!;
+  assert.equal(b.notInLatestRead, true);
+  assert.equal(b.lastSeenInList, "2026-10-17T20:07:44");
+  const msgs = live.cardMessages({ ...a, threadUrl: "https://www.facebook.com/marketplace/inbox" });
+  assert.equal(msgs[1].attachments?.[0].thumb, "https://scontent.example/t.jpg");
+  assert.equal(msgs[2].attachments?.[0].href, "https://www.facebook.com/marketplace/inbox", "placeholder links to the chat");
+});
+
+test("inbox gaps: refresh stays queued while the Mac reports the FB browser busy", () => {
+  store.resetInboxStoreForTests();
+  const r = store.requestInboxRefresh("open", T0);
+  assert.equal(r.queued, true);
+  store.noteFbBusy(true, "FB browser locked by iris-publish", plus(1000));
+  assert.equal(store.latestRefresh(plus(1000))?.status, "queued");
+  assert.match(store.latestRefresh(plus(1000))?.detail ?? "", /^Waiting: FB browser locked/);
+  assert.match(live.refreshLabel(store.latestRefresh(plus(1000))), /Waiting for the FB browser/);
+  // Busy for 45 min: not expired (would be after 30 min when the Mac is simply offline).
+  store.noteFbBusy(true, "FB browser locked by iris-publish", plus(45 * 60_000));
+  assert.equal(store.latestRefresh(plus(45 * 60_000))?.status, "queued");
+  store.noteFbBusy(false, "", plus(46 * 60_000));
+  const claimed = store.claimRefresh(plus(46 * 60_000));
+  assert.equal(claimed?.status, "running");
+  assert.equal(claimed?.detail, "");
+});

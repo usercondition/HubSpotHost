@@ -27,9 +27,16 @@ export function parsePacific(at: string | null | undefined): number | null {
 }
 
 /** Card history (or `recent` from an older Mac script) -> chat messages for buildChatItems. */
-export function cardMessages(card: Pick<InboxCardView, "history" | "recent">): ChatMessage[] {
+export function cardMessages(card: Pick<InboxCardView, "history" | "recent"> & { threadUrl?: string }): ChatMessage[] {
   const src: InboxMessage[] = card.history?.length ? card.history : card.recent ?? [];
-  return src.map((m, i) => ({ id: `h-${i}`, who: isMine(m.who) ? "me" : "them", when: m.when, at: parsePacific(m.at), text: m.text }));
+  return src.map((m, i) => {
+    const out: ChatMessage = { id: `h-${i}`, who: isMine(m.who) ? "me" : "them", when: m.when, at: parsePacific(m.at), text: m.text };
+    if (m.attachments?.length) {
+      // Thumbnail when the Mac captured one; otherwise a placeholder that links to the chat on Facebook.
+      out.attachments = m.attachments.map((a) => ({ kind: a.kind, label: a.label, thumb: a.thumb || undefined, href: a.url || card.threadUrl || undefined }));
+    }
+    return out;
+  });
 }
 
 export type LiveThreadRow = ChatThreadRow & { card: InboxCardView };
@@ -79,7 +86,7 @@ const t = (iso: string | null | undefined) => {
 
 export function refreshLabel(r: InboxRefreshView | null | undefined): string {
   if (!r) return "";
-  if (r.status === "queued") return "Refreshing… waiting for the Mac";
+  if (r.status === "queued") return /^Waiting:/.test(r.detail || "") ? `Queued. ${r.detail.replace(/^Waiting:\s*/, "Waiting for the FB browser: ")}` : "Refreshing… waiting for the Mac";
   if (r.status === "running") return "Refreshing… reading Facebook";
   if (r.status === "done") return `Refreshed ${t(r.finishedAt)}`;
   return `Refresh failed${r.detail ? `: ${r.detail}` : ""}`;

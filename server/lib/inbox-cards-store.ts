@@ -271,10 +271,16 @@ function expireStale(now: Date): void {
   db()
     .prepare("UPDATE inbox_refresh_requests SET status='failed', detail='No result from the Mac within 10 min', finished_at=? WHERE status='running' AND started_at < ?")
     .run(now.toISOString(), cut);
+  // Queued and never picked up: failed after 30 min, or after 4 h when it is waiting for a busy FB browser
+  // (the Mac marked it "Waiting: ..." via fbBusy; it is handed out as soon as the browser is free).
   const qcut = new Date(now.getTime() - 30 * 60_000).toISOString();
+  const wcut = new Date(now.getTime() - 4 * 60 * 60_000).toISOString();
   db()
-    .prepare("UPDATE inbox_refresh_requests SET status='failed', detail='Mac did not pick this up within 30 min', finished_at=? WHERE status='queued' AND requested_at < ?")
-    .run(now.toISOString(), qcut);
+    .prepare(
+      `UPDATE inbox_refresh_requests SET status='failed', detail=CASE WHEN detail LIKE 'Waiting:%' THEN 'FB browser stayed busy for 4 h; tap Refresh again' ELSE 'Mac did not pick this up within 30 min' END, finished_at=?
+       WHERE status='queued' AND ((detail NOT LIKE 'Waiting:%' AND requested_at < ?) OR requested_at < ?)`,
+    )
+    .run(now.toISOString(), qcut, wcut);
   const ocut = new Date(now.getTime() - OUTBOUND_STALE_MS).toISOString();
   db()
     .prepare(
@@ -321,13 +327,27 @@ export function requestInboxRefresh(reason: "open" | "manual", now = new Date())
   return { queued: true, refresh: latestRefresh(now)! };
 }
 
+/**
+ * The Mac reports whether its FB browser is busy (fb_browser_lifecycle lock held / CDP :9333 in use by another job).
+ * While busy, a queued refresh stays queued (with a "waiting" detail) instead of being handed out.
+ */
+export function noteFbBusy(busy: boolean, detail: string, now = new Date()): void {
+  setMeta("fb_busy_at", busy ? now.toISOString() : "");
+  setMeta("fb_busy_detail", busy ? detail.slice(0, 120) : "");
+  if (busy) {
+    db()
+      .prepare("UPDATE inbox_refresh_requests SET detail=? WHERE status='queued'")
+      .run(`Waiting: ${detail.slice(0, 120) || "FB browser busy with another job"}`);
+  }
+}
+
 /** Mac claims the queued refresh (at most one). */
 export function claimRefresh(now = new Date()): InboxRefreshView | null {
   expireStale(now);
   const r = db().prepare("SELECT * FROM inbox_refresh_requests WHERE status='queued' ORDER BY requested_at LIMIT 1").get() as RefreshRow | undefined;
   if (!r) return null;
-  db().prepare("UPDATE inbox_refresh_requests SET status='running', started_at=? WHERE id=? AND status='queued'").run(now.toISOString(), r.id);
-  return refreshView({ ...r, status: "running", started_at: now.toISOString() });
+  db().prepare("UPDATE inbox_refresh_requests SET status='running', started_at=?, detail='' WHERE id=? AND status='queued'").run(now.toISOString(), r.id);
+  return refreshView({ ...r, status: "running", detail: "", started_at: now.toISOString() });
 }
 
 export function finishRefresh(id: string, ok: boolean, detail: string, now = new Date()): boolean {

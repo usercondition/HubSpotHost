@@ -7,7 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import { buildChatItems, initialOf, listTime, splitLinks, visibleThreads, attachmentLabel } from "@/lib/nerve-chat";
-import type { ChatItem } from "@/lib/nerve-chat";
+import type { ChatAttachment, ChatItem } from "@/lib/nerve-chat";
 import {
   cardMessages,
   cardRows,
@@ -75,8 +75,8 @@ export function InboxChat({
   const rl = refreshLabel(data?.refresh);
 
   return (
-    <div className="imsg grid overflow-hidden rounded-lg border border-border bg-card md:h-[calc(100dvh-15rem)] md:min-h-[28rem] md:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]" data-testid="inbox-chat">
-      <section className={cn("flex min-h-0 flex-col border-border md:border-r", uid && "max-md:hidden")} aria-label="Conversations">
+    <div className="imsg grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-card md:h-[calc(100dvh-15rem)] md:min-h-[28rem] md:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]" data-testid="inbox-chat">
+      <section className={cn("flex min-h-0 min-w-0 flex-col border-border md:border-r", uid && "max-md:hidden")} aria-label="Conversations">
         <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3">
           <div className="min-w-0">
             <h2 className="text-[17px] font-semibold tracking-tight">Messages</h2>
@@ -196,9 +196,12 @@ function ThreadRow({ t, active, onClick }: { t: LiveThreadRow; active: boolean; 
               <span className="truncate text-[15px] font-semibold text-foreground" data-private="name">{t.name}</span>
               {riskText(t.card) ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="Risk flagged" data-testid={`icon-chat-risk-${t.uid}`} /> : null}
             </span>
-            <span className="shrink-0 text-xs text-muted-foreground">{listTime(t.sortAt || t.at) || t.when}</span>
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-testid={`text-chat-time-${t.uid}`}>{listTime(t.sortAt || t.at) || t.when}</span>
           </span>
-          {t.listing ? <span className="block truncate text-xs text-[hsl(var(--text-3))]" data-private="text">{t.listing}</span> : null}
+          {t.listing ? <span className="block min-w-0 truncate text-xs text-[hsl(var(--text-3))]" data-private="text" data-testid={`text-chat-listing-${t.uid}`}>{t.listing}</span> : null}
+          {t.card.notInLatestRead ? (
+            <span className="block truncate text-[11px] text-warn" data-testid={`text-chat-not-latest-${t.uid}`}>Not in latest FB read{t.card.lastSeenInList ? ` · seen ${listTime(sourceIso(t.card.lastSeenInList)) || ""}` : ""}</span>
+          ) : null}
           <span className="line-clamp-2 text-[13px] leading-snug text-muted-foreground" data-private="text">
             {mine ? "You: " : ""}
             {t.last || "Photo"}
@@ -271,6 +274,11 @@ function Conversation({
       ) : null}
       <div className="imsg-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5" data-testid="list-chat-messages">
         {partial ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing recent messages (full history arrives with the next Mac push)</p> : null}
+        {card.notInLatestRead ? (
+          <p className="pb-2 text-center text-[11px] text-warn" data-testid="text-chat-not-latest">
+            Not in the latest Facebook read. Showing the last-known copy{card.lastSeenInList ? ` (seen ${listTime(sourceIso(card.lastSeenInList)) || card.lastSeenInList})` : ""}.
+          </p>
+        ) : null}
         {items.map((it) => (
           <Row key={it.key} it={it} meta={it === lastBubble && it.kind === "bubble" && it.mine && outbound.length === 0 ? "Sent" : ""} />
         ))}
@@ -428,13 +436,42 @@ function Row({ it, meta }: { it: ChatItem; meta: string }) {
         </div>
       ) : null}
       {it.attachments.map((a, i) => (
-        <div key={i} className={cn("imsg-bubble imsg-att", side, it.text ? "mt-[2px]" : "", it.last && i === it.attachments.length - 1 && "imsg-tail")}>
-          <ImageIcon className="h-4 w-4 shrink-0" />
-          <span>{attachmentLabel(a)}</span>
-        </div>
+        <AttachmentBubble key={i} a={a} className={cn("imsg-bubble imsg-att", side, it.text ? "mt-[2px]" : "", it.last && i === it.attachments.length - 1 && "imsg-tail")} />
       ))}
       {meta ? <span className="mt-0.5 px-1 text-[11px] text-muted-foreground">{meta}</span> : null}
     </div>
+  );
+}
+
+/** Photo thumbnail (FB CDN links expire, so fall back to a labelled placeholder) linking to the chat on Facebook. */
+function AttachmentBubble({ a, className }: { a: ChatAttachment; className: string }) {
+  const [broken, setBroken] = useState(false);
+  const label = attachmentLabel(a);
+  const body =
+    a.thumb && !broken ? (
+      <img
+        src={a.thumb}
+        alt={label}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="block max-h-48 max-w-[min(14rem,70vw)] rounded-lg object-cover"
+        data-private="image"
+        data-testid="img-chat-attachment"
+      />
+    ) : (
+      <>
+        <ImageIcon className="h-4 w-4 shrink-0" />
+        <span>{label}</span>
+        {a.href ? <span className="text-[11px] underline opacity-80">Open in Facebook</span> : null}
+      </>
+    );
+  return a.href ? (
+    <a href={a.href} target="_blank" rel="noopener noreferrer" className={cn(className, "inline-flex items-center gap-1.5", a.thumb && !broken && "p-1")} data-testid="link-chat-attachment">
+      {body}
+    </a>
+  ) : (
+    <div className={cn(className, a.thumb && !broken && "p-1")} data-testid="chat-attachment">{body}</div>
   );
 }
 

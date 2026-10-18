@@ -17,7 +17,7 @@ export type ChatThreadRow = {
   softDeleted?: boolean;
 };
 
-export type ChatAttachment = { kind?: string; label?: string };
+export type ChatAttachment = { kind?: string; label?: string; thumb?: string; href?: string };
 export type ChatMessage = {
   id?: string;
   who: string;
@@ -151,6 +151,10 @@ export function initialOf(name: string | undefined): string {
 /** Friendly attachment label: FB scrapes most photos as a bare "Attachment". */
 export function attachmentLabel(a: ChatAttachment): string {
   const l = String(a.label || "").trim();
+  if (!l && a.kind === "video") return "Video";
+  if (!l && a.kind === "sticker") return "Sticker";
+  if (!l && a.kind === "file") return "File";
+  if (!l && a.kind === "attachment") return "Photo or attachment";
   if (!l || /^attachment$/i.test(l)) return "Photo";
   return l;
 }
