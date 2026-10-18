@@ -3,7 +3,7 @@
  * Names are operator-declared — the slice file does not contain part names.
  * STL meshes stay in this browser tab for local 3D preview (not uploaded).
  */
-import { useEffect, useMemo, useState, type Dispatch, type DragEvent, type SetStateAction } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type Dispatch, type DragEvent, type SetStateAction } from "react";
 import {
   Box,
   CheckCircle2,
@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { StlPreview } from "@/components/stl-preview";
 import { useIsPhone } from "@/hooks/use-is-phone";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -26,6 +25,9 @@ import {
 } from "@/lib/stl-folder-import";
 import { normalizeStlFileName } from "@shared/stl-names";
 import { partStatusLabel, type PrintPlateBit, type PrintPlateBitStatus } from "@shared/schema";
+
+/** three.js (~180 KB gz) loads only when a plate preview actually renders, like plate-mesh-view. */
+const StlPreview = lazy(() => import("@/components/stl-preview").then((m) => ({ default: m.StlPreview })));
 
 export type PlateBitSummary = {
   total: number;
@@ -566,6 +568,16 @@ export function PlateBitsPanel({
             className="flex min-h-[min(28rem,50vh)] min-w-0 flex-col lg:min-h-0"
             data-testid={`panel-plate-bit-preview-${recordId}`}
           >
+            <Suspense
+              fallback={
+                <div
+                  className="flex h-full min-h-[min(28rem,50vh)] items-center justify-center rounded-md border border-card-border bg-muted/30 text-xs text-muted-foreground lg:min-h-0"
+                  data-testid="stl-preview-loading"
+                >
+                  Loading 3D preview…
+                </div>
+              }
+            >
             <StlPreview
               file={previewFile}
               label={selectedBit?.label}
@@ -576,6 +588,7 @@ export function PlateBitsPanel({
               }
               className="h-full min-h-[min(28rem,50vh)] lg:min-h-0"
             />
+            </Suspense>
           </div>
         </div>
       ) : null}

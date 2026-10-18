@@ -1,6 +1,6 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
+import { lazyPage, PageFallback } from "@/lib/lazy-page";
 import { Switch, Route, Router } from "wouter";
-import NervePage from "@/pages/nerve";
 import { NERVE_SECTION_ENABLED } from "@/lib/nerve";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -9,38 +9,37 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell, MorePage, ThemeProvider } from "@/components/shell";
 import { OwnerSessionProvider } from "@/hooks/use-owner-session";
-import Dashboard from "@/pages/dashboard";
-import DealsPage from "@/pages/deals";
-import Operations from "@/pages/operations";
-import Setup from "@/pages/setup";
-import PaidOrders from "@/pages/paid-orders";
-import MarketplaceBriefPage from "@/pages/marketplace-brief";
-import InboxPage from "@/pages/inbox";
-import FilesPage from "@/pages/files";
-import OrderLinks from "@/pages/order-links";
-import QuotePage from "@/pages/quote";
-const Performance = lazy(() => import("@/pages/performance"));
-function PerformanceRoute() {
-  return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Stats…</div>}><Performance /></Suspense>;
-}
-import Spending from "@/pages/spending";
-import Prints from "@/pages/prints";
-import PlateLibraryPage from "@/pages/plate-library";
-import PrintersPage from "@/pages/printers";
-import ResinInventoryPage from "@/pages/resin-inventory";
-import ShippingLabelsPage from "@/pages/shipping-labels";
-import ShipmentsPage from "@/pages/shipments";
-import ProductionQueuePage from "@/pages/queue";
-import PriorityStackPage from "@/pages/priority-stack";
-import ClientsPage from "@/pages/clients";
-import ClientOrder from "@/pages/client-order";
-import FloorFocusPage from "@/pages/floor-focus";
-import NotFound from "@/pages/not-found";
+const NervePage = lazyPage(() => import("@/pages/nerve"));
+const Dashboard = lazyPage(() => import("@/pages/dashboard"));
+const DealsPage = lazyPage(() => import("@/pages/deals"));
+const Operations = lazyPage(() => import("@/pages/operations"));
+const Setup = lazyPage(() => import("@/pages/setup"));
+const PaidOrders = lazyPage(() => import("@/pages/paid-orders"));
+const MarketplaceBriefPage = lazyPage(() => import("@/pages/marketplace-brief"));
+const InboxPage = lazyPage(() => import("@/pages/inbox"));
+const FilesPage = lazyPage(() => import("@/pages/files"));
+const OrderLinks = lazyPage(() => import("@/pages/order-links"));
+const QuotePage = lazyPage(() => import("@/pages/quote"));
+const Performance = lazyPage(() => import("@/pages/performance"));
+const Spending = lazyPage(() => import("@/pages/spending"));
+const Prints = lazyPage(() => import("@/pages/prints"));
+const PlateLibraryPage = lazyPage(() => import("@/pages/plate-library"));
+const PrintersPage = lazyPage(() => import("@/pages/printers"));
+const ResinInventoryPage = lazyPage(() => import("@/pages/resin-inventory"));
+const ShippingLabelsPage = lazyPage(() => import("@/pages/shipping-labels"));
+const ShipmentsPage = lazyPage(() => import("@/pages/shipments"));
+const ProductionQueuePage = lazyPage(() => import("@/pages/queue"));
+const PriorityStackPage = lazyPage(() => import("@/pages/priority-stack"));
+const ClientsPage = lazyPage(() => import("@/pages/clients"));
+const ClientOrder = lazyPage(() => import("@/pages/client-order"));
+const FloorFocusPage = lazyPage(() => import("@/pages/floor-focus"));
+const NotFound = lazyPage(() => import("@/pages/not-found"));
 
 /** Owner-facing routes live inside the operations shell. */
 function ShellRoutes() {
   return (
     <AppShell>
+      <Suspense fallback={<PageFallback />}>
         <Switch>
           <Route path="/" component={Dashboard} />
           <Route path="/stack" component={PriorityStackPage} />
@@ -73,12 +72,13 @@ function ShellRoutes() {
             the route until attach uses the same Slice.log + printer + bits path.
           */}
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
-          <Route path="/performance" component={PerformanceRoute} />
+          <Route path="/performance" component={Performance} />
           <Route path="/setup" component={Setup} />
           {/* Phone More page (own route, not an overlay). Desktop redirects to the Work hub. */}
           <Route path="/more" component={MorePage} />
           <Route component={NotFound} />
         </Switch>
+      </Suspense>
       </AppShell>
   );
 }
@@ -92,6 +92,7 @@ function App() {
           {/* One owner session for Print Ops and Nerve: Nerve unlocks with the same Print Ops key. */}
           <OwnerSessionProvider>
           <Router hook={useAppHashLocation}>
+            <Suspense fallback={<PageFallback />}>
             <Switch>
               {/* Public buyer form. Legacy /client-order path still works. */}
               <Route path="/order-form/:token" component={ClientOrder} />
@@ -102,6 +103,7 @@ function App() {
               {NERVE_SECTION_ENABLED ? <Route path="/nerve" component={NervePage} /> : null}
               <Route component={ShellRoutes} />
             </Switch>
+            </Suspense>
           </Router>
           </OwnerSessionProvider>
         </TooltipProvider>

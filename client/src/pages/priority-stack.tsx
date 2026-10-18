@@ -8,7 +8,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { readHashQueryParam, stripDealIdFromLocation } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { StackOrderDrawer } from "@/components/stack-order-drawer";
+import { StackOrderDrawer } from "@/components/lazy-drawers";
 import { Panel } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import {
