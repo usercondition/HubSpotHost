@@ -22,6 +22,8 @@ export type QuotePrinter = {
   /** "manufacturer spec" note shown in settings. */
   specNote: string;
   specUrl: string;
+  /** Manufacturer build volume in mm (W x D x H); null = unknown, fit warning skipped. */
+  buildMm?: { x: number; y: number; z: number } | null;
   parked?: boolean;
 };
 
@@ -56,19 +58,18 @@ const PHROZEN_UPS_GUIDE =
   "https://helpcenter.phrozen3d.com/hc/en-us/articles/33355891695897-Comprehensive-Guide-to-Selecting-an-Uninterruptible-Power-Supply-UPS-for-Your-Phrozen-3D-Printer";
 const MIGHTY_8K = "https://phrozen3d.com/en/products/sonic-mighty-8k";
 const MIGHTY_12K = "https://us.phrozen3d.com/products/sonic-mighty-12k";
-const m8k = "Manufacturer spec: System Power 120 W (DC 24V 5A); Phrozen UPS guide lists Sonic Mighty 8K at 120 W. Same rating used for every Mighty 8K revision.";
-const m12k = "Manufacturer spec: System Power 120 W (DC 24V 5A). Same rating used for Old and New units.";
+const m8k = "Manufacturer spec: System Power 120 W (DC 24V 5A); Phrozen UPS guide lists Sonic Mighty 8K at 120 W. Same rating used for every Mighty 8K revision. Build volume 218 x 123 x 235 mm.";
+const m12k = "Manufacturer spec: System Power 120 W (DC 24V 5A). Same rating used for Old and New units. Build volume 218 x 123 x 235 mm.";
 
 export const DEFAULT_QUOTE_PRINTERS: QuotePrinter[] = [
-  { id: "mega-8k-s", name: "Phrozen Sonic Mega 8K S", watts: 240, secondsPerLayer: 8, specNote: "Manufacturer spec: System Power Max 240 W (AC 100-240V).", specUrl: "https://phrozen3d.com/en/products/sonic-mega-8k-s" },
-  { id: "mighty-12k-new", name: "Phrozen Sonic Mighty 12K New", watts: 120, secondsPerLayer: 8, specNote: m12k, specUrl: MIGHTY_12K },
-  { id: "mighty-12k-old", name: "Phrozen Sonic Mighty 12K Old", watts: 120, secondsPerLayer: 8, specNote: m12k, specUrl: MIGHTY_12K },
-  { id: "mighty-8k-old", name: "Phrozen Sonic Mighty 8K Old", watts: 120, secondsPerLayer: 8, specNote: m8k, specUrl: MIGHTY_8K },
-  { id: "mighty-8k-newx2", name: "Phrozen Sonic Mighty 8K NEWX2", watts: 120, secondsPerLayer: 8, specNote: m8k, specUrl: MIGHTY_8K },
-  { id: "mighty-8k-newx1", name: "Phrozen Sonic Mighty 8K New X1", watts: 120, secondsPerLayer: 8, specNote: m8k, specUrl: MIGHTY_8K },
-  { id: "mighty-8k-newx3", name: "Phrozen Sonic Mighty 8K NEWX3", watts: 120, secondsPerLayer: 8, specNote: m8k, specUrl: MIGHTY_8K },
-  { id: "heygears-reflex", name: "HeyGears (UltraCraft Reflex)", watts: 180, secondsPerLayer: 6, specNote: "Manufacturer spec: UltraCraft Reflex RS rated power 180 W (no separate Turbo figure published; RS rating used). HeyGears lab avg 4.5 s/layer with PAWW10, default set to 6 s.", specUrl: "https://www.heygears.com/hardware/Reflex-RS" },
-  { id: "mighty-revo", name: "Phrozen Sonic Mighty Revo", watts: 240, secondsPerLayer: 8, specNote: "Manufacturer spec: System Power Max 240 W (AC 100-240V); avg 450 layers/hr = 8 s/layer.", specUrl: "https://phrozen3d.com/en/products/sonic-mighty-revo" },
+  { id: "mega-8k-s", name: "Phrozen Sonic Mega 8K S", watts: 240, secondsPerLayer: 8, specNote: "Manufacturer spec: System Power Max 240 W (AC 100-240V); build volume 330 x 185 x 300 mm.", buildMm: { x: 330, y: 185, z: 300 }, specUrl: "https://phrozen3d.com/en/products/sonic-mega-8k-s" },
+  { id: "mighty-12k-new", name: "Phrozen Sonic Mighty 12K New", watts: 120, secondsPerLayer: 8, specNote: m12k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_12K },
+  { id: "mighty-12k-old", name: "Phrozen Sonic Mighty 12K Old", watts: 120, secondsPerLayer: 8, specNote: m12k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_12K },
+  { id: "mighty-8k-old", name: "Phrozen Sonic Mighty 8K Old", watts: 120, secondsPerLayer: 8, specNote: m8k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_8K },
+  { id: "mighty-8k-newx2", name: "Phrozen Sonic Mighty 8K NEWX2", watts: 120, secondsPerLayer: 8, specNote: m8k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_8K },
+  { id: "mighty-8k-newx1", name: "Phrozen Sonic Mighty 8K New X1", watts: 120, secondsPerLayer: 8, specNote: m8k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_8K },
+  { id: "mighty-8k-newx3", name: "Phrozen Sonic Mighty 8K NEWX3", watts: 120, secondsPerLayer: 8, specNote: m8k, buildMm: { x: 218, y: 123, z: 235 }, specUrl: MIGHTY_8K },
+  { id: "heygears-reflex", name: "HeyGears (UltraCraft Reflex)", watts: 180, secondsPerLayer: 6, specNote: "Manufacturer spec: UltraCraft Reflex RS rated power 180 W, build volume 222 x 122 x 228 mm (no separate Turbo figure published; RS rating used). HeyGears lab avg 4.5 s/layer with PAWW10, default set to 6 s.", buildMm: { x: 222, y: 122, z: 228 }, specUrl: "https://www.heygears.com/hardware/Reflex-RS" },
   { id: "formlabs", name: "Formlabs (parked)", watts: null, secondsPerLayer: 8, specNote: "Parked: not used for quotes.", specUrl: "", parked: true },
 ];
 
@@ -105,6 +106,13 @@ const num = (v: unknown, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGE
 };
 const str = (v: unknown, fallback: string, max = 300) => (typeof v === "string" ? v.slice(0, max) : fallback);
 
+function normalizeBuild(v: unknown): { x: number; y: number; z: number } | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const x = num(o.x, NaN, 1, 5000), y = num(o.y, NaN, 1, 5000), z = num(o.z, NaN, 1, 5000);
+  return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z) ? { x, y, z } : null;
+}
+
 /** Merge untrusted input onto defaults, clamping every number. */
 export function normalizeStlQuoteSettings(input: unknown): StlQuoteSettings {
   const d = DEFAULT_STL_QUOTE_SETTINGS;
@@ -123,6 +131,7 @@ export function normalizeStlQuoteSettings(input: unknown): StlQuoteSettings {
         secondsPerLayer: num(p.secondsPerLayer, base?.secondsPerLayer ?? 8, 0.5, 120),
         specNote: str(p.specNote, base?.specNote ?? "", 500),
         specUrl: str(p.specUrl, base?.specUrl ?? "", 500),
+        buildMm: normalizeBuild(p.buildMm === undefined ? base?.buildMm : p.buildMm),
         ...(p.parked ? { parked: true } : {}),
       };
     })
@@ -245,7 +254,30 @@ export type QuoteOptions = {
   /** Override seconds per layer for this quote. */
   secondsPerLayer?: number | null;
   quantity?: number;
+  /** Uniform scale factor, aspect locked (1 = 100%). */
+  scale?: number;
+  /** Each copy ships in its own package (packaging x quantity). */
+  separatePackages?: boolean;
+  addOns?: QuoteAddOns;
 };
+
+/** Optional line items, all included in raw cost before the markups. null/undefined = off. */
+export type QuoteAddOns = {
+  rushUsd?: number | null;
+  /** Base / magnet, charged per copy. */
+  baseMagnetUsdEach?: number | null;
+  finishing?: { hours: number; usdPerHour: number } | null;
+  custom?: { label: string; usd: number } | null;
+};
+
+/** Starting amounts when an add-on is switched on (editable per quote). */
+export const DEFAULT_ADDON_AMOUNTS = { rushUsd: 10, baseMagnetUsdEach: 2, finishingHours: 0.5, finishingUsdPerHour: 15, customUsd: 5 };
+
+export type AddOnLine = { key: "rush" | "baseMagnet" | "finishing" | "custom"; label: string; usd: number; detail: string };
+
+export type Dims = { x: number; y: number; z: number };
+
+export type FitCheck = { status: "fits" | "too-big" | "unknown"; detail: string };
 
 export type QuoteResult = {
   printer: QuotePrinter;
@@ -261,7 +293,15 @@ export type QuoteResult = {
   kwh: number;
   packagingTier: PackagingTier;
   suggestedPackagingTier: PackagingTier;
-  costs: { resin: number; electricity: number; plateTime: number; packaging: number };
+  costs: { resin: number; electricity: number; plateTime: number; packaging: number; addOns: number };
+  addOnLines: AddOnLine[];
+  scale: number;
+  originalDims: Dims;
+  scaledDims: Dims;
+  originalModelMl: number;
+  fit: FitCheck;
+  separatePackages: boolean;
+  notes: string[];
   rawCost: number;
   flatMarkupPct: number;
   flatPrice: number;
@@ -269,10 +309,71 @@ export type QuoteResult = {
   math: Record<string, string>;
 };
 
+const roundDims = (d: Dims): Dims => ({ x: r2(d.x), y: r2(d.y), z: r2(d.z) });
+
 export function suggestPackagingTier(maxSideMm: number, s: Pick<StlQuoteSettings, "packagingMaxMm">): PackagingTier {
   if (maxSideMm <= s.packagingMaxMm.small) return "small";
   if (maxSideMm <= s.packagingMaxMm.medium) return "medium";
   return "large";
+}
+
+/** Overall W x D x H of the parts (largest of each axis). */
+export function overallDims(parts: Array<Pick<QuotePart, "bbox">>): Dims {
+  return {
+    x: Math.max(...parts.map((p) => p.bbox.x)),
+    y: Math.max(...parts.map((p) => p.bbox.y)),
+    z: Math.max(...parts.map((p) => p.bbox.z)),
+  };
+}
+
+export type TargetSizeMode = "percent" | "height" | "longest";
+
+/** Uniform scale factor from a target (aspect locked). Returns 1 for empty/invalid input. */
+export function scaleForTarget(mode: TargetSizeMode, value: number, dims: Dims): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  if (mode === "percent") return value / 100;
+  const base = mode === "height" ? dims.z : Math.max(dims.x, dims.y, dims.z);
+  return base > 0 ? value / base : 1;
+}
+
+/** Scale a part: lengths x s, area x s², volume x s³. */
+export function scalePart<T extends QuotePart>(p: T, s: number): T {
+  return {
+    ...p,
+    volumeMl: p.volumeMl * s ** 3,
+    surfaceAreaMm2: p.surfaceAreaMm2 * s ** 2,
+    heightMm: p.heightMm * s,
+    bbox: { x: p.bbox.x * s, y: p.bbox.y * s, z: p.bbox.z * s },
+  };
+}
+
+/** Does every part fit the printer build volume as modeled (Z up, free to rotate on the plate)? */
+export function checkFit(parts: Array<Pick<QuotePart, "name" | "bbox">>, printer: Pick<QuotePrinter, "name" | "buildMm">): FitCheck {
+  const b = printer.buildMm;
+  if (!b) return { status: "unknown", detail: `No build volume on file for ${printer.name}` };
+  const [bx, by] = [b.x, b.y].sort((m, n) => n - m) as [number, number];
+  const over = parts.filter((p) => {
+    const [px, py] = [p.bbox.x, p.bbox.y].sort((m, n) => n - m) as [number, number];
+    return p.bbox.z > b.z || px > bx || py > by;
+  });
+  if (over.length === 0) return { status: "fits", detail: `Fits ${printer.name} (${b.x} × ${b.y} × ${b.z} mm)` };
+  return {
+    status: "too-big",
+    detail: `${over.map((p) => p.name).join(", ")} exceeds ${printer.name} build volume ${b.x} × ${b.y} × ${b.z} mm. Split, re-orient, or pick a bigger printer.`,
+  };
+}
+
+export function addOnLines(addOns: QuoteAddOns | undefined, qty: number): AddOnLine[] {
+  const out: AddOnLine[] = [];
+  if (!addOns) return out;
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
+  if (ok(addOns.rushUsd)) out.push({ key: "rush", label: "Rush", usd: r2(addOns.rushUsd), detail: "flat" });
+  if (ok(addOns.baseMagnetUsdEach)) out.push({ key: "baseMagnet", label: "Base / magnet", usd: r2(addOns.baseMagnetUsdEach * qty), detail: `$${addOns.baseMagnetUsdEach} x ${qty}` });
+  if (addOns.finishing && ok(addOns.finishing.hours) && ok(addOns.finishing.usdPerHour)) {
+    out.push({ key: "finishing", label: "Supports cleanup / finishing", usd: r2(addOns.finishing.hours * addOns.finishing.usdPerHour), detail: `${addOns.finishing.hours} h x $${addOns.finishing.usdPerHour}/h` });
+  }
+  if (addOns.custom && ok(addOns.custom.usd)) out.push({ key: "custom", label: addOns.custom.label.trim().slice(0, 60) || "Custom fee", usd: r2(addOns.custom.usd), detail: "flat" });
+  return out;
 }
 
 /**
@@ -281,6 +382,9 @@ export function suggestPackagingTier(maxSideMm: number, s: Pick<StlQuoteSettings
  */
 export function computeStlQuote(parts: QuotePart[], s: StlQuoteSettings, opts: QuoteOptions = {}): QuoteResult {
   if (parts.length === 0) throw new Error("Add at least one model");
+  const scale = opts.scale && Number.isFinite(opts.scale) && opts.scale > 0 ? Math.min(opts.scale, 100) : 1;
+  const originalParts = parts;
+  parts = parts.map((p) => scalePart(p, scale));
   const printer =
     s.printers.find((p) => p.id === opts.printerId && !p.parked) ??
     s.printers.find((p) => p.id === s.defaultPrinterId) ??
@@ -307,10 +411,17 @@ export function computeStlQuote(parts: QuotePart[], s: StlQuoteSettings, opts: Q
   const plateTime = printHours * s.plateTimeUsdPerHour;
   const suggestedPackagingTier = suggestPackagingTier(maxSideMm, s);
   const packagingTier = opts.packagingTier ?? suggestedPackagingTier;
-  const packaging = s.packagingUsd[packagingTier];
+  const separatePackages = !!opts.separatePackages;
+  const packaging = s.packagingUsd[packagingTier] * (separatePackages ? qty : 1);
+  const lines = addOnLines(opts.addOns, qty);
+  const addOnTotal = lines.reduce((sum, l) => sum + l.usd, 0);
 
-  const costs = { resin: r2(resin), electricity: r2(electricity), plateTime: r2(plateTime), packaging: r2(packaging) };
-  const rawCost = r2(resin + electricity + plateTime + packaging);
+  const costs = { resin: r2(resin), electricity: r2(electricity), plateTime: r2(plateTime), packaging: r2(packaging), addOns: r2(addOnTotal) };
+  const rawCost = r2(resin + electricity + plateTime + packaging + addOnTotal);
+  const notes: string[] = [];
+  if (qty > 1) notes.push(`${qty} copies: resin x ${qty}; print time assumes they all fit on one plate (same height = same time).`);
+  if (qty > 1 && !separatePackages) notes.push("Packaging counted once (all copies in one package).");
+  const originalModelMl = originalParts.reduce((sum, p) => sum + p.volumeMl, 0);
   const flatPrice = r2(rawCost * (1 + s.flatMarkupPct / 100));
   const markups = costMarkups(rawCost, s);
   return {
@@ -328,6 +439,14 @@ export function computeStlQuote(parts: QuotePart[], s: StlQuoteSettings, opts: Q
     packagingTier,
     suggestedPackagingTier,
     costs,
+    addOnLines: lines,
+    scale,
+    originalDims: roundDims(overallDims(originalParts)),
+    scaledDims: roundDims(overallDims(parts)),
+    originalModelMl: r2(originalModelMl),
+    fit: checkFit(parts, printer),
+    separatePackages,
+    notes,
     rawCost,
     flatMarkupPct: s.flatMarkupPct,
     flatPrice,
@@ -337,7 +456,7 @@ export function computeStlQuote(parts: QuotePart[], s: StlQuoteSettings, opts: Q
       printTime: `${r2(heightMm)} mm / ${s.layerHeightMm} mm = ${layers} layers x ${spl} s = ${r2(printHours)} h (estimate)`,
       electricity: `${printer.watts ?? 0} W x ${r2(printHours)} h = ${Math.round(kwh * 1000) / 1000} kWh x $${s.electricityUsdPerKwh}/kWh`,
       plateTime: `${r2(printHours)} h x $${s.plateTimeUsdPerHour}/h`,
-      packaging: `${packagingTier} (largest side ${r2(maxSideMm)} mm${opts.packagingTier ? ", manual" : ", auto"})`,
+      packaging: `${packagingTier} (largest side ${r2(maxSideMm)} mm${opts.packagingTier ? ", manual" : ", auto"})${separatePackages && qty > 1 ? ` x ${qty} packages` : ""}`,
       markups: `don't-go-below = cost x ${markups.multipliers.dontGoBelow}, floor = cost x ${markups.multipliers.floor}, ask = cost x ${markups.multipliers.ask}; min $${s.minimumQuoteUsd}, charm-rounded to $x4.99/$x9.99 (prometheus-quote)`,
     },
   };
@@ -403,4 +522,25 @@ export function searchTermFromFileName(fileName: string): string {
     .filter((w) => w && !NOISE.has(w) && !/^\d+$/.test(w) && !/^\d+(mm|x|pct|%)$/.test(w) && !/^v\d+$/.test(w));
   const core = words.slice(0, 6).join(" ").trim();
   return core ? `${core} resin print` : "resin print miniature";
+}
+
+export function formatDims(d: Dims): string {
+  return `${d.x.toFixed(1)} × ${d.y.toFixed(1)} × ${d.z.toFixed(1)} mm`;
+}
+
+/** Plain-text quote summary for the clipboard. Nothing is sent anywhere. */
+export function buildQuoteSummary(input: { items: string[]; quote: QuoteResult; hollow: boolean; clientNotes: string; suggested?: SuggestedPrice | null }): string {
+  const q = input.quote;
+  const lines = [
+    `Quote: ${input.items.join(", ")}`,
+    `Size: ${formatDims(q.scaledDims)} (W × D × H)${q.scale !== 1 ? ` at ${r2(q.scale * 100)}% of original ${formatDims(q.originalDims)}` : ""}`,
+    `Quantity: ${q.quantity}${q.quantity > 1 ? (q.separatePackages ? " (packaged separately)" : " (one package)") : ""}`,
+    `Printer: ${q.printer.name} · ${input.hollow ? "hollow" : "solid"}`,
+    `Add-ons: ${q.addOnLines.length ? q.addOnLines.map((l) => `${l.label} $${l.usd.toFixed(2)}`).join("; ") : "none"}`,
+    `Ask: $${q.markups.ask.toFixed(2)} (floor $${q.markups.floor.toFixed(2)})`,
+  ];
+  if (input.suggested) lines.push(`Suggested price: $${input.suggested.price.toFixed(2)}`);
+  lines.push("Postage at label cost.");
+  if (input.clientNotes.trim()) lines.push("", "Client notes:", input.clientNotes.trim());
+  return lines.join("\n");
 }

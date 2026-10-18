@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, FileUp, Loader2, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, FileUp, Loader2, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,13 @@ import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
 import { MESH_FILE_ACCEPT, parseMeshFile, type MeshStats } from "@shared/stl-mesh";
 import {
+  DEFAULT_ADDON_AMOUNTS,
   DEFAULT_STL_QUOTE_SETTINGS,
+  buildQuoteSummary,
+  formatDims,
+  overallDims,
+  scaleForTarget,
+  type TargetSizeMode,
   PHROZEN_POWER_GUIDE_URL,
   computeStlQuote,
   resinCostPerMl,
@@ -81,6 +88,18 @@ function NumField({
   );
 }
 
+function AddOnRow({ id, label, on, onToggle, children }: { id: string; label: string; on: boolean; onToggle: (v: boolean) => void; children: React.ReactNode }) {
+  return (
+    <div className={`min-w-0 rounded-md border p-2 ${on ? "border-primary/50" : "border-border/70"}`}>
+      <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid={`toggle-addon-${id}`}>
+        <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={on} onChange={(e) => onToggle(e.target.checked)} />
+        {label}
+      </label>
+      {on ? <div className="mt-1">{children}</div> : null}
+    </div>
+  );
+}
+
 const selectClass =
   "flex h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base shadow-xs md:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -118,6 +137,16 @@ export default function QuotePage() {
   const [term, setTerm] = useState("");
   const [termTouched, setTermTouched] = useState(false);
   const [market, setMarket] = useState<MarketCheckResult | null>(null);
+  const [sizeMode, setSizeMode] = useState<TargetSizeMode>("percent");
+  const [sizeValue, setSizeValue] = useState("");
+  const [separate, setSeparate] = useState(false);
+  const [clientNotes, setClientNotes] = useState("");
+  const [addOn, setAddOn] = useState({
+    rush: false, rushUsd: DEFAULT_ADDON_AMOUNTS.rushUsd,
+    base: false, baseUsd: DEFAULT_ADDON_AMOUNTS.baseMagnetUsdEach,
+    finishing: false, finHours: DEFAULT_ADDON_AMOUNTS.finishingHours, finRate: DEFAULT_ADDON_AMOUNTS.finishingUsdPerHour,
+    custom: false, customLabel: "Custom fee", customUsd: DEFAULT_ADDON_AMOUNTS.customUsd,
+  });
 
   useEffect(() => {
     if (!printerId) setPrinterId(draft.defaultPrinterId);
@@ -147,6 +176,9 @@ export default function QuotePage() {
     setParsing(false);
   }
 
+  const origDims = parts.length ? overallDims(parts) : null;
+  const scale = origDims && sizeValue.trim() ? scaleForTarget(sizeMode, Number(sizeValue), origDims) : 1;
+
   const quote = useMemo(() => {
     if (parts.length === 0) return null;
     const spl = Number(splOverride);
@@ -156,10 +188,29 @@ export default function QuotePage() {
       packagingTier: tier === "auto" ? null : tier,
       quantity,
       secondsPerLayer: splOverride.trim() && Number.isFinite(spl) && spl > 0 ? spl : null,
+      scale,
+      separatePackages: separate,
+      addOns: {
+        rushUsd: addOn.rush ? addOn.rushUsd : null,
+        baseMagnetUsdEach: addOn.base ? addOn.baseUsd : null,
+        finishing: addOn.finishing ? { hours: addOn.finHours, usdPerHour: addOn.finRate } : null,
+        custom: addOn.custom ? { label: addOn.customLabel, usd: addOn.customUsd } : null,
+      },
     });
-  }, [parts, draft, printerId, hollow, tier, quantity, splOverride]);
+  }, [parts, draft, printerId, hollow, tier, quantity, splOverride, scale, separate, addOn]);
 
   const suggestion = quote ? suggestFinalPrice(quote, market?.stats ?? null) : null;
+
+  async function copySummary() {
+    if (!quote) return;
+    const text = buildQuoteSummary({ items: parts.map((p) => p.name), quote, hollow, clientNotes, suggested: suggestion });
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Quote summary copied" });
+    } catch {
+      window.prompt("Copy the quote summary:", text);
+    }
+  }
 
   const save = useMutation({
     mutationFn: async () => (await apiRequest("PUT", "/api/stl-quote/settings", { settings: draft }, { headers })).json(),
@@ -274,36 +325,122 @@ export default function QuotePage() {
               ) : null}
             </Panel>
 
-            <Panel title="This print" testId="panel-quote-options">
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-                <div className="min-w-0 space-y-1">
-                  <Label htmlFor="quote-printer" className="text-xs">Printer</Label>
-                  <select id="quote-printer" className={selectClass} value={printerId} onChange={(e) => setPrinterId(e.target.value)} data-testid="select-quote-printer">
-                    {activePrinters.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · {p.watts ?? "?"} W
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <Label htmlFor="quote-tier" className="text-xs">Packaging</Label>
-                  <select id="quote-tier" className={selectClass} value={tier} onChange={(e) => setTier(e.target.value as PackagingTier | "auto")} data-testid="select-quote-packaging">
-                    <option value="auto">Auto{quote ? ` (${quote.suggestedPackagingTier})` : ""}</option>
-                    <option value="small">Small · {usd(draft.packagingUsd.small)}</option>
-                    <option value="medium">Medium · {usd(draft.packagingUsd.medium)}</option>
-                    <option value="large">Large · {usd(draft.packagingUsd.large)}</option>
-                  </select>
-                </div>
-                <NumField id="quote-qty" label="Copies on the plate" value={quantity} step="1" onChange={(n) => setQuantity(Math.max(1, Math.floor(n)))} />
-                <div className="min-w-0 space-y-1">
-                  <Label htmlFor="quote-spl" className="text-xs">Seconds per layer <span className="text-muted-foreground">(blank = printer default)</span></Label>
-                  <Input id="quote-spl" type="number" inputMode="decimal" step="any" placeholder={String(draft.printers.find((p) => p.id === printerId)?.secondsPerLayer ?? 8)} value={splOverride} onChange={(e) => setSplOverride(e.target.value)} />
-                </div>
-                <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:col-span-2" data-testid="toggle-quote-hollow">
-                  <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={hollow} onChange={(e) => setHollow(e.target.checked)} />
-                  Hollow (estimate: surface area × {draft.hollowWallMm} mm wall)
-                </label>
+            <Panel title="Modifiers" description="Adjust for what the client wants. Everything recomputes live." testId="panel-quote-modifiers">
+              <div className="space-y-4">
+                <section aria-labelledby="mod-size" className="min-w-0">
+                  <h3 id="mod-size" className="rule-label mb-2">Target size (aspect locked)</h3>
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="quote-size-mode" className="text-xs">By</Label>
+                      <select id="quote-size-mode" className={selectClass} value={sizeMode} onChange={(e) => setSizeMode(e.target.value as TargetSizeMode)} data-testid="select-quote-size-mode">
+                        <option value="percent">Scale %</option>
+                        <option value="height">Target height (mm)</option>
+                        <option value="longest">Target longest side (mm)</option>
+                      </select>
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="quote-size-value" className="text-xs">{sizeMode === "percent" ? "Scale %" : "mm"}</Label>
+                      <Input id="quote-size-value" type="number" inputMode="decimal" step="any" placeholder={sizeMode === "percent" ? "100" : origDims ? String(sizeMode === "height" ? origDims.z.toFixed(1) : Math.max(origDims.x, origDims.y, origDims.z).toFixed(1)) : ""} value={sizeValue} onChange={(e) => setSizeValue(e.target.value)} data-testid="input-quote-size-value" />
+                    </div>
+                  </div>
+                  {quote ? (
+                    <div className="mt-2 grid min-w-0 grid-cols-2 gap-2 text-xs" data-testid="block-quote-dims">
+                      <div className="min-w-0 rounded-md border border-border/70 p-2">
+                        <p className="rule-label">Original</p>
+                        <p className="tabular-nums">{formatDims(quote.originalDims)}</p>
+                        <p className="text-muted-foreground tabular-nums">{quote.originalModelMl.toFixed(2)} ml</p>
+                      </div>
+                      <div className={`min-w-0 rounded-md border p-2 ${quote.scale !== 1 ? "border-primary/50 bg-primary/5" : "border-border/70"}`}>
+                        <p className="rule-label">Scaled · {(quote.scale * 100).toFixed(quote.scale * 100 % 1 ? 1 : 0)}%</p>
+                        <p className="tabular-nums font-medium">{formatDims(quote.scaledDims)}</p>
+                        <p className="text-muted-foreground tabular-nums">{(quote.modelMl / quote.quantity).toFixed(2)} ml each{hollow ? " (hollow)" : ""}</p>
+                      </div>
+                      {quote.fit.status === "too-big" ? (
+                        <p className="col-span-2 rounded-md border border-destructive/60 bg-destructive/10 p-2 text-destructive" role="alert" data-testid="text-quote-fit-warning">{quote.fit.detail}</p>
+                      ) : (
+                        <p className="col-span-2 text-muted-foreground">{quote.fit.detail}</p>
+                      )}
+                    </div>
+                  ) : null}
+                  {sizeValue ? (
+                    <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={() => setSizeValue("")}>Reset to original size</Button>
+                  ) : null}
+                </section>
+
+                <section aria-labelledby="mod-print" className="min-w-0">
+                  <h3 id="mod-print" className="rule-label mb-2">Print and packaging</h3>
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="quote-printer" className="text-xs">Printer</Label>
+                      <select id="quote-printer" className={selectClass} value={printerId} onChange={(e) => setPrinterId(e.target.value)} data-testid="select-quote-printer">
+                        {activePrinters.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} · {p.watts ?? "?"} W
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="quote-tier" className="text-xs">Packaging</Label>
+                      <select id="quote-tier" className={selectClass} value={tier} onChange={(e) => setTier(e.target.value as PackagingTier | "auto")} data-testid="select-quote-packaging">
+                        <option value="auto">Auto{quote ? ` (${quote.suggestedPackagingTier})` : ""}</option>
+                        <option value="small">Small · {usd(draft.packagingUsd.small)}</option>
+                        <option value="medium">Medium · {usd(draft.packagingUsd.medium)}</option>
+                        <option value="large">Large · {usd(draft.packagingUsd.large)}</option>
+                      </select>
+                    </div>
+                    <NumField id="quote-qty" label="Copies" value={quantity} step="1" onChange={(n) => setQuantity(Math.max(1, Math.floor(n)))} />
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="quote-spl" className="text-xs">Seconds per layer <span className="text-muted-foreground">(blank = printer default)</span></Label>
+                      <Input id="quote-spl" type="number" inputMode="decimal" step="any" placeholder={String(draft.printers.find((p) => p.id === printerId)?.secondsPerLayer ?? 8)} value={splOverride} onChange={(e) => setSplOverride(e.target.value)} />
+                    </div>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid="toggle-quote-separate">
+                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={separate} onChange={(e) => setSeparate(e.target.checked)} />
+                      Package each copy separately
+                    </label>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid="toggle-quote-hollow">
+                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={hollow} onChange={(e) => setHollow(e.target.checked)} />
+                      Hollow (est. {draft.hollowWallMm} mm wall), else solid
+                    </label>
+                  </div>
+                  {quote?.notes.length ? <ul className="mt-2 space-y-0.5 text-[0.6875rem] text-muted-foreground">{quote.notes.map((n) => <li key={n}>{n}</li>)}</ul> : null}
+                </section>
+
+                <section aria-labelledby="mod-addons" className="min-w-0">
+                  <h3 id="mod-addons" className="rule-label mb-2">Add-ons (added to cost before markups)</h3>
+                  <div className="space-y-2">
+                    <AddOnRow id="rush" label="Rush" on={addOn.rush} onToggle={(v) => setAddOn({ ...addOn, rush: v })}>
+                      <NumField id="addon-rush" label="$ flat" value={addOn.rushUsd} onChange={(n) => setAddOn({ ...addOn, rushUsd: n })} />
+                    </AddOnRow>
+                    <AddOnRow id="base" label="Base / magnet" on={addOn.base} onToggle={(v) => setAddOn({ ...addOn, base: v })}>
+                      <NumField id="addon-base" label="$ per copy" value={addOn.baseUsd} onChange={(n) => setAddOn({ ...addOn, baseUsd: n })} />
+                    </AddOnRow>
+                    <AddOnRow id="finishing" label="Supports cleanup / finishing" on={addOn.finishing} onToggle={(v) => setAddOn({ ...addOn, finishing: v })}>
+                      <div className="grid grid-cols-2 gap-2">
+                        <NumField id="addon-fin-h" label="Hours" value={addOn.finHours} onChange={(n) => setAddOn({ ...addOn, finHours: n })} />
+                        <NumField id="addon-fin-r" label="$/hr" value={addOn.finRate} onChange={(n) => setAddOn({ ...addOn, finRate: n })} />
+                      </div>
+                    </AddOnRow>
+                    <AddOnRow id="custom" label="Custom fee" on={addOn.custom} onToggle={(v) => setAddOn({ ...addOn, custom: v })}>
+                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,7rem)] gap-2">
+                        <div className="min-w-0 space-y-1">
+                          <Label htmlFor="addon-custom-label" className="text-xs">Label</Label>
+                          <Input id="addon-custom-label" value={addOn.customLabel} onChange={(e) => setAddOn({ ...addOn, customLabel: e.target.value })} />
+                        </div>
+                        <NumField id="addon-custom" label="$" value={addOn.customUsd} onChange={(n) => setAddOn({ ...addOn, customUsd: n })} />
+                      </div>
+                    </AddOnRow>
+                  </div>
+                </section>
+
+                <section aria-labelledby="mod-notes" className="min-w-0">
+                  <Label htmlFor="quote-client-notes" id="mod-notes" className="rule-label">Client notes</Label>
+                  <Textarea id="quote-client-notes" className="mt-1 min-h-[88px]" placeholder="What the client asked for (size, pose, finish, deadline)…" value={clientNotes} onChange={(e) => setClientNotes(e.target.value)} data-testid="input-quote-client-notes" />
+                  <Button type="button" variant="outline" className="mt-2 w-full sm:w-auto" disabled={!quote} onClick={copySummary} data-testid="button-quote-copy-summary">
+                    <Copy className="mr-1.5 h-4 w-4" /> Copy quote summary
+                  </Button>
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Copies plain text to your clipboard only. Nothing is sent or saved.</p>
+                </section>
               </div>
             </Panel>
           </div>
@@ -318,6 +455,9 @@ export default function QuotePage() {
                   <Row label="Electricity" value={usd(quote.costs.electricity)} hint={quote.math.electricity} />
                   <Row label="Plate time" value={usd(quote.costs.plateTime)} hint={quote.math.plateTime} />
                   <Row label="Packaging" value={usd(quote.costs.packaging)} hint={quote.math.packaging} />
+                  {quote.addOnLines.map((l) => (
+                    <Row key={l.key} label={l.label} value={usd(l.usd)} hint={`Add-on · ${l.detail}`} />
+                  ))}
                   <Row label="Raw cost" value={usd(quote.rawCost)} strong hint={`Print time estimate ${quote.math.printTime}`} />
                 </div>
               )}
@@ -480,12 +620,12 @@ export default function QuotePage() {
                 </div>
                 <h3 className="mt-5 text-sm font-semibold">Printers</h3>
                 <p className="text-xs text-muted-foreground">
-                  Watts are manufacturer rated / max system power (actual draw is usually lower). Seconds per layer are estimates (exposure + lift).{" "}
+                  Watts and build volume are manufacturer specs (watts = rated / max system power; actual draw is usually lower). Build 0 = unknown, no fit warning. Seconds per layer are estimates (exposure + lift).{" "}
                   <a className="hs-link tap-ext" href={PHROZEN_POWER_GUIDE_URL} target="_blank" rel="noreferrer">Phrozen power guide</a>
                 </p>
                 <ul className="mt-2 space-y-2">
                   {draft.printers.map((p, idx) => (
-                    <li key={p.id} className="grid min-w-0 gap-2 rounded-md border border-border/70 p-2.5 sm:grid-cols-[minmax(0,1fr)_7rem_7rem]">
+                    <li key={p.id} className="grid min-w-0 gap-2 rounded-md border border-border/70 p-2.5 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] lg:grid-cols-[minmax(0,1fr)_6rem_6rem_6rem_6rem_6rem]">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{p.name}{p.id === draft.defaultPrinterId ? " · default" : ""}</p>
                         <p className="break-words text-[0.6875rem] text-muted-foreground">
@@ -501,6 +641,24 @@ export default function QuotePage() {
                         <>
                           <NumField id={`qs-w-${p.id}`} label="Watts" value={p.watts ?? 0} onChange={(n) => edit({ printers: draft.printers.map((x, i) => (i === idx ? { ...x, watts: n } : x)) })} />
                           <NumField id={`qs-s-${p.id}`} label="s / layer" value={p.secondsPerLayer} onChange={(n) => edit({ printers: draft.printers.map((x, i) => (i === idx ? { ...x, secondsPerLayer: n } : x)) })} />
+                          <div className="grid grid-cols-3 gap-2 sm:col-span-2 lg:col-span-3">
+                            {(["x", "y", "z"] as const).map((ax) => (
+                              <NumField
+                                key={ax}
+                                id={`qs-b${ax}-${p.id}`}
+                                label={`Build ${ax === "x" ? "W" : ax === "y" ? "D" : "H"}`}
+                                suffix="mm"
+                                value={p.buildMm?.[ax] ?? 0}
+                                onChange={(n) =>
+                                  edit({
+                                    printers: draft.printers.map((x, i) =>
+                                      i === idx ? { ...x, buildMm: n > 0 ? { ...(x.buildMm ?? { x: 0, y: 0, z: 0 }), [ax]: n } : null } : x,
+                                    ),
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
                         </>
                       )}
                     </li>
