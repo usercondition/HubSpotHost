@@ -4,6 +4,7 @@ import { cp, rm, readFile } from "node:fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
+// express is intentionally NOT bundled so Sentry can instrument it at require time.
 const allowlist = [
   "@google/generative-ai",
   "axios",
@@ -11,7 +12,6 @@ const allowlist = [
   "date-fns",
   "drizzle-orm",
   "drizzle-zod",
-  "express",
   "express-rate-limit",
   "express-session",
   "jsonwebtoken",
@@ -57,6 +57,9 @@ async function buildAll() {
   };
   await esbuild({ ...serverBuild, entryPoints: ["server/index.ts"], outfile: "dist/index.cjs" });
   await esbuild({ ...serverBuild, entryPoints: ["server/lib/plate-mesh-worker.ts"], outfile: "dist/plate-mesh-worker.cjs" });
+  // Sentry init is loaded with `node --import` before the app bundle (ESM so
+  // the SDK can register both its ESM and CJS module hooks).
+  await esbuild({ ...serverBuild, format: "esm", entryPoints: ["server/instrument.ts"], outfile: "dist/instrument.mjs" });
 
   await cp("server/fonts", "dist/fonts", { recursive: true });
   await cp("shared/geo/us-zip-centroids.json", "dist/us-zip-centroids.json");

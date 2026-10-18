@@ -1,7 +1,8 @@
 import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
-import { registerRoutes } from "./routes";
+import { registerRoutes, rejectUnsecuredIntake } from "./routes";
+import { registerSentryTestRoute } from "./lib/sentry-test-route";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 import { PRINT_FILE_MAX_LABEL } from "./lib/print-file-limits";
@@ -63,6 +64,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  registerSentryTestRoute(app, rejectUnsecuredIntake);
   // Redis failures are handled inside the worker; API health must not depend on it.
   startPrintOpsJobWorker();
   startSyncHealthSchedule();
