@@ -76,6 +76,7 @@ import { normalizeShipAddress } from "../shared/ship-address";
 import { CtbParseError } from "./lib/ctb";
 import { listExpenses, overheadForPeriod } from "./lib/expenses";
 import { registerExpenseRoutes } from "./lib/expense-routes";
+import { registerSpendingRoutes } from "./lib/spending-routes";
 import { registerStlQuoteRoutes } from "./lib/stl-quote-routes";
 import { registerInboxRoutes } from "./lib/inbox-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
@@ -1093,6 +1094,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   registerExpenseRoutes(app, rejectUnsecuredIntake);
+  registerSpendingRoutes(app, rejectUnsecuredIntake);
   registerStlQuoteRoutes(app, rejectUnsecuredIntake);
   registerInboxRoutes(app, rejectUnsecuredIntake, rejectUnsecuredOwnerDigestCron);
   registerOpsSummaryRoutes(app);

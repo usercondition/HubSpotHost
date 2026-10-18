@@ -12,6 +12,12 @@ import { SHOP_PERIODS, type ShopPeriodId, resolveShopWindow } from "../../shared
 import { shipByCalendarDate } from "../../shared/ship-by";
 import { listExpenses, overheadForPeriod } from "./expenses";
 
+/** Selected-period overhead in cents. Shared by the Shop dashboard and the Spending bottom line so both always agree. */
+export function periodOverheadCents(period: ShopPeriodId, now: Date): number {
+  const window = resolveShopWindow(period, now);
+  return overheadForPeriod(listExpenses(), window.start == null ? "0000-01-01" : shipByCalendarDate(new Date(window.start)), shipByCalendarDate(new Date(window.end)));
+}
+
 export function refreshPrintFileStagesFromHubSpot(deals: HubSpotDealRecord[], stages: HubSpotPipelineStage[]) {
   const byStage = new Map(stages.map((stage) => [stage.id, stage]));
   syncPrintFileDealStages(new Map(deals.map((deal) => {
@@ -31,8 +37,7 @@ export function registerPerformanceRoutes(app: Express, rejectOwner: (req: Reque
       const period = String(req.query.period ?? "30");
       if (!SHOP_PERIODS.includes(period as ShopPeriodId)) return res.status(400).json({ ok: false, error: "Period must be 7, 30, 90, ytd, or all." });
       const shipToLoad = await loadDealShipTos(deals.map((deal) => deal.id));
-      const window = resolveShopWindow(period as ShopPeriodId, new Date());
-      const overhead = overheadForPeriod(listExpenses(), window.start == null ? "0000-01-01" : shipByCalendarDate(new Date(window.start)), shipByCalendarDate(new Date(window.end)));
+      const overhead = periodOverheadCents(period as ShopPeriodId, new Date());
       return res.json({ ...snapshot, dashboard: collectShopDashboard({ deals, stages, period: period as ShopPeriodId, shipTos: shipToLoad.shipTos, mapIncomplete: shipToLoad.incomplete, mapBusy: shipToLoad.busy, overheadCents: overhead }) });
     } catch (error) {
       return res.status(error instanceof HubSpotError ? error.status : 502).json({ ok: false, error: error instanceof Error ? error.message : "Could not load HubSpot performance data" });

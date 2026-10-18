@@ -143,7 +143,8 @@ type ParsedInvoiceResponse = {
   pageCount: number;
 };
 
-export default function Supplies() {
+/** Supplies tab of the Spending page; `embedded` drops the page header and the old 30-day books panel. */
+export default function Supplies({ embedded = false }: { embedded?: boolean } = {}) {
   const { toast } = useToast();
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
   const unlock = useOwnerUnlock({
@@ -165,7 +166,7 @@ export default function Supplies() {
 
   const books = useQuery<PerformanceResponse>({
     queryKey: ["/api/performance", ownerCode],
-    enabled: isUnlocked,
+    enabled: isUnlocked && !embedded,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/performance", undefined, { headers });
       return (await response.json()) as PerformanceResponse;
@@ -326,8 +327,8 @@ export default function Supplies() {
   const summary = supplies.data?.summary;
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <PageHeader
+    <div className={embedded ? "" : "mx-auto max-w-6xl"}>
+      {embedded ? null : <PageHeader
         title="Supply spend"
         subtitle="Drop a receipt, confirm the items, then review what you’ve spent."
         actions={
@@ -346,7 +347,7 @@ export default function Supplies() {
             ) : null}
           </>
         }
-      />
+      />}
 
       <div className="page-stack">
         {!isUnlocked ? (
@@ -732,7 +733,7 @@ export default function Supplies() {
               </Panel>
             </section>
 
-            {books.data?.books ? (
+            {embedded ? null : books.data?.books ? (
               <BooksBalancePanel books={books.data.books} />
             ) : books.isLoading ? (
               <Skeleton className="h-[22rem] rounded-lg" data-testid="skeleton-books-balance" />
