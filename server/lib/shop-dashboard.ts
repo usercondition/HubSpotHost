@@ -11,7 +11,10 @@ import {
   type ShopDashboardInput,
   type ShopDashboardOrder,
   type ShopPeriodId,
+  type ShopBooks,
+  type ShopMetric,
 } from "../../shared/shop-dashboard";
+import { buildSpendingBottomLine } from "./spending";
 import type { HubSpotDealRecord, HubSpotPipelineStage } from "./hubspot";
 import { getDb, getSqlite, orderLinkCounts } from "./order-links";
 import { ensureDefaultPrinters, listPrinterLifecycleEvents, listPrinterProfileMaps, resolvePrinterIdForRecord } from "./printers";
@@ -61,6 +64,25 @@ export function selectDashboardResinCost(material: string | null | undefined, pl
     if (cost != null) { total += cost; any = true; }
   }
   return { cost: any ? Math.round((total + Number.EPSILON) * 100) / 100 : null, estimated: any };
+}
+
+/**
+ * "Bottom line" (was "Net profit after overhead"): the same number as the Spending page bottom line
+ * (gross profit − supply receipts − overhead for the period), built by the same helper.
+ */
+export function netAfterSpendingMetric(books: ShopBooks, overheadCents: number | undefined, periodLabel: string): ShopMetric {
+  const value = overheadCents == null ? null : buildSpendingBottomLine(books, overheadCents).bottomLine;
+  return {
+    id: "net-profit",
+    label: "Bottom line",
+    formula: "Gross profit minus supply receipts minus overhead for the same period. Matches the Spending page bottom line; each dollar is counted once.",
+    value,
+    unit: "usd",
+    previous: null,
+    compare: false,
+    note: books.ordersCounted === 0 ? `${periodLabel} · no orders with full costs yet` : periodLabel,
+    series: [],
+  };
 }
 
 export function collectShopDashboard(input: {
@@ -248,11 +270,10 @@ export function collectShopDashboard(input: {
     zips: loadUsZipCentroids(),
   };
   const dashboard = buildShopDashboard(facts);
-  const gross = dashboard.money.find((item) => item.id === "gross-profit")?.value;
   const overhead = input.overheadCents == null ? null : input.overheadCents / 100;
   dashboard.money.push(
     { id: "overhead", label: "Overhead", formula: "Recurring shop overhead prorated by days in this period, plus one-off and usage charges dated in the period.", value: overhead, unit: "usd", previous: null, compare: false, note: dashboard.period.label, series: [] },
-    { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus the same selected-period overhead. An order cost and overhead charge are each counted once.", value: gross == null || overhead == null ? null : Math.round((gross - overhead) * 100) / 100, unit: "usd", previous: null, compare: false, note: gross == null ? "Gross profit is not available for this period." : dashboard.period.label, series: [] },
+    netAfterSpendingMetric(dashboard.books, input.overheadCents, dashboard.period.label),
   );
   const overheadMetric = dashboard.money.find((item) => item.id === "overhead");
   const netMetric = dashboard.money.find((item) => item.id === "net-profit");

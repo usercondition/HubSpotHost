@@ -349,7 +349,7 @@ function bodyFor(input: string | URL) {
         });
         const gross = dashboard.headlines.find((item) => item.id === "gross-profit")?.value ?? 0;
         const overhead = { id: "overhead", label: "Overhead", formula: "Recurring overhead prorated for the period, plus one-off expense charges.", value: overheadForPeriod(EXPENSE_FIXTURE, "2026-08-26", "2026-09-25") / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
-        const net = { id: "net-profit", label: "Net profit after overhead", formula: "Gross profit minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
+        const net = { id: "net-profit", label: "Bottom line", formula: "Gross profit minus supply receipts minus period overhead.", value: Math.round((gross - overhead.value) * 100) / 100, unit: "usd" as const, previous: null, compare: false, note: "30 days", series: [] };
         dashboard.headlines.push(overhead, net);
         return dashboard;
       })(),
