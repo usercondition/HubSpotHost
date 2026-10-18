@@ -1,10 +1,16 @@
-/** Business-only Google Drive file index (synced from the Mac mini's nightly drive_thumbs.py). */
+/** Business-only file index: Google Drive (drive_thumbs.py) + shop JBOD drives X:/Y:/Z: (shop_files_sync.py). */
+import { searchTokens } from "./file-search";
+
+export const DRIVE_FILE_SOURCES = ["drive", "shop"] as const;
+export type DriveFileSource = (typeof DRIVE_FILE_SOURCES)[number];
+export const DRIVE_SOURCE_LABEL: Record<DriveFileSource, string> = { drive: "Google Drive", shop: "Shop drive" };
 export const DRIVE_FILE_CATEGORIES = ["model", "sliced", "archive", "photo", "video", "doc", "folder", "other"] as const;
 export type DriveFileCategory = (typeof DRIVE_FILE_CATEGORIES)[number];
 export type DriveThumbSource = "drive" | "folder-photo" | "render" | "web" | "icon";
 
 export type DriveFileView = {
   id: string;
+  source: DriveFileSource;
   name: string;
   category: DriveFileCategory;
   path: string;
@@ -23,11 +29,18 @@ export type DriveFilesResponse = {
   ok: true;
   q: string;
   category: DriveFileCategory | null;
+  source: DriveFileSource | null;
   total: number;
+  /** Hits matching every word exactly (substring/prefix). When fewer than a dozen, close matches are added. */
+  exactTotal: number;
+  /** True when typo / joined-word matches were added (ranked after exact ones). */
+  fuzzy: boolean;
   offset: number;
   items: DriveFileView[];
   counts: Partial<Record<DriveFileCategory, number>>;
+  sources: Partial<Record<DriveFileSource, number>>;
   generatedAt: string | null;
+  generatedAtShop: string | null;
   configured: boolean;
 };
 
@@ -54,14 +67,21 @@ export const DRIVE_CATEGORY_ONE: Record<DriveFileCategory, string> = {
   other: "File",
 };
 
-export function driveDownloadUrl(f: Pick<DriveFileView, "id" | "category">): string | null {
-  if (f.category === "folder") return null;
+export function driveDownloadUrl(f: Pick<DriveFileView, "id" | "category"> & { source?: DriveFileSource }): string | null {
+  if (f.category === "folder" || f.source === "shop") return null;
   return `https://drive.google.com/uc?id=${encodeURIComponent(f.id)}&export=download`;
 }
 
-/** Lowercase AND-tokens; separators ignored ("dark-angels" == "dark angels"). */
+/** Lowercase AND-tokens; separators and camelCase ignored ("dark-angels" == "dark angels" == "DarkAngels"). */
 export function queryTokens(q: string): string[] {
-  return (q.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((t) => t.length > 1).slice(0, 8);
+  return searchTokens(q);
+}
+
+/** Windows path of a shop-drive row as Miguel sees it on the PC: "X:/Kit/Doors" + name -> X:\Kit\Doors\name. */
+export function shopWindowsPath(f: Pick<DriveFileView, "path" | "name" | "category">): string {
+  const p = (f.path || "").replace(/\//g, "\\");
+  const full = p ? `${p}\\${f.name}` : f.name;
+  return f.category === "folder" ? `${full}\\` : full;
 }
 
 export function humanSize(n: number | null | undefined): string {
