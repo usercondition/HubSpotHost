@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import {
   assignPrinterProfileSchema,
   assignPrintFilePrinterSchema,
@@ -15,8 +15,21 @@ import {
   updatePrinter,
 } from "./printers";
 import { firstIssue } from "./validation";
-import { startPrinterRunSchema } from "../../shared/printer-status";
-import { buildStatusBoard, finishPrinterRun, listStartablePlates, startPrinterRun } from "./printer-status";
+import { ASSIGN_PREFIX_BYTES, ASSIGNABLE_SLICE_EXTENSIONS, isAssignableSliceName, printerVoiceSchema, startPrinterRunSchema } from "../../shared/printer-status";
+import {
+  assignPrinterFile,
+  buildStatusBoard,
+  clearPrinterAssignment,
+  finishPrinterRun,
+  listStartablePlates,
+  startPrinterRun,
+  voiceStart,
+} from "./printer-status";
+import { parseCtbFileFromPrefix } from "./ctb";
+
+const MAX_SLICE_BYTES = 4 * 1024 * 1024 * 1024;
+/** Only the first ASSIGN_PREFIX_BYTES of the file are sent, parsed in memory, and dropped. */
+const assignBody = express.raw({ type: () => true, limit: ASSIGN_PREFIX_BYTES + 64 * 1024 });
 
 export function registerPrinterRoutes(app: Express, rejectOwner: (req: Request, res: Response) => boolean) {
   /**
@@ -42,6 +55,68 @@ export function registerPrinterRoutes(app: Express, rejectOwner: (req: Request, 
     const result = startPrinterRun(String(req.params.key), parsed.data);
     if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
     return res.status(201).json({ ok: true, run: result.run, ...buildStatusBoard() });
+  });
+  /**
+   * Drag-and-drop / "Assign file": the browser sends the first 2 MB of a .ctb plus its real size.
+   * We read layer count + print time with the Library CTB parser and keep only that metadata.
+   * Owner check runs before the body is read.
+   */
+  app.post(
+    "/api/printers/status/:key/assign",
+    (req, res, next) => {
+      if (rejectOwner(req, res)) {
+        req.resume();
+        return;
+      }
+      next();
+    },
+    assignBody,
+    (req, res) => {
+      const fileName = String(req.query.fileName ?? "").trim().slice(0, 240);
+      const fullFileSize = Number(req.query.fullFileSize);
+      if (!fileName || !isAssignableSliceName(fileName)) {
+        return res.status(415).json({ ok: false, error: `That file type can't go on a printer. Drop a ${ASSIGNABLE_SLICE_EXTENSIONS.join(" / ")} slice file.` });
+      }
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (body.length < 0x50 || !Number.isFinite(fullFileSize) || fullFileSize < body.length || fullFileSize > MAX_SLICE_BYTES) {
+        return res.status(400).json({ ok: false, error: "That slice file looks empty or cut short." });
+      }
+      let metrics;
+      try {
+        metrics = parseCtbFileFromPrefix(fileName, body, fullFileSize);
+      } catch {
+        return res.status(422).json({ ok: false, error: "Could not read that slice file. Re-export it from ChiTuBox and try again." });
+      }
+      const result = assignPrinterFile(String(req.params.key), {
+        fileName,
+        sizeBytes: fullFileSize,
+        layerCount: metrics.layerCount,
+        layerHeightMm: metrics.layerHeightMm,
+        printTimeSeconds: metrics.printTimeSeconds,
+        resinVolumeMl: metrics.resinVolumeMl,
+        printerProfile: metrics.printerProfile ?? null,
+      });
+      if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
+      return res.json({ ok: true, assigned: result.assigned, ...buildStatusBoard() });
+    },
+  );
+  app.delete("/api/printers/status/:key/assign", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const result = clearPrinterAssignment(String(req.params.key));
+    if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
+    return res.json({ ok: true, cleared: result.cleared, ...buildStatusBoard() });
+  });
+  /**
+   * Voice start: {text} like "9012 12K old print started". Starts only on a clear match with a file
+   * on that card; otherwise returns candidates (started: false). {text, printerKey} confirms a pick.
+   */
+  app.post("/api/printers/voice", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = printerVoiceSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const result = voiceStart(parsed.data);
+    if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
+    return res.status(result.started ? 201 : 200).json({ ...result, board: buildStatusBoard() });
   });
   app.post("/api/printers/status/:key/done", (req, res) => {
     if (rejectOwner(req, res)) return;

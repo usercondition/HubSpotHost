@@ -78,6 +78,8 @@ export type PrinterLiveStatus = StatusRosterPrinter & {
     dealId: string | null;
     startedAt: string;
     etaAt: string | null;
+    /** Total estimated duration in seconds, null when the job has none. */
+    estSeconds: number | null;
     remainingSeconds: number | null;
     /** 0..1, null when there is no estimate. */
     progress: number | null;
@@ -87,7 +89,31 @@ export type PrinterLiveStatus = StatusRosterPrinter & {
     clientName?: string | null;
   };
   /** Most recent finished run (marked done, or its estimate ran out). */
-  last: null | { jobLabel: string; endedAt: string; autoEnded: boolean };
+  last: null | { jobLabel: string; startedAt: string; endedAt: string; autoEnded: boolean; durationSeconds: number | null };
+  /** Slice file dropped on this card and not started yet (parsed metadata only). */
+  assigned?: PrinterAssignedFile | null;
+};
+
+/** Slice formats the Library slice parser reads stats from (server/lib/ctb.ts). */
+export const ASSIGNABLE_SLICE_EXTENSIONS = [".ctb"] as const;
+/** Bytes of the file the browser sends for parsing; the file itself is never stored. */
+export const ASSIGN_PREFIX_BYTES = 2 * 1024 * 1024;
+
+export function isAssignableSliceName(fileName: string): boolean {
+  const lower = String(fileName ?? "").trim().toLowerCase();
+  return ASSIGNABLE_SLICE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export type PrinterAssignedFile = {
+  fileName: string;
+  sizeBytes: number | null;
+  layerCount: number | null;
+  layerHeightMm: number | null;
+  printTimeSeconds: number | null;
+  resinVolumeMl: number | null;
+  /** Machine name the slicer wrote into the file. */
+  printerProfile: string | null;
+  assignedAt: string;
 };
 
 export type PrinterStatusBoard = {
@@ -143,6 +169,7 @@ export function computePrinterStatus(
       dealId: printingRun.dealId,
       startedAt: new Date(start).toISOString(),
       etaAt: eta != null ? new Date(eta).toISOString() : null,
+      estSeconds: total != null && total > 0 ? Math.round(total / 1000) : null,
       remainingSeconds: eta != null ? Math.max(0, Math.round((eta - nowMs) / 1000)) : null,
       progress: total && total > 0 ? Math.min(1, Math.max(0, (nowMs - start) / total)) : null,
     };
@@ -162,7 +189,14 @@ export function computePrinterStatus(
     } else if (finished != null) endMs = finished;
     if (endMs == null || endMs > nowMs) continue;
     if (!last || endMs > ms(last.endedAt)!) {
-      last = { jobLabel: r.jobLabel, endedAt: new Date(endMs).toISOString(), autoEnded };
+      const startMs = ms(r.startedAt)!;
+      last = {
+        jobLabel: r.jobLabel,
+        startedAt: new Date(startMs).toISOString(),
+        endedAt: new Date(endMs).toISOString(),
+        autoEnded,
+        durationSeconds: endMs > startMs ? Math.round((endMs - startMs) / 1000) : null,
+      };
     }
   }
 
@@ -242,9 +276,17 @@ export const startPrinterRunSchema = z
     jobLabel: z.string().trim().max(200).optional(),
     /** Hours for a typed job (or to override a plate's print time). */
     estHours: z.coerce.number().min(0).max(240).optional(),
+    /** Start the slice file assigned (dropped) on this card, using its estimated time. */
+    useAssigned: z.boolean().optional(),
   })
-  .refine((v) => v.recordId != null || (v.jobLabel ?? "").length > 0, {
+  .refine((v) => v.useAssigned === true || v.recordId != null || (v.jobLabel ?? "").length > 0, {
     message: "Pick a plate or type a job name",
   });
 
 export type StartPrinterRunInput = z.infer<typeof startPrinterRunSchema>;
+
+export const printerVoiceSchema = z.object({
+  text: z.string().trim().min(1, "Say the printer name").max(300),
+  /** Confirmation from the prompt: start this printer (still needs a file on the card). */
+  printerKey: z.string().trim().max(60).optional(),
+});
