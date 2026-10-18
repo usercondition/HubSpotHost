@@ -265,8 +265,7 @@ const NAV: Array<{
     phone: "more",
   },
   { href: "/printers", label: "Printers", title: "Printers", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
-  { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep", phone: "more" },
-  { href: "/expenses", label: "Expenses", title: "Shop overhead", icon: ShoppingBag, testId: "link-nav-expenses", group: "Keep", phone: "more" },
+  { href: "/spending", label: "Spending", title: "Supplies, overhead and the bottom line", icon: ShoppingBag, testId: "link-nav-spending", group: "Keep", phone: "more" },
   { href: "/deals", label: "HubSpot board", title: "Full HubSpot stage board", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
   { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
   { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
@@ -363,9 +362,17 @@ function NavCount({ value, hot, testId }: { value: number | null; hot?: boolean;
   );
 }
 
+/** Old routes that now open a tab of a merged page; the nav highlights the merged page. */
+const NAV_ALIASES: Record<string, string> = {
+  "/supplies": "/spending",
+  "/expenses": "/spending",
+  "/spending/overhead": "/spending",
+};
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [location, navigate] = useLocation();
-  const pathOnly = location.split("?")[0] || "/";
+  const routePath = location.split("?")[0] || "/";
+  const pathOnly = NAV_ALIASES[routePath] ?? routePath;
   const { isUnlocked, lock } = useOwnerSession();
   const shop = useShopCounts();
   const activeItem = NAV.find((item) => item.href === pathOnly);
@@ -375,7 +382,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const backTo = phoneBackTarget(pathOnly, PHONE_MORE.map((item) => item.href));
   const isPhone = useIsPhone();
   // On a phone, PC-only pages show a short "Do this on your PC" note instead.
-  const pcOnly = isPhone ? pcOnlyRouteFor(pathOnly) : null;
+  const pcOnly = isPhone ? pcOnlyRouteFor(routePath) : null;
 
   useEffect(() => {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : onMorePage ? "More · Print Ops" : "Print Ops";

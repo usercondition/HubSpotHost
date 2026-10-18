@@ -36,7 +36,7 @@ export type PhoneMoreSection = { title: string; hrefs: string[] };
 export const PHONE_MORE_SECTIONS: PhoneMoreSection[] = [
   { title: "Orders", hrefs: ["/stack", "/orders", "/paid-orders", "/shipments", "/labels"] },
   { title: "Make", hrefs: ["/quote", "/files", "/prints"] },
-  { title: "Shop", hrefs: ["/supplies", "/expenses", "/performance", "/nerve"] },
+  { title: "Shop", hrefs: ["/spending", "/performance", "/nerve"] },
 ];
 
 /** Short phone labels where the desktop label is too long or unclear on a phone. */
@@ -57,8 +57,7 @@ export const PHONE_DESCRIPTIONS: Record<string, string> = {
   "/quote": "Price an STL with modifiers",
   "/files": "Search Drive files and thumbnails",
   "/prints": "Plates per order and part QC",
-  "/supplies": "Snap a receipt, resin to buy",
-  "/expenses": "Add a shop charge",
+  "/spending": "Supplies, overhead and the bottom line",
   "/performance": "Sales, profit and print time",
   "/nerve": "Mac mini and agent status",
 };
@@ -89,7 +88,7 @@ export const PC_ONLY_ROUTES: Record<string, PcOnlyRoute> = {
   "/operations": { what: "Profit automation and recalculation", alt: { href: "/performance", label: "See Stats" } },
   "/setup": { what: "System setup and connections", alt: { href: "/nerve", label: "Check Nerve status" } },
   "/marketplace-brief": { what: "The Marketplace brief and Chrome helper", alt: { href: "/inbox", label: "Open Inbox" } },
-  "/resin": { what: "Resin inventory tables", alt: { href: "/supplies", label: "Open Supplies" } },
+  "/resin": { what: "Resin inventory tables", alt: { href: "/spending", label: "Open Spending" } },
 };
 
 export function pcOnlyRouteFor(path: string): PcOnlyRoute | null {

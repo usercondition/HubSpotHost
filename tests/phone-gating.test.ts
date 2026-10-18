@@ -39,7 +39,7 @@ test("isPhoneFrom: a matchMedia that throws counts as not a phone", () => {
 
 const NAV = [
   "/", "/stack", "/queue", "/prints", "/library", "/labels", "/shipments", "/inbox", "/orders", "/quote",
-  "/paid-orders", "/printers", "/supplies", "/expenses", "/deals", "/operations", "/performance", "/setup", "/nerve",
+  "/paid-orders", "/printers", "/spending", "/deals", "/operations", "/performance", "/setup", "/nerve",
 ].map((href) => ({ href, label: href }));
 
 test("phone tabs are Work hub, Inbox, Printers, Print queue in that order", () => {
@@ -52,7 +52,7 @@ test("phone More is grouped and never lists PC-only pages or tab pages", () => {
   assert.deepEqual(sections.map((s) => s.items.map((i) => i.href)), [
     ["/stack", "/orders", "/paid-orders", "/shipments", "/labels"],
     ["/quote", "/prints"],
-    ["/supplies", "/expenses", "/performance", "/nerve"],
+    ["/spending", "/performance", "/nerve"],
   ]);
   const reachable = phoneNavHrefs(NAV);
   for (const href of Object.keys(PC_ONLY_ROUTES)) assert.equal(reachable.includes(href), false, `${href} is in phone nav`);
@@ -63,7 +63,7 @@ test("phone More picks up Files once the desktop NAV has it; Nerve hides when it
   const withFiles = phoneMoreSections([...NAV, { href: "/files", label: "Files" }]);
   assert.deepEqual(withFiles.find((s) => s.title === "Make")?.items.map((i) => i.href), ["/quote", "/files", "/prints"]);
   const noNerve = phoneMoreSections(NAV.filter((i) => i.href !== "/nerve"));
-  assert.deepEqual(noNerve.find((s) => s.title === "Shop")?.items.map((i) => i.href), ["/supplies", "/expenses", "/performance"]);
+  assert.deepEqual(noNerve.find((s) => s.title === "Shop")?.items.map((i) => i.href), ["/spending", "/performance"]);
 });
 
 test("every desktop page is either in the phone nav or a PC-only page", () => {

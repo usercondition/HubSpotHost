@@ -18,13 +18,12 @@ import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import InboxPage from "@/pages/inbox";
 import FilesPage from "@/pages/files";
 import OrderLinks from "@/pages/order-links";
-import Expenses from "@/pages/expenses";
 import QuotePage from "@/pages/quote";
 const Performance = lazy(() => import("@/pages/performance"));
 function PerformanceRoute() {
   return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Stats…</div>}><Performance /></Suspense>;
 }
-import Supplies from "@/pages/supplies";
+import Spending from "@/pages/spending";
 import Prints from "@/pages/prints";
 import PlateLibraryPage from "@/pages/plate-library";
 import PrintersPage from "@/pages/printers";
@@ -55,13 +54,15 @@ function ShellRoutes() {
           <Route path="/clients" component={ClientsPage} />
           <Route path="/orders" component={OrderLinks} />
           <Route path="/quote" component={QuotePage} />
-          <Route path="/expenses" component={Expenses} />
+          <Route path="/expenses" component={Spending} />
+          <Route path="/spending/overhead" component={Spending} />
+          <Route path="/spending" component={Spending} />
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />
           <Route path="/marketplace-brief" component={MarketplaceBriefPage} />
           <Route path="/inbox" component={InboxPage} />
           <Route path="/files" component={FilesPage} />
-          <Route path="/supplies" component={Supplies} />
+          <Route path="/supplies" component={Spending} />
           <Route path="/prints" component={Prints} />
           <Route path="/library" component={PlateLibraryPage} />
           <Route path="/printers" component={PrintersPage} />

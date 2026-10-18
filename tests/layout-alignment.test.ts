@@ -1449,6 +1449,9 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.deepEqual(moreHeads.slice(0, 3), ["orders", "make", "shop"]);
     assert.ok(moreHeads.includes("tools") && moreHeads.includes("apps"), moreHeads.join("|"));
     assert.ok(moreLinks.includes("Priority"), `phone More is missing Priority: ${moreLinks.join("|")}`);
+    // Spending replaces Supplies + Expenses under Shop.
+    assert.ok(moreLinks.includes("Spending"), `phone More is missing Spending: ${moreLinks.join("|")}`);
+    assert.equal(moreLinks.some((t) => t === "Supplies" || t === "Expenses"), false, moreLinks.join("|"));
     const rowHeights = await page.locator("[data-testid='page-more'] .more-row").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
     for (const height of rowHeights) check(height >= 56, `More row too short (${height}px)`);
     // A page opened from More shows Back, keeps More highlighted, and Back returns to More.

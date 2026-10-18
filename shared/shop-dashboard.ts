@@ -105,6 +105,19 @@ export interface ShopDashboard {
   channelMetrics: ShopMetric[];
   origins: OrderOrigins;
   costGaps: string[];
+  /** Period money facts shared by the Spending bottom line (orders with complete costs only). */
+  books: ShopBooks;
+}
+
+export interface ShopBooks {
+  revenue: number;
+  orderCosts: number;
+  grossProfit: number;
+  ordersCounted: number;
+  ordersMissingCost: number;
+  estimated: boolean;
+  supplies: number;
+  supplyReceipts: number;
 }
 
 const PERIOD_LABEL: Record<ShopPeriodId, string> = {
@@ -766,6 +779,16 @@ export function buildShopDashboard(input: ShopDashboardInput): ShopDashboard {
       compareLabel: input.period === "all" ? "All time is not compared" : input.period === "ytd" ? "vs last year to this date" : `vs the prior ${PERIOD_LABEL[input.period]}`,
     },
     headlines,
+    books: {
+      revenue: currentProfit.revenue,
+      orderCosts: currentProfit.cost,
+      grossProfit: currentProfit.profit,
+      ordersCounted: currentProfit.complete,
+      ordersMissingCost: currentProfit.missing,
+      estimated: currentProfit.estimated,
+      supplies: supply,
+      supplyReceipts: supplyCount,
+    },
     money: [revenue, shippedRevenue, ordersMetric, aov, profit, margin, costPer, cashMetric, waitingMetric, supplyMetric],
     speed: [speedMedian, stageTime, onTime, lateMetric, oldestMetric],
     production: [platesMetric, hoursMetric, resinMl, resinUsd, reprintRate, failureMetric, utilization],
