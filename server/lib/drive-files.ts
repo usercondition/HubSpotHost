@@ -11,7 +11,15 @@
  * Auth for sync: Bearer FILES_SYNC_TOKEN (>= 24 chars; 503 when unset). Write-only token, separate from
  * NERVE_READ_TOKEN and the owner code.
  *
- * Read: GET /api/files?q=&cat=&offset=&limit= behind the normal Print Ops owner code. Thumbnails are
+ * Two sources share the table: source='drive' (Google Drive, above) and source='shop' (the X:/Y:/Z: shop JBOD drives,
+ * pushed by ~/.hermes/scripts/shop_files_sync.py from the Mac's nightly ~/.drive-index/files.tsv: folders + archives
+ * with the same privacy filter and client-name mask). Commit only replaces rows of the source being committed.
+ *
+ * Search: normalized text (case, _ - . +, camelCase) in an FTS5 trigram index (substring/prefix, any word order,
+ * AND across name + folder path). When exact matches are scarce it adds close matches: typo variants from the
+ * index vocabulary (edit distance 1-2) and joined words split ("groundplunderer" -> ground + plunderer).
+ *
+ * Read: GET /api/files?q=&cat=&src=&offset=&limit= behind the normal Print Ops owner code. Thumbnails are
  * returned inline as data: URLs so <img> never needs a separate unauthenticated route.
  * Read-only toward Drive: links only (Open in Drive / Download / Share link); nothing is moved or shared.
  */
@@ -21,9 +29,11 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
+import { fuzzyVariants, normalizeText, searchTokens, splitJoined } from "../../shared/file-search";
 import {
   DRIVE_FILE_CATEGORIES,
-  queryTokens,
+  DRIVE_FILE_SOURCES,
+  type DriveFileSource,
   type DriveFileCategory,
   type DriveFileView,
   type DriveFilesResponse,
@@ -58,6 +68,29 @@ CREATE TABLE IF NOT EXISTS drive_thumbs (
 CREATE TABLE IF NOT EXISTS drive_files_meta (k TEXT PRIMARY KEY, v TEXT);
 `;
 
+/** Columns added after #265; applied idempotently on open. */
+const ADDED_COLUMNS: Array<[string, string]> = [
+  ["source", "TEXT NOT NULL DEFAULT 'drive'"],
+  ["name_norm", "TEXT NOT NULL DEFAULT ''"],
+  ["keywords", "TEXT NOT NULL DEFAULT ''"],
+];
+
+const FTS = `
+CREATE VIRTUAL TABLE IF NOT EXISTS drive_files_fts USING fts5(search, content='drive_files', content_rowid='rowid', tokenize='trigram');
+CREATE TRIGGER IF NOT EXISTS drive_files_ai AFTER INSERT ON drive_files BEGIN
+  INSERT INTO drive_files_fts(rowid, search) VALUES (new.rowid, new.search);
+END;
+CREATE TRIGGER IF NOT EXISTS drive_files_ad AFTER DELETE ON drive_files BEGIN
+  INSERT INTO drive_files_fts(drive_files_fts, rowid, search) VALUES ('delete', old.rowid, old.search);
+END;
+CREATE TRIGGER IF NOT EXISTS drive_files_au AFTER UPDATE OF search ON drive_files BEGIN
+  INSERT INTO drive_files_fts(drive_files_fts, rowid, search) VALUES ('delete', old.rowid, old.search);
+  INSERT INTO drive_files_fts(rowid, search) VALUES (new.rowid, new.search);
+END;
+CREATE INDEX IF NOT EXISTS drive_files_src ON drive_files(source);
+`;
+const SEARCH_VERSION = "2";
+
 let sqlite: Database.Database | null = null;
 
 export function driveFilesDbFile(env: NodeJS.ProcessEnv = process.env): string {
@@ -76,13 +109,45 @@ export function driveFilesDb(): Database.Database {
   sqlite = new Database(file);
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(SCHEMA);
+  migrate(sqlite);
   return sqlite;
+}
+
+function migrate(d: Database.Database) {
+  const have = new Set((d.prepare("PRAGMA table_info(drive_files)").all() as Array<{ name: string }>).map((c) => c.name));
+  for (const [col, def] of ADDED_COLUMNS) if (!have.has(col)) d.exec(`ALTER TABLE drive_files ADD COLUMN ${col} ${def}`);
+  const ver = (d.prepare("SELECT v FROM drive_files_meta WHERE k='searchVersion'").get() as { v: string } | undefined)?.v;
+  if (ver === SEARCH_VERSION) {
+    d.exec(FTS);
+    return;
+  }
+  // One-time: re-normalize rows synced by older code, then build the trigram index from the table. The FTS table and
+  // its triggers are dropped first: an external-content 'delete' of values the index never saw corrupts it.
+  d.exec(`DROP TRIGGER IF EXISTS drive_files_ai; DROP TRIGGER IF EXISTS drive_files_ad; DROP TRIGGER IF EXISTS drive_files_au;
+    DROP TABLE IF EXISTS drive_files_fts;`);
+  const rows = d.prepare("SELECT rowid, name, path, tags, keywords FROM drive_files").all() as Array<{ rowid: number; name: string; path: string; tags: string; keywords: string }>;
+  const upd = d.prepare("UPDATE drive_files SET search = ?, name_norm = ? WHERE rowid = ?");
+  d.transaction(() => {
+    for (const r of rows) {
+      let tags: Record<string, string> = {};
+      try {
+        tags = JSON.parse(r.tags) as Record<string, string>;
+      } catch {
+        /* ignore */
+      }
+      upd.run(searchBlob({ name: r.name, path: r.path, tags, keywords: r.keywords }), normalizeText(r.name), r.rowid);
+    }
+    d.exec(FTS);
+    d.exec("INSERT INTO drive_files_fts(drive_files_fts) VALUES ('rebuild')");
+    d.prepare("INSERT INTO drive_files_meta (k,v) VALUES ('searchVersion', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(SEARCH_VERSION);
+  })();
 }
 
 /** Test hook. */
 export function resetDriveFilesDbForTests() {
   sqlite?.close();
   sqlite = null;
+  vocabCache = null;
 }
 
 function syncToken(env: NodeJS.ProcessEnv) {
@@ -113,6 +178,7 @@ const KEY = z.string().regex(/^[A-Za-z0-9_.-]{1,120}$/);
 const thumbSources = ["drive", "folder-photo", "render", "web", "icon"] as const;
 const rowSchema = z.object({
   id: KEY,
+  source: z.enum(DRIVE_FILE_SOURCES).default("drive"),
   name: z.string().max(400),
   category: z.enum(DRIVE_FILE_CATEGORIES),
   path: z.string().max(1200).default(""),
@@ -130,6 +196,8 @@ const rowSchema = z.object({
   thumbSource: z.enum(thumbSources).default("icon"),
   thumbKey: KEY.nullable().optional(),
   webSourceUrl: z.string().max(500).regex(/^https:\/\//).nullable().optional(),
+  /** Search-only words (shop folders: names of the files inside). Never returned to the client. */
+  keywords: z.string().max(2000).default(""),
 });
 const rowsSchema = z.object({ generation: z.string().min(4).max(40), rows: z.array(rowSchema).max(5000) });
 const thumbsSchema = z.object({
@@ -144,19 +212,37 @@ const thumbsSchema = z.object({
     )
     .max(200),
 });
-const commitSchema = z.object({ generation: z.string().min(4).max(40), generatedAt: z.string().max(40).optional() });
+const commitSchema = z.object({
+  generation: z.string().min(4).max(40),
+  generatedAt: z.string().max(40).optional(),
+  source: z.enum(DRIVE_FILE_SOURCES).default("drive"),
+});
 
-export function searchBlob(r: { name: string; path: string; tags: Record<string, string> }): string {
-  const raw = [r.name, r.path, ...Object.values(r.tags)].join(" ").toLowerCase();
-  // Keep both spaced and joined forms so "darkangels" and "dark angels" both hit.
-  return `${raw} ${raw.replace(/[^a-z0-9]+/g, "")}`;
+/** Tag keys that are display facts, not search words. */
+const NON_SEARCH_TAGS = new Set(["files", "types", "drive"]);
+
+/**
+ * Normalized search text: name | folder path | tags | keywords. Name and path are also kept squashed (no spaces)
+ * so a query typed joined ("darkangels") hits "Dark_Angels" by substring.
+ */
+export function searchBlob(r: { name: string; path: string; tags: Record<string, string>; keywords?: string }): string {
+  const tagText = Object.entries(r.tags)
+    .filter(([k]) => !NON_SEARCH_TAGS.has(k))
+    .map(([, v]) => v)
+    .join(" ");
+  const name = normalizeText(r.name);
+  const pathText = normalizeText(r.path);
+  const squash = (t: string) => t.replace(/ /g, "");
+  return [name, pathText, normalizeText(tagText), normalizeText(r.keywords ?? ""), `${squash(name)} ${squash(pathText)}`]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 export function upsertRows(generation: string, rows: z.infer<typeof rowSchema>[]) {
   const d = driveFilesDb();
-  const stmt = d.prepare(`INSERT INTO drive_files (id,name,category,path,parent,size,modified_time,web_view_link,mime_type,tags,thumb_source,thumb_key,web_source_url,search,generation)
-    VALUES (@id,@name,@category,@path,@parent,@size,@modifiedTime,@webViewLink,@mimeType,@tags,@thumbSource,@thumbKey,@webSourceUrl,@search,@generation)
-    ON CONFLICT(id) DO UPDATE SET name=excluded.name, category=excluded.category, path=excluded.path, parent=excluded.parent,
+  const stmt = d.prepare(`INSERT INTO drive_files (id,source,name,name_norm,keywords,category,path,parent,size,modified_time,web_view_link,mime_type,tags,thumb_source,thumb_key,web_source_url,search,generation)
+    VALUES (@id,@source,@name,@nameNorm,@keywords,@category,@path,@parent,@size,@modifiedTime,@webViewLink,@mimeType,@tags,@thumbSource,@thumbKey,@webSourceUrl,@search,@generation)
+    ON CONFLICT(id) DO UPDATE SET source=excluded.source, name=excluded.name, name_norm=excluded.name_norm, keywords=excluded.keywords, category=excluded.category, path=excluded.path, parent=excluded.parent,
       size=excluded.size, modified_time=excluded.modified_time, web_view_link=excluded.web_view_link, mime_type=excluded.mime_type,
       tags=excluded.tags, thumb_source=excluded.thumb_source, thumb_key=excluded.thumb_key, web_source_url=excluded.web_source_url,
       search=excluded.search, generation=excluded.generation`);
@@ -164,6 +250,9 @@ export function upsertRows(generation: string, rows: z.infer<typeof rowSchema>[]
     for (const r of items) {
       stmt.run({
         ...r,
+        source: r.source ?? "drive",
+        nameNorm: normalizeText(r.name),
+        keywords: r.keywords ?? "",
         parent: r.parent ?? null,
         size: r.size ?? null,
         modifiedTime: r.modifiedTime ?? null,
@@ -178,68 +267,204 @@ export function upsertRows(generation: string, rows: z.infer<typeof rowSchema>[]
     }
   });
   tx(rows);
+  vocabCache = null;
 }
 
-export function commitGeneration(generation: string, generatedAt?: string) {
+export function commitGeneration(generation: string, generatedAt?: string, source: DriveFileSource = "drive") {
   const d = driveFilesDb();
-  const seen = (d.prepare("SELECT COUNT(*) n FROM drive_files WHERE generation = ?").get(generation) as { n: number }).n;
+  const seen = (d.prepare("SELECT COUNT(*) n FROM drive_files WHERE generation = ? AND source = ?").get(generation, source) as { n: number }).n;
   // Never wipe the index on an empty/aborted push.
   if (seen === 0) return { kept: 0, removed: 0, skipped: true };
-  const removed = d.prepare("DELETE FROM drive_files WHERE generation <> ?").run(generation).changes;
+  // Only this source's stale rows: a Drive push never removes shop-drive rows and vice versa.
+  const removed = d.prepare("DELETE FROM drive_files WHERE generation <> ? AND source = ?").run(generation, source).changes;
+  vocabCache = null;
   const orphanThumbs = d
     .prepare("DELETE FROM drive_thumbs WHERE key NOT IN (SELECT thumb_key FROM drive_files WHERE thumb_key IS NOT NULL)")
     .run().changes;
-  d.prepare("INSERT INTO drive_files_meta (k,v) VALUES ('generatedAt', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(
+  const metaKey = source === "drive" ? "generatedAt" : `generatedAt:${source}`;
+  d.prepare("INSERT INTO drive_files_meta (k,v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(
+    metaKey,
     generatedAt || new Date().toISOString(),
   );
+  // Warm the typo vocabulary off the request path so the first close-match search after a sync stays fast.
+  setImmediate(() => {
+    try {
+      searchVocab();
+    } catch {
+      /* next search builds it */
+    }
+  });
   return { kept: seen, removed, orphanThumbs, skipped: false };
 }
 
 type Row = {
-  id: string; name: string; category: DriveFileCategory; path: string; size: number | null; modified_time: string | null;
+  id: string; source: string; name: string; category: DriveFileCategory; path: string; size: number | null; modified_time: string | null;
   web_view_link: string | null; mime_type: string | null; tags: string; thumb_source: DriveThumbSource; thumb_key: string | null;
   web_source_url: string | null; tmime: string | null; tdata: Buffer | null;
 };
 
-const CAT_RANK = "CASE category WHEN 'folder' THEN 0 WHEN 'model' THEN 1 WHEN 'archive' THEN 2 WHEN 'sliced' THEN 3 WHEN 'photo' THEN 4 ELSE 5 END";
+const CAT_BOOST = "CASE f.category WHEN 'folder' THEN 10 WHEN 'archive' THEN 6 WHEN 'model' THEN 4 WHEN 'sliced' THEN 2 ELSE 0 END";
+/** Below this many exact hits the search also returns close (typo / joined-word) matches, ranked after exact ones. */
+export const FUZZY_MIN_EXACT = 12;
 
-export function searchFiles(opts: { q: string; category: DriveFileCategory | null; offset: number; limit: number }): DriveFilesResponse {
-  const d = driveFilesDb();
-  const tokens = queryTokens(opts.q);
-  const where: string[] = [];
-  const args: Record<string, unknown> = {};
-  tokens.forEach((t, i) => {
-    where.push(`search LIKE @t${i} ESCAPE '\\'`);
-    args[`t${i}`] = `%${t.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+let vocabCache: Map<string, number> | null = null;
+
+/** Word -> number of rows using it (names, folder paths, keywords). Rebuilt lazily after each sync batch. */
+export function searchVocab(): Map<string, number> {
+  if (vocabCache) return vocabCache;
+  const m = new Map<string, number>();
+  const it = driveFilesDb().prepare("SELECT name_norm, path, keywords FROM drive_files").iterate() as IterableIterator<{ name_norm: string; path: string; keywords: string }>;
+  for (const r of it) {
+    const words = new Set(`${r.name_norm} ${normalizeText(r.path)} ${normalizeText(r.keywords)}`.split(" "));
+    for (const w of words) if (w.length >= 3 && !/^\d+$/.test(w)) m.set(w, (m.get(w) ?? 0) + 1);
+  }
+  vocabCache = m;
+  return m;
+}
+
+type Term = { token: string; alts: string[][] };
+
+/** FTS5 trigram needs >= 3 chars; shorter words fall back to a word-start LIKE on the search column. */
+function termSql(alts: string[][], args: Record<string, unknown>, key: string): { fts: string | null; like: string | null } {
+  const ftsAlts: string[] = [];
+  const likeAlts: string[] = [];
+  alts.forEach((words, ai) => {
+    if (words.every((w) => w.length >= 3)) ftsAlts.push(words.length === 1 ? `"${words[0]}"` : `(${words.map((w) => `"${w}"`).join(" AND ")})`);
+    else {
+      likeAlts.push(
+        `(${words
+          .map((w, wi) => {
+            const k = `${key}_${ai}_${wi}`;
+            args[k] = `% ${w}%`;
+            return `(' ' || f.search) LIKE @${k}`;
+          })
+          .join(" AND ")})`,
+      );
+    }
   });
-  const base = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const countRows = d.prepare(`SELECT category, COUNT(*) n FROM drive_files ${base} GROUP BY category`).all(args) as Array<{ category: DriveFileCategory; n: number }>;
+  return { fts: ftsAlts.length ? `(${ftsAlts.join(" OR ")})` : null, like: likeAlts.length ? likeAlts.join(" OR ") : null };
+}
+
+/** WHERE fragment matching every term (any order) on name + folder path + tags + keywords. */
+function matchWhere(terms: Term[], args: Record<string, unknown>, key: string): string {
+  const fts: string[] = [];
+  const parts: string[] = [];
+  terms.forEach((t, i) => {
+    const s = termSql(t.alts, args, `${key}${i}`);
+    if (s.fts && s.like) parts.push(`(f.rowid IN (SELECT rowid FROM drive_files_fts WHERE drive_files_fts MATCH @${key}m${i}) OR ${s.like})`), (args[`${key}m${i}`] = s.fts);
+    else if (s.fts) fts.push(s.fts);
+    else if (s.like) parts.push(`(${s.like})`);
+  });
+  if (fts.length) {
+    args[`${key}m`] = fts.join(" AND ");
+    parts.unshift(`f.rowid IN (SELECT rowid FROM drive_files_fts WHERE drive_files_fts MATCH @${key}m)`);
+  }
+  return parts.join(" AND ");
+}
+
+export function searchFiles(opts: {
+  q: string;
+  category: DriveFileCategory | null;
+  source?: DriveFileSource | null;
+  offset: number;
+  limit: number;
+}): DriveFilesResponse {
+  const d = driveFilesDb();
+  const tokens = searchTokens(opts.q);
+  const args: Record<string, unknown> = {};
+  const strictTerms: Term[] = tokens.map((t) => ({ token: t, alts: [[t]] }));
+  let where = tokens.length ? matchWhere(strictTerms, args, "s") : "";
+  const countExact = () =>
+    (d.prepare(`SELECT COUNT(*) n FROM drive_files f ${where ? `WHERE ${where}` : ""}`).get(args) as { n: number }).n;
+  const exactTotal = tokens.length ? countExact() : 0;
+  let fuzzy = false;
+  let rankTerms = strictTerms;
+  const strictWhere = where;
+  if (tokens.length && exactTotal < FUZZY_MIN_EXACT) {
+    const vocab = searchVocab();
+    const loose: Term[] = tokens.map((t) => {
+      const alts: string[][] = [[t]];
+      const split = splitJoined(t, vocab);
+      if (split) alts.push(split);
+      for (const v of fuzzyVariants(t, vocab)) alts.push([v]);
+      return { token: t, alts };
+    });
+    if (loose.some((t) => t.alts.length > 1)) {
+      where = matchWhere(loose, args, "z");
+      fuzzy = true;
+      rankTerms = loose;
+    }
+  }
+
+  const base = where ? `WHERE ${where}` : "";
+  const srcCountRows = d.prepare(`SELECT f.source, COUNT(*) n FROM drive_files f ${base} GROUP BY f.source`).all(args) as Array<{ source: DriveFileSource; n: number }>;
+  const sources: DriveFilesResponse["sources"] = {};
+  for (const c of srcCountRows) sources[c.source] = c.n;
+  const srcArgs = { ...args };
+  let srcWhere = base;
+  if (opts.source) {
+    srcWhere = `${base ? `${base} AND` : "WHERE"} f.source = @src`;
+    srcArgs.src = opts.source;
+  }
+  const countRows = d.prepare(`SELECT f.category, COUNT(*) n FROM drive_files f ${srcWhere} GROUP BY f.category`).all(srcArgs) as Array<{ category: DriveFileCategory; n: number }>;
   const counts: DriveFilesResponse["counts"] = {};
   for (const c of countRows) counts[c.category] = c.n;
-  const catClause = opts.category ? `${base ? `${base} AND` : "WHERE"} category = @cat` : base;
-  if (opts.category) args.cat = opts.category;
+  const catWhere = opts.category ? `${srcWhere ? `${srcWhere} AND` : "WHERE"} f.category = @cat` : srcWhere;
+  if (opts.category) srcArgs.cat = opts.category;
   const total = opts.category ? counts[opts.category] ?? 0 : countRows.reduce((s, c) => s + c.n, 0);
-  // Name hits first, then things with a real picture, then folders/models before loose files.
-  const nameHits = tokens.length ? tokens.map((_, i) => `(lower(name) LIKE @t${i} ESCAPE '\\')`).join(" + ") : "(0 = 0)";
+
+  // Ranking: exact before close matches; whole-name match > name starts with query > words starting in the name >
+  // words anywhere in the name > folder path only; folders/kits and archives before loose files; real pictures first.
+  const phrase = tokens.join(" ");
+  srcArgs.phrase = phrase;
+  srcArgs.phrasePrefix = `${phrase}%`;
+  // Per query word: 12 when a word of the name starts with it (or a close spelling of it), 6 when the name contains it
+  // anywhere, including joined ("groundplunderer" inside "Ground Plunderer").
+  const nameScore = rankTerms
+    .map((t, i) => {
+      const starts: string[] = [];
+      const inside: string[] = [];
+      t.alts.forEach((words, ai) => {
+        const ws = words.map((w, wi) => {
+          srcArgs[`nw${i}_${ai}_${wi}`] = `% ${w}%`;
+          return `(' ' || f.name_norm) LIKE @nw${i}_${ai}_${wi}`;
+        });
+        starts.push(`(${ws.join(" AND ")})`);
+        srcArgs[`nc${i}_${ai}`] = `%${words.join("")}%`;
+        inside.push(`replace(f.name_norm, ' ', '') LIKE @nc${i}_${ai}`);
+      });
+      return `(CASE WHEN ${starts.join(" OR ")} THEN 12 WHEN ${inside.join(" OR ")} THEN 6 ELSE 0 END)`;
+    })
+    .join(" + ");
+  const exactBoost = fuzzy && strictWhere ? `(CASE WHEN ${strictWhere} THEN 200 ELSE 0 END)` : "0";
+  const score = tokens.length
+    ? `${exactBoost} + (CASE WHEN f.name_norm = @phrase THEN 100 WHEN f.name_norm LIKE @phrasePrefix THEN 50 ELSE 0 END) + ${nameScore} + ${CAT_BOOST} + (CASE WHEN f.thumb_source <> 'icon' THEN 3 ELSE 0 END)`
+    : `${CAT_BOOST} + (CASE WHEN f.thumb_source <> 'icon' THEN 3 ELSE 0 END)`;
   const rows = d
     .prepare(
       `SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key
-       ${catClause.replace(/\bsearch\b/g, "f.search").replace(/\bcategory\b/g, "f.category")}
-       ORDER BY (${nameHits}) DESC, (f.thumb_source <> 'icon') DESC, ${CAT_RANK.replace("category", "f.category")}, f.modified_time DESC
+       ${catWhere}
+       ORDER BY (${score}) DESC, f.modified_time DESC, f.name
        LIMIT @limit OFFSET @offset`,
     )
-    .all({ ...args, limit: opts.limit, offset: opts.offset }) as Row[];
-  const generatedAt =
-    (d.prepare("SELECT v FROM drive_files_meta WHERE k='generatedAt'").get() as { v: string } | undefined)?.v ?? null;
+    .all({ ...srcArgs, limit: opts.limit, offset: opts.offset }) as Row[];
+  const meta = (k: string) => (d.prepare("SELECT v FROM drive_files_meta WHERE k = ?").get(k) as { v: string } | undefined)?.v ?? null;
+  const generatedAt = meta("generatedAt");
+  const generatedAtShop = meta("generatedAt:shop");
   return {
     ok: true,
     q: opts.q,
     category: opts.category,
+    source: opts.source ?? null,
     total,
+    exactTotal: tokens.length ? exactTotal : total,
+    fuzzy,
     offset: opts.offset,
     counts,
+    sources,
     generatedAt,
-    configured: generatedAt !== null,
+    generatedAtShop,
+    configured: generatedAt !== null || generatedAtShop !== null,
     items: rows.map(toView),
   };
 }
@@ -253,6 +478,7 @@ function toView(r: Row): DriveFileView {
   }
   return {
     id: r.id,
+    source: r.source === "shop" ? "shop" : "drive",
     name: r.name,
     category: r.category,
     path: r.path,
@@ -270,6 +496,7 @@ function toView(r: Row): DriveFileView {
 const readQuery = z.object({
   q: z.string().max(200).default(""),
   cat: z.enum(DRIVE_FILE_CATEGORIES).optional().catch(undefined),
+  src: z.enum(DRIVE_FILE_SOURCES).optional().catch(undefined),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
   limit: z.coerce.number().int().min(1).max(60).default(36),
 });
@@ -284,8 +511,14 @@ export function registerDriveFilesRoutes(
     if (rejectOwner(req, res)) return;
     const parsed = readQuery.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ ok: false, error: "bad query" });
-    const { q, cat, offset, limit } = parsed.data;
-    res.json(searchFiles({ q, category: cat ?? null, offset, limit }));
+    const { q, cat, src, offset, limit } = parsed.data;
+    res.json(searchFiles({ q, category: cat ?? null, source: src ?? null, offset, limit }));
+  });
+
+  // Capability probe for the Mac sync scripts: an older server (404 here) would silently drop `source`.
+  app.get("/api/ops/files/sync/sources", (req, res) => {
+    if (rejectFilesSync(req, res, env)) return;
+    res.json({ ok: true, sources: DRIVE_FILE_SOURCES });
   });
 
   app.get("/api/ops/files/sync/thumbs", (req, res) => {
@@ -328,6 +561,6 @@ export function registerDriveFilesRoutes(
     if (rejectFilesSync(req, res, env)) return;
     const parsed = commitSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: "bad commit payload" });
-    res.json({ ok: true, ...commitGeneration(parsed.data.generation, parsed.data.generatedAt) });
+    res.json({ ok: true, ...commitGeneration(parsed.data.generation, parsed.data.generatedAt, parsed.data.source) });
   });
 }
