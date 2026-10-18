@@ -163,15 +163,17 @@ export function Mark({ className }: { className?: string }) {
     <svg
       viewBox="0 0 32 32"
       fill="none"
-      aria-label="Print Operations"
+      aria-label="Print Ops"
       role="img"
       className={className}
     >
-      <rect x="3.5" y="3.5" width="25" height="25" rx="7" stroke="currentColor" strokeWidth="1.8" opacity="0.35" />
-      <path d="M9 22h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M11 17h10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />
-      <path d="M13 12h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.5" />
-      <circle cx="16" cy="8" r="1.7" fill="currentColor" />
+      <rect width="32" height="32" rx="7.04" fill="#1c1917" />
+      <path d="M11.648 11.648A4.352 4.352 0 0 0 20.352 11.648Z" fill="#f59e0b" />
+      <rect x="10.24" y="12.576" width="11.52" height="1.6" rx="0.8" fill="#f59e0b" />
+      <rect x="9.12" y="15.104" width="13.76" height="1.6" rx="0.8" fill="#f59e0b" />
+      <rect x="8.224" y="17.632" width="15.552" height="1.6" rx="0.8" fill="#f59e0b" />
+      <rect x="7.392" y="20.16" width="17.216" height="1.6" rx="0.8" fill="#f59e0b" />
+      <rect x="6.704" y="22.688" width="18.592" height="1.92" rx="0.96" fill="#f59e0b" />
     </svg>
   );
 }
@@ -332,7 +334,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className="ops-rail hidden md:flex">
         <Link href="/" className="ops-brand" data-testid="link-home" title="Print Ops">
           <span className="ops-mark-wrap">
-            <Mark className="h-4 w-4 text-primary-foreground" />
+            <Mark className="h-full w-full" />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-[15px] font-semibold tracking-tight text-foreground">Print Ops</span>
@@ -423,7 +425,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="ops-phone-bar flex md:hidden">
           <Link href="/" className="flex min-w-0 items-center gap-2" data-testid="link-home-mobile" title="Print Ops">
             <span className="ops-mark-wrap h-[26px] w-[26px] rounded-[7px]">
-              <Mark className="h-3.5 w-3.5 text-primary-foreground" />
+              <Mark className="h-full w-full" />
             </span>
             <span className="truncate text-[17px] font-semibold tracking-tight">{activeItem?.label ?? "Print Ops"}</span>
           </Link>

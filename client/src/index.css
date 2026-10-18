@@ -353,6 +353,14 @@
     border-radius: 8px;
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
+    overflow: hidden;
+  }
+
+  /* Print Ops brand mark is a self-contained charcoal + amber tile. */
+  .ops-mark-wrap:has(svg[aria-label="Print Ops"]) {
+    background: transparent;
+    color: inherit;
+    padding: 0;
   }
 
   .ops-rail {

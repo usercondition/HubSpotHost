@@ -339,7 +339,7 @@ export default function ClientOrder() {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header className="accent-wash border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center gap-2.5 px-5 py-4">
-          <Mark className="h-7 w-7 text-primary" />
+          <Mark className="h-7 w-7" />
           <span className="flex flex-col leading-tight">
             <span className="text-sm font-semibold tracking-tight">Print Orders</span>
             <span className="rule-label">Order form</span>
