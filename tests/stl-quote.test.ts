@@ -11,6 +11,10 @@ import {
   costMarkups,
   marketStats,
   normalizeStlQuoteSettings,
+  scaleForTarget,
+  checkFit,
+  buildQuoteSummary,
+  DEFAULT_QUOTE_PRINTERS,
   resinCostPerMl,
   roundUp,
   searchTermFromFileName,
@@ -129,12 +133,14 @@ test("STL quote math with defaults (20 mm cube on Mighty 8K)", () => {
 });
 
 test("settings normalization clamps junk and keeps defaults", () => {
-  const s = normalizeStlQuoteSettings({ wasteFactor: 0.2, flatMarkupPct: "7", printers: [{ id: "mighty-revo", watts: -5 }], defaultPrinterId: "nope" });
+  const s = normalizeStlQuoteSettings({ wasteFactor: 0.2, flatMarkupPct: "7", printers: [{ id: "mega-8k-s", watts: -5 }], defaultPrinterId: "nope" });
   assert.equal(s.wasteFactor, 1.1);
   assert.equal(s.flatMarkupPct, 7);
   assert.equal(s.printers.length, 1);
   assert.equal(s.printers[0]!.watts, 240);
-  assert.equal(s.defaultPrinterId, "mighty-revo");
+  assert.equal(s.defaultPrinterId, "mega-8k-s");
+  assert.deepEqual(s.printers[0]!.buildMm, { x: 330, y: 185, z: 300 });
+  assert.equal(normalizeStlQuoteSettings({ printers: [{ id: "mega-8k-s", buildMm: { x: 0, y: 1, z: 1 } }] }).printers[0]!.buildMm, null);
 });
 
 test("market stats, suggested price, search term", () => {
@@ -213,4 +219,91 @@ test("routes: owner gate, settings round-trip, market validation", async () => {
   } finally {
     server.close();
   }
+});
+
+const cube20 = { name: "cube.stl", volumeMl: 8, surfaceAreaMm2: 2400, heightMm: 20, bbox: { x: 20, y: 20, z: 20 } };
+
+test("Revo removed from default printers; Mighty/Mega/HeyGears have build volumes", () => {
+  assert.ok(!DEFAULT_QUOTE_PRINTERS.some((p) => /revo/i.test(p.id + p.name)));
+  for (const p of DEFAULT_QUOTE_PRINTERS.filter((x) => !x.parked)) assert.ok(p.buildMm, p.id);
+});
+
+test("scaling: 200% gives 8x volume, 2x height and time; dims and packaging re-pick", () => {
+  const s = DEFAULT_STL_QUOTE_SETTINGS;
+  const base = computeStlQuote([cube20], s);
+  const big = computeStlQuote([cube20], s, { scale: 2 });
+  assert.equal(big.modelMl, 64); // 8 ml x 2^3
+  assert.equal(big.originalModelMl, 8);
+  assert.equal(big.heightMm, 40);
+  assert.equal(big.layers, base.layers * 2);
+  assert.deepEqual(big.originalDims, { x: 20, y: 20, z: 20 });
+  assert.deepEqual(big.scaledDims, { x: 40, y: 40, z: 40 });
+  assert.ok(Math.abs(big.printHours - base.printHours * 2) < 0.011);
+  assert.equal(computeStlQuote([cube20], s, { scale: 3.75 }).packagingTier, "small"); // 75 mm = small limit
+  assert.equal(computeStlQuote([cube20], s, { scale: 4 }).packagingTier, "medium"); // 80 mm
+  assert.equal(computeStlQuote([cube20], s, { scale: 8 }).packagingTier, "large"); // 160 mm
+  // hollow shell scales with area (s^2)
+  assert.equal(computeStlQuote([cube20], s, { scale: 2, hollow: true }).modelMl, 19.2);
+  // markups follow the new cost
+  assert.ok(big.rawCost > base.rawCost);
+  assert.equal(big.markups.dontGoBelow, Math.max(15, Math.ceil(big.rawCost * 2)));
+});
+
+test("target size helpers lock aspect", () => {
+  const d = { x: 44, y: 44, z: 62 };
+  assert.equal(scaleForTarget("percent", 150, d), 1.5);
+  assert.equal(scaleForTarget("height", 124, d), 2);
+  assert.equal(scaleForTarget("longest", 31, d), 0.5);
+  assert.equal(scaleForTarget("height", 0, d), 1);
+  assert.equal(scaleForTarget("percent", NaN, d), 1);
+});
+
+test("fit check against printer build volume (rotation on the plate allowed)", () => {
+  const p = { name: "M8K", buildMm: { x: 218, y: 123, z: 235 } };
+  assert.equal(checkFit([{ name: "a", bbox: { x: 120, y: 200, z: 100 } }], p).status, "fits");
+  assert.equal(checkFit([{ name: "a", bbox: { x: 50, y: 50, z: 240 } }], p).status, "too-big");
+  assert.equal(checkFit([{ name: "a", bbox: { x: 130, y: 130, z: 50 } }], p).status, "too-big");
+  assert.equal(checkFit([{ name: "a", bbox: { x: 1, y: 1, z: 1 } }], { name: "X", buildMm: null }).status, "unknown");
+  const q = computeStlQuote([cube20], DEFAULT_STL_QUOTE_SETTINGS, { printerId: "mighty-8k-newx1", scale: 12 }); // 240 mm tall
+  assert.equal(q.fit.status, "too-big");
+});
+
+test("quantity: resin x qty, time unchanged, packaging x qty only when separate", () => {
+  const s = DEFAULT_STL_QUOTE_SETTINGS;
+  const one = computeStlQuote([cube20], s);
+  const three = computeStlQuote([cube20], s, { quantity: 3 });
+  const sep = computeStlQuote([cube20], s, { quantity: 3, separatePackages: true });
+  assert.equal(three.modelMl, 24);
+  assert.equal(three.printHours, one.printHours);
+  assert.equal(three.costs.packaging, 1.5);
+  assert.equal(sep.costs.packaging, 4.5);
+  assert.ok(three.notes.some((n) => /one plate/.test(n)));
+});
+
+test("add-ons are off by default and added to raw cost before markups", () => {
+  const s = DEFAULT_STL_QUOTE_SETTINGS;
+  const plain = computeStlQuote([cube20], s, { quantity: 2 });
+  assert.equal(plain.addOnLines.length, 0);
+  assert.equal(plain.costs.addOns, 0);
+  const q = computeStlQuote([cube20], s, {
+    quantity: 2,
+    addOns: { rushUsd: 10, baseMagnetUsdEach: 2, finishing: { hours: 0.5, usdPerHour: 15 }, custom: { label: "Paint test", usd: 5 } },
+  });
+  assert.deepEqual(q.addOnLines.map((l) => [l.key, l.usd]), [["rush", 10], ["baseMagnet", 4], ["finishing", 7.5], ["custom", 5]]);
+  assert.equal(q.costs.addOns, 26.5);
+  assert.equal(q.rawCost, Math.round((plain.rawCost + 26.5) * 100) / 100);
+  assert.equal(q.flatPrice, Math.round(q.rawCost * 1.1 * 100) / 100);
+  assert.equal(q.markups.dontGoBelow, Math.ceil(q.rawCost * 2));
+  assert.equal(computeStlQuote([cube20], s, { addOns: { rushUsd: null, custom: { label: "", usd: 3 } } }).addOnLines[0]!.label, "Custom fee");
+});
+
+test("quote summary text has item, size, qty, add-ons, ask, and notes", () => {
+  const q = computeStlQuote([cube20], DEFAULT_STL_QUOTE_SETTINGS, { scale: 2, quantity: 2, addOns: { rushUsd: 10 } });
+  const text = buildQuoteSummary({ items: ["cube.stl"], quote: q, hollow: false, clientNotes: "Wants it 40 mm tall", suggested: null });
+  assert.match(text, /Quote: cube\.stl/);
+  assert.match(text, /Size: 40\.0 × 40\.0 × 40\.0 mm .* at 200% of original 20\.0 × 20\.0 × 20\.0 mm/);
+  assert.match(text, /Quantity: 2 \(one package\)/);
+  assert.match(text, /Add-ons: Rush \$10\.00/);
+  assert.match(text, new RegExp(`Ask: \\$${q.markups.ask.toFixed(2).replace(".", "\\.")}`));
+  assert.match(text, /Client notes:\nWants it 40 mm tall/);
 });
