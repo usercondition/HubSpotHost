@@ -4,6 +4,10 @@ import { searchTokens } from "./file-search";
 export const DRIVE_FILE_SOURCES = ["drive", "shop"] as const;
 export type DriveFileSource = (typeof DRIVE_FILE_SOURCES)[number];
 export const DRIVE_SOURCE_LABEL: Record<DriveFileSource, string> = { drive: "Google Drive", shop: "Shop drive" };
+/** Grid order. Default: best match while searching, A-Z while browsing. */
+export const FILE_SORTS = ["relevance", "name", "newest", "size", "creator"] as const;
+export type FileSort = (typeof FILE_SORTS)[number];
+export const FILE_SORT_LABEL: Record<FileSort, string> = { relevance: "Best match", name: "A-Z", newest: "Newest", size: "Size", creator: "Creator" };
 export const DRIVE_FILE_CATEGORIES = ["model", "sliced", "archive", "photo", "video", "doc", "folder", "other"] as const;
 export type DriveFileCategory = (typeof DRIVE_FILE_CATEGORIES)[number];
 export type DriveThumbSource = "drive" | "folder-photo" | "render" | "web" | "icon";
@@ -23,6 +27,24 @@ export type DriveFileView = {
   /** data: URL (JPEG/PNG) or null when only the category icon is available. */
   thumb: string | null;
   webSourceUrl: string | null;
+  /** Shop-drive kit card: copies folded into this card, and (search) how many rows matched inside it. */
+  kit?: { copies: number; matches: number; matchNames: string[]; parts: number; creator: string | null; title: string };
+};
+
+/** GET /api/files/shop/:id — an opened shop kit or one of its folders. */
+export type ShopFolderResponse = {
+  ok: true;
+  item: DriveFileView;
+  /** Kit root down to this folder (excluding it); empty at the kit root. */
+  crumbs: Array<{ id: string; name: string }>;
+  /** Other copies of this kit (only at the kit root). */
+  copies: Array<{ id: string; name: string; path: string; size: number | null; category: DriveFileCategory }>;
+  /** Wrapper folders skipped because they only held one same-named folder. */
+  skipped: string[];
+  /** Subfolders (Supported/Unsupported first) and archives inside. */
+  folders: DriveFileView[];
+  /** Files directly inside (masked names), from the nightly sync. */
+  files: Array<{ name: string; size: number | null }>;
 };
 
 export type DriveFilesResponse = {
@@ -30,7 +52,10 @@ export type DriveFilesResponse = {
   q: string;
   category: DriveFileCategory | null;
   source: DriveFileSource | null;
+  sort?: FileSort;
   total: number;
+  /** Cards across all categories (the "All" chip); kits span categories, so this is not the sum of counts. */
+  totalAll?: number;
   /** Hits matching every word exactly (substring/prefix). When fewer than a dozen, close matches are added. */
   exactTotal: number;
   /** True when typo / joined-word matches were added (ranked after exact ones). */

@@ -231,3 +231,42 @@ test("rows from the #265 schema are migrated and indexed on open", async () => {
     process.env.DRIVE_FILES_DB_FILE = prev;
   }
 });
+
+test("shop kits: one card per kit, copies folded, search groups part hits, kit opens with parts and files", async () => {
+  const { s, sync, owner } = server();
+  try {
+    const sf = (id: string, path: string, name: string, size: number, files: number, extra: Record<string, unknown> = {}) => ({
+      id, source: "shop", name, category: "folder", path, size, tags: { drive: path.slice(0, 2), files: `${files} files` }, thumbSource: "icon", ...extra,
+    });
+    const shopRows = [
+      sf("rg2", "X:", "Ragegutta Mega Armor (2)", 328656133, 80),
+      sf("rg", "X:/Ragegutta Mega Armor (2)", "Ragegutta Mega Armor", 328655893, 79),
+      sf("rgS", "X:/Ragegutta Mega Armor (2)/Ragegutta Mega Armor", "Supported", 161924348, 22),
+      sf("rgU", "X:/Ragegutta Mega Armor (2)/Ragegutta Mega Armor", "Unsupported", 102492748, 22),
+      sf("rgB", "X:/Ragegutta Mega Armor (2)/Ragegutta Mega Armor", "Base", 4102868, 2),
+      sf("rgSB", "X:/Ragegutta Mega Armor (2)/Ragegutta Mega Armor/Supported", "Body", 49299236, 4, { keywords: "plunderer", entries: [{ n: "Body_sup.stl", s: 1000 }] }),
+      sf("kX", "X:", "Knight Castellan @STLHammer", 448401777, 97),
+      sf("kZ", "Z:", "Knight Castellan @STLHammer", 448401777, 97),
+    ];
+    assert.equal((await sync("/api/ops/files/sync/rows", { generation: "s0001", rows: shopRows })).status, 200);
+    await sync("/api/ops/files/sync/commit", { generation: "s0001", source: "shop" });
+    const all = await (await owner("/api/files?src=shop")).json();
+    assert.equal(all.total, 2);
+    assert.deepEqual(all.items.map((i: { id: string }) => i.id).sort(), ["kX", "rg2"]);
+    assert.equal(all.items.find((i: { id: string }) => i.id === "kX").kit.copies, 2);
+    const hit = await (await owner("/api/files?q=plunderer")).json();
+    assert.equal(hit.items.length, 1);
+    assert.equal(hit.items[0].id, "rg2");
+    assert.deepEqual(hit.items[0].kit.matchNames, ["Body"]);
+    const kit = await (await owner("/api/files/shop/rg2")).json();
+    assert.deepEqual(kit.skipped, ["Ragegutta Mega Armor"]);
+    assert.deepEqual(kit.folders.map((f: { name: string }) => f.name), ["Supported", "Unsupported", "Base"]);
+    const copies = await (await owner("/api/files/shop/kX")).json();
+    assert.deepEqual(copies.copies.map((c: { id: string }) => c.id), ["kZ"]);
+    const body = await (await owner("/api/files/shop/rgSB")).json();
+    assert.deepEqual(body.files, [{ name: "Body_sup.stl", size: 1000 }]);
+    assert.deepEqual(body.crumbs.map((c: { name: string }) => c.name), ["Ragegutta Mega Armor (2)", "Ragegutta Mega Armor", "Supported"]);
+  } finally {
+    s.close();
+  }
+});

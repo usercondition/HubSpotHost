@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Shop drives (X:/Y:/Z: JBODs on the Mac mini) -> Print Ops Files page as source='shop'.  DRAFT 2026-10-17 (grokbot).
+"""Shop drives (X:/Y:/Z: JBODs on the Mac mini) -> Print Ops Files page as source='shop'.  Scheduled 04:40 PT (com.home.shop-files-sync).
 
-Not scheduled yet. Needs the Print Ops server from the files-search PR: it probes GET /api/ops/files/sync/sources
+Needs the Print Ops server from the files-search PR: it probes GET /api/ops/files/sync/sources
 and sends nothing when that route is missing (an older server would drop `source` and treat rows as Drive rows).
 
 Source : ~/.drive-index/files.tsv (nightly 03:41 build-drive-index.sh; path<TAB>size<TAB>mtime<TAB>tag; no ._ files)
-Rows   : one row per folder (recursive size/count, names of the files directly inside as search-only keywords)
+Rows   : one row per folder (recursive size/count, names of the files directly inside as search-only keywords,
+         plus "entries": masked name + size of up to 300 files directly inside, for drilling into a kit)
          + one row per .zip/.rar/.7z archive. Individual STLs are not rows (the folder row carries their words).
 Privacy: same business-only gate as Drive + Hermes drivefile.py (drive_thumbs.privacy + keep-root/OMF extras),
          applied to every file BEFORE aggregation, so private files never contribute names, sizes or previews.
@@ -47,6 +48,7 @@ LOCK = os.path.join(OUT, ".lock")
 TOKEN_FILE = os.path.join(HOME, ".hermes", "secrets", "print-ops-files-sync-token")
 BASE = os.environ.get("PRINT_OPS_BASE", "https://hubspothost-production.up.railway.app")
 MAX_BODY = 850_000
+ENTRIES_MAX = 300  # per folder row; the server accepts up to 400
 MAP = {"/Volumes/2BOBS EXPAN": "X:", "/Volumes/BOBS EXPANS": "Y:", "/Volumes/JBODS": "Z:"}
 SKIP_NAME = re.compile(r"^(\._.*|\.DS_Store|Thumbs\.db|desktop\.ini|Icon\r?)$", re.I)
 SKIP_SEG = re.compile(r"^(\$RECYCLE\.BIN|System Volume Information|\.Trashes|\.Spotlight-V100|\.fseventsd|\.TemporaryItems|__MACOSX)$", re.I)
@@ -125,7 +127,7 @@ def aggregate(files):
             k = (vol, "/".join(segs[:i]))
             d = dirs.get(k)
             if d is None:
-                d = dirs[k] = {"size": 0, "mtime": 0, "n": 0, "types": {}, "names": [], "images": [], "stls": [], "zips": [], "children": set()}
+                d = dirs[k] = {"size": 0, "mtime": 0, "n": 0, "types": {}, "names": [], "images": [], "stls": [], "zips": [], "files": [], "children": set()}
             d["size"] += size
             d["mtime"] = max(d["mtime"], mt)
             d["n"] += 1
@@ -135,6 +137,7 @@ def aggregate(files):
         if parent:
             d = dirs[(vol, parent)]
             d["names"].append(segs[-1])
+            d["files"].append((segs[-1], size))
             e = ext(segs[-1])
             if e in IMG_EXT and 8_000 < size < 12_000_000:
                 d["images"].append((segs[-1], size))
@@ -187,6 +190,14 @@ def build_thumbs(dirs, archives, state, a):
     img_end = t0 + max(a.budget_min - max(a.render_min, 0), a.budget_min * 0.25) * 60  # STL renders keep their share
     stats = {"image": 0, "zip": 0, "render": 0, "cached": 0, "fail": 0, "budget_hit": False}
     folder_thumb, zip_thumb = {}, {}
+    # launchd jobs may lack Full Disk Access to the JBODs: then reuse cached thumbnails only and never cache failures.
+    readable = True
+    for vol in MAP:
+        try:
+            os.listdir(vol)
+        except OSError:
+            readable = False
+    stats["volumes_readable"] = readable
 
     def cached(ck):
         v = cache.get(ck)
@@ -196,6 +207,8 @@ def build_thumbs(dirs, archives, state, a):
         return None
 
     def budget_ok(until=None):
+        if not readable:
+            return False
         if time.time() < (until or img_end) and len(cache) < a.max_thumbs * 2:
             return True
         stats["budget_hit"] = True
@@ -219,6 +232,8 @@ def build_thumbs(dirs, archives, state, a):
                     small_jpeg(fh.read(), os.path.join(THUMBS, key))
                 v = cache[ck] = [key, "folder-photo"]
                 stats["image"] += 1
+            except PermissionError:
+                continue
             except Exception:
                 v = cache[ck] = ["", "fail"]
                 stats["fail"] += 1
@@ -245,6 +260,8 @@ def build_thumbs(dirs, archives, state, a):
                         small_jpeg(z.read(name), os.path.join(THUMBS, key))
                         v = [key, "folder-photo"]
                         stats["zip"] += 1
+            except PermissionError:
+                continue
             except Exception:
                 stats["fail"] += 1
             cache[ck] = v
@@ -331,6 +348,9 @@ def make_rows(dirs, archives, folder_thumb, zip_thumb, mask_name, mask_path):
             "tags": {k: v for k, v in {"drive": letter, "files": f"{d['n']:,} files", "types": types_label(d["types"])}.items() if v},
             "thumbSource": t[1] if t else "icon", "thumbKey": t[0] if t else None, "webSourceUrl": None,
             "keywords": " ".join(kw)[:1990],
+            # Files directly inside (masked names) so the Files page can drill a kit down to files. Display only.
+            "entries": [{"n": mask_name(n, rel, False)[:300], "s": s}
+                        for n, s in sorted(d["files"], key=lambda x: x[0].lower())[:ENTRIES_MAX]],
         })
     for vol, rel, size, mt in archives:
         segs = rel.split("/")

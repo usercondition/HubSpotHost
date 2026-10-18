@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { Box, Copy, Download, ExternalLink, FileArchive, FileText, Film, Folder, HardDrive, Image as ImageIcon, Layers, Loader2, Search, Share2, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { Box, ChevronLeft, ChevronRight, Copy, Files, Download, ExternalLink, FileArchive, FileText, Film, Folder, HardDrive, Image as ImageIcon, Layers, Loader2, Search, Share2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -22,6 +22,10 @@ import {
   type DriveFileSource,
   type DriveFileView,
   type DriveFilesResponse,
+  type ShopFolderResponse,
+  FILE_SORTS,
+  FILE_SORT_LABEL,
+  type FileSort,
 } from "@shared/drive-files";
 
 const PAGE = 36;
@@ -50,11 +54,19 @@ function useHashParams(): URLSearchParams {
   return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : "");
 }
 
-function writeHashParams(q: string, cat: DriveFileCategory | null, src: DriveFileSource | null = null) {
+function currentSort(): FileSort | null {
+  const h = window.location.hash;
+  const v = new URLSearchParams(h.includes("?") ? h.slice(h.indexOf("?") + 1) : "").get("sort");
+  return (FILE_SORTS as readonly string[]).includes(v ?? "") ? (v as FileSort) : null;
+}
+
+function writeHashParams(q: string, cat: DriveFileCategory | null, src: DriveFileSource | null = null, sort: FileSort | null | undefined = undefined) {
   const p = new URLSearchParams();
   if (q) p.set("q", q);
   if (cat) p.set("cat", cat);
   if (src) p.set("src", src);
+  const so = sort === undefined ? currentSort() : sort;
+  if (so) p.set("sort", so);
   const next = `#/files${p.size ? `?${p}` : ""}`;
   if (window.location.hash !== next) window.history.replaceState(null, "", next);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -85,6 +97,9 @@ export default function FilesPage() {
   const urlCat = (DRIVE_FILE_CATEGORIES as readonly string[]).includes(urlCatRaw ?? "") ? (urlCatRaw as DriveFileCategory) : null;
   const urlSrcRaw = params.get("src");
   const urlSrc = (DRIVE_FILE_SOURCES as readonly string[]).includes(urlSrcRaw ?? "") ? (urlSrcRaw as DriveFileSource) : null;
+  const urlSortRaw = params.get("sort");
+  const urlSort = (FILE_SORTS as readonly string[]).includes(urlSortRaw ?? "") ? (urlSortRaw as FileSort) : null;
+  const effSort: FileSort = urlSort ?? (urlQ ? "relevance" : "name");
   const [draft, setDraft] = useState(urlQ);
   const [open, setOpen] = useState<DriveFileView | null>(null);
   const { toast } = useToast();
@@ -99,13 +114,14 @@ export default function FilesPage() {
   }, [draft, urlQ, urlCat, urlSrc]);
 
   const query = useInfiniteQuery<DriveFilesResponse>({
-    queryKey: ["/api/files", urlQ, urlCat, urlSrc, ownerCode],
+    queryKey: ["/api/files", urlQ, urlCat, urlSrc, urlSort, ownerCode],
     enabled: isUnlocked,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const p = new URLSearchParams({ q: urlQ, offset: String(pageParam), limit: String(PAGE) });
       if (urlCat) p.set("cat", urlCat);
       if (urlSrc) p.set("src", urlSrc);
+      if (urlSort) p.set("sort", urlSort);
       return (await apiRequest("GET", `/api/files?${p}`, undefined, { headers })).json();
     },
     getNextPageParam: (last) => (last.offset + last.items.length < last.total ? last.offset + last.items.length : undefined),
@@ -113,7 +129,19 @@ export default function FilesPage() {
   });
   const first = query.data?.pages[0];
   const items = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
-  const allCount = first ? Object.values(first.counts).reduce((s, n) => s + (n ?? 0), 0) : 0;
+  // One photo per kit: a picture already used by an earlier card (inherited from a shared parent) shows the icon instead.
+  const repeatedThumb = useMemo(() => {
+    const seen = new Set<string>();
+    const rep = new Set<number>();
+    items.forEach((f, i) => {
+      if (!f.thumb) return;
+      const k = f.thumb.slice(-120);
+      if (seen.has(k)) rep.add(i);
+      else seen.add(k);
+    });
+    return rep;
+  }, [items]);
+  const allCount = first ? first.totalAll ?? Object.values(first.counts).reduce((s, n) => s + (n ?? 0), 0) : 0;
   const srcCounts = first?.sources ?? {};
   const allSources = Object.values(srcCounts).reduce((s, n) => s + (n ?? 0), 0);
   const showSources = (srcCounts.shop ?? 0) > 0 || urlSrc !== null;
@@ -244,10 +272,25 @@ export default function FilesPage() {
             <p className="py-10 text-sm text-[hsl(var(--text-2))]" data-testid="text-files-empty">No files match{urlQ ? ` “${urlQ}”` : ""}.</p>
           ) : (
             <>
-              <p className="mb-2 mt-1 text-xs text-[hsl(var(--text-3))]" data-testid="text-files-count">
-                {first?.total.toLocaleString()} result{first?.total === 1 ? "" : "s"}
-                {first?.generatedAt ? ` · index ${fmtDate(first.generatedAt)}` : ""}
-              </p>
+              <div className="mb-2 mt-1 flex items-center justify-between gap-2">
+                <p className="text-xs text-[hsl(var(--text-3))]" data-testid="text-files-count">
+                  {first?.total.toLocaleString()} {urlSrc === "shop" ? "kit" : "result"}{first?.total === 1 ? "" : "s"}
+                  {first?.generatedAt ? ` · index ${fmtDate(first.generatedAt)}` : ""}
+                </p>
+                <label className="flex shrink-0 items-center gap-1 text-xs text-[hsl(var(--text-3))]">
+                  Sort
+                  <select
+                    value={effSort}
+                    onChange={(e) => writeHashParams(urlQ, urlCat, urlSrc, e.target.value as FileSort)}
+                    className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-1.5 py-1 text-xs font-semibold text-[hsl(var(--foreground))]"
+                    data-testid="select-files-sort"
+                  >
+                    {FILE_SORTS.filter((so) => so !== "relevance" || urlQ).map((so) => (
+                      <option key={so} value={so}>{FILE_SORT_LABEL[so]}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               {first?.fuzzy ? (
                 <p className="mb-2 text-xs text-[hsl(var(--text-2))]" data-testid="text-files-fuzzy">
                   {first.exactTotal === 0
@@ -257,7 +300,13 @@ export default function FilesPage() {
               ) : null}
               <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4" data-testid="grid-files">
                 {items.map((f, i) => (
-                  <li key={f.id}>
+                  <Fragment key={f.id}>
+                  {effSort === "creator" && (i === 0 || (items[i - 1].kit?.creator ?? null) !== (f.kit?.creator ?? null)) ? (
+                    <li className="col-span-full mt-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--text-2))]" data-testid="files-creator-heading">
+                      {f.kit?.creator ? `@${f.kit.creator}` : "No creator in name"}
+                    </li>
+                  ) : null}
+                  <li>
                     <button
                       type="button"
                       onClick={() => setOpen(f)}
@@ -265,7 +314,7 @@ export default function FilesPage() {
                       data-testid={`card-file-${i}`}
                     >
                       <div className="relative aspect-square overflow-hidden">
-                        <Thumb f={f} />
+                        <Thumb f={repeatedThumb.has(i) ? { ...f, thumb: null } : f} />
                         {SOURCE_LABEL[f.thumbSource] ? (
                           <span className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
                             {SOURCE_LABEL[f.thumbSource]}
@@ -279,15 +328,30 @@ export default function FilesPage() {
                         ) : null}
                       </div>
                       <div className="p-2">
-                        <p className="line-clamp-2 break-words text-[13px] font-semibold leading-tight">{f.name}</p>
+                        <p className="line-clamp-2 break-words text-[13px] font-semibold leading-tight">{f.kit?.title ?? f.name}</p>
                         <p className="mt-0.5 truncate text-[11px] text-[hsl(var(--text-2))]">
                           {f.source === "shop" ? "Shop drive · " : ""}
-                          {DRIVE_CATEGORY_ONE[f.category]}
+                          {f.source === "shop" && f.category === "folder" ? "Kit" : DRIVE_CATEGORY_ONE[f.category]}
                           {f.size ? ` · ${humanSize(f.size)}` : ""}
                         </p>
+                        {f.kit && f.category === "folder" ? (
+                          <p className="mt-0.5 truncate text-[11px] font-medium text-[hsl(var(--foreground))]" data-testid={`card-file-parts-${i}`}>
+                            {f.kit.parts} part{f.kit.parts === 1 ? "" : "s"}
+                            {f.tags.files ? ` · ${f.tags.files}` : ""}
+                            {f.kit.creator && effSort !== "creator" ? ` · @${f.kit.creator}` : ""}
+                          </p>
+                        ) : null}
+                        {f.kit && (f.kit.copies > 1 || f.kit.matchNames.length) ? (
+                          <p className="mt-0.5 truncate text-[11px] text-[hsl(var(--text-3))]" data-testid={`card-file-kit-${i}`}>
+                            {f.kit.copies > 1 ? `${f.kit.copies} copies` : ""}
+                            {f.kit.copies > 1 && f.kit.matchNames.length ? " · " : ""}
+                            {f.kit.matchNames.length ? `Matches: ${f.kit.matchNames.join(", ")}` : ""}
+                          </p>
+                        ) : null}
                       </div>
                     </button>
                   </li>
+                  </Fragment>
                 ))}
               </ul>
               {query.hasNextPage ? (
@@ -303,7 +367,14 @@ export default function FilesPage() {
         </div>
       )}
 
-      <Sheet open={open !== null} onOpenChange={(v) => !v && setOpen(null)}>
+      <ShopKitSheet
+        id={open && open.source === "shop" && open.category === "folder" ? open.id : null}
+        headers={headers}
+        ownerCode={ownerCode}
+        onClose={() => setOpen(null)}
+        copyPath={copyPath}
+      />
+      <Sheet open={open !== null && !(open.source === "shop" && open.category === "folder")} onOpenChange={(v) => !v && setOpen(null)}>
         <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto rounded-t-2xl p-0 md:mx-auto md:max-w-lg" data-testid="sheet-file">
           {open ? (
             <>
@@ -370,5 +441,128 @@ export default function FilesPage() {
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+/** An opened shop-drive kit: copies, Supported/Unsupported, part folders and files, drillable. */
+function ShopKitSheet({
+  id,
+  headers,
+  ownerCode,
+  onClose,
+  copyPath,
+}: {
+  id: string | null;
+  headers: Record<string, string>;
+  ownerCode: string | null | undefined;
+  onClose: () => void;
+  copyPath: (f: DriveFileView) => void;
+}) {
+  const [stack, setStack] = useState<string[]>([]);
+  useEffect(() => setStack(id ? [id] : []), [id]);
+  const cur = stack[stack.length - 1] ?? null;
+  const q = useQuery<ShopFolderResponse>({
+    queryKey: ["/api/files/shop", cur, ownerCode],
+    enabled: cur !== null,
+    queryFn: async () => (await apiRequest("GET", `/api/files/shop/${encodeURIComponent(cur!)}`, undefined, { headers })).json(),
+    staleTime: 60_000,
+  });
+  const data = q.data && q.data.item.id === cur ? q.data : null;
+  const item = data?.item;
+  const go = (next: string) => setStack((s) => [...s, next]);
+  const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+  return (
+    <Sheet open={id !== null} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto rounded-t-2xl p-0 md:mx-auto md:max-w-2xl" data-testid="sheet-kit">
+        {!item ? (
+          <div className="flex h-40 items-center justify-center">
+            <SheetTitle className="sr-only">Loading kit</SheetTitle>
+            <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--text-3))]" />
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-3 p-4 pb-2">
+              <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-[hsl(var(--surface))] md:h-32 md:w-32">
+                <Thumb f={item} />
+              </div>
+              <SheetHeader className="min-w-0 flex-1 space-y-1 pr-8 text-left">
+                {stack.length > 1 ? (
+                  <button type="button" onClick={back} className="inline-flex items-center text-xs font-semibold text-[hsl(var(--amber))]" data-testid="button-kit-back">
+                    <ChevronLeft className="h-3.5 w-3.5" />Back
+                  </button>
+                ) : null}
+                {data.crumbs.length ? (
+                  <p className="truncate text-[11px] text-[hsl(var(--text-3))]">{data.crumbs.map((c) => c.name).join(" / ")}</p>
+                ) : null}
+                <SheetTitle className="break-words text-lg leading-snug">{data.crumbs.length ? item.name : item.kit?.title ?? item.name}</SheetTitle>
+                <SheetDescription className="break-all text-xs">{shopWindowsPath(item)}</SheetDescription>
+                <p className="text-xs text-[hsl(var(--text-2))]">
+                  {humanSize(item.size) || "—"}
+                  {item.tags.files ? ` · ${item.tags.files}` : ""}
+                  {item.tags.types ? ` · ${item.tags.types}` : ""}
+                </p>
+              </SheetHeader>
+            </div>
+            <div className="space-y-3 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+              <Button className="w-full bg-[hsl(var(--amber))] text-white hover:bg-[hsl(var(--amber))]/90" onClick={() => copyPath(item)} data-testid="button-kit-copy-path">
+                <Copy className="mr-1.5 h-4 w-4" />Copy path
+              </Button>
+              {data.copies.length ? (
+                <div className="rounded-xl border border-[hsl(var(--border))] p-2.5" data-testid="kit-copies">
+                  <p className="flex items-center gap-1 text-xs font-semibold"><Files className="h-3.5 w-3.5" />{data.copies.length + 1} copies on the shop drives</p>
+                  <ul className="mt-1 space-y-0.5 text-[11px] text-[hsl(var(--text-2))]">
+                    <li className="break-all">{shopWindowsPath(item)} <span className="text-[hsl(var(--text-3))]">(shown)</span></li>
+                    {data.copies.map((c) => (
+                      <li key={c.id} className="break-all">
+                        {shopWindowsPath(c)}
+                        {c.size ? <span className="text-[hsl(var(--text-3))]"> · {humanSize(c.size)}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {data.folders.length ? (
+                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4" data-testid="kit-folders">
+                  {data.folders.map((c, i) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        disabled={c.category !== "folder"}
+                        onClick={() => go(c.id)}
+                        className="flex w-full items-center gap-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2 text-left disabled:opacity-90"
+                        data-testid={`kit-folder-${i}`}
+                      >
+                        {c.category === "folder" ? <Folder className="h-4 w-4 shrink-0 text-[hsl(var(--amber))]" /> : <FileArchive className="h-4 w-4 shrink-0 text-[hsl(var(--amber))]" />}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-semibold">{c.name}</span>
+                          <span className="block truncate text-[11px] text-[hsl(var(--text-3))]">
+                            {humanSize(c.size)}
+                            {c.tags.files ? ` · ${c.tags.files}` : ""}
+                          </span>
+                        </span>
+                        {c.category === "folder" ? <ChevronRight className="h-4 w-4 shrink-0 text-[hsl(var(--text-3))]" /> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {data.files.length ? (
+                <ul className="divide-y divide-[hsl(var(--border))] rounded-xl border border-[hsl(var(--border))]" data-testid="kit-files">
+                  {data.files.map((x) => (
+                    <li key={x.name} className="flex items-center gap-2 px-2.5 py-1.5 text-[12px]">
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--text-3))]" />
+                      <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                      <span className="shrink-0 text-[11px] text-[hsl(var(--text-3))]">{humanSize(x.size)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : !data.folders.length ? (
+                <p className="text-xs text-[hsl(var(--text-3))]">File list arrives with the next nightly shop-drive sync.</p>
+              ) : null}
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }

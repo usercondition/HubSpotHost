@@ -59,3 +59,21 @@ Shop drives: after deploy, run `/usr/bin/python3 ~/.hermes/scripts/shop_files_sy
 2. Mac mini: write the same value to `~/.hermes/secrets/print-ops-files-sync-token` (0600), run `/usr/bin/python3 ~/.hermes/scripts/drive_files_sync.py`, then schedule it after `com.home.drive-thumbs`.
 
 Screenshots (local build, synced from a real business-only index subset): `docs/screenshots/files/` (08-10: shop drives + close spellings, from the real 34,986 Drive + 43,611 shop rows).
+
+## Kit cards (shop drives)
+
+The grid shows **one card per kit**, not one per part folder (`shared/shop-kits.ts`, recomputed on every shop commit):
+
+- Kit root = the shallowest folder on a row's path with <= 1,500 files and <= 40 subfolders that isn't a library
+  (8+ subfolders, none part-like). Every part folder / archive inside joins its kit's card; the card shows the kit
+  photo, total size (recursive), part count (leaf folders) and file count.
+- Copies fold into one card ("N copies"): kit roots with the same name after stripping " (2)", " - Copy",
+  "Copy of", within 1% size; or identical size + file count (> 5 MB) on any drive; plus a top-level .zip named like
+  the kit. All locations are listed when the kit is opened. Nothing is deleted.
+- Search still matches part rows and file names; hits fold into their kit card with "Matches: Body, LeftArm".
+- `GET /api/files/shop/:id` opens a kit/folder: copies, Supported/Unsupported first, then part folders/archives,
+  then files directly inside (`entries`, masked names + sizes pushed by the sync, max 300 per folder). A wrapper
+  holding one same-named folder (`Kit (2)/Kit/`) is skipped.
+- Sort: Best match (search) / A-Z (browse, leading "#"/numbering ignored) / Newest / Size / Creator (`@STLHammer`,
+  "by X" in the name; grouped with headings). Junk/system names never show. A picture already used by an earlier
+  card shows the icon instead (one photo per kit).
