@@ -25,6 +25,7 @@ import {
   ShoppingBag,
   Sun,
   Tag,
+  Calculator,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
@@ -197,6 +198,7 @@ const NAV: Array<{
   { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: Ship, testId: "link-nav-shipments", group: "Run", phone: "more" },
   { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Take", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
+  { href: "/quote", label: "Quote", title: "STL Quote", icon: Calculator, testId: "link-nav-quote", group: "Take", phone: "more" },
   {
     href: "/paid-orders",
     label: "Manual",
