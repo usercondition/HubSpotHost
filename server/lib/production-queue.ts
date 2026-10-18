@@ -15,7 +15,14 @@ import {
 import { SHIP_BY_TIME_ZONE } from "../../shared/ship-by";
 import { deriveShipAddressReadiness, looksLikePickup, pickupAddressReadiness, addressNeedsChase } from "../../shared/ship-address";
 import { pickupBundleDealIds } from "./priority-stack";
-import { fetchDealAssociatedContact, peekDealContactCache, type DealAssociatedContact } from "./deal-ops";
+import {
+  dealContactFreshMs,
+  fetchDealAssociatedContactsBatch,
+  peekDealContactCache,
+  peekDealContactEntry,
+  QUEUE_READY_CONTACT_STALE_OK_MS,
+  type DealAssociatedContact,
+} from "./deal-ops";
 import { listFulfillmentChecklists, withDerivedCostsEntered, withStoredAddressVerification } from "./fulfillment";
 import { failureSummary, listProductionFailures } from "./failures";
 import { listKitSummaries } from "./kits";
@@ -414,8 +421,6 @@ export function queueItemsForShipAddressEnrichment(
   return [...targets.values()];
 }
 
-const ADDRESS_LOOKUP_CONCURRENCY = 3;
-
 const UNCHECKED_ADDRESS = {
   addressStatus: "unknown" as const,
   addressSummary: null,
@@ -462,24 +467,6 @@ function readinessFromContact(
   };
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await fn(items[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
 /**
  * Fetch HubSpot ship-to for Labels-visible deals and attach
  * addressStatus / addressSummary / chaseDraft. A failed lookup keeps the
@@ -492,25 +479,52 @@ export async function attachShipAddressReadiness(
   const targets = new Map(targetItems.map((item) => [item.dealId, item]));
   if (targets.size === 0) return queue;
 
-  const dealIds = Array.from(targets.keys());
-  const entries = await mapWithConcurrency(dealIds, ADDRESS_LOOKUP_CONCURRENCY, async (dealId) => {
-    const item = targets.get(dealId)!;
-    try {
-      const contact = await fetchDealAssociatedContact(dealId);
-      return [dealId, readinessFromContact(contact, item)] as const;
-    } catch {
+  type Readiness = Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">;
+  const byDeal = new Map<string, Readiness>();
+  const freshMs = dealContactFreshMs();
+  const toFetch: string[] = [];
+  const toRefresh: string[] = [];
+  for (const [dealId, item] of Array.from(targets.entries())) {
+    const cached = peekDealContactEntry(dealId);
+    if (cached) {
+      const readiness = readinessFromContact(cached.value, item);
+      if (cached.ageMs < freshMs) {
+        byDeal.set(dealId, readiness);
+        continue;
+      }
+      // Stale-while-revalidate: a ready address stays on screen while one batch refreshes it.
+      if (readiness.addressStatus === "ready" && cached.ageMs < QUEUE_READY_CONTACT_STALE_OK_MS) {
+        byDeal.set(dealId, readiness);
+        toRefresh.push(dealId);
+        continue;
+      }
+    }
+    toFetch.push(dealId);
+  }
+
+  if (toFetch.length > 0) {
+    const batch = await fetchDealAssociatedContactsBatch(toFetch);
+    for (const dealId of toFetch) {
+      const item = targets.get(dealId)!;
+      const contact = batch.contacts.get(dealId);
+      if (contact) {
+        byDeal.set(dealId, readinessFromContact(contact, item));
+        continue;
+      }
+      // A failed lookup keeps the last cached *ready* contact, or unknown: never a false "missing".
       const cached = peekDealContactCache(dealId);
       if (cached) {
         const readiness = readinessFromContact(cached, item);
-        if (readiness.addressStatus === "ready") return [dealId, readiness] as const;
+        if (readiness.addressStatus === "ready") {
+          byDeal.set(dealId, readiness);
+          continue;
+        }
       }
-      return [dealId, UNCHECKED_ADDRESS] as const;
+      byDeal.set(dealId, UNCHECKED_ADDRESS);
     }
-  });
-
-  const byDeal = new Map<string, Pick<ProductionQueueItem, "addressStatus" | "addressSummary" | "chaseDraft">>();
-  for (const entry of entries) {
-    if (entry) byDeal.set(entry[0], entry[1]);
+  }
+  if (toRefresh.length > 0) {
+    void fetchDealAssociatedContactsBatch(toRefresh).catch(() => undefined);
   }
 
   const patch = (item: ProductionQueueItem): ProductionQueueItem => {

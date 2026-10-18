@@ -274,6 +274,180 @@ export async function fetchDealAssociatedContact(
   return pending;
 }
 
+/**
+ * Queue enrichment may keep showing a cached *ready* address this long while it refreshes in the
+ * background (stale-while-revalidate). Contact/association webhooks invalidate entries immediately.
+ * Non-ready addresses are never served stale past DEAL_CONTACT_CACHE_MS, so a fixed address shows up.
+ */
+export const QUEUE_READY_CONTACT_STALE_OK_MS = 10 * 60 * 1000;
+const CONTACT_BATCH_CHUNK = 100;
+
+/** Cached contact with its age, or null. Used by queue enrichment to decide fresh / stale / miss. */
+export function peekDealContactEntry(dealId: string): { value: DealAssociatedContact; ageMs: number } | null {
+  const row = dealContactCache.get(dealId);
+  if (!row) return null;
+  return { value: row.value, ageMs: Date.now() - row.fetchedAt };
+}
+
+export function dealContactFreshMs(): number {
+  return DEAL_CONTACT_CACHE_MS;
+}
+
+export type DealContactBatch = {
+  /** Deals resolved this round (a deal with no associated contact maps to an empty contact). */
+  contacts: Map<string, DealAssociatedContact>;
+  /** Deals whose lookup failed (rate limit, timeout, unattributable HubSpot error). Never "missing". */
+  failed: Map<string, unknown>;
+};
+
+function idText(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return /^[0-9]{1,20}$/.test(text) ? text : null;
+}
+
+/** Deal ids named in a HubSpot batch error's context (e.g. { fromObjectId: ["123"] }). */
+function idsFromBatchError(error: unknown): string[] {
+  const context = error && typeof error === "object" ? (error as { context?: unknown }).context : null;
+  if (!context || typeof context !== "object") return [];
+  const ids: string[] = [];
+  for (const value of Object.values(context as Record<string, unknown>)) {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      const id = idText(item);
+      if (id) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function isNoAssociationError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { message?: unknown; subCategory?: unknown; category?: unknown };
+  return /no\s+\w*\s*associat|NO_ASSOCIATIONS/i.test(`${record.subCategory ?? ""} ${record.message ?? ""}`);
+}
+
+/**
+ * Two HubSpot calls for any number of deals (v4 association batch read + v3 contact batch read,
+ * chunked at 100) instead of two sequential calls per deal. Successful lookups land in the same
+ * contact cache the single-deal path uses.
+ */
+async function loadDealContactsBatch(dealIds: string[]): Promise<DealContactBatch> {
+  const contacts = new Map<string, DealAssociatedContact>();
+  const failed = new Map<string, unknown>();
+  for (let offset = 0; offset < dealIds.length; offset += CONTACT_BATCH_CHUNK) {
+    const slice = dealIds.slice(offset, offset + CONTACT_BATCH_CHUNK);
+    try {
+      const assoc = await hubspotRequest("/crm/v4/associations/deals/contacts/batch/read", {
+        method: "POST",
+        body: JSON.stringify({ inputs: slice.map((id) => ({ id })) }),
+        readOnly: true,
+      });
+      const contactByDeal = new Map<string, string | null>();
+      for (const row of Array.isArray(assoc?.results) ? assoc.results : []) {
+        const dealId = idText(row?.from?.id);
+        if (!dealId) continue;
+        const to = Array.isArray(row?.to) ? row.to : [];
+        contactByDeal.set(dealId, to.length ? contactIdFromAssociationResult(to[0]) : null);
+      }
+      const errors: unknown[] = Array.isArray(assoc?.errors) ? assoc.errors : [];
+      let unattributedError: unknown = null;
+      for (const error of errors) {
+        const ids = idsFromBatchError(error);
+        if (ids.length === 0) {
+          if (!isNoAssociationError(error)) unattributedError = error;
+          continue;
+        }
+        for (const id of ids) {
+          if (contactByDeal.has(id)) continue;
+          if (isNoAssociationError(error)) contactByDeal.set(id, null);
+          else failed.set(id, new HubSpotError("HubSpot association lookup failed", 502));
+        }
+      }
+      for (const id of slice) {
+        if (contactByDeal.has(id) || failed.has(id)) continue;
+        // Absent with no error means no association; absent next to an error we could not attribute is unknown.
+        if (unattributedError) failed.set(id, new HubSpotError("HubSpot association lookup failed", 502));
+        else contactByDeal.set(id, null);
+      }
+
+      const contactIds = Array.from(new Set(Array.from(contactByDeal.values()).filter((id): id is string => Boolean(id))));
+      const byContact = new Map<string, DealAssociatedContact>();
+      if (contactIds.length > 0) {
+        const read = await hubspotRequest("/crm/v3/objects/contacts/batch/read", {
+          method: "POST",
+          body: JSON.stringify({ properties: CONTACT_PROPERTIES, inputs: contactIds.map((id) => ({ id })) }),
+          readOnly: true,
+        });
+        for (const row of Array.isArray(read?.results) ? read.results : []) {
+          const id = idText(row?.id);
+          if (id) byContact.set(id, contactFromHubSpotProperties(id, (row?.properties ?? {}) as Record<string, string | null>));
+        }
+      }
+      for (const [dealId, contactId] of Array.from(contactByDeal.entries())) {
+        if (!contactId) {
+          const empty = { ...EMPTY_DEAL_CONTACT };
+          rememberDealContact(dealId, empty);
+          contacts.set(dealId, empty);
+          continue;
+        }
+        const contact = byContact.get(contactId);
+        if (contact) {
+          rememberDealContact(dealId, contact);
+          contacts.set(dealId, contact);
+        } else {
+          failed.set(dealId, new HubSpotError("HubSpot contact not found", 404));
+        }
+      }
+    } catch (error) {
+      for (const id of slice) if (!contacts.has(id)) failed.set(id, error);
+    }
+  }
+  return { contacts, failed };
+}
+
+/**
+ * Batch contact lookup for queue enrichment. Shares in-flight lookups with fetchDealAssociatedContact
+ * (and with other concurrent batches) so simultaneous queue loads make at most one lookup per deal.
+ */
+export async function fetchDealAssociatedContactsBatch(dealIds: string[]): Promise<DealContactBatch> {
+  const ids = Array.from(new Set(dealIds.map((id) => id.trim()).filter((id) => /^[0-9]{1,20}$/.test(id))));
+  const need = ids.filter((id) => !dealContactInflight.has(id));
+  if (need.length > 0) {
+    const run = loadDealContactsBatch(need);
+    for (const id of need) {
+      const pending: Promise<DealAssociatedContact> = run
+        .then((batch) => {
+          const contact = batch.contacts.get(id);
+          if (contact) return contact;
+          throw batch.failed.get(id) ?? new HubSpotError("HubSpot contact lookup failed", 502);
+        })
+        .finally(() => {
+          if (dealContactInflight.get(id) === pending) dealContactInflight.delete(id);
+        });
+      pending.catch(() => undefined);
+      dealContactInflight.set(id, pending);
+    }
+  }
+  const contacts = new Map<string, DealAssociatedContact>();
+  const failed = new Map<string, unknown>();
+  await Promise.all(
+    ids.map(async (id) => {
+      const pending = dealContactInflight.get(id);
+      if (!pending) {
+        const cached = dealContactCache.get(id);
+        if (cached) contacts.set(id, cached.value);
+        else failed.set(id, new HubSpotError("HubSpot contact lookup failed", 502));
+        return;
+      }
+      try {
+        contacts.set(id, await pending);
+      } catch (error) {
+        failed.set(id, error);
+      }
+    }),
+  );
+  return { contacts, failed };
+}
+
 async function loadDealAssociatedContact(dealId: string): Promise<DealAssociatedContact> {
   const assoc = await hubspotRequest(
     `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/contacts?limit=1`,
@@ -285,10 +459,15 @@ async function loadDealAssociatedContact(dealId: string): Promise<DealAssociated
     return { ...EMPTY_DEAL_CONTACT };
   }
   const contact = await hubspotRequest(
-    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=firstname,lastname,email,phone,address,city,state,zip,country`,
+    `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${CONTACT_PROPERTIES.join(",")}`,
     { method: "GET" },
   );
-  const props = (contact.properties ?? {}) as Record<string, string | null>;
+  return contactFromHubSpotProperties(contactId, (contact.properties ?? {}) as Record<string, string | null>);
+}
+
+const CONTACT_PROPERTIES = ["firstname", "lastname", "email", "phone", "address", "city", "state", "zip", "country"];
+
+function contactFromHubSpotProperties(contactId: string, props: Record<string, string | null>): DealAssociatedContact {
   const name = [props.firstname, props.lastname].filter(Boolean).join(" ").trim();
   const street1 = String(props.address ?? "").trim();
   const city = String(props.city ?? "").trim();

@@ -573,6 +573,12 @@ export async function clearDealPrintFileMetrics(dealId: string): Promise<void> {
 
 /** Short TTL so Floor / Queue / AttentionBell / Orders share one HubSpot search burst. */
 const PRINT_ORDER_DEALS_CACHE_MS = 20_000;
+/**
+ * Past the 20 s TTL, a cached list up to this old is returned immediately while one background search
+ * refreshes it (stale-while-revalidate), so Dashboard / Stack / Queue never wait on HubSpot after idle.
+ * HubSpot writes and deal webhooks still invalidate (null) the cache, which forces a blocking fresh read.
+ */
+const PRINT_ORDER_DEALS_STALE_OK_MS = 10 * 60 * 1000;
 const PRINT_ORDER_STAGES_CACHE_MS = 10 * 60 * 1000;
 
 let printOrderDealsCache: { value: HubSpotDealRecord[]; fetchedAt: number } | null = null;
@@ -584,6 +590,11 @@ let printOrderStagesInflight: Promise<HubSpotPipelineStage[]> | null = null;
 export function invalidatePrintOrderDealsCache(): void {
   printOrderDealsCache = null;
   printOrderDealsInflight = null;
+}
+
+/** Test helper: pretend the cached deal list was fetched `ageMs` ago. */
+export function agePrintOrderDealsCacheForTest(ageMs: number): void {
+  if (printOrderDealsCache) printOrderDealsCache.fetchedAt = Date.now() - ageMs;
 }
 
 export function invalidatePrintOrderStagesCache(): void {
@@ -646,9 +657,29 @@ export async function fetchPrintOrderDeals(options?: {
     return overlayLocalTruth(printOrderDealsCache.value);
   }
   if (!options?.bypassCache && printOrderDealsInflight) {
+    if (printOrderDealsCache && now - printOrderDealsCache.fetchedAt < PRINT_ORDER_DEALS_STALE_OK_MS) {
+      return overlayLocalTruth(printOrderDealsCache.value);
+    }
     return printOrderDealsInflight.then((deals) => overlayLocalTruth(deals));
   }
+  if (
+    !options?.bypassCache &&
+    printOrderDealsCache &&
+    now - printOrderDealsCache.fetchedAt < PRINT_ORDER_DEALS_STALE_OK_MS
+  ) {
+    const stale = printOrderDealsCache;
+    startPrintOrderDealsSearch().catch((error) => {
+      console.warn("[hubspot] background deals refresh failed:", error instanceof Error ? error.message : "error");
+    });
+    return overlayLocalTruth(stale.value);
+  }
 
+  return overlayLocalTruth(await startPrintOrderDealsSearch({ force: options?.bypassCache === true }));
+}
+
+/** One shared HubSpot search; `force` (bypassCache) starts a new one instead of joining an older search. */
+function startPrintOrderDealsSearch(options?: { force?: boolean }): Promise<HubSpotDealRecord[]> {
+  if (printOrderDealsInflight && !options?.force) return printOrderDealsInflight;
   const pending = searchPrintOrderDeals()
     .then((deals) => {
       printOrderDealsCache = { value: deals, fetchedAt: Date.now() };
@@ -658,7 +689,7 @@ export async function fetchPrintOrderDeals(options?: {
       if (printOrderDealsInflight === pending) printOrderDealsInflight = null;
     });
   printOrderDealsInflight = pending;
-  return overlayLocalTruth(await pending);
+  return pending;
 }
 
 async function overlayLocalTruth(deals: HubSpotDealRecord[]): Promise<HubSpotDealRecord[]> {

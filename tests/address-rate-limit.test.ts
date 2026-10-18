@@ -27,6 +27,37 @@ function jsonResponse(body: unknown, status = 200, headers?: Record<string, stri
   });
 }
 
+/** Let fire-and-forget background refreshes settle before the next assertion. */
+async function settleBackground(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+/**
+ * HubSpot batch mock: v4 deal->contact association batch read + v3 contact batch read.
+ * associations maps dealId -> contactId (absent = no association); contacts maps contactId -> contact JSON.
+ */
+function batchFetch(
+  data: { associations: Record<string, string>; contacts: Record<string, unknown> },
+  calls?: string[],
+): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? "{}")) as { inputs?: Array<{ id: string }> };
+    calls?.push(url);
+    if (url.includes("/associations/deals/contacts/batch/read")) {
+      const results = (body.inputs ?? [])
+        .filter(({ id }) => data.associations[id])
+        .map(({ id }) => ({ from: { id }, to: [{ toObjectId: Number(data.associations[id]), associationTypes: [] }] }));
+      return jsonResponse({ status: "COMPLETE", results });
+    }
+    if (url.includes("/objects/contacts/batch/read")) {
+      const results = (body.inputs ?? []).map(({ id }) => data.contacts[id]).filter(Boolean);
+      return jsonResponse({ status: "COMPLETE", results });
+    }
+    return jsonResponse({});
+  }) as typeof fetch;
+}
+
 function shipReadyItem(dealId: string): ProductionQueueItem {
   return {
     dealId,
@@ -241,30 +272,32 @@ describe("address rate limit", { concurrency: 1 }, () => {
 
     const limited = "348746780377";
     const emptyDeal = "342134173423";
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes(`/deals/${limited}/`)) {
-        return jsonResponse({ message: "limit" }, 429, { "retry-after": "0" });
-      }
-      if (url.includes(`/deals/${emptyDeal}/`)) return jsonResponse({ results: [] });
-      return jsonResponse({ message: "unused" }, 500);
-    }) as typeof fetch;
-
+    // The whole association batch is rate limited: every deal stays unknown, none is "missing".
+    globalThis.fetch = (async () => jsonResponse({ message: "limit" }, 429, { "retry-after": "0" })) as typeof fetch;
     const first = await attachShipAddressReadiness(queueOf([limited, emptyDeal]));
-    const missed = first.shipReady.find((item) => item.dealId === limited);
-    const none = first.shipReady.find((item) => item.dealId === emptyDeal);
-    assert.equal(missed?.addressStatus, "unknown");
-    assert.notEqual(missed?.addressStatus, "missing");
-    assert.equal(none?.addressStatus, "missing");
-    assert.equal(first.summary.needsAddress, 1);
+    assert.ok(first.shipReady.every((item) => item.addressStatus === "unknown"));
+    assert.equal(first.summary.needsAddress, 0);
 
-    const cachedDeal = "346140673754";
+    // A deal with no associated contact (absent from the batch results) is "missing".
+    globalThis.fetch = batchFetch({ contacts: {}, associations: {} });
+    const none = await attachShipAddressReadiness(queueOf([emptyDeal]));
+    assert.equal(none.shipReady[0]?.addressStatus, "missing");
+    assert.equal(none.summary.needsAddress, 1);
+
+    // A per-deal batch error that is not "no associations" is unknown, never missing.
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/associations/contacts")) return jsonResponse({ results: [{ toObjectId: 9001 }] });
-      if (url.includes("/objects/contacts/")) return jsonResponse(fullContact("9001"));
+      if (url.includes("/associations/deals/contacts/batch/read")) {
+        return jsonResponse({ status: "COMPLETE", results: [], errors: [{ status: "error", category: "RATE_LIMITS", message: "busy", context: { fromObjectId: [limited] } }] }, 207);
+      }
       return jsonResponse({});
     }) as typeof fetch;
+    invalidateDealContactCache();
+    const busy = await attachShipAddressReadiness(queueOf([limited]));
+    assert.equal(busy.shipReady[0]?.addressStatus, "unknown");
+
+    const cachedDeal = "346140673754";
+    globalThis.fetch = batchFetch({ associations: { [cachedDeal]: "9001" }, contacts: { "9001": fullContact("9001") } });
     const warmed = await attachShipAddressReadiness(queueOf([cachedDeal]));
     assert.equal(warmed.shipReady[0]?.addressStatus, "ready");
     assert.equal(warmed.shipReady[0]?.addressSummary, "Phoenix, AZ");
@@ -275,6 +308,7 @@ describe("address rate limit", { concurrency: 1 }, () => {
     assert.equal(stale.shipReady[0]?.addressStatus, "ready");
     assert.equal(stale.shipReady[0]?.addressSummary, "Phoenix, AZ");
     assert.equal(stale.summary.needsAddress, 0);
+    await settleBackground();
 
     ageDealContactCache(cachedDeal, 16 * 60 * 1000);
     const expired = await attachShipAddressReadiness(queueOf([cachedDeal]));
@@ -282,17 +316,10 @@ describe("address rate limit", { concurrency: 1 }, () => {
     assert.notEqual(expired.shipReady[0]?.addressStatus, "missing");
 
     const partialDeal = "349912151800";
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/associations/contacts")) return jsonResponse({ results: [{ toObjectId: 9002 }] });
-      if (url.includes("/objects/contacts/")) {
-        return jsonResponse({
-          id: "9002",
-          properties: { firstname: "Glenn", lastname: "Chandler", address: "", city: "", state: "", zip: "" },
-        });
-      }
-      return jsonResponse({});
-    }) as typeof fetch;
+    globalThis.fetch = batchFetch({
+      associations: { [partialDeal]: "9002" },
+      contacts: { "9002": { id: "9002", properties: { firstname: "Glenn", lastname: "Chandler", address: "", city: "", state: "", zip: "" } } },
+    });
     const incomplete = await attachShipAddressReadiness(queueOf([partialDeal]));
     assert.equal(incomplete.shipReady[0]?.addressStatus, "missing");
     expireDealContactCache(partialDeal);
@@ -300,6 +327,31 @@ describe("address rate limit", { concurrency: 1 }, () => {
     const failedIncomplete = await attachShipAddressReadiness(queueOf([partialDeal]));
     assert.equal(failedIncomplete.shipReady[0]?.addressStatus, "unknown");
     assert.notEqual(failedIncomplete.shipReady[0]?.addressStatus, "missing");
+  });
+
+  test("a stale ready address is served at once and refreshed by one background batch", async (t) => {
+    process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+    invalidateDealContactCache();
+    t.after(() => {
+      globalThis.fetch = originalFetch;
+      invalidateDealContactCache();
+      if (previousToken === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+      else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
+    });
+    const dealId = "346140673754";
+    const calls: string[] = [];
+    globalThis.fetch = batchFetch({ associations: { [dealId]: "9001" }, contacts: { "9001": fullContact("9001") } }, calls);
+    await attachShipAddressReadiness(queueOf([dealId]));
+    assert.equal(calls.length, 2, "one association batch + one contact batch");
+    const warm = await attachShipAddressReadiness(queueOf([dealId]));
+    assert.equal(warm.shipReady[0]?.addressStatus, "ready");
+    assert.equal(calls.length, 2, "fresh cache makes no HubSpot call");
+
+    expireDealContactCache(dealId);
+    const stale = await attachShipAddressReadiness(queueOf([dealId]));
+    assert.equal(stale.shipReady[0]?.addressStatus, "ready");
+    await settleBackground();
+    assert.equal(calls.length, 4, "stale entry refreshed in the background");
   });
 
   test("unknown addresses stay out of the Ask Ops chase list", () => {
@@ -444,8 +496,7 @@ describe("address rate limit", { concurrency: 1 }, () => {
 
     const deals = ["346140673754", "349919419125"];
     const lookups = new Map<string, number>();
-    let inflight = 0;
-    let maxInflight = 0;
+    let associationBatches = 0;
 
     t.after(() => {
       globalThis.fetch = originalFetch;
@@ -461,20 +512,16 @@ describe("address rate limit", { concurrency: 1 }, () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const contactsMock = batchFetch({ associations: Object.fromEntries(deals.map((id) => [id, "9001"])), contacts: { "9001": fullContact("9001") } });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/associations/contacts")) {
-        const dealId = url.match(/deals\/(\d+)/)?.[1] ?? "";
-        lookups.set(dealId, (lookups.get(dealId) ?? 0) + 1);
-        inflight += 1;
-        maxInflight = Math.max(maxInflight, inflight);
+      if (url.includes("/associations/deals/contacts/batch/read")) {
+        associationBatches += 1;
+        for (const { id } of JSON.parse(String(init?.body ?? "{}")).inputs ?? []) lookups.set(id, (lookups.get(id) ?? 0) + 1);
         await new Promise((resolve) => setTimeout(resolve, 30));
-        inflight -= 1;
-        return jsonResponse({ results: [{ toObjectId: 9001 }] });
+        return contactsMock(input, init);
       }
-      if (url.includes("/objects/contacts/")) {
-        return jsonResponse(fullContact("9001"));
-      }
+      if (url.includes("/objects/contacts/batch/read")) return contactsMock(input, init);
       if (url.includes("/deals/search")) {
         return jsonResponse({
           results: deals.map((id) => ({
@@ -516,15 +563,14 @@ describe("address rate limit", { concurrency: 1 }, () => {
       assert.equal(lookups.get(dealId) ?? 0, 1, `contact lookups for ${dealId}`);
       assert.equal(loads[0]?.shipReady.find((item) => item.dealId === dealId)?.addressStatus, "ready");
     }
-    assert.ok(maxInflight <= 3, `address lookups in flight peaked at ${maxInflight}`);
+    assert.equal(associationBatches, 1, "all deals resolved in one association batch");
   });
 
-  test("address enrichment stays at three lookups at a time", async (t) => {
+  test("address enrichment uses one batch request for many deals", async (t) => {
     process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
     invalidateDealContactCache();
     const ids = ["11", "12", "13", "14", "15", "16"];
-    let inflight = 0;
-    let maxInflight = 0;
+    let requests = 0;
     t.after(() => {
       globalThis.fetch = originalFetch;
       invalidateDealContactCache();
@@ -532,18 +578,15 @@ describe("address rate limit", { concurrency: 1 }, () => {
       else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
     });
     globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requests += 1;
       const url = String(input);
-      if (url.includes("/associations/contacts")) {
-        inflight += 1;
-        maxInflight = Math.max(maxInflight, inflight);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        inflight -= 1;
+      if (url.includes("/associations/deals/contacts/batch/read")) {
         return jsonResponse({ message: "limit" }, 429, { "retry-after": "0" });
       }
       return jsonResponse({});
     }) as typeof fetch;
     const queue = await attachShipAddressReadiness(queueOf(ids));
-    assert.ok(maxInflight <= 3, `peaked at ${maxInflight}`);
+    assert.equal(requests, 1, `made ${requests} HubSpot requests`);
     assert.ok(queue.shipReady.every((item) => item.addressStatus === "unknown"));
     assert.equal(queue.summary.needsAddress, 0);
   });
