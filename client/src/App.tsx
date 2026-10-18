@@ -18,6 +18,7 @@ import MarketplaceBriefPage from "@/pages/marketplace-brief";
 import InboxPage from "@/pages/inbox";
 import OrderLinks from "@/pages/order-links";
 import Expenses from "@/pages/expenses";
+import QuotePage from "@/pages/quote";
 const Performance = lazy(() => import("@/pages/performance"));
 function PerformanceRoute() {
   return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading Stats…</div>}><Performance /></Suspense>;
@@ -52,6 +53,7 @@ function ShellRoutes() {
           {/* Clients + Marketplace Brief stay routed but off the nav rail (declutter). */}
           <Route path="/clients" component={ClientsPage} />
           <Route path="/orders" component={OrderLinks} />
+          <Route path="/quote" component={QuotePage} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/operations" component={Operations} />
           <Route path="/paid-orders" component={PaidOrders} />
