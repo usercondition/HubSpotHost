@@ -49,6 +49,8 @@ export type InboxCard = {
   threadHint: string;
   risk: string | null;
   recent: InboxMessage[];
+  /** Full thread history (oldest first) when the Mac pushes it; empty on older Mac scripts. */
+  history: InboxMessage[];
   analysis: InboxAnalysis | null;
   firstSeen: string | null;
   lastScraped: string | null;
@@ -89,6 +91,7 @@ export type Followup = {
 
 const MAX_TEXT = 4000;
 const MAX_RECENT = 20;
+export const MAX_HISTORY = 600;
 
 function rec(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -159,10 +162,10 @@ export function normalizeInboxAnalysis(value: unknown): InboxAnalysis | null {
   };
 }
 
-function normalizeMessages(value: unknown): InboxMessage[] {
+function normalizeMessages(value: unknown, max = MAX_RECENT): InboxMessage[] {
   if (!Array.isArray(value)) return [];
   return value
-    .slice(-MAX_RECENT)
+    .slice(-max)
     .map((m) => {
       const r = rec(m);
       return { who: str(r.who, 40) || "unknown", when: str(r.when, 80), at: optStr(r.at, 40), text: str(r.text, 2000) };
@@ -197,6 +200,7 @@ export function normalizeInboxCard(value: unknown, fallbackId = ""): InboxCard |
     threadHint: str(c.thread_hint, 300),
     risk,
     recent: normalizeMessages(Array.isArray(c.recent) ? c.recent : c.thread),
+    history: normalizeMessages(c.full_history === true || c.full_history === 1 ? c.thread : [], MAX_HISTORY),
     analysis,
     firstSeen: optStr(c.first_seen, 40),
     lastScraped: optStr(c.last_scraped, 40),
@@ -212,7 +216,13 @@ function safeUrl(value: unknown): string {
  * Accepts the raw Hermes file (`{ threads: { [id]: card }, updated_at, version }`),
  * `{ threads: [...] }`, or a bare array.
  */
-export function normalizeInboxPayload(value: unknown): { cards: InboxCard[]; updatedAt: string | null; rejected: number } {
+export function normalizeInboxPayload(value: unknown): {
+  cards: InboxCard[];
+  updatedAt: string | null;
+  rejected: number;
+  /** Thread ids the Mac marks personal/hidden: never stored, and purged if already stored. */
+  excludeIds: string[];
+} {
   const root = rec(value);
   const threads = Array.isArray(value) ? value : root.threads;
   const entries: Array<[string, unknown]> = Array.isArray(threads)
@@ -225,7 +235,47 @@ export function normalizeInboxPayload(value: unknown): { cards: InboxCard[]; upd
     if (card) cards.push(card);
     else rejected += 1;
   }
-  return { cards, updatedAt: optStr(root.updated_at, 40), rejected };
+  const excludeIds = (Array.isArray(root.exclude_ids) ? root.exclude_ids : [])
+    .map((v) => str(v, 160).trim())
+    .filter((v) => /^[A-Za-z0-9._:-]+$/.test(v))
+    .slice(0, 500);
+  const excluded = new Set(excludeIds);
+  return { cards: cards.filter((c) => !excluded.has(c.id)), updatedAt: optStr(root.updated_at, 40), rejected, excludeIds };
+}
+
+/* ------------------------------------------------- live mirror: refresh + send queue --- */
+
+export type InboxRefreshStatus = "queued" | "running" | "done" | "failed";
+export type InboxRefreshView = {
+  id: string;
+  reason: "open" | "manual";
+  status: InboxRefreshStatus;
+  detail: string;
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+/** queued -> sending (claimed by the Mac) -> sent | failed | unverified. Retry (owner tap only) puts failed/unverified back to queued. */
+export type InboxOutboundStatus = "queued" | "sending" | "sent" | "failed" | "unverified";
+export type InboxOutboundView = {
+  id: string;
+  cardId: string;
+  text: string;
+  idempotencyKey: string;
+  status: InboxOutboundStatus;
+  detail: string;
+  attempt: number;
+  createdAt: string;
+  updatedAt: string;
+  sentAt: string | null;
+};
+
+/** Messages the owner sent from Print Ops that the pushed history does not show yet (match by text, mine only). */
+export function pendingOutbound(history: InboxMessage[], outbound: InboxOutboundView[]): InboxOutboundView[] {
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const mine = history.filter((m) => m.who === "miguel" || m.who === "me" || m.who === "us").map((m) => norm(m.text));
+  return outbound.filter((o) => !(o.status === "sent" && mine.slice(-30).includes(norm(o.text))));
 }
 
 /** YYYY-MM-DD for "today" in the shop's zone. */

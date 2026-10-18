@@ -1,43 +1,70 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, Image as ImageIcon, Link2, RefreshCw, Search } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ChevronDown, Image as ImageIcon, Link2, Loader2, RefreshCw, RotateCcw, Search, Send } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { nerveGet } from "@/lib/nerve";
-import type { NerveError, NerveThread, NerveThreadList, NerveThreadSummary } from "@/lib/nerve";
-import { attachmentLabel, buildChatItems, initialOf, listTime, splitLinks, visibleThreads } from "@/lib/nerve-chat";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
+import { buildChatItems, initialOf, listTime, splitLinks, visibleThreads, attachmentLabel } from "@/lib/nerve-chat";
 import type { ChatItem } from "@/lib/nerve-chat";
-import { NerveErrorState, NerveUnlock, useNerveAccess } from "@/components/nerve-common";
+import {
+  cardMessages,
+  cardRows,
+  loadComposerDraft,
+  newIdempotencyKey,
+  outboundForCard,
+  outboundLabel,
+  parsePacific,
+  refreshBusy,
+  refreshLabel,
+  saveComposerDraft,
+} from "@/lib/inbox-live";
+import type { LiveThreadRow } from "@/lib/inbox-live";
+
+export type LiveInboxData = {
+  cards: InboxCardView[];
+  sourceUpdatedAt: string | null;
+  refresh: InboxRefreshView | null;
+  outbound: InboxOutboundView[];
+  liveMirror: boolean;
+};
 
 /**
- * Inbox > Chats: iMessage-style, read-only view of the FB Marketplace threads on the Mac mini.
- * Miguel's bubbles use the Print Ops green accent (--good), buyer bubbles neutral gray. No send/reply here:
- * replies will come later through the approval flow.
+ * Inbox > Chats: iMessage-style mirror of the FB Marketplace Selling chats, from Print Ops' own store (the Mac mini
+ * pushes the full history). Personal chats are filtered on the Mac and never reach Print Ops.
+ * Sending: only when the owner presses Send. The message is queued here and the Mac sends it through its FB browser.
  */
-export function InboxChat({ selected, onSelect }: { selected: string | null; onSelect: (uid: string | null) => void }) {
-  const key = useNerveAccess();
+export function InboxChat({
+  data,
+  loading,
+  headers,
+  selected,
+  onSelect,
+  onRefresh,
+  refreshPending,
+}: {
+  data: LiveInboxData | undefined;
+  loading: boolean;
+  headers: Record<string, string>;
+  selected: string | null;
+  onSelect: (uid: string | null) => void;
+  onRefresh: () => void;
+  refreshPending: boolean;
+}) {
   const [q, setQ] = useState("");
-  const list = useQuery<NerveThreadList, NerveError>({
-    queryKey: ["nerve", "/api/messages", key],
-    queryFn: () => nerveGet<NerveThreadList>("/api/messages", key),
-    enabled: !!key,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
-    retry: false,
-  });
+  const rows = useMemo(() => visibleThreads(cardRows(data?.cards ?? [])), [data]);
   const threads = useMemo(() => {
-    const v = visibleThreads(list.data?.threads);
     const s = q.trim().toLowerCase();
-    return s ? v.filter((t) => `${t.name} ${t.listing}`.toLowerCase().includes(s)) : v;
-  }, [list.data, q]);
-  // A deleted/archived thread that is still in the URL is not shown.
-  const hidden = !!selected && !!list.data && !visibleThreads(list.data.threads).some((t) => t.uid === selected);
-  const uid = hidden ? null : selected;
+    return s ? rows.filter((t) => `${t.name} ${t.listing}`.toLowerCase().includes(s)) : rows;
+  }, [rows, q]);
+  const current = rows.find((t) => t.uid === selected) ?? null;
+  const uid = current ? selected : null;
 
-  if (!key) return <NerveUnlock title="Unlock Print Ops to see chats" />;
-  if (list.isLoading) return <Skeleton className="h-[60vh] w-full" />;
-  if (list.error) return <NerveErrorState err={list.error} retry={() => list.refetch()} />;
+  if (loading && !data) return <Skeleton className="h-[60vh] w-full" />;
   const owes = threads.filter((t) => t.owes).length;
+  const busy = refreshPending || refreshBusy(data?.refresh);
+  const rl = refreshLabel(data?.refresh);
 
   return (
     <div className="imsg grid overflow-hidden rounded-lg border border-border bg-card md:h-[calc(100dvh-15rem)] md:min-h-[28rem] md:grid-cols-[minmax(0,21rem)_minmax(0,1fr)]" data-testid="inbox-chat">
@@ -45,46 +72,69 @@ export function InboxChat({ selected, onSelect }: { selected: string | null; onS
         <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3">
           <div className="min-w-0">
             <h2 className="text-[17px] font-semibold tracking-tight">Messages</h2>
-            <p className="text-xs text-muted-foreground">
-              {owes ? `${owes} owe a reply` : "All caught up"} · synced {listTime(list.data?.updated ? new Date(list.data.updated).toISOString() : null) || "—"}
+            <p className="text-xs text-muted-foreground" data-testid="text-chat-synced">
+              {owes ? `${owes} owe a reply` : "All caught up"} · FB read {listTime(data?.sourceUpdatedAt ? sourceIso(data.sourceUpdatedAt) : null) || "—"}
             </p>
+            {rl ? (
+              <p className={cn("text-xs", data?.refresh?.status === "failed" ? "text-destructive" : "text-muted-foreground")} data-testid="text-refresh-status">
+                {rl}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
-            onClick={() => list.refetch()}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
-            aria-label="Refresh"
+            onClick={onRefresh}
+            disabled={busy}
+            className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-60"
+            aria-label="Refresh from Facebook"
+            title="Read Facebook now"
             data-testid="button-chat-refresh"
           >
-            <RefreshCw className={cn("h-4 w-4", list.isFetching && "animate-spin")} />
+            <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
+            <span className="max-sm:hidden">{busy ? "Refreshing…" : "Refresh"}</span>
           </button>
         </div>
-        <label className="mx-4 mb-2 flex h-9 items-center gap-2 rounded-lg bg-muted px-2.5 text-sm text-muted-foreground">
+        <label className="mx-4 mb-2 flex h-11 items-center gap-2 rounded-lg bg-muted px-2.5 text-sm text-muted-foreground">
           <Search className="h-4 w-4 shrink-0" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search"
-            className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
             data-testid="input-chat-search"
           />
         </label>
         <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="list-chat-threads">
-          {threads.length === 0 ? <li className="px-4 py-6 text-sm text-muted-foreground">No conversations.</li> : null}
+          {threads.length === 0 ? <li className="px-4 py-6 text-sm text-muted-foreground">No conversations yet. They appear after the Mac pushes the inbox.</li> : null}
           {threads.map((t) => (
             <ThreadRow key={t.uid} t={t} active={t.uid === uid} onClick={() => onSelect(t.uid)} />
           ))}
         </ul>
       </section>
       <section className={cn("flex min-h-[70vh] min-w-0 flex-col md:min-h-0", !uid && "max-md:hidden")} aria-label="Conversation">
-        {uid ? <Conversation uid={uid} onBack={() => onSelect(null)} /> : (
+        {current ? (
+          <Conversation
+            key={current.uid}
+            row={current}
+            outbound={outboundForCard(current.card, data?.outbound ?? [])}
+            headers={headers}
+            liveMirror={!!data?.liveMirror}
+            onBack={() => onSelect(null)}
+          />
+        ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground" data-testid="chat-empty">
-            {hidden ? "That conversation was archived or deleted." : "Pick a conversation."}
+            {selected ? "That conversation is not in the inbox any more." : "Pick a conversation."}
           </div>
         )}
       </section>
     </div>
   );
+}
+
+/** The Mac writes naive Pacific time ("2026-10-17T17:34:05"); show it as such. */
+function sourceIso(s: string): string | null {
+  const v = parsePacific(s);
+  return v == null ? null : new Date(v).toISOString();
 }
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
@@ -100,8 +150,8 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   );
 }
 
-function ThreadRow({ t, active, onClick }: { t: NerveThreadSummary; active: boolean; onClick: () => void }) {
-  const mine = t.lastSpeaker === "us" || t.lastSpeaker === "me";
+function ThreadRow({ t, active, onClick }: { t: LiveThreadRow; active: boolean; onClick: () => void }) {
+  const mine = t.lastSpeaker === "me";
   return (
     <li>
       <button
@@ -129,41 +179,41 @@ function ThreadRow({ t, active, onClick }: { t: NerveThreadSummary; active: bool
   );
 }
 
-function Conversation({ uid, onBack }: { uid: string; onBack: () => void }) {
-  const key = useNerveAccess();
+function Conversation({
+  row,
+  outbound,
+  headers,
+  liveMirror,
+  onBack,
+}: {
+  row: LiveThreadRow;
+  outbound: InboxOutboundView[];
+  headers: Record<string, string>;
+  liveMirror: boolean;
+  onBack: () => void;
+}) {
+  const card = row.card;
   const [showSummary, setShowSummary] = useState(false);
-  const thread = useQuery<NerveThread, NerveError>({
-    queryKey: ["nerve", "/api/messages/thread", uid, key],
-    queryFn: () => nerveGet<NerveThread>(`/api/messages/thread?uid=${encodeURIComponent(uid)}&limit=80`, key),
-    enabled: !!key,
-    refetchInterval: 30_000,
-    retry: false,
-  });
-  const items = useMemo(() => buildChatItems(thread.data?.messages), [thread.data]);
+  const items = useMemo(() => buildChatItems(cardMessages(card)), [card]);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [uid, items.length]);
-  useEffect(() => setShowSummary(false), [uid]);
-
-  if (thread.isLoading) return <Skeleton className="m-4 h-64" />;
-  if (thread.error) return <div className="p-4"><NerveErrorState err={thread.error} retry={() => thread.refetch()} /></div>;
-  const t = thread.data;
-  if (!t) return null;
+  }, [items.length, outbound.length]);
   const lastBubble = [...items].reverse().find((i) => i.kind === "bubble");
-  const summary = t.summary || t.nextAction;
+  const summary = card.analysis?.summary || card.nextAction;
+  const partial = !card.history?.length;
   return (
     <>
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <button type="button" onClick={onBack} className="inline-flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted md:hidden" aria-label="Back to conversations" data-testid="button-chat-back">
+        <button type="button" onClick={onBack} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-foreground hover:bg-muted md:hidden" aria-label="Back to conversations" data-testid="button-chat-back">
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <Avatar name={t.name} size={36} />
+        <Avatar name={card.name} size={36} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold" data-private="name">{t.name}</p>
-          <p className="truncate text-xs text-muted-foreground" data-private="text">{[t.listing, t.stage?.replace(/_/g, " ")].filter(Boolean).join(" · ")}</p>
+          <p className="truncate text-[15px] font-semibold" data-private="name">{card.name}</p>
+          <p className="truncate text-xs text-muted-foreground" data-private="text">{[card.listing, card.stage?.replace(/_/g, " ")].filter(Boolean).join(" · ")}</p>
         </div>
-        {t.owes ? <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-medium text-good">Owes reply</span> : null}
+        {row.owes ? <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-medium text-good">Owes reply</span> : null}
       </header>
       {summary ? (
         <button
@@ -175,20 +225,120 @@ function Conversation({ uid, onBack }: { uid: string; onBack: () => void }) {
         >
           <span className="shrink-0 font-semibold text-foreground">Summary</span>
           <span className={cn("min-w-0 flex-1", showSummary ? "whitespace-pre-wrap" : "truncate")} data-private="text">
-            {showSummary ? [t.summary, t.nextAction ? `Next: ${t.nextAction}` : ""].filter(Boolean).join("\n") : summary}
+            {showSummary ? [card.analysis?.summary, card.nextAction ? `Next: ${card.nextAction}` : ""].filter(Boolean).join("\n") : summary}
           </span>
           <ChevronDown className={cn("mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform", showSummary && "rotate-180")} />
         </button>
       ) : null}
       <div className="imsg-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5" data-testid="list-chat-messages">
-        {t.hasMore ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing the latest messages</p> : null}
+        {partial ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing recent messages (full history arrives with the next Mac push)</p> : null}
         {items.map((it) => (
-          <Row key={it.key} it={it} meta={it === lastBubble && it.kind === "bubble" ? (it.mine ? "Sent" : "") : ""} />
+          <Row key={it.key} it={it} meta={it === lastBubble && it.kind === "bubble" && it.mine && outbound.length === 0 ? "Sent" : ""} />
+        ))}
+        {outbound.map((o) => (
+          <PendingBubble key={o.id} o={o} headers={headers} />
         ))}
         <div ref={end} />
       </div>
-      <footer className="border-t border-border px-4 py-2 text-center text-[11px] text-muted-foreground">Read-only. Replies will go through approval.</footer>
+      <Composer cardId={card.id} headers={headers} liveMirror={liveMirror} />
     </>
+  );
+}
+
+function PendingBubble({ o, headers }: { o: InboxOutboundView; headers: Record<string, string> }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const l = outboundLabel(o);
+  const retry = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/inbox/outbound/${encodeURIComponent(o.id)}/retry`, {}, { headers })).json(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["/api/inbox/cards"] }),
+    onError: (e: Error) => toast({ title: "Could not retry", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <div className="mt-2 flex flex-col items-end" data-testid={`outbound-${o.id}`}>
+      <div className={cn("imsg-bubble imsg-me imsg-tail", o.status !== "sent" && "opacity-70")} data-private="text">{o.text}</div>
+      <span
+        className={cn(
+          "mt-0.5 flex items-center gap-1 px-1 text-right text-[11px]",
+          l.tone === "bad" ? "text-destructive" : l.tone === "warn" ? "text-[hsl(var(--warn,38_92%_50%))]" : "text-muted-foreground",
+        )}
+        data-testid={`outbound-status-${o.id}`}
+      >
+        {o.status === "sending" || o.status === "queued" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+        {l.text}
+        {l.canRetry ? (
+          <button
+            type="button"
+            className="ml-1 inline-flex min-h-11 items-center gap-1 rounded px-2 font-medium text-foreground underline-offset-2 hover:underline"
+            onClick={() => retry.mutate()}
+            disabled={retry.isPending}
+            data-testid={`button-outbound-retry-${o.id}`}
+          >
+            <RotateCcw className="h-3 w-3" /> Retry
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function Composer({ cardId, headers, liveMirror }: { cardId: string; headers: Record<string, string>; liveMirror: boolean }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [text, setText] = useState(() => loadComposerDraft(cardId));
+  // One key per Send press; a network retry of the same press reuses it so the server never queues twice.
+  const keyRef = useRef<string | null>(null);
+  useEffect(() => saveComposerDraft(cardId, text), [cardId, text]);
+  const send = useMutation({
+    mutationFn: async (body: { text: string; idempotencyKey: string }) =>
+      (await apiRequest("POST", `/api/inbox/cards/${encodeURIComponent(cardId)}/send`, body, { headers })).json(),
+    onSuccess: () => {
+      keyRef.current = null;
+      setText("");
+      saveComposerDraft(cardId, "");
+      void qc.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
+    },
+    onError: (e: Error) => toast({ title: "Not queued", description: `${e.message}. Nothing was sent.`, variant: "destructive" }),
+  });
+  const submit = () => {
+    const t = text.trim();
+    if (!t || send.isPending) return;
+    if (!keyRef.current) keyRef.current = newIdempotencyKey();
+    send.mutate({ text: t, idempotencyKey: keyRef.current });
+  };
+  return (
+    <footer className="border-t border-border px-3 py-2" data-testid="chat-composer">
+      <div className="flex items-end gap-2">
+        <textarea
+          value={text}
+          onChange={(e) => {
+            keyRef.current = null;
+            setText(e.target.value);
+          }}
+          rows={Math.min(5, Math.max(1, text.split("\n").length))}
+          maxLength={2000}
+          placeholder="Message"
+          aria-label="Message"
+          className="min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-ring sm:text-sm"
+          data-testid="input-chat-message"
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!text.trim() || send.isPending}
+          className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          data-testid="button-chat-send"
+        >
+          {send.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <span>Send</span>
+        </button>
+      </div>
+      <p className="mt-1 text-center text-[11px] text-muted-foreground" data-testid="text-composer-note">
+        {liveMirror
+          ? "Sends from the Mac mini's Facebook only when you press Send. Nothing is ever sent automatically."
+          : "Sending turns on once the Mac mini live sync is enabled. Messages you queue wait until then."}
+      </p>
+    </footer>
   );
 }
 

@@ -5,8 +5,13 @@
  *   by INBOX_PUSH_TOKEN (Authorization: Bearer … or x-inbox-push-token).
  * - Owner UI: everything else, behind the existing owner access code.
  * - Scheduler: POST /api/cron/followup-reminders, behind OWNER_DIGEST_CRON_SECRET.
+ * - Live mirror (Mac → Print Ops, push token): POST /api/inbox/mac/poll (heartbeat + claim refresh/sends),
+ *   POST /api/inbox/mac/refresh/:id, POST /api/inbox/mac/outbound/:id, POST /api/inbox/mac/thread/:id.
+ * - Live mirror (owner): POST /api/inbox/refresh, POST /api/inbox/cards/:id/send, POST /api/inbox/outbound/:id/retry.
  *
- * Sending replies to clients stays manual; nothing here messages a buyer.
+ * Nothing here messages a buyer by itself. A message is only queued when the owner presses Send
+ * (owner code + idempotency key); the Mac sends it through the FB browser and reports back.
+ * Retries happen only when the owner taps Retry.
  */
 import crypto from "node:crypto";
 import type { Express, Request, Response } from "express";
@@ -17,8 +22,22 @@ import {
   createFollowup,
   getFollowup,
   getInboxCard,
+  OutboundKeyConflictError,
+  claimOutbound,
+  claimRefresh,
+  finishOutbound,
+  finishRefresh,
   getMeta,
+  getOutbound,
+  latestRefresh,
   listFollowups,
+  listOutbound,
+  mergeThreadRead,
+  purgeInboxCards,
+  queueOutbound,
+  requestInboxRefresh,
+  retryOutbound,
+  setInboxMeta,
   listInboxCards,
   listReplyEditsSince,
   saveReplyEdit,
@@ -78,6 +97,22 @@ const statusSchema = z.object({
     })
     .optional(),
 });
+const refreshSchema = z.object({ reason: z.enum(["open", "manual"]).default("manual") });
+const sendSchema = z.object({
+  text: z.string().min(1).max(2000),
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/, "idempotencyKey must be 8-80 letters/digits/-/_"),
+});
+const macRefreshSchema = z.object({ ok: z.boolean(), detail: z.string().max(300).optional() });
+const macOutboundSchema = z.object({
+  attempt: z.number().int().min(1),
+  status: z.enum(["sent", "failed", "unverified"]),
+  detail: z.string().max(300).optional(),
+});
+const macThreadSchema = z.object({
+  messages: z
+    .array(z.object({ who: z.string().min(1), text: z.string(), when: z.string().optional(), at: z.string().max(40).nullable().optional() }))
+    .max(400),
+});
 const followupPatchSchema = z.object({
   status: z.enum(["open", "done", "snoozed"]).optional(),
   reminderDate: dateSchema.nullable().optional(),
@@ -99,16 +134,18 @@ async function syncToNotion(id: string) {
 export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron: Gate): void {
   app.post("/api/inbox/cards", (req, res) => {
     if (rejectInboxPush(req, res)) return;
-    const { cards, updatedAt, rejected } = normalizeInboxPayload(req.body);
+    const { cards, updatedAt, rejected, excludeIds } = normalizeInboxPayload(req.body);
     if (cards.length === 0 && rejected > 0) {
       return res.status(400).json({ ok: false, error: "No valid cards in payload", rejected });
     }
+    const purged = purgeInboxCards(excludeIds);
     const result = upsertInboxCards(cards, updatedAt);
-    return res.json({ ok: true, ...result, rejected });
+    return res.json({ ok: true, ...result, rejected, purged });
   });
 
   app.get("/api/inbox/edits", (req, res) => {
     if (rejectInboxPush(req, res)) return;
+    setInboxMeta("last_checkin_at", new Date().toISOString());
     const since = typeof req.query.since === "string" && req.query.since.trim() ? req.query.since.trim() : null;
     return res.json({ ok: true, edits: listReplyEditsSince(since), now: new Date().toISOString() });
   });
@@ -119,10 +156,91 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
       ok: true,
       cards: listInboxCards(),
       lastPushAt: getMeta("last_push_at"),
+      lastCheckinAt: getMeta("last_checkin_at"),
+      liveMirror: getMeta("mac_live") === "1",
       sourceUpdatedAt: getMeta("source_updated_at"),
+      refresh: latestRefresh(),
+      outbound: listOutbound(),
       pushConfigured: inboxPushToken().length >= 24,
       notionConfigured: Boolean(getNotionFollowupsConfig()),
     });
+  });
+
+  /* ---------------------------------------------- live mirror: owner side --- */
+
+  app.post("/api/inbox/refresh", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = refreshSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { reason: 'open' | 'manual' }" });
+    const result = requestInboxRefresh(parsed.data.reason);
+    return res.status(result.queued ? 202 : 200).json({ ok: true, ...result });
+  });
+
+  app.post("/api/inbox/cards/:id/send", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = sendSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? "Expected { text, idempotencyKey }" });
+    const text = parsed.data.text.replace(/\r/g, "").trim();
+    if (!text) return res.status(400).json({ ok: false, error: "Empty message" });
+    if (!getInboxCard(req.params.id)) return res.status(404).json({ ok: false, error: "Chat not found" });
+    try {
+      const { created, outbound } = queueOutbound(req.params.id, text, parsed.data.idempotencyKey);
+      return res.status(created ? 202 : 200).json({ ok: true, created, outbound });
+    } catch (error) {
+      if (error instanceof OutboundKeyConflictError) return res.status(409).json({ ok: false, error: error.message });
+      throw error;
+    }
+  });
+
+  app.post("/api/inbox/outbound/:id/retry", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const current = getOutbound(req.params.id);
+    if (!current) return res.status(404).json({ ok: false, error: "Message not found" });
+    const outbound = retryOutbound(req.params.id);
+    if (!outbound) return res.status(409).json({ ok: false, error: `Only failed messages can be retried (this one is ${current.status})`, outbound: current });
+    return res.json({ ok: true, outbound });
+  });
+
+  /* ------------------------------------------------ live mirror: Mac side --- */
+
+  app.post("/api/inbox/mac/poll", (req, res) => {
+    if (rejectInboxPush(req, res)) return;
+    const body = (req.body ?? {}) as { live?: unknown; maxSends?: unknown };
+    const live = body.live === true;
+    setInboxMeta("last_checkin_at", new Date().toISOString());
+    setInboxMeta("mac_live", live ? "1" : "0");
+    if (!live) return res.json({ ok: true, refresh: null, outbound: [] });
+    const maxSends = typeof body.maxSends === "number" ? Math.max(0, Math.min(5, Math.floor(body.maxSends))) : 3;
+    return res.json({ ok: true, refresh: claimRefresh(), outbound: claimOutbound(maxSends) });
+  });
+
+  app.post("/api/inbox/mac/refresh/:id", (req, res) => {
+    if (rejectInboxPush(req, res)) return;
+    const parsed = macRefreshSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { ok, detail? }" });
+    const updated = finishRefresh(req.params.id, parsed.data.ok, parsed.data.detail ?? "");
+    return res.status(updated ? 200 : 409).json({ ok: updated, refresh: latestRefresh() });
+  });
+
+  app.post("/api/inbox/mac/outbound/:id", (req, res) => {
+    if (rejectInboxPush(req, res)) return;
+    const parsed = macOutboundSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { attempt, status, detail? }" });
+    const outbound = finishOutbound(req.params.id, parsed.data.attempt, parsed.data.status, parsed.data.detail ?? "");
+    if (!outbound) return res.status(409).json({ ok: false, error: "Not a claimed attempt", outbound: getOutbound(req.params.id) });
+    return res.json({ ok: true, outbound });
+  });
+
+  app.post("/api/inbox/mac/thread/:id", (req, res) => {
+    if (rejectInboxPush(req, res)) return;
+    const parsed = macThreadSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { messages: [{ who, text, when?, at? }] }" });
+    const messages = parsed.data.messages
+      .map((m) => ({ who: m.who.slice(0, 40), text: m.text.slice(0, 2000), when: (m.when ?? "").slice(0, 80), at: m.at ?? null }))
+      .filter((m) => m.text.trim());
+    const result = mergeThreadRead(req.params.id, messages);
+    if (!result.ok) return res.status(404).json({ ok: false, error: "Chat not found" });
+    return res.json({ ...result, ok: true });
   });
 
   app.patch("/api/inbox/cards/:id/reply", (req, res) => {
