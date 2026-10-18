@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Inbox as InboxIcon, Loader2, MessagesSquare, RefreshCw, RotateCcw, Save } from "lucide-react";
@@ -11,15 +11,19 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel, StatusPill } from "@/components/primitives";
 import { FollowupDialog, type FollowupDraft } from "@/components/followup-dialog";
-import type { Followup, InboxCardView } from "@shared/inbox";
+import type { Followup, InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import { InboxChat } from "@/components/inbox-chat";
-import { NERVE_SECTION_ENABLED } from "@/lib/nerve";
+import { heartbeatLabel, refreshBusy, saveComposerDraft } from "@/lib/inbox-live";
 
 type CardsResponse = {
   ok: boolean;
   cards: InboxCardView[];
   lastPushAt: string | null;
+  lastCheckinAt?: string | null;
+  liveMirror?: boolean;
   sourceUpdatedAt: string | null;
+  refresh?: InboxRefreshView | null;
+  outbound?: InboxOutboundView[];
   pushConfigured: boolean;
   notionConfigured: boolean;
 };
@@ -65,10 +69,12 @@ function InboxCardItem({
   card,
   headers,
   onMark,
+  onUse,
 }: {
   card: InboxCardView;
   headers: Record<string, string>;
   onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
+  onUse: (card: InboxCardView, reply: string) => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -136,12 +142,15 @@ function InboxCardItem({
           <Button size="sm" variant="outline" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
           </Button>
+          <Button size="sm" disabled={!reply.trim()} onClick={() => onUse(card, reply)} data-testid={`button-use-reply-${card.id}`}>
+            <MessagesSquare className="h-4 w-4" /> Use this
+          </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => {
               void navigator.clipboard?.writeText(reply);
-              toast({ title: "Copied", description: "Paste it into Messenger yourself — Print Ops never sends." });
+              toast({ title: "Copied", description: "Copied to the clipboard. Nothing was sent." });
             }}
           >
             <Copy className="h-4 w-4" /> Copy
@@ -223,9 +232,8 @@ export default function InboxPage() {
   const [, navigate] = useLocation();
   const sp = new URLSearchParams(search);
   const rawTab = sp.get("tab");
-  // Chats (read-only, from the Mac mini) is the default Inbox view when the Nerve link is enabled; Cards + Follow-ups stay as before.
-  const tab: "chats" | "cards" | "followups" =
-    rawTab === "followups" ? "followups" : rawTab === "cards" || !NERVE_SECTION_ENABLED ? "cards" : "chats";
+  // Chats (live mirror from Print Ops' store, pushed by the Mac mini) is the default Inbox view.
+  const tab: "chats" | "cards" | "followups" = rawTab === "followups" ? "followups" : rawTab === "cards" ? "cards" : "chats";
   const chatThread = sp.get("thread");
   const openThread = (uid: string | null) => navigate(uid ? `/inbox?tab=chats&thread=${encodeURIComponent(uid)}` : "/inbox?tab=chats");
   const [filter, setFilter] = useState<"needs" | "all">("needs");
@@ -234,9 +242,39 @@ export default function InboxPage() {
   const cardsQuery = useQuery<CardsResponse>({
     queryKey: ["/api/inbox/cards"],
     enabled: isUnlocked,
-    refetchInterval: 60_000,
+    // Poll fast only while a refresh or a send is in flight; otherwise every 30 s.
+    refetchInterval: (query) => {
+      const d = query.state.data as CardsResponse | undefined;
+      const inFlight = refreshBusy(d?.refresh) || (d?.outbound ?? []).some((o) => o.status === "queued" || o.status === "sending");
+      return inFlight ? 3_000 : 30_000;
+    },
+    refetchOnWindowFocus: true,
     queryFn: async () => (await apiRequest("GET", "/api/inbox/cards", undefined, { headers })).json(),
   });
+
+  // Ask the Mac for an FB read: once when the Inbox opens (server skips it if data is < 15 min old), and on Refresh taps.
+  const refreshMutation = useMutation({
+    mutationFn: async (reason: "open" | "manual") =>
+      (await apiRequest("POST", "/api/inbox/refresh", { reason }, { headers })).json() as Promise<{
+        queued: boolean;
+        reason?: string;
+        retryAfterMs?: number;
+      }>,
+    onSuccess: (r, reason) => {
+      if (reason === "manual" && !r.queued && r.reason === "cooldown") {
+        toast({ title: "Just refreshed", description: `Try again in ${Math.ceil((r.retryAfterMs ?? 0) / 1000)} s.` });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
+    },
+    onError: (e: Error, reason) => reason === "manual" && toast({ title: "Could not start a refresh", description: e.message, variant: "destructive" }),
+  });
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (!isUnlocked || openedRef.current) return;
+    openedRef.current = true;
+    refreshMutation.mutate("open");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnlocked]);
   const followupsQuery = useQuery<{ followups: Followup[] }>({
     queryKey: ["/api/followups"],
     enabled: isUnlocked,
@@ -272,17 +310,28 @@ export default function InboxPage() {
     return [...visible].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 5) - (CATEGORY_ORDER[b.category] ?? 5));
   }, [cardsQuery.data, filter]);
   const followups = followupsQuery.data?.followups ?? [];
+  const heartbeat = heartbeatLabel(cardsQuery.data?.lastCheckinAt, cardsQuery.data?.lastPushAt);
   const dueCount = followups.filter((f) => f.status === "open" && f.reminderDate && f.reminderDate <= todayPT()).length;
 
   return (
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Client chats, suggested replies and follow-ups. Sending stays manual."
+        subtitle="Client chats, suggested replies and follow-ups. A message goes out only when you press Send."
         actions={
           isUnlocked ? (
-            <Button size="sm" variant="outline" onClick={() => { void cardsQuery.refetch(); void followupsQuery.refetch(); }}>
-              <RefreshCw className="h-4 w-4" /> Refresh
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={refreshMutation.isPending || refreshBusy(cardsQuery.data?.refresh)}
+              onClick={() => {
+                refreshMutation.mutate("manual");
+                void followupsQuery.refetch();
+              }}
+              data-testid="button-inbox-refresh"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshBusy(cardsQuery.data?.refresh) ? "animate-spin" : ""}`} />
+              {refreshBusy(cardsQuery.data?.refresh) ? "Refreshing…" : "Refresh"}
             </Button>
           ) : null
         }
@@ -300,26 +349,46 @@ export default function InboxPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2" role="tablist">
-              {NERVE_SECTION_ENABLED ? (
-                <Button size="sm" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
-                  <MessagesSquare className="h-4 w-4" /> Chats
-                </Button>
-              ) : null}
+              <Button size="sm" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
+                <MessagesSquare className="h-4 w-4" /> Chats
+              </Button>
               <Button size="sm" variant={tab === "cards" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=cards")} data-testid="tab-inbox-cards">
                 <InboxIcon className="h-4 w-4" /> Replies
               </Button>
               <Button size="sm" variant={tab === "followups" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=followups")} data-testid="tab-inbox-followups">
                 Follow-ups{dueCount ? ` (${dueCount} due)` : ""}
               </Button>
-              <span className="ml-auto text-xs text-muted-foreground max-sm:w-full max-sm:ml-0">
-                Mac sync: {fmtTime(cardsQuery.data?.lastPushAt ?? null)}
+              <span
+                className={`ml-auto text-xs max-sm:w-full max-sm:ml-0 ${heartbeat.stale && cardsQuery.data ? "text-destructive" : "text-muted-foreground"}`}
+                title={`Last data push: ${fmtTime(cardsQuery.data?.lastPushAt ?? null)}`}
+                data-testid="text-mac-sync"
+              >
+                {heartbeat.text}
                 {cardsQuery.data && !cardsQuery.data.pushConfigured ? " · push not configured" : ""}
                 {cardsQuery.data && !cardsQuery.data.notionConfigured ? " · Notion not configured (local only)" : ""}
               </span>
             </div>
 
             {tab === "chats" ? (
-              <InboxChat selected={chatThread} onSelect={openThread} />
+              <InboxChat
+                data={
+                  cardsQuery.data
+                    ? {
+                        cards: cardsQuery.data.cards,
+                        sourceUpdatedAt: cardsQuery.data.sourceUpdatedAt,
+                        refresh: cardsQuery.data.refresh ?? null,
+                        outbound: cardsQuery.data.outbound ?? [],
+                        liveMirror: !!cardsQuery.data.liveMirror,
+                      }
+                    : undefined
+                }
+                loading={cardsQuery.isLoading}
+                headers={headers}
+                selected={chatThread}
+                onSelect={openThread}
+                onRefresh={() => refreshMutation.mutate("manual")}
+                refreshPending={refreshMutation.isPending}
+              />
             ) : tab === "cards" ? (
               <Panel
                 title={`Cards (${cards.length})`}
@@ -337,7 +406,17 @@ export default function InboxPage() {
                 ) : null}
                 <div className="grid gap-2">
                   {cards.map((card) => (
-                    <InboxCardItem key={`${card.id}:${card.replyVersion}:${card.status}`} card={card} headers={headers} onMark={(c, status, reply) => setMarking({ card: c, status, reply })} />
+                    <InboxCardItem
+                      key={`${card.id}:${card.replyVersion}:${card.status}`}
+                      card={card}
+                      headers={headers}
+                      onMark={(c, status, reply) => setMarking({ card: c, status, reply })}
+                      onUse={(c, reply) => {
+                        // Fill the chat composer only. Sending still needs a Send press in the chat.
+                        saveComposerDraft(c.id, reply);
+                        openThread(c.id);
+                      }}
+                    />
                   ))}
                 </div>
               </Panel>

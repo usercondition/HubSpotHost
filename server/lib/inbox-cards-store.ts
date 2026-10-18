@@ -7,7 +7,18 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import type { Followup, FollowupStatus, InboxCard, InboxCardStatus, InboxCardView } from "../../shared/inbox";
+import type {
+  Followup,
+  FollowupStatus,
+  InboxCard,
+  InboxCardStatus,
+  InboxCardView,
+  InboxMessage,
+  InboxOutboundStatus,
+  InboxOutboundView,
+  InboxRefreshView,
+} from "../../shared/inbox";
+import { MAX_HISTORY } from "../../shared/inbox";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS inbox_cards (
@@ -52,6 +63,29 @@ CREATE TABLE IF NOT EXISTS followups (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS followups_reminder ON followups(status, reminder_date);
+CREATE TABLE IF NOT EXISTS inbox_refresh_requests (
+  id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  requested_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS inbox_outbound (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  attempt INTEGER NOT NULL DEFAULT 1,
+  claimed_at TEXT,
+  sent_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS inbox_outbound_status ON inbox_outbound(status, created_at);
 `;
 
 let sqlite: Database.Database | null = null;
@@ -143,10 +177,257 @@ export function upsertInboxCards(cards: InboxCard[], sourceUpdatedAt: string | n
       }
     }
     setMeta("last_push_at", at);
-    if (sourceUpdatedAt) setMeta("source_updated_at", sourceUpdatedAt);
+    setMeta("last_checkin_at", at);
+    if (sourceUpdatedAt) {
+      if (getMeta("source_updated_at") !== sourceUpdatedAt) setMeta("source_changed_at", at);
+      setMeta("source_updated_at", sourceUpdatedAt);
+    }
   });
   tx();
   return result;
+}
+
+/**
+ * Personal / hidden threads the Mac excludes: delete every stored trace (card, reply edit, queued sends)
+ * so nothing personal stays on the server. Returns how many cards were removed.
+ */
+export function purgeInboxCards(ids: string[]): number {
+  if (ids.length === 0) return 0;
+  const d = db();
+  let n = 0;
+  d.transaction(() => {
+    for (const id of ids) {
+      n += d.prepare("DELETE FROM inbox_cards WHERE id=?").run(id).changes;
+      d.prepare("DELETE FROM inbox_reply_edits WHERE card_id=?").run(id);
+      d.prepare("DELETE FROM inbox_outbound WHERE card_id=?").run(id);
+    }
+  })();
+  return n;
+}
+
+/**
+ * Merge a fresh single-thread read (after a send) into the stored history: keeps everything already stored and
+ * appends only the tail messages that are not there yet. Never shortens history.
+ */
+export function mergeThreadRead(cardId: string, fresh: InboxMessage[], now = new Date()): { ok: boolean; added: number } {
+  const row = db().prepare("SELECT card_json FROM inbox_cards WHERE id=?").get(cardId) as { card_json: string } | undefined;
+  if (!row) return { ok: false, added: 0 };
+  const card = JSON.parse(row.card_json) as InboxCard;
+  const history = Array.isArray(card.history) ? card.history : [];
+  const key = (m: InboxMessage) => `${m.who}|${m.text.replace(/\s+/g, " ").trim()}`;
+  // Find the longest suffix of `history` that is a prefix of `fresh` (overlap), then append the rest.
+  const hk = history.map(key);
+  const fk = fresh.map(key);
+  let overlap = 0;
+  for (let n = Math.min(hk.length, fk.length); n > 0; n--) {
+    if (hk.slice(hk.length - n).join("\n") === fk.slice(0, n).join("\n")) {
+      overlap = n;
+      break;
+    }
+  }
+  let add = fresh.slice(overlap);
+  if (overlap === 0) {
+    // No clean overlap (popup shows only a window): append only messages not already in the last 60 stored.
+    const recent = new Set(hk.slice(-60));
+    add = fresh.filter((m) => !recent.has(key(m)));
+  }
+  if (add.length === 0) return { ok: true, added: 0 };
+  const merged = [...history, ...add].slice(-MAX_HISTORY);
+  const last = merged[merged.length - 1];
+  const next: InboxCard = {
+    ...card,
+    history: merged,
+    recent: merged.slice(-8),
+    lastMessage: last?.text ?? card.lastMessage,
+    lastSpeaker: last?.who ?? card.lastSpeaker,
+    owesReply: last ? last.who === "buyer" : card.owesReply,
+  };
+  db()
+    .prepare("UPDATE inbox_cards SET card_json=?, content_hash=?, updated_at=? WHERE id=?")
+    .run(JSON.stringify(next), hashCard(next), now.toISOString(), cardId);
+  return { ok: true, added: add.length };
+}
+
+/* ------------------------------------------------------- refresh requests --- */
+
+export const REFRESH_MANUAL_COOLDOWN_MS = 60_000;
+export const REFRESH_OPEN_COOLDOWN_MS = 15 * 60_000;
+export const REFRESH_STALE_MS = 10 * 60_000;
+export const OUTBOUND_STALE_MS = 10 * 60_000;
+
+type RefreshRow = {
+  id: string; reason: string; status: string; detail: string; requested_at: string; started_at: string | null; finished_at: string | null;
+};
+function refreshView(r: RefreshRow): InboxRefreshView {
+  return {
+    id: r.id, reason: r.reason === "open" ? "open" : "manual", status: r.status as InboxRefreshView["status"], detail: r.detail,
+    requestedAt: r.requested_at, startedAt: r.started_at, finishedAt: r.finished_at,
+  };
+}
+
+/** A claimed refresh with no result for 10 min is failed (the Mac died or went offline mid-read). */
+function expireStale(now: Date): void {
+  const cut = new Date(now.getTime() - REFRESH_STALE_MS).toISOString();
+  db()
+    .prepare("UPDATE inbox_refresh_requests SET status='failed', detail='No result from the Mac within 10 min', finished_at=? WHERE status='running' AND started_at < ?")
+    .run(now.toISOString(), cut);
+  const qcut = new Date(now.getTime() - 30 * 60_000).toISOString();
+  db()
+    .prepare("UPDATE inbox_refresh_requests SET status='failed', detail='Mac did not pick this up within 30 min', finished_at=? WHERE status='queued' AND requested_at < ?")
+    .run(now.toISOString(), qcut);
+  const ocut = new Date(now.getTime() - OUTBOUND_STALE_MS).toISOString();
+  db()
+    .prepare(
+      `UPDATE inbox_outbound SET status='unverified', detail='No result from the Mac within 10 min. Check Messenger before retrying.', updated_at=?
+       WHERE status='sending' AND claimed_at < ?`,
+    )
+    .run(now.toISOString(), ocut);
+}
+
+export function latestRefresh(now = new Date()): InboxRefreshView | null {
+  expireStale(now);
+  const r = db().prepare("SELECT * FROM inbox_refresh_requests ORDER BY requested_at DESC, rowid DESC LIMIT 1").get() as RefreshRow | undefined;
+  return r ? refreshView(r) : null;
+}
+
+export type RefreshRequestResult =
+  | { queued: true; refresh: InboxRefreshView }
+  | { queued: false; reason: "in_progress" | "cooldown" | "fresh"; refresh: InboxRefreshView | null; retryAfterMs?: number };
+
+/**
+ * Ask the Mac for an FB inbox read. `open` (page opened): skipped when the data or the last request is under 15 min old.
+ * `manual` (Refresh tap): bypasses the 15 min rule but keeps a 60 s anti-spam cooldown. One request in flight at a time.
+ */
+export function requestInboxRefresh(reason: "open" | "manual", now = new Date()): RefreshRequestResult {
+  const last = latestRefresh(now);
+  if (last && (last.status === "queued" || last.status === "running")) return { queued: false, reason: "in_progress", refresh: last };
+  const nowMs = now.getTime();
+  if (last) {
+    const age = nowMs - Date.parse(last.requestedAt);
+    const cooldown = reason === "manual" ? REFRESH_MANUAL_COOLDOWN_MS : REFRESH_OPEN_COOLDOWN_MS;
+    if (age < cooldown) return { queued: false, reason: "cooldown", refresh: last, retryAfterMs: cooldown - age };
+  }
+  if (reason === "open") {
+    // Server time when fresh FB data last arrived (source_updated_at is the Mac's naive local time, so not compared directly).
+    const changed = getMeta("source_changed_at");
+    if (changed && nowMs - Date.parse(changed) < REFRESH_OPEN_COOLDOWN_MS) {
+      return { queued: false, reason: "fresh", refresh: last };
+    }
+  }
+  const id = crypto.randomUUID();
+  db()
+    .prepare("INSERT INTO inbox_refresh_requests (id, reason, status, requested_at) VALUES (?, ?, 'queued', ?)")
+    .run(id, reason, now.toISOString());
+  return { queued: true, refresh: latestRefresh(now)! };
+}
+
+/** Mac claims the queued refresh (at most one). */
+export function claimRefresh(now = new Date()): InboxRefreshView | null {
+  expireStale(now);
+  const r = db().prepare("SELECT * FROM inbox_refresh_requests WHERE status='queued' ORDER BY requested_at LIMIT 1").get() as RefreshRow | undefined;
+  if (!r) return null;
+  db().prepare("UPDATE inbox_refresh_requests SET status='running', started_at=? WHERE id=? AND status='queued'").run(now.toISOString(), r.id);
+  return refreshView({ ...r, status: "running", started_at: now.toISOString() });
+}
+
+export function finishRefresh(id: string, ok: boolean, detail: string, now = new Date()): boolean {
+  const res = db()
+    .prepare("UPDATE inbox_refresh_requests SET status=?, detail=?, finished_at=? WHERE id=? AND status IN ('running','queued')")
+    .run(ok ? "done" : "failed", detail.slice(0, 300), now.toISOString(), id);
+  return res.changes > 0;
+}
+
+/* ------------------------------------------------------------ send queue --- */
+
+type OutboundRow = {
+  id: string; card_id: string; text: string; idempotency_key: string; status: string; detail: string; attempt: number;
+  claimed_at: string | null; sent_at: string | null; created_at: string; updated_at: string;
+};
+function outboundView(r: OutboundRow): InboxOutboundView {
+  return {
+    id: r.id, cardId: r.card_id, text: r.text, idempotencyKey: r.idempotency_key, status: r.status as InboxOutboundStatus,
+    detail: r.detail, attempt: r.attempt, createdAt: r.created_at, updatedAt: r.updated_at, sentAt: r.sent_at,
+  };
+}
+
+export class OutboundKeyConflictError extends Error {
+  constructor() {
+    super("That idempotency key was already used for a different message.");
+  }
+}
+
+/**
+ * Queue one owner-pressed Send. The idempotency key makes a double tap / network retry return the same row
+ * instead of a second message. Reusing a key with different text or card is rejected.
+ */
+export function queueOutbound(cardId: string, text: string, idempotencyKey: string, now = new Date()): { created: boolean; outbound: InboxOutboundView } {
+  const d = db();
+  const existing = d.prepare("SELECT * FROM inbox_outbound WHERE idempotency_key=?").get(idempotencyKey) as OutboundRow | undefined;
+  if (existing) {
+    if (existing.card_id !== cardId || existing.text !== text) throw new OutboundKeyConflictError();
+    return { created: false, outbound: outboundView(existing) };
+  }
+  const id = crypto.randomUUID();
+  const at = now.toISOString();
+  d.prepare(
+    "INSERT INTO inbox_outbound (id, card_id, text, idempotency_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)",
+  ).run(id, cardId, text, idempotencyKey, at, at);
+  return { created: true, outbound: getOutbound(id)! };
+}
+
+export function getOutbound(id: string): InboxOutboundView | null {
+  const r = db().prepare("SELECT * FROM inbox_outbound WHERE id=?").get(id) as OutboundRow | undefined;
+  return r ? outboundView(r) : null;
+}
+
+/** Recent sends for the UI: anything not final, plus final ones from the last 3 days. */
+export function listOutbound(now = new Date()): InboxOutboundView[] {
+  expireStale(now);
+  const cut = new Date(now.getTime() - 3 * 86_400_000).toISOString();
+  const rows = db()
+    .prepare("SELECT * FROM inbox_outbound WHERE status IN ('queued','sending') OR updated_at >= ? ORDER BY created_at LIMIT 300")
+    .all(cut) as OutboundRow[];
+  return rows.map(outboundView);
+}
+
+/** Mac claims queued sends (oldest first). A claimed row is never handed out again unless the owner taps Retry. */
+export function claimOutbound(limit = 3, now = new Date()): InboxOutboundView[] {
+  expireStale(now);
+  const d = db();
+  const at = now.toISOString();
+  const out: InboxOutboundView[] = [];
+  d.transaction(() => {
+    const rows = d.prepare("SELECT * FROM inbox_outbound WHERE status='queued' ORDER BY created_at LIMIT ?").all(limit) as OutboundRow[];
+    for (const r of rows) {
+      const res = d.prepare("UPDATE inbox_outbound SET status='sending', claimed_at=?, updated_at=? WHERE id=? AND status='queued'").run(at, at, r.id);
+      if (res.changes) out.push(outboundView({ ...r, status: "sending", claimed_at: at, updated_at: at }));
+    }
+  })();
+  return out;
+}
+
+/** Mac reports the result for one claimed attempt. Ignored unless the row is `sending` on that same attempt. */
+export function finishOutbound(
+  id: string,
+  attempt: number,
+  status: "sent" | "failed" | "unverified",
+  detail: string,
+  now = new Date(),
+): InboxOutboundView | null {
+  const at = now.toISOString();
+  const res = db()
+    .prepare("UPDATE inbox_outbound SET status=?, detail=?, sent_at=CASE WHEN ?='sent' THEN ? ELSE sent_at END, updated_at=? WHERE id=? AND attempt=? AND status='sending'")
+    .run(status, detail.slice(0, 300), status, at, at, id, attempt);
+  return res.changes ? getOutbound(id) : null;
+}
+
+/** Owner tapped Retry on a failed/unverified send: same row, next attempt, back in the queue. */
+export function retryOutbound(id: string, now = new Date()): InboxOutboundView | null {
+  const at = now.toISOString();
+  const res = db()
+    .prepare("UPDATE inbox_outbound SET status='queued', detail='', attempt=attempt+1, claimed_at=NULL, updated_at=? WHERE id=? AND status IN ('failed','unverified')")
+    .run(at, id);
+  return res.changes ? getOutbound(id) : null;
 }
 
 function setMeta(key: string, value: string): void {
@@ -174,6 +455,7 @@ function toView(row: CardRow): InboxCardView {
   const card = JSON.parse(row.card_json) as InboxCard;
   return {
     ...card,
+    history: Array.isArray(card.history) ? card.history : [],
     status: row.status,
     statusChangedAt: row.status_changed_at,
     editedReply: row.reply,
