@@ -30,14 +30,18 @@ import Database from "better-sqlite3";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { fuzzyVariants, normalizeText, searchTokens, splitJoined } from "../../shared/file-search";
+import { assignKits, copyKey, JUNK_NAME, parseFileCount, partOrder, sortKey, type KitInputRow } from "../../shared/shop-kits";
 import {
   DRIVE_FILE_CATEGORIES,
   DRIVE_FILE_SOURCES,
+  FILE_SORTS,
+  type FileSort,
   type DriveFileSource,
   type DriveFileCategory,
   type DriveFileView,
   type DriveFilesResponse,
   type DriveThumbSource,
+  type ShopFolderResponse,
 } from "../../shared/drive-files";
 
 const SCHEMA = `
@@ -73,6 +77,14 @@ const ADDED_COLUMNS: Array<[string, string]> = [
   ["source", "TEXT NOT NULL DEFAULT 'drive'"],
   ["name_norm", "TEXT NOT NULL DEFAULT ''"],
   ["keywords", "TEXT NOT NULL DEFAULT ''"],
+  // Shop-drive kits (#files-kit-cards): files directly inside a folder, its kit root row, its card group, copy count.
+  ["entries", "TEXT NOT NULL DEFAULT '[]'"],
+  ["kit", "TEXT"],
+  ["grp", "TEXT"],
+  ["copies", "INTEGER NOT NULL DEFAULT 1"],
+  ["parts", "INTEGER NOT NULL DEFAULT 0"],
+  ["creator", "TEXT"],
+  ["sort_key", "TEXT"],
 ];
 
 const FTS = `
@@ -88,6 +100,8 @@ CREATE TRIGGER IF NOT EXISTS drive_files_au AFTER UPDATE OF search ON drive_file
   INSERT INTO drive_files_fts(rowid, search) VALUES (new.rowid, new.search);
 END;
 CREATE INDEX IF NOT EXISTS drive_files_src ON drive_files(source);
+CREATE INDEX IF NOT EXISTS drive_files_src_path ON drive_files(source, path);
+CREATE INDEX IF NOT EXISTS drive_files_grp ON drive_files(grp);
 `;
 const SEARCH_VERSION = "2";
 
@@ -110,6 +124,8 @@ export function driveFilesDb(): Database.Database {
   sqlite.pragma("journal_mode = WAL");
   sqlite.exec(SCHEMA);
   migrate(sqlite);
+  const stale = sqlite.prepare("SELECT 1 FROM drive_files WHERE grp IS NULL OR (source = 'shop' AND sort_key IS NULL) LIMIT 1").get();
+  if (stale) recomputeKits(sqlite);
   return sqlite;
 }
 
@@ -198,6 +214,11 @@ const rowSchema = z.object({
   webSourceUrl: z.string().max(500).regex(/^https:\/\//).nullable().optional(),
   /** Search-only words (shop folders: names of the files inside). Never returned to the client. */
   keywords: z.string().max(2000).default(""),
+  /** Shop folders: files directly inside (masked names + sizes), shown when a kit is opened. */
+  entries: z
+    .array(z.object({ n: z.string().max(300), s: z.number().int().nonnegative().nullable().optional() }))
+    .max(400)
+    .default([]),
 });
 const rowsSchema = z.object({ generation: z.string().min(4).max(40), rows: z.array(rowSchema).max(5000) });
 const thumbsSchema = z.object({
@@ -240,9 +261,9 @@ export function searchBlob(r: { name: string; path: string; tags: Record<string,
 
 export function upsertRows(generation: string, rows: z.infer<typeof rowSchema>[]) {
   const d = driveFilesDb();
-  const stmt = d.prepare(`INSERT INTO drive_files (id,source,name,name_norm,keywords,category,path,parent,size,modified_time,web_view_link,mime_type,tags,thumb_source,thumb_key,web_source_url,search,generation)
-    VALUES (@id,@source,@name,@nameNorm,@keywords,@category,@path,@parent,@size,@modifiedTime,@webViewLink,@mimeType,@tags,@thumbSource,@thumbKey,@webSourceUrl,@search,@generation)
-    ON CONFLICT(id) DO UPDATE SET source=excluded.source, name=excluded.name, name_norm=excluded.name_norm, keywords=excluded.keywords, category=excluded.category, path=excluded.path, parent=excluded.parent,
+  const stmt = d.prepare(`INSERT INTO drive_files (id,source,name,name_norm,keywords,entries,category,path,parent,size,modified_time,web_view_link,mime_type,tags,thumb_source,thumb_key,web_source_url,search,generation)
+    VALUES (@id,@source,@name,@nameNorm,@keywords,@entries,@category,@path,@parent,@size,@modifiedTime,@webViewLink,@mimeType,@tags,@thumbSource,@thumbKey,@webSourceUrl,@search,@generation)
+    ON CONFLICT(id) DO UPDATE SET source=excluded.source, name=excluded.name, name_norm=excluded.name_norm, keywords=excluded.keywords, entries=excluded.entries, category=excluded.category, path=excluded.path, parent=excluded.parent,
       size=excluded.size, modified_time=excluded.modified_time, web_view_link=excluded.web_view_link, mime_type=excluded.mime_type,
       tags=excluded.tags, thumb_source=excluded.thumb_source, thumb_key=excluded.thumb_key, web_source_url=excluded.web_source_url,
       search=excluded.search, generation=excluded.generation`);
@@ -253,6 +274,7 @@ export function upsertRows(generation: string, rows: z.infer<typeof rowSchema>[]
         source: r.source ?? "drive",
         nameNorm: normalizeText(r.name),
         keywords: r.keywords ?? "",
+        entries: JSON.stringify((r.entries ?? []).map((e) => ({ n: e.n, s: e.s ?? null }))),
         parent: r.parent ?? null,
         size: r.size ?? null,
         modifiedTime: r.modifiedTime ?? null,
@@ -278,6 +300,7 @@ export function commitGeneration(generation: string, generatedAt?: string, sourc
   // Only this source's stale rows: a Drive push never removes shop-drive rows and vice versa.
   const removed = d.prepare("DELETE FROM drive_files WHERE generation <> ? AND source = ?").run(generation, source).changes;
   vocabCache = null;
+  recomputeKits(d);
   const orphanThumbs = d
     .prepare("DELETE FROM drive_thumbs WHERE key NOT IN (SELECT thumb_key FROM drive_files WHERE thumb_key IS NOT NULL)")
     .run().changes;
@@ -297,10 +320,38 @@ export function commitGeneration(generation: string, generatedAt?: string, sourc
   return { kept: seen, removed, orphanThumbs, skipped: false };
 }
 
+/**
+ * Card groups. Drive rows are their own card. Shop rows join their kit root's card, and copies of a kit (" (2)",
+ * " - Copy", same size on another drive, a top-level .zip of it) share one card (see shared/shop-kits.ts).
+ */
+export function recomputeKits(d: Database.Database = driveFilesDb()) {
+  const shop = d.prepare("SELECT id, name, category, path, size, tags FROM drive_files WHERE source = 'shop'").all() as Array<{
+    id: string; name: string; category: string; path: string; size: number | null; tags: string;
+  }>;
+  const input: KitInputRow[] = shop.map((r) => {
+    let files: number | null = null;
+    try {
+      files = parseFileCount((JSON.parse(r.tags) as Record<string, string>).files);
+    } catch {
+      /* ignore */
+    }
+    return { id: r.id, name: r.name, category: r.category, path: r.path, size: r.size, files };
+  });
+  const a = assignKits(input);
+  const upd = d.prepare("UPDATE drive_files SET kit = ?, grp = ?, copies = ?, parts = ?, creator = ?, sort_key = ? WHERE id = ?");
+  d.transaction(() => {
+    d.prepare("UPDATE drive_files SET kit = NULL, grp = id, copies = 1, parts = 0, creator = NULL, sort_key = NULL WHERE source <> 'shop'").run();
+    const names = new Map(shop.map((r) => [r.id, r.name]));
+    for (const [id, k] of a) upd.run(k.kit, k.grp, k.copies, k.parts, k.creator, sortKey(names.get(id) ?? ""), id);
+  })();
+  return { shopRows: shop.length, cards: new Set([...a.values()].map((k) => k.grp)).size };
+}
+
 type Row = {
   id: string; source: string; name: string; category: DriveFileCategory; path: string; size: number | null; modified_time: string | null;
   web_view_link: string | null; mime_type: string | null; tags: string; thumb_source: DriveThumbSource; thumb_key: string | null;
   web_source_url: string | null; tmime: string | null; tdata: Buffer | null;
+  entries?: string; kit?: string | null; grp?: string | null; copies?: number; parts?: number; creator?: string | null;
 };
 
 const CAT_BOOST = "CASE f.category WHEN 'folder' THEN 10 WHEN 'archive' THEN 6 WHEN 'model' THEN 4 WHEN 'sliced' THEN 2 ELSE 0 END";
@@ -366,6 +417,7 @@ export function searchFiles(opts: {
   q: string;
   category: DriveFileCategory | null;
   source?: DriveFileSource | null;
+  sort?: FileSort | null;
   offset: number;
   limit: number;
 }): DriveFilesResponse {
@@ -396,8 +448,10 @@ export function searchFiles(opts: {
     }
   }
 
-  const base = where ? `WHERE ${where}` : "";
-  const srcCountRows = d.prepare(`SELECT f.source, COUNT(*) n FROM drive_files f ${base} GROUP BY f.source`).all(args) as Array<{ source: DriveFileSource; n: number }>;
+  // Junk/system entries never show, even from rows synced before the Mac filter existed.
+  const junk = `f.name NOT LIKE '.\\_%' ESCAPE '\\' AND f.name NOT IN (${JUNK_SQL})`;
+  const base = `WHERE ${where ? `(${where}) AND ` : ""}${junk}`;
+  const srcCountRows = d.prepare(`SELECT f.source, COUNT(DISTINCT COALESCE(f.grp, f.id)) n FROM drive_files f ${base} GROUP BY f.source`).all(args) as Array<{ source: DriveFileSource; n: number }>;
   const sources: DriveFilesResponse["sources"] = {};
   for (const c of srcCountRows) sources[c.source] = c.n;
   const srcArgs = { ...args };
@@ -406,12 +460,14 @@ export function searchFiles(opts: {
     srcWhere = `${base ? `${base} AND` : "WHERE"} f.source = @src`;
     srcArgs.src = opts.source;
   }
-  const countRows = d.prepare(`SELECT f.category, COUNT(*) n FROM drive_files f ${srcWhere} GROUP BY f.category`).all(srcArgs) as Array<{ category: DriveFileCategory; n: number }>;
+  const countRows = d.prepare(`SELECT f.category, COUNT(DISTINCT COALESCE(f.grp, f.id)) n FROM drive_files f ${srcWhere} GROUP BY f.category`).all(srcArgs) as Array<{ category: DriveFileCategory; n: number }>;
   const counts: DriveFilesResponse["counts"] = {};
   for (const c of countRows) counts[c.category] = c.n;
   const catWhere = opts.category ? `${srcWhere ? `${srcWhere} AND` : "WHERE"} f.category = @cat` : srcWhere;
   if (opts.category) srcArgs.cat = opts.category;
-  const total = opts.category ? counts[opts.category] ?? 0 : countRows.reduce((s, c) => s + c.n, 0);
+  // One card per kit: a kit can have hits in several categories, so the total counts distinct cards.
+  const total = (d.prepare(`SELECT COUNT(DISTINCT COALESCE(f.grp, f.id)) n FROM drive_files f ${catWhere}`).get(srcArgs) as { n: number }).n;
+  const totalAll = opts.category ? (d.prepare(`SELECT COUNT(DISTINCT COALESCE(f.grp, f.id)) n FROM drive_files f ${srcWhere}`).get(srcArgs) as { n: number }).n : total;
 
   // Ranking: exact before close matches; whole-name match > name starts with query > words starting in the name >
   // words anywhere in the name > folder path only; folders/kits and archives before loose files; real pictures first.
@@ -440,14 +496,60 @@ export function searchFiles(opts: {
   const score = tokens.length
     ? `${exactBoost} + (CASE WHEN f.name_norm = @phrase THEN 100 WHEN f.name_norm LIKE @phrasePrefix THEN 50 ELSE 0 END) + ${nameScore} + ${CAT_BOOST} + (CASE WHEN f.thumb_source <> 'icon' THEN 3 ELSE 0 END)`
     : `${CAT_BOOST} + (CASE WHEN f.thumb_source <> 'icon' THEN 3 ELSE 0 END)`;
-  const rows = d
+  // Hits are folded into their card (Drive row itself; shop kit / canonical copy) and ranked by the best hit.
+  const hits = `SELECT f.id, f.name, COALESCE(f.grp, f.id) g, (${score}) sc, f.modified_time mt FROM drive_files f ${catWhere}`;
+  const sort = opts.sort ?? (tokens.length ? "relevance" : "name");
+  const order =
+    sort === "name"
+      ? "COALESCE(k.sort_key, lower(k.name)), g"
+      : sort === "newest"
+        ? "k.modified_time DESC, k.name COLLATE NOCASE"
+        : sort === "size"
+          ? "COALESCE(k.size, 0) DESC, k.name COLLATE NOCASE"
+          : sort === "creator"
+            ? "(k.creator IS NULL), k.creator COLLATE NOCASE, k.name COLLATE NOCASE"
+            : "sc DESC, mt DESC, g";
+  const page = d
     .prepare(
-      `SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key
-       ${catWhere}
-       ORDER BY (${score}) DESC, f.modified_time DESC, f.name
-       LIMIT @limit OFFSET @offset`,
+      `SELECT h.g, MAX(h.sc) sc, COUNT(*) n, MAX(h.mt) mt FROM (${hits}) h JOIN drive_files k ON k.id = h.g
+       GROUP BY h.g ORDER BY ${order} LIMIT @limit OFFSET @offset`,
     )
-    .all({ ...srcArgs, limit: opts.limit, offset: opts.offset }) as Row[];
+    .all({ ...srcArgs, limit: opts.limit, offset: opts.offset }) as Array<{ g: string; sc: number; n: number }>;
+  const ids = page.map((p) => p.g);
+  const byId = new Map<string, Row>();
+  if (ids.length) {
+    const ph = ids.map((_, i) => `@id${i}`).join(",");
+    const idArgs = Object.fromEntries(ids.map((id, i) => [`id${i}`, id]));
+    for (const r of d
+      .prepare(`SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key WHERE f.id IN (${ph})`)
+      .all(idArgs) as Row[])
+      byId.set(r.id, r);
+  }
+  // Which parts matched inside each kit card (search only), best first.
+  const matchNames = new Map<string, string[]>();
+  const kitGroups = page.filter((p) => tokens.length && (p.n > 1 || byId.get(p.g)?.source === "shop"));
+  if (kitGroups.length) {
+    const ph = kitGroups.map((_, i) => `@kg${i}`).join(",");
+    const kArgs: Record<string, unknown> = { ...srcArgs };
+    kitGroups.forEach((p, i) => (kArgs[`kg${i}`] = p.g));
+    const partRows = d.prepare(`SELECT g, id, name FROM (${hits}) WHERE g IN (${ph}) AND id <> g ORDER BY sc DESC, name`).all(kArgs) as Array<{ g: string; name: string }>;
+    const groupKey = new Map(kitGroups.map((p) => [p.g, copyKey(byId.get(p.g)?.name ?? "")]));
+    for (const r of partRows) {
+      if (copyKey(r.name) === groupKey.get(r.g)) continue; // a copy or wrapper of the kit itself, not a part
+      const arr = matchNames.get(r.g) ?? [];
+      if (arr.length < 4 && !arr.includes(r.name)) arr.push(r.name);
+      matchNames.set(r.g, arr);
+    }
+  }
+  const items = page
+    .map((p) => {
+      const r = byId.get(p.g);
+      if (!r) return null;
+      const v = toView(r);
+      if (r.source === "shop") v.kit = kitInfo(r, tokens.length ? p.n : 0, matchNames.get(p.g) ?? []);
+      return v;
+    })
+    .filter((v): v is DriveFileView => v !== null);
   const meta = (k: string) => (d.prepare("SELECT v FROM drive_files_meta WHERE k = ?").get(k) as { v: string } | undefined)?.v ?? null;
   const generatedAt = meta("generatedAt");
   const generatedAtShop = meta("generatedAt:shop");
@@ -456,6 +558,8 @@ export function searchFiles(opts: {
     q: opts.q,
     category: opts.category,
     source: opts.source ?? null,
+    sort,
+    totalAll,
     total,
     exactTotal: tokens.length ? exactTotal : total,
     fuzzy,
@@ -465,7 +569,7 @@ export function searchFiles(opts: {
     generatedAt,
     generatedAtShop,
     configured: generatedAt !== null || generatedAtShop !== null,
-    items: rows.map(toView),
+    items,
   };
 }
 
@@ -493,10 +597,88 @@ function toView(r: Row): DriveFileView {
   };
 }
 
+const JUNK_SQL = [".DS_Store", "Thumbs.db", "desktop.ini", "$RECYCLE.BIN", "System Volume Information", ".Trashes", ".Spotlight-V100", ".fseventsd", ".TemporaryItems", "__MACOSX", ".AppleDouble", ".apdisk"]
+  .map((n) => `'${n.replace(/'/g, "''")}'`)
+  .join(",");
+
+/** Card title without copy markers: "Ragegutta Mega Armor (2)" -> "Ragegutta Mega Armor" (the path keeps the real name). */
+function kitTitle(name: string): string {
+  let s = name.trim();
+  for (let i = 0; i < 3; i++) s = s.replace(/\s*\((\d+|copy)\)\s*$/i, "").replace(/\s*[-_]\s*copy(\s*\(?\d+\)?)?\s*$/i, "").replace(/^copy of\s+/i, "").trim();
+  return s || name;
+}
+
+function kitInfo(r: Row, matches: number, matchNames: string[]): NonNullable<DriveFileView["kit"]> {
+  return { copies: r.copies ?? 1, matches, matchNames, parts: r.parts ?? 0, creator: r.creator ?? null, title: kitTitle(r.name) };
+}
+
+const ROW_WITH_THUMB = "SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key";
+const fullPath = (r: { path: string; name: string }) => (r.path ? `${r.path}/${r.name}` : r.name);
+
+/** An opened shop kit/folder: copies (kit root only), subfolders + archives, files directly inside. */
+export function shopFolder(id: string): ShopFolderResponse | null {
+  const d = driveFilesDb();
+  let row = d.prepare(`${ROW_WITH_THUMB} WHERE f.id = ? AND f.source = 'shop'`).get(id) as Row | undefined;
+  if (!row) return null;
+  const childrenOf = (r: Row) =>
+    d.prepare(`${ROW_WITH_THUMB} WHERE f.source = 'shop' AND f.path = ? ORDER BY f.name`).all(fullPath(r)) as Row[];
+  const entriesOf = (r: Row) => {
+    try {
+      return (JSON.parse(r.entries ?? "[]") as Array<{ n: string; s: number | null }>)
+        .filter((e) => !JUNK_NAME.test(e.n))
+        .map((e) => ({ name: e.n, size: e.s ?? null }));
+    } catch {
+      return [];
+    }
+  };
+  const isRoot = row.category === "folder" && (row.kit ?? row.id) === row.id;
+  const copies =
+    isRoot || row.category !== "folder"
+      ? (d.prepare("SELECT id, name, path, size, category FROM drive_files WHERE source = 'shop' AND grp = ? AND id = kit AND id <> ? ORDER BY path, name").all(row.grp ?? row.id, row.id) as ShopFolderResponse["copies"])
+      : [];
+  const view = toView(row);
+  view.kit = kitInfo(row, 0, []);
+  // Skip wrappers like "Ragegutta Mega Armor (2)/Ragegutta Mega Armor/" that only hold one same-named folder.
+  const skipped: string[] = [];
+  const clean = (rs: Row[]) => rs.filter((r) => !JUNK_NAME.test(r.name));
+  let kids = row.category === "folder" ? clean(childrenOf(row)) : [];
+  let files = row.category === "folder" ? entriesOf(row) : [];
+  // Loose files in the wrapper (a readme, a credits .txt) are kept and listed after the inner folder's files.
+  for (let i = 0; i < 3; i++) {
+    const inner = kids.filter((k) => k.category === "folder");
+    if (inner.length !== 1 || copyKey(inner[0].name) !== copyKey(row.name) || files.length > 5) break;
+    skipped.push(inner[0].name);
+    const keepFiles = files;
+    const keepArchives = kids.filter((k) => k.category !== "folder");
+    row = inner[0];
+    kids = [...clean(childrenOf(row)), ...keepArchives];
+    files = [...entriesOf(row), ...keepFiles];
+  }
+  kids.sort((a, b) => partOrder(a.name) - partOrder(b.name) || Number(a.category !== "folder") - Number(b.category !== "folder") || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  // Breadcrumbs from the kit root down to (not including) the opened folder.
+  const crumbs: ShopFolderResponse["crumbs"] = [];
+  const root = view.id !== (row.kit ?? row.id) ? (d.prepare("SELECT id, name, path FROM drive_files WHERE id = ?").get(row.kit ?? row.id) as { id: string; name: string; path: string } | undefined) : undefined;
+  if (root && !isRoot) {
+    const rootFull = fullPath(root);
+    const segs = view.path.slice(rootFull.length).split("/").filter(Boolean);
+    crumbs.push({ id: root.id, name: root.name });
+    let cur = rootFull;
+    const look = d.prepare("SELECT id, name FROM drive_files WHERE source = 'shop' AND category = 'folder' AND path = ? AND name = ?");
+    for (const s of segs) {
+      const r = look.get(cur, s) as { id: string; name: string } | undefined;
+      if (r) crumbs.push(r);
+      cur = `${cur}/${s}`;
+    }
+  }
+  return { ok: true, item: view, crumbs, copies, skipped, folders: kids.map(toView), files };
+}
+
 const readQuery = z.object({
   q: z.string().max(200).default(""),
   cat: z.enum(DRIVE_FILE_CATEGORIES).optional().catch(undefined),
   src: z.enum(DRIVE_FILE_SOURCES).optional().catch(undefined),
+  sort: z.enum(FILE_SORTS).optional().catch(undefined),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
   limit: z.coerce.number().int().min(1).max(60).default(36),
 });
@@ -511,8 +693,18 @@ export function registerDriveFilesRoutes(
     if (rejectOwner(req, res)) return;
     const parsed = readQuery.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ ok: false, error: "bad query" });
-    const { q, cat, src, offset, limit } = parsed.data;
-    res.json(searchFiles({ q, category: cat ?? null, source: src ?? null, offset, limit }));
+    const { q, cat, src, sort, offset, limit } = parsed.data;
+    res.json(searchFiles({ q, category: cat ?? null, source: src ?? null, sort: sort ?? null, offset, limit }));
+  });
+
+  app.get("/api/files/shop/:id", (req, res) => {
+    res.set("cache-control", "no-store");
+    if (rejectOwner(req, res)) return;
+    const id = KEY.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ ok: false, error: "bad id" });
+    const out = shopFolder(id.data);
+    if (!out) return res.status(404).json({ ok: false, error: "not found" });
+    res.json(out);
   });
 
   // Capability probe for the Mac sync scripts: an older server (404 here) would silently drop `source`.
