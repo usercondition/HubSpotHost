@@ -164,6 +164,7 @@ export function resetDriveFilesDbForTests() {
   sqlite?.close();
   sqlite = null;
   vocabCache = null;
+  thumbSigningKeyCache = null;
 }
 
 function syncToken(env: NodeJS.ProcessEnv) {
@@ -350,7 +351,7 @@ export function recomputeKits(d: Database.Database = driveFilesDb()) {
 type Row = {
   id: string; source: string; name: string; category: DriveFileCategory; path: string; size: number | null; modified_time: string | null;
   web_view_link: string | null; mime_type: string | null; tags: string; thumb_source: DriveThumbSource; thumb_key: string | null;
-  web_source_url: string | null; tmime: string | null; tdata: Buffer | null;
+  web_source_url: string | null; tsha: string | null;
   entries?: string; kit?: string | null; grp?: string | null; copies?: number; parts?: number; creator?: string | null;
 };
 
@@ -521,7 +522,7 @@ export function searchFiles(opts: {
     const ph = ids.map((_, i) => `@id${i}`).join(",");
     const idArgs = Object.fromEntries(ids.map((id, i) => [`id${i}`, id]));
     for (const r of d
-      .prepare(`SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key WHERE f.id IN (${ph})`)
+      .prepare(`SELECT f.*, t.sha tsha FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key WHERE f.id IN (${ph})`)
       .all(idArgs) as Row[])
       byId.set(r.id, r);
   }
@@ -573,6 +574,65 @@ export function searchFiles(opts: {
   };
 }
 
+/*
+ * Thumbnails are served from their own URL so the browser can cache them, instead of being inlined as
+ * base64 in every /api/files response (that was ~98% of the payload). <img> cannot send the owner
+ * header, so each URL carries an HMAC signature over (key, sha, expiry) made with a server-only secret:
+ *   /api/files/thumb/<key>?v=<sha>&e=<expiry unix seconds>&s=<signature>
+ * The expiry is pinned to a UTC day boundary (valid until the end of the next UTC day), so the URL for a
+ * thumbnail is stable all day and cacheable, and rotates daily. Without a valid, unexpired signature the
+ * route answers 403: thumbs never become public.
+ */
+const THUMB_URL_PATH = "/api/files/thumb/";
+const DAY_S = 86_400;
+const THUMB_SIG_VERSION = "t1";
+const THUMB_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+let thumbSigningKeyCache: Buffer | null = null;
+
+/** FILES_THUMB_SIGNING_SECRET when set (>= 32 chars); otherwise a random key generated once and kept in the DB. */
+function thumbSigningKey(env: NodeJS.ProcessEnv = process.env): Buffer {
+  const configured = env.FILES_THUMB_SIGNING_SECRET?.trim();
+  if (configured && configured.length >= 32) return crypto.createHash("sha256").update(configured).digest();
+  if (thumbSigningKeyCache) return thumbSigningKeyCache;
+  const d = driveFilesDb();
+  d.prepare("INSERT OR IGNORE INTO drive_files_meta (k, v) VALUES ('thumbSigningKey', ?)").run(crypto.randomBytes(32).toString("hex"));
+  const stored = (d.prepare("SELECT v FROM drive_files_meta WHERE k = 'thumbSigningKey'").get() as { v: string }).v;
+  thumbSigningKeyCache = Buffer.from(stored, "hex");
+  return thumbSigningKeyCache;
+}
+
+/** Test helper: forget the cached key (e.g. after swapping the DB file). */
+export function resetThumbSigningKeyForTest(): void {
+  thumbSigningKeyCache = null;
+}
+
+function thumbSignature(key: string, sha: string, expiry: number): string {
+  return crypto.createHmac("sha256", thumbSigningKey()).update(`${THUMB_SIG_VERSION}|${key}|${sha}|${expiry}`).digest("base64url").slice(0, 32);
+}
+
+/** End of the next UTC day: one URL per thumb per day, always valid for at least 24 h. */
+export function thumbUrlExpiry(nowMs = Date.now()): number {
+  return (Math.floor(nowMs / 1000 / DAY_S) + 2) * DAY_S;
+}
+
+export function signedThumbUrl(key: string, sha: string, nowMs = Date.now()): string {
+  const expiry = thumbUrlExpiry(nowMs);
+  const v = sha.slice(0, 16);
+  return `${THUMB_URL_PATH}${encodeURIComponent(key)}?v=${v}&e=${expiry}&s=${thumbSignature(key, v, expiry)}`;
+}
+
+/** Verify a signed thumb URL; returns seconds left before expiry, or null when invalid/expired. */
+export function verifyThumbSignature(key: string, v: string, e: string, sig: string, nowMs = Date.now()): number | null {
+  if (!/^[0-9a-f]{1,64}$/i.test(v) || !/^[0-9]{1,12}$/.test(e) || !/^[A-Za-z0-9_-]{32}$/.test(sig)) return null;
+  const expiry = Number(e);
+  const left = expiry - Math.floor(nowMs / 1000);
+  if (left <= 0 || left > 3 * DAY_S) return null;
+  const expected = Buffer.from(thumbSignature(key, v, expiry));
+  const given = Buffer.from(sig);
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
+  return left;
+}
+
 function toView(r: Row): DriveFileView {
   let tags: Record<string, string> = {};
   try {
@@ -592,7 +652,7 @@ function toView(r: Row): DriveFileView {
     mimeType: r.mime_type,
     tags,
     thumbSource: r.thumb_source,
-    thumb: r.tdata && r.tmime ? `data:${r.tmime};base64,${Buffer.from(r.tdata).toString("base64")}` : null,
+    thumb: r.thumb_key && r.tsha ? signedThumbUrl(r.thumb_key, r.tsha) : null,
     webSourceUrl: r.web_source_url,
   };
 }
@@ -612,7 +672,7 @@ function kitInfo(r: Row, matches: number, matchNames: string[]): NonNullable<Dri
   return { copies: r.copies ?? 1, matches, matchNames, parts: r.parts ?? 0, creator: r.creator ?? null, title: kitTitle(r.name) };
 }
 
-const ROW_WITH_THUMB = "SELECT f.*, t.mime tmime, t.data tdata FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key";
+const ROW_WITH_THUMB = "SELECT f.*, t.sha tsha FROM drive_files f LEFT JOIN drive_thumbs t ON t.key = f.thumb_key";
 const fullPath = (r: { path: string; name: string }) => (r.path ? `${r.path}/${r.name}` : r.name);
 
 /** An opened shop kit/folder: copies (kit root only), subfolders + archives, files directly inside. */
@@ -695,6 +755,32 @@ export function registerDriveFilesRoutes(
     if (!parsed.success) return res.status(400).json({ ok: false, error: "bad query" });
     const { q, cat, src, sort, offset, limit } = parsed.data;
     res.json(searchFiles({ q, category: cat ?? null, source: src ?? null, sort: sort ?? null, offset, limit }));
+  });
+
+  // Signed thumbnail URL (see signedThumbUrl). Auth is the signature itself, not the owner header.
+  app.get("/api/files/thumb/:key", (req, res) => {
+    const key = KEY.safeParse(req.params.key);
+    const q = (name: string) => (typeof req.query[name] === "string" ? (req.query[name] as string) : "");
+    const left = key.success ? verifyThumbSignature(key.data, q("v"), q("e"), q("s")) : null;
+    if (!key.success || left === null) {
+      res.set("cache-control", "no-store");
+      return res.status(403).json({ ok: false, error: "invalid or expired thumbnail link" });
+    }
+    const row = driveFilesDb().prepare("SELECT sha, mime, data FROM drive_thumbs WHERE key = ?").get(key.data) as
+      | { sha: string; mime: string; data: Buffer }
+      | undefined;
+    if (!row || !THUMB_MIMES.has(row.mime)) {
+      res.set("cache-control", "no-store");
+      return res.status(404).json({ ok: false, error: "not found" });
+    }
+    const current = row.sha.slice(0, 16) === q("v");
+    // private: only the owner's browser caches it. A replaced thumb (sha changed) is served once, uncached.
+    res.set("cache-control", current ? `private, max-age=${left}, immutable` : "no-store");
+    res.set("etag", `"${row.sha}"`);
+    res.set("x-content-type-options", "nosniff");
+    res.set("cross-origin-resource-policy", "same-origin");
+    res.type(row.mime);
+    return res.send(row.data);
   });
 
   app.get("/api/files/shop/:id", (req, res) => {

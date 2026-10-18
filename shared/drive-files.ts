@@ -24,7 +24,7 @@ export type DriveFileView = {
   mimeType: string | null;
   tags: Record<string, string>;
   thumbSource: DriveThumbSource;
-  /** data: URL (JPEG/PNG) or null when only the category icon is available. */
+  /** Signed, cacheable /api/files/thumb/... URL (no owner header needed), or null when only the category icon is available. */
   thumb: string | null;
   webSourceUrl: string | null;
   /** Shop-drive kit card: copies folded into this card, and (search) how many rows matched inside it. */

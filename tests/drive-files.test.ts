@@ -88,8 +88,35 @@ test("sync rows + thumbs, AND search, category filter, inline thumbs, commit dro
     const r = await (await a.owner("/api/files?q=dark%20angels%20torso")).json();
     assert.equal(r.total, 1);
     assert.equal(r.items[0].id, "f1");
-    assert.match(r.items[0].thumb, /^data:image\/jpeg;base64,/);
+    // Thumbs are signed, cacheable URLs now (not inline base64 in the JSON).
+    const thumbUrl: string = r.items[0].thumb;
+    assert.match(thumbUrl, /^\/api\/files\/thumb\/p1\.jpg\?v=abcdef12&e=\d+&s=[A-Za-z0-9_-]{32}$/);
+    assert.ok(!JSON.stringify(r).includes("base64"), "no inline image data in /api/files");
     assert.equal(r.generatedAt, "2026-10-18T10:20:00Z");
+
+    // Signed URL works without the owner header and is cacheable by the owner's browser only.
+    const img = await a.call(thumbUrl);
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get("content-type"), "image/jpeg");
+    assert.match(img.headers.get("cache-control") ?? "", /^private, max-age=\d+, immutable$/);
+    assert.deepEqual(Buffer.from(await img.arrayBuffer()), Buffer.from(JPEG, "base64"));
+
+    // No signature, a tampered signature, another key, or an expired link: 403, never the image.
+    const u = new URL(thumbUrl, "http://x");
+    const sig = u.searchParams.get("s")!;
+    const flipped = (sig[0] === "A" ? "B" : "A") + sig.slice(1);
+    for (const bad of [
+      "/api/files/thumb/p1.jpg",
+      `/api/files/thumb/p1.jpg?v=abcdef12&e=${u.searchParams.get("e")}`,
+      `/api/files/thumb/p1.jpg?v=abcdef12&e=${u.searchParams.get("e")}&s=${flipped}`,
+      `/api/files/thumb/bad.jpg?v=abcdef12&e=${u.searchParams.get("e")}&s=${sig}`,
+      `/api/files/thumb/p1.jpg?v=abcdef12&e=${Number(u.searchParams.get("e")) + 86400}&s=${sig}`,
+      `/api/files/thumb/p1.jpg?v=abcdef12&e=1000&s=${sig}`,
+    ]) {
+      const denied = await a.call(bad);
+      assert.equal(denied.status, 403, bad);
+      assert.equal(denied.headers.get("cache-control"), "no-store");
+    }
 
     const joined = await (await a.owner("/api/files?q=darkangels")).json();
     assert.equal(joined.total, 1);
@@ -269,4 +296,22 @@ test("shop kits: one card per kit, copies folded, search groups part hits, kit o
   } finally {
     s.close();
   }
+});
+
+test("signed thumb links rotate daily and expire", async () => {
+  const { signedThumbUrl, thumbUrlExpiry, verifyThumbSignature } = await import("../server/lib/drive-files");
+  resetDriveFilesDbForTests();
+  const day = 86_400_000;
+  const t0 = Date.UTC(2026, 9, 18, 6, 0, 0);
+  // Stable within a UTC day (cacheable), different the next day.
+  assert.equal(signedThumbUrl("k.jpg", "abcdef12", t0), signedThumbUrl("k.jpg", "abcdef12", t0 + 3 * 3_600_000));
+  assert.notEqual(signedThumbUrl("k.jpg", "abcdef12", t0), signedThumbUrl("k.jpg", "abcdef12", t0 + day));
+  const u = new URL(signedThumbUrl("k.jpg", "abcdef12", t0), "http://x");
+  const [v, e, s] = ["v", "e", "s"].map((k) => u.searchParams.get(k)!);
+  assert.equal(Number(e), thumbUrlExpiry(t0));
+  assert.ok((verifyThumbSignature("k.jpg", v, e, s, t0) ?? 0) >= 86_400, "valid for at least a day");
+  assert.ok(verifyThumbSignature("k.jpg", v, e, s, t0 + day) !== null, "still valid the next day");
+  assert.equal(verifyThumbSignature("k.jpg", v, e, s, t0 + 2 * day), null, "expired after the next UTC day");
+  assert.equal(verifyThumbSignature("other.jpg", v, e, s, t0), null);
+  assert.equal(verifyThumbSignature("k.jpg", "abcdef13", e, s, t0), null);
 });

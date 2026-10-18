@@ -78,9 +78,19 @@ function fmtDate(iso: string | null) {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" });
 }
 
-function Thumb({ f, className }: { f: DriveFileView; className?: string }) {
+function Thumb({ f, className, eager = false }: { f: DriveFileView; className?: string; eager?: boolean }) {
   const Icon = CAT_ICON[f.category] ?? FileText;
-  if (f.thumb) return <img src={f.thumb} alt="" loading="lazy" className={cn("h-full w-full object-cover", className)} />;
+  // Signed, browser-cacheable /api/files/thumb URL. The first row loads eagerly (it is the page's LCP).
+  if (f.thumb)
+    return (
+      <img
+        src={f.thumb}
+        alt=""
+        loading={eager ? "eager" : "lazy"}
+        decoding="async"
+        className={cn("h-full w-full object-cover", className)}
+      />
+    );
   return (
     <div className={cn("flex h-full w-full items-center justify-center bg-[hsl(var(--surface))]", className)}>
       <Icon className="h-10 w-10 text-[hsl(var(--amber))]" aria-hidden />
@@ -135,7 +145,7 @@ export default function FilesPage() {
     const rep = new Set<number>();
     items.forEach((f, i) => {
       if (!f.thumb) return;
-      const k = f.thumb.slice(-120);
+      const k = f.thumb; // same signed URL = same thumbnail (key + sha)
       if (seen.has(k)) rep.add(i);
       else seen.add(k);
     });
@@ -314,7 +324,7 @@ export default function FilesPage() {
                       data-testid={`card-file-${i}`}
                     >
                       <div className="relative aspect-square overflow-hidden">
-                        <Thumb f={repeatedThumb.has(i) ? { ...f, thumb: null } : f} />
+                        <Thumb f={repeatedThumb.has(i) ? { ...f, thumb: null } : f} eager={i < 4} />
                         {SOURCE_LABEL[f.thumbSource] ? (
                           <span className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
                             {SOURCE_LABEL[f.thumbSource]}
