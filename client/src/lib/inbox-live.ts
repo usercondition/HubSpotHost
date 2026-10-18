@@ -99,7 +99,7 @@ export function newIdempotencyKey(rand: () => string = () => (globalThis.crypto?
   return `send-${rand().replace(/[^A-Za-z0-9_-]/g, "")}`.slice(0, 80);
 }
 
-/** Replies tab "Use this" -> composer prefill, per chat. */
+/** Suggested-reply "Use this" -> composer prefill, per chat (fills the box only; never sends). */
 const DRAFT_KEY = (id: string) => `printops.inbox.draft.${id}`;
 export function saveComposerDraft(id: string, text: string, storage: Pick<Storage, "setItem" | "removeItem"> | null = typeof localStorage === "undefined" ? null : localStorage) {
   if (!storage) return;
@@ -108,4 +108,15 @@ export function saveComposerDraft(id: string, text: string, storage: Pick<Storag
 }
 export function loadComposerDraft(id: string, storage: Pick<Storage, "getItem"> | null = typeof localStorage === "undefined" ? null : localStorage): string {
   return storage?.getItem(DRAFT_KEY(id)) ?? "";
+}
+
+/** "Needs me": open, not spam, and owes a reply or needs Miguel. One predicate for the filter and every count. */
+export function needsMe(card: Pick<InboxCardView, "status" | "category" | "needsYou" | "owesReply">): boolean {
+  return card.status === "open" && card.category !== "spam" && (card.needsYou || card.owesReply);
+}
+
+/** Risk text for a chat (card risk + analysis flags + note), or "" when there is none. */
+export function riskText(card: Pick<InboxCardView, "risk" | "analysis">): string {
+  const a = card.analysis;
+  return [card.risk, ...(a?.riskFlags ?? []), a?.riskNote].filter(Boolean).join(" · ");
 }

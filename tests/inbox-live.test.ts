@@ -226,3 +226,20 @@ test("client helpers: Pacific times, pending bubbles, labels, keys, drafts", () 
   assert.equal(live.refreshLabel({ id: "", reason: "manual", status: "running", detail: "", requestedAt: "", startedAt: null, finishedAt: null }), "Refreshing… reading Facebook");
   assert.match(live.refreshLabel({ id: "", reason: "manual", status: "failed", detail: "FB needs login on the Mac", requestedAt: "", startedAt: null, finishedAt: null }), /needs login/);
 });
+
+test("Needs me: one predicate for the Chats filter and every count (open, not spam, owes reply or needs Miguel)", () => {
+  const base = { status: "open", category: "question", needsYou: false, owesReply: false } as const;
+  assert.equal(live.needsMe({ ...base, owesReply: true }), true);
+  assert.equal(live.needsMe({ ...base, needsYou: true }), true);
+  assert.equal(live.needsMe(base), false);
+  assert.equal(live.needsMe({ ...base, owesReply: true, category: "spam" }), false);
+  assert.equal(live.needsMe({ ...base, owesReply: true, status: "replied" }), false);
+  const cards = normalizeInboxPayload({ threads: { a: card("a"), b: card("b", { owes_reply: false }), c: card("c", { owes_reply: false, needs_you: true }), s: card("s", { category: "spam" }) } }).cards;
+  assert.equal(cards.map((c) => ({ ...c, status: "open" })).filter(live.needsMe).length, 2);
+});
+
+test("risk text joins card risk, analysis flags and note", () => {
+  const [c] = normalizeInboxPayload({ threads: { a: card("a", { risk: "Wants it shipped tomorrow", analysis: { risk_flags: ["low budget"], risk_note: "asked twice" } }) } }).cards;
+  assert.equal(live.riskText(c), "Wants it shipped tomorrow · low budget · asked twice");
+  assert.equal(live.riskText(normalizeInboxPayload({ threads: { b: card("b") } }).cards[0]), "");
+});

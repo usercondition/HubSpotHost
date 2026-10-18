@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, Image as ImageIcon, Link2, Loader2, RefreshCw, RotateCcw, Search, Send } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, Save, Image as ImageIcon, Link2, Loader2, RefreshCw, RotateCcw, Search, Send } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
@@ -12,6 +12,8 @@ import {
   cardMessages,
   cardRows,
   loadComposerDraft,
+  needsMe,
+  riskText,
   newIdempotencyKey,
   outboundForCard,
   outboundLabel,
@@ -43,6 +45,7 @@ export function InboxChat({
   onSelect,
   onRefresh,
   refreshPending,
+  onMark,
 }: {
   data: LiveInboxData | undefined;
   loading: boolean;
@@ -51,18 +54,23 @@ export function InboxChat({
   onSelect: (uid: string | null) => void;
   onRefresh: () => void;
   refreshPending: boolean;
+  /** Replied / Handled: opens the follow-up dialog (logs to Notion). Never sends a message. */
+  onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
 }) {
   const [q, setQ] = useState("");
+  // "Needs me" is on by default (as it was in the old Replies tab).
+  const [filter, setFilter] = useState<"needs" | "all">("needs");
   const rows = useMemo(() => visibleThreads(cardRows(data?.cards ?? [])), [data]);
+  const needCount = useMemo(() => rows.filter((t) => needsMe(t.card)).length, [rows]);
   const threads = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return s ? rows.filter((t) => `${t.name} ${t.listing}`.toLowerCase().includes(s)) : rows;
-  }, [rows, q]);
+    const base = filter === "needs" ? rows.filter((t) => needsMe(t.card)) : rows;
+    return s ? base.filter((t) => `${t.name} ${t.listing}`.toLowerCase().includes(s)) : base;
+  }, [rows, q, filter]);
   const current = rows.find((t) => t.uid === selected) ?? null;
   const uid = current ? selected : null;
 
   if (loading && !data) return <Skeleton className="h-[60vh] w-full" />;
-  const owes = threads.filter((t) => t.owes).length;
   const busy = refreshPending || refreshBusy(data?.refresh);
   const rl = refreshLabel(data?.refresh);
 
@@ -73,7 +81,7 @@ export function InboxChat({
           <div className="min-w-0">
             <h2 className="text-[17px] font-semibold tracking-tight">Messages</h2>
             <p className="text-xs text-muted-foreground" data-testid="text-chat-synced">
-              {owes ? `${owes} owe a reply` : "All caught up"} · FB read {listTime(data?.sourceUpdatedAt ? sourceIso(data.sourceUpdatedAt) : null) || "—"}
+              {needCount ? `${needCount} need${needCount === 1 ? "s" : ""} you` : "All caught up"} · FB read {listTime(data?.sourceUpdatedAt ? sourceIso(data.sourceUpdatedAt) : null) || "—"}
             </p>
             {rl ? (
               <p className={cn("text-xs", data?.refresh?.status === "failed" ? "text-destructive" : "text-muted-foreground")} data-testid="text-refresh-status">
@@ -104,8 +112,26 @@ export function InboxChat({
             data-testid="input-chat-search"
           />
         </label>
+        <div className="mx-4 mb-2 grid grid-cols-2 gap-1 rounded-lg bg-muted p-0.5 text-sm" role="group" aria-label="Filter chats">
+          {([["needs", `Needs me (${needCount})`], ["all", `All (${rows.length})`]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={filter === id}
+              onClick={() => setFilter(id)}
+              className={cn("min-h-11 rounded-md px-2 font-medium", filter === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground")}
+              data-testid={`button-chat-filter-${id}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="list-chat-threads">
-          {threads.length === 0 ? <li className="px-4 py-6 text-sm text-muted-foreground">No conversations yet. They appear after the Mac pushes the inbox.</li> : null}
+          {threads.length === 0 ? (
+            <li className="px-4 py-6 text-sm text-muted-foreground">
+              {rows.length && filter === "needs" && !q ? "Nothing needs you right now." : rows.length ? "No matches." : "No conversations yet. They appear after the Mac pushes the inbox."}
+            </li>
+          ) : null}
           {threads.map((t) => (
             <ThreadRow key={t.uid} t={t} active={t.uid === uid} onClick={() => onSelect(t.uid)} />
           ))}
@@ -120,6 +146,7 @@ export function InboxChat({
             headers={headers}
             liveMirror={!!data?.liveMirror}
             onBack={() => onSelect(null)}
+            onMark={onMark}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground" data-testid="chat-empty">
@@ -165,7 +192,10 @@ function ThreadRow({ t, active, onClick }: { t: LiveThreadRow; active: boolean; 
         <Avatar name={t.name} />
         <span className="min-w-0 flex-1 border-b border-border/60 pb-2.5 group-last:border-0">
           <span className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-[15px] font-semibold text-foreground" data-private="name">{t.name}</span>
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate text-[15px] font-semibold text-foreground" data-private="name">{t.name}</span>
+              {riskText(t.card) ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="Risk flagged" data-testid={`icon-chat-risk-${t.uid}`} /> : null}
+            </span>
             <span className="shrink-0 text-xs text-muted-foreground">{listTime(t.sortAt || t.at) || t.when}</span>
           </span>
           {t.listing ? <span className="block truncate text-xs text-[hsl(var(--text-3))]" data-private="text">{t.listing}</span> : null}
@@ -185,14 +215,17 @@ function Conversation({
   headers,
   liveMirror,
   onBack,
+  onMark,
 }: {
   row: LiveThreadRow;
   outbound: InboxOutboundView[];
   headers: Record<string, string>;
   liveMirror: boolean;
   onBack: () => void;
+  onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
 }) {
   const card = row.card;
+  const risk = riskText(card);
   const [showSummary, setShowSummary] = useState(false);
   const items = useMemo(() => buildChatItems(cardMessages(card)), [card]);
   const end = useRef<HTMLDivElement>(null);
@@ -230,6 +263,12 @@ function Conversation({
           <ChevronDown className={cn("mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform", showSummary && "rotate-180")} />
         </button>
       ) : null}
+      {risk ? (
+        <p className="flex items-start gap-1.5 border-b border-border/60 px-4 py-1.5 text-xs text-destructive" data-testid="text-chat-risk">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 break-words" data-private="text">{risk}</span>
+        </p>
+      ) : null}
       <div className="imsg-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5" data-testid="list-chat-messages">
         {partial ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing recent messages (full history arrives with the next Mac push)</p> : null}
         {items.map((it) => (
@@ -240,7 +279,7 @@ function Conversation({
         ))}
         <div ref={end} />
       </div>
-      <Composer cardId={card.id} headers={headers} liveMirror={liveMirror} />
+      <Composer card={card} headers={headers} liveMirror={liveMirror} onMark={onMark} />
     </>
   );
 }
@@ -282,7 +321,18 @@ function PendingBubble({ o, headers }: { o: InboxOutboundView; headers: Record<s
   );
 }
 
-function Composer({ cardId, headers, liveMirror }: { cardId: string; headers: Record<string, string>; liveMirror: boolean }) {
+function Composer({
+  card,
+  headers,
+  liveMirror,
+  onMark,
+}: {
+  card: InboxCardView;
+  headers: Record<string, string>;
+  liveMirror: boolean;
+  onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
+}) {
+  const cardId = card.id;
   const qc = useQueryClient();
   const { toast } = useToast();
   const [text, setText] = useState(() => loadComposerDraft(cardId));
@@ -308,6 +358,16 @@ function Composer({ cardId, headers, liveMirror }: { cardId: string; headers: Re
   };
   return (
     <footer className="border-t border-border px-3 py-2" data-testid="chat-composer">
+      <SuggestedDraft
+        card={card}
+        headers={headers}
+        onUse={(reply) => {
+          // Fill the message box only. Sending still needs a Send press.
+          keyRef.current = null;
+          setText(reply);
+        }}
+        onMark={(status) => onMark(card, status, text.trim() || card.editedReply || card.suggestedReply)}
+      />
       <div className="flex items-end gap-2">
         <textarea
           value={text}
@@ -374,6 +434,114 @@ function Row({ it, meta }: { it: ChatItem; meta: string }) {
         </div>
       ))}
       {meta ? <span className="mt-0.5 px-1 text-[11px] text-muted-foreground">{meta}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * Suggested reply as an editable draft above the message box (moved here from the old Replies tab).
+ * Save stores the edit on the server; "Use this" only fills the message box. Nothing here sends.
+ */
+function SuggestedDraft({
+  card,
+  headers,
+  onUse,
+  onMark,
+}: {
+  card: InboxCardView;
+  headers: Record<string, string>;
+  onUse: (reply: string) => void;
+  onMark: (status: "replied" | "handled") => void;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const base = card.editedReply ?? card.suggestedReply ?? "";
+  const [reply, setReply] = useState(base);
+  const [open, setOpen] = useState(true);
+  useEffect(() => setReply(base), [base, card.replyVersion]);
+  const dirty = reply !== base;
+  const save = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("PATCH", `/api/inbox/cards/${encodeURIComponent(card.id)}/reply`, { reply, version: card.replyVersion }, { headers })).json(),
+    onSuccess: () => {
+      toast({ title: "Draft saved", description: "Saved to Print Ops. Nothing was sent." });
+      void qc.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
+    },
+    onError: (e: Error) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
+  });
+  const reopen = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/inbox/cards/${encodeURIComponent(card.id)}/reopen`, undefined, { headers })).json(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["/api/inbox/cards"] }),
+  });
+  const hasDraft = base.trim().length > 0 || card.editedReply != null;
+  return (
+    <div className="mb-2 rounded-xl border border-dashed border-border bg-[hsl(var(--surface))] px-2.5 py-2" data-testid="chat-suggested-draft">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {hasDraft ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="inline-flex min-h-9 items-center gap-1 text-xs font-semibold text-foreground"
+            data-testid="button-draft-toggle"
+          >
+            Suggested reply{card.editedReply != null ? " (edited)" : ""}
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </button>
+        ) : (
+          <span className="text-xs text-muted-foreground">No suggested reply</span>
+        )}
+        <span className="ml-auto flex flex-wrap items-center gap-1">
+          {card.status === "open" ? (
+            <>
+              <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border px-2.5 text-xs font-medium" onClick={() => onMark("replied")} data-testid="button-chat-replied">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Replied
+              </button>
+              <button type="button" className="inline-flex min-h-9 items-center rounded-full border border-border px-2.5 text-xs font-medium" onClick={() => onMark("handled")} data-testid="button-chat-handled">
+                Handled
+              </button>
+            </>
+          ) : (
+            <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-full px-2.5 text-xs" onClick={() => reopen.mutate()} data-testid="button-chat-reopen">
+              <RotateCcw className="h-3.5 w-3.5" /> Reopen ({card.status})
+            </button>
+          )}
+        </span>
+      </div>
+      {hasDraft && open ? (
+        <div className="mt-1.5 grid gap-1.5">
+          <textarea
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            aria-label="Suggested reply draft"
+            className="min-w-0 resize-y rounded-lg border border-border bg-background px-2.5 py-2 text-base outline-none focus:ring-2 focus:ring-ring sm:text-sm"
+            data-private="text"
+            data-testid="input-draft-reply"
+          />
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={!reply.trim()}
+              onClick={() => onUse(reply)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-full bg-secondary px-3 text-xs font-medium text-secondary-foreground disabled:opacity-50"
+              data-testid="button-draft-use"
+            >
+              Use this (fills the box)
+            </button>
+            <button
+              type="button"
+              disabled={!dirty || save.isPending}
+              onClick={() => save.mutate()}
+              className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border px-3 text-xs disabled:opacity-50"
+              data-testid="button-draft-save"
+            >
+              {save.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save draft
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
