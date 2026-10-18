@@ -596,7 +596,7 @@ function paidOrderLineItemsFrom(
   return lines.length > 0 ? lines.slice(0, 20) : null;
 }
 
-function rejectUnsecuredIntake(req: Request, res: Response): boolean {
+export function rejectUnsecuredIntake(req: Request, res: Response): boolean {
   const status = intakeAuthorizationStatus(req);
   if (status === "authorized") return false;
   res.status(status === "not-configured" ? 503 : 401).json({
