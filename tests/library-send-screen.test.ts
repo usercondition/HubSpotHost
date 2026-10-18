@@ -437,89 +437,12 @@ test("Send to Library screen at 1440 and 390", { timeout: 180_000 }, async () =>
     await shot("preview-desktop-1440.png", "[data-testid='panel-plate-preview']");
     await page.locator("[data-testid='button-close-plate-preview']").click();
 
+    // Library is PC work: on a phone the shell shows a "Do this on your PC" note instead of the list.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
-    await page.locator("[data-testid='library-row-file-castigator']").waitFor();
-    await assertKitCatalog();
-    const phoneMetaBox = await page.locator("[data-testid='library-row-file-castigator'] .library-meta").evaluate((el) => {
-      const parts = [];
-      const nodes = el.querySelectorAll(".library-meta-part");
-      for (const node of nodes) {
-        parts.push({
-          text: (node.textContent || "").replace(/\s+/g, " ").trim(),
-          scroll: node.scrollWidth,
-          client: node.clientWidth,
-        });
-      }
-      return {
-        text: (el.textContent || "").replace(/\s+/g, " ").trim(),
-        wrap: getComputedStyle(el).whiteSpace,
-        scroll: el.scrollWidth,
-        client: el.clientWidth,
-        parts,
-      };
-    });
-    assert.match(phoneMetaBox.text, /31\.25 ml/, phoneMetaBox.text);
-    assert.equal(phoneMetaBox.wrap, "normal");
-    assert.ok(phoneMetaBox.scroll <= phoneMetaBox.client + 1, `phone meta still clips (${phoneMetaBox.scroll} > ${phoneMetaBox.client})`);
-    assert.ok(phoneMetaBox.parts.some((part) => part.text === "4h 00m"), phoneMetaBox.text);
-    for (const part of phoneMetaBox.parts) {
-      assert.ok(part.scroll <= part.client + 1, `meta value clipped (${part.text})`);
-    }
-    const phoneNames = await page.locator("[data-testid='library-file-name'] span").evaluateAll((nodes) => {
-      const rows = [];
-      for (const node of nodes) {
-        const style = getComputedStyle(node);
-        rows.push({
-          text: (node.textContent || "").replace(/\s+/g, " ").trim(),
-          wrap: style.whiteSpace,
-          scroll: node.scrollHeight,
-          client: node.clientHeight,
-        });
-      }
-      return rows;
-    });
-    const phoneText = phoneNames.map((row) => row.text).join("\n");
-    assert.match(phoneText, /Mighty 8K NEWX2 Knight Castellan Torso/);
-    assert.match(phoneText, /Mighty 8K NEWX3 Knight Castellan Bits Plate/);
-    for (const row of phoneNames) {
-      assert.equal(row.wrap, "normal");
-      assert.ok(row.scroll <= row.client + 1, `phone name clipped (${row.scroll} > ${row.client}): ${row.text}`);
-    }
-    const phoneCastSize = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='library-file-size']").boundingBox();
-    const phoneRaidSize = await page.locator("[data-testid='library-row-file-raider'] [data-testid='library-file-size']").boundingBox();
-    const phoneCastMenu = await page.locator("[data-testid='library-row-file-castigator'] [data-testid='button-plate-menu-file-castigator']").boundingBox();
-    const phoneRaidMenu = await page.locator("[data-testid='library-row-file-raider'] [data-testid='button-plate-menu-file-raider']").boundingBox();
-    assert.ok(phoneCastSize && phoneRaidSize && phoneCastMenu && phoneRaidMenu, "phone size and menu slots missing");
-    assert.ok(Math.abs(phoneCastSize.x - phoneRaidSize.x) <= 2, "phone size column moved between rows");
-    assert.ok(Math.abs(phoneCastMenu.x - phoneRaidMenu.x) <= 2, "phone menu column moved between rows");
-    assert.ok(phoneCastMenu.x > phoneCastSize.x, "phone menu sits before size");
-    await page.locator("[data-testid='library-row-file-castigator']").screenshot({ path: `${ARTIFACTS}/library-part-row-phone-390.png` });
-    await shot("library-phone-390.png", "[data-testid='page-library']");
-    await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
-    await page.locator("[data-testid='library-row-file-castigator']").waitFor();
-    await page.locator("[data-testid='library-row-file-raider']").waitFor({ state: "hidden" });
-    await shot("library-kit-phone-390.png", "[data-testid='page-library']");
-    await page.locator("[data-testid='button-plate-thumb-file-castigator']").click();
-    await page.locator("[data-testid='panel-plate-preview']").waitFor();
-    const phonePreview = await page.locator("[data-testid='panel-plate-preview']").innerText();
-    assert.equal(/Ada|Daniel|Wayne|Glenn/.test(phonePreview), false, phonePreview);
-    await shot("preview-phone-390.png", "[data-testid='panel-plate-preview']");
-    await page.locator("[data-testid='button-close-plate-preview']").click();
-
-    downloadError = true;
-    await page.locator("[data-testid='button-plate-menu-file-castigator']").click();
-    await page.locator("[data-testid='button-download-plate-file-castigator']").click();
-    const error = page.locator("[data-testid='text-plate-download-error']");
-    await error.waitFor();
-    const errorText = await error.innerText();
-    assert.equal(/ya29|googleapis|invalid_grant/i.test(errorText), false, errorText);
-    assert.match(errorText, /Drive could not read that file/);
-    const box = await error.boundingBox();
-    assert.ok(box, "download error missing");
-    assert.ok(box.x >= 0 && box.y >= 0, `error origin ${box.x},${box.y}`);
-    assert.ok(box.x + box.width <= 390 + 1, `error overflows 390 (${box.x + box.width})`);
-    downloadError = false;
+    await page.locator("[data-testid='note-pc-only']").waitFor();
+    assert.match(await page.locator("[data-testid='note-pc-only']").innerText(), /Do this on your PC/);
+    assert.equal(await page.locator("[data-testid^='library-row-']").count(), 0);
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });

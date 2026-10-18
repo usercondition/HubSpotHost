@@ -32,7 +32,9 @@ import { AttentionBell } from "@/components/attention-bell";
 import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
 import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
 import { PageTransition } from "@/components/page-transition";
-import { PrintsLibrarySwitch } from "@/components/prints-library-switch";
+import { PcOnlyNote } from "@/components/pc-only";
+import { useIsPhone } from "@/hooks/use-is-phone";
+import { PHONE_LABELS, pcOnlyRouteFor, phoneMoreSections, phoneTabs } from "@/lib/phone";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
@@ -231,8 +233,12 @@ const GROUPS: Array<{ id: NavGroup; hint: string }> = [
   { id: "Office", hint: "Numbers & setup" },
 ];
 
-const PHONE_TABS = NAV.filter((item) => item.phone === "tab");
-const PHONE_MORE = NAV.filter((item) => item.phone === "more");
+// Phone nav is built from lib/phone.ts (on-the-go tasks), not the desktop groups.
+// PC-only pages (Library, HubSpot board, Profit, Expenses, Setup) are left out.
+const PHONE_TABS = phoneTabs(NAV);
+const PHONE_MORE_SECTIONS = phoneMoreSections(NAV);
+const PHONE_MORE = PHONE_MORE_SECTIONS.flatMap((section) => section.items);
+const phoneLabel = (item: { href: string; label: string }) => PHONE_LABELS[item.href] ?? item.label;
 
 function refreshShop() {
   void queryClient.invalidateQueries({ queryKey: ["/api/health"] });
@@ -304,6 +310,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeGroup = activeItem?.group ?? "Run";
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = PHONE_MORE.some((item) => item.href === pathOnly);
+  const isPhone = useIsPhone();
+  // On a phone, PC-only pages show a short "Do this on your PC" note instead.
+  const pcOnly = isPhone ? pcOnlyRouteFor(pathOnly) : null;
 
   useEffect(() => {
     document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
@@ -350,7 +359,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <p className="ops-rail-label" title={group.hint}>
                 {group.id}
               </p>
-              {NAV.filter((item) => item.group === group.id).map((item) => {
+              {NAV.filter((item) => item.group === group.id && !(isPhone && pcOnlyRouteFor(item.href))).map((item) => {
                 const active = pathOnly === item.href;
                 const count = countFor(item.href);
                 return (
@@ -429,7 +438,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="ops-mark-wrap h-[26px] w-[26px] rounded-[7px]">
               <Mark className="h-full w-full" />
             </span>
-            <span className="truncate text-[17px] font-semibold tracking-tight">{activeItem?.label ?? "Print Ops"}</span>
+            <span className="truncate text-[17px] font-semibold tracking-tight">{activeItem ? phoneLabel(activeItem) : "Print Ops"}</span>
           </Link>
           <div className="ml-auto flex items-center gap-1">
             <RefreshButton testId="button-refresh-workspace-mobile" />
@@ -449,28 +458,38 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main className="scroll-pane relative z-[1] min-h-0 min-w-0 flex-1 bg-transparent pb-24 md:pb-0" data-scroll-pane>
-          {pathOnly === "/prints" || pathOnly === "/library" ? (
-            <div className="px-4 pt-3 md:hidden">
-              <PrintsLibrarySwitch />
-            </div>
-          ) : null}
-          <PageTransition routeKey={pathOnly}>{children}</PageTransition>
+          <PageTransition routeKey={pathOnly}>
+            {pcOnly ? <PcOnlyNote what={pcOnly.what} alt={pcOnly.alt} /> : children}
+          </PageTransition>
         </main>
 
         {moreOpen ? (
           <div className="ops-more-sheet flex md:hidden" data-testid="panel-mobile-more">
-            <p className="ops-rail-label px-1">More</p>
-            {PHONE_MORE.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                data-testid={`link-phone-${item.label.toLowerCase()}`}
-                className={cn("ops-rail-link", pathOnly === item.href && "bg-[hsl(var(--raised))] font-semibold text-foreground")}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span>{item.label}</span>
-              </Link>
+            {PHONE_MORE_SECTIONS.map((section, index) => (
+              <div key={section.title} className="flex flex-col gap-0.5" data-testid={`group-phone-more-${section.title.toLowerCase()}`}>
+                <p className={cn("ops-rail-label px-1", index > 0 && "pt-2")}>{section.title}</p>
+                {section.items.map((item) => {
+                  const count = countFor(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      data-testid={`link-phone-${item.label.toLowerCase()}`}
+                      className={cn("ops-rail-link", pathOnly === item.href && "bg-[hsl(var(--raised))] font-semibold text-foreground")}
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{phoneLabel(item)}</span>
+                      <NavCount
+                        value={count?.value ?? null}
+                        hot={count?.hot}
+                        testId={item.href === "/stack" ? "badge-phone-stack" : `badge-phone-${item.label.toLowerCase()}`}
+                      />
+                    </Link>
+                  );
+                })}
+              </div>
             ))}
+            <p className="ops-rail-label px-1 pt-2">Tools</p>
             <OpsAssistantSheet rail />
             <ThemeToggle rail />
             <p className="ops-rail-label px-1 pt-2">Apps</p>
@@ -480,11 +499,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <nav aria-label="Mobile navigation" className="ops-tabbar grid md:hidden">
           {PHONE_TABS.map((item) => {
-            const active = item.href === "/prints" ? pathOnly === "/prints" || pathOnly === "/library" : pathOnly === item.href;
+            const active = pathOnly === item.href;
             const count = countFor(item.href);
             const badge = count?.value != null && count.value > 0 ? count.value : null;
             const phoneTestId =
-              item.href === "/" ? "badge-phone-floor" : item.href === "/stack" ? "badge-phone-stack" : item.href === "/queue" ? "badge-phone-queue" : null;
+              item.href === "/" ? "badge-phone-floor" : item.href === "/queue" ? "badge-phone-queue" : null;
             return (
               <Link
                 key={item.href}
@@ -505,7 +524,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </span>
                   ) : null}
                 </span>
-                <span>{item.label}</span>
+                <span>{phoneLabel(item)}</span>
               </Link>
             );
           })}

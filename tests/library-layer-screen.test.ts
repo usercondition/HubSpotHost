@@ -321,26 +321,12 @@ test("Library layer scan and 3D view at 1440 and 390", { timeout: 180_000 }, asy
     await page.waitForTimeout(700);
     await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-closeup-1440.png` });
 
+    // Library is PC work: on a phone the shell shows a "Do this on your PC" note instead of the list.
     await page.setViewportSize({ width: 390, height: 844 });
-    await openLayers();
-    await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-layers-phone-390.png` });
-    await page.locator("[data-testid='button-view-model']").click();
-    await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
-    await page.locator("[data-testid='button-reset-mesh-view']").click();
-    await page.waitForTimeout(500);
-    await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-phone-390.png` });
-    const phoneCover = await modelCoverage(page);
-    console.log(`[plate-mesh] phone cover x=${phoneCover.coverX.toFixed(3)} y=${phoneCover.coverY.toFixed(3)} clipped=${phoneCover.clipped}`);
-    const phoneFill = Math.max(phoneCover.coverX, phoneCover.coverY);
-    assert.ok(phoneFill > 0.05, `phone view did not draw ${phoneCover.coverX} ${phoneCover.coverY}`);
-    for (const state of ["preparing", "failed"] as const) {
-      FILE.meshState = state;
-      await openLayers();
-      await page.locator("[data-testid='button-view-model']").click();
-      if (state !== "preparing") await page.locator("[data-testid='plate-model-view'] canvas").waitFor();
-      await page.locator(`[data-testid='text-mesh-${state}']`).waitFor();
-      await page.locator("[data-testid='panel-plate-preview']").screenshot({ path: `${ARTIFACTS}/library-model-${state}-phone-390.png` });
-    }
+    await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='note-pc-only']").waitFor();
+    assert.match(await page.locator("[data-testid='note-pc-only']").innerText(), /Do this on your PC/);
+    assert.equal(await page.locator("[data-testid^='library-row-']").count(), 0);
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const state of ["preparing", "failed"] as const) {
       FILE.meshState = state;
