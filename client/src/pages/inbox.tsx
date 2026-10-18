@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Inbox as InboxIcon, Loader2, MessagesSquare, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { MessagesSquare, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -13,7 +12,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { FollowupDialog, type FollowupDraft } from "@/components/followup-dialog";
 import type { Followup, InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import { InboxChat } from "@/components/inbox-chat";
-import { heartbeatLabel, refreshBusy, saveComposerDraft } from "@/lib/inbox-live";
+import { heartbeatLabel, needsMe, refreshBusy } from "@/lib/inbox-live";
 
 type CardsResponse = {
   ok: boolean;
@@ -46,7 +45,6 @@ function useHashSearch(): string {
   return i >= 0 ? hash.slice(i + 1) : window.location.search.replace(/^\?/, "");
 }
 
-const CATEGORY_ORDER: Record<string, number> = { hot: 0, question: 1, waiting: 2, spam: 9 };
 
 function fmtTime(iso: string | null): string {
   if (!iso) return "never";
@@ -59,130 +57,6 @@ function todayPT(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
 }
 
-function categoryTone(category: string): "good" | "warn" | "bad" | "neutral" {
-  if (category === "hot") return "bad";
-  if (category === "question") return "warn";
-  return "neutral";
-}
-
-function InboxCardItem({
-  card,
-  headers,
-  onMark,
-  onUse,
-}: {
-  card: InboxCardView;
-  headers: Record<string, string>;
-  onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
-  onUse: (card: InboxCardView, reply: string) => void;
-}) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const baseReply = card.editedReply ?? card.suggestedReply;
-  const [reply, setReply] = useState(baseReply);
-  const [showThread, setShowThread] = useState(false);
-  const dirty = reply !== baseReply;
-  const a = card.analysis;
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("PATCH", `/api/inbox/cards/${encodeURIComponent(card.id)}/reply`, { reply, version: card.replyVersion }, { headers });
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Reply saved", description: "Hermes picks it up on the next Mac sync." });
-      void queryClient.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
-    },
-    onError: (e: Error) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
-  });
-
-  const reopen = useMutation({
-    mutationFn: async () => (await apiRequest("POST", `/api/inbox/cards/${encodeURIComponent(card.id)}/reopen`, undefined, { headers })).json(),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["/api/inbox/cards"] }),
-  });
-
-  const agreed = a ? Object.entries(a.agreed).filter(([, v]) => v) : [];
-
-  return (
-    <article className="rounded-md border border-border bg-card px-3 py-3" data-testid={`inbox-card-${card.id}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-semibold">{card.name}</h3>
-            <StatusPill tone={categoryTone(card.category)} label={card.category} />
-            {card.stage ? <StatusPill tone="neutral" label={card.stage.replace(/_/g, " ")} /> : null}
-            {card.status !== "open" ? <StatusPill tone="good" icon={CheckCircle2} label={card.status} /> : null}
-            {card.owesReply && card.status === "open" ? <StatusPill tone="bad" label="owes reply" /> : null}
-            {a?.confidence != null ? <span className="text-xs text-muted-foreground">conf {Math.round(a.confidence * 100)}%</span> : null}
-          </div>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground" title={card.listing}>{card.listing || "No listing"}</p>
-        </div>
-        <span className="text-xs text-muted-foreground">{card.timeLabel || card.lastMessageAt}</span>
-      </div>
-
-      {a?.summary ? <p className="mt-2 text-sm">{a.summary}</p> : null}
-      {card.risk || (a?.riskFlags.length ?? 0) > 0 ? (
-        <p className="mt-2 flex items-start gap-1.5 text-sm text-[hsl(var(--destructive))]">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{[card.risk, ...(a?.riskFlags ?? []), a?.riskNote].filter(Boolean).join(" · ")}</span>
-        </p>
-      ) : null}
-      {agreed.length > 0 ? (
-        <p className="mt-1 text-xs text-muted-foreground">Agreed: {agreed.map(([k, v]) => `${k} ${v}`).join(" · ")}</p>
-      ) : null}
-      <p className="mt-2 text-sm"><span className="text-muted-foreground">Last: </span>{card.lastMessage}</p>
-      {card.nextAction ? <p className="mt-1 text-sm"><span className="text-muted-foreground">Next: </span>{card.nextAction}</p> : null}
-
-      <div className="mt-3 grid gap-1.5">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor={`reply-${card.id}`}>
-          Suggested reply {card.editedReply != null ? "(edited)" : ""}
-        </label>
-        <Textarea id={`reply-${card.id}`} rows={3} value={reply} onChange={(e) => setReply(e.target.value)} data-testid={`input-reply-${card.id}`} />
-        <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
-          </Button>
-          <Button size="sm" disabled={!reply.trim()} onClick={() => onUse(card, reply)} data-testid={`button-use-reply-${card.id}`}>
-            <MessagesSquare className="h-4 w-4" /> Use this
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void navigator.clipboard?.writeText(reply);
-              toast({ title: "Copied", description: "Copied to the clipboard. Nothing was sent." });
-            }}
-          >
-            <Copy className="h-4 w-4" /> Copy
-          </Button>
-          {card.threadUrl ? (
-            <Button size="sm" variant="outline" asChild>
-              <a href={card.threadUrl} target="_blank" rel="noreferrer" title={card.threadHint}>
-                <ExternalLink className="h-4 w-4" /> Open chat
-              </a>
-            </Button>
-          ) : null}
-          {card.status === "open" ? (
-            <>
-              <Button size="sm" onClick={() => onMark(card, "replied", reply)} data-testid={`button-replied-${card.id}`}>Replied</Button>
-              <Button size="sm" variant="secondary" onClick={() => onMark(card, "handled", reply)}>Handled</Button>
-            </>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={() => reopen.mutate()}><RotateCcw className="h-4 w-4" /> Reopen</Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setShowThread((v) => !v)}>{showThread ? "Hide" : "Recent"} messages</Button>
-        </div>
-      </div>
-      {showThread ? (
-        <ol className="mt-2 grid gap-1 border-l border-border pl-3 text-sm">
-          {card.recent.map((m, i) => (
-            <li key={i}><span className="text-xs text-muted-foreground">{m.when} · </span>{m.text}</li>
-          ))}
-        </ol>
-      ) : null}
-    </article>
-  );
-}
 
 function FollowupRow({ f, headers }: { f: Followup; headers: Record<string, string> }) {
   const queryClient = useQueryClient();
@@ -232,11 +106,11 @@ export default function InboxPage() {
   const [, navigate] = useLocation();
   const sp = new URLSearchParams(search);
   const rawTab = sp.get("tab");
-  // Chats (live mirror from Print Ops' store, pushed by the Mac mini) is the default Inbox view.
-  const tab: "chats" | "cards" | "followups" = rawTab === "followups" ? "followups" : rawTab === "cards" ? "cards" : "chats";
+  // Chats (live mirror, with suggested drafts, risk flags and Replied/Handled) is the default view.
+  // The old Replies tab (`tab=cards`) was merged into Chats; old links land there.
+  const tab: "chats" | "followups" = rawTab === "followups" ? "followups" : "chats";
   const chatThread = sp.get("thread");
   const openThread = (uid: string | null) => navigate(uid ? `/inbox?tab=chats&thread=${encodeURIComponent(uid)}` : "/inbox?tab=chats");
-  const [filter, setFilter] = useState<"needs" | "all">("needs");
   const [marking, setMarking] = useState<{ card: InboxCardView; status: "replied" | "handled"; reply: string } | null>(null);
 
   const cardsQuery = useQuery<CardsResponse>({
@@ -304,11 +178,7 @@ export default function InboxPage() {
     onError: (e: Error) => toast({ title: "Could not log follow-up", description: e.message, variant: "destructive" }),
   });
 
-  const cards = useMemo(() => {
-    const list = cardsQuery.data?.cards ?? [];
-    const visible = filter === "needs" ? list.filter((c) => c.status === "open" && c.category !== "spam" && (c.needsYou || c.owesReply)) : list;
-    return [...visible].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 5) - (CATEGORY_ORDER[b.category] ?? 5));
-  }, [cardsQuery.data, filter]);
+  const needCount = (cardsQuery.data?.cards ?? []).filter(needsMe).length;
   const followups = followupsQuery.data?.followups ?? [];
   const heartbeat = heartbeatLabel(cardsQuery.data?.lastCheckinAt, cardsQuery.data?.lastPushAt);
   const dueCount = followups.filter((f) => f.status === "open" && f.reminderDate && f.reminderDate <= todayPT()).length;
@@ -317,7 +187,7 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Client chats, suggested replies and follow-ups. A message goes out only when you press Send."
+        subtitle="Client chats with suggested drafts, and follow-ups. A message goes out only when you press Send."
         actions={
           isUnlocked ? (
             <Button
@@ -350,10 +220,7 @@ export default function InboxPage() {
           <>
             <div className="flex flex-wrap items-center gap-2" role="tablist">
               <Button size="sm" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
-                <MessagesSquare className="h-4 w-4" /> Chats
-              </Button>
-              <Button size="sm" variant={tab === "cards" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=cards")} data-testid="tab-inbox-cards">
-                <InboxIcon className="h-4 w-4" /> Replies
+                <MessagesSquare className="h-4 w-4" /> Chats{needCount ? ` (${needCount})` : ""}
               </Button>
               <Button size="sm" variant={tab === "followups" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=followups")} data-testid="tab-inbox-followups">
                 Follow-ups{dueCount ? ` (${dueCount} due)` : ""}
@@ -388,38 +255,8 @@ export default function InboxPage() {
                 onSelect={openThread}
                 onRefresh={() => refreshMutation.mutate("manual")}
                 refreshPending={refreshMutation.isPending}
+                onMark={(c, status, reply) => setMarking({ card: c, status, reply })}
               />
-            ) : tab === "cards" ? (
-              <Panel
-                title={`Cards (${cards.length})`}
-                actions={
-                  <div className="flex gap-1">
-                    <Button size="sm" variant={filter === "needs" ? "default" : "ghost"} onClick={() => setFilter("needs")}>Needs me</Button>
-                    <Button size="sm" variant={filter === "all" ? "default" : "ghost"} onClick={() => setFilter("all")}>All</Button>
-                  </div>
-                }
-              >
-                {cardsQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-                {cardsQuery.error ? <p className="text-sm text-destructive">{(cardsQuery.error as Error).message}</p> : null}
-                {!cardsQuery.isLoading && cards.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing waiting. Cards appear after the Mac pushes its inbox.</p>
-                ) : null}
-                <div className="grid gap-2">
-                  {cards.map((card) => (
-                    <InboxCardItem
-                      key={`${card.id}:${card.replyVersion}:${card.status}`}
-                      card={card}
-                      headers={headers}
-                      onMark={(c, status, reply) => setMarking({ card: c, status, reply })}
-                      onUse={(c, reply) => {
-                        // Fill the chat composer only. Sending still needs a Send press in the chat.
-                        saveComposerDraft(c.id, reply);
-                        openThread(c.id);
-                      }}
-                    />
-                  ))}
-                </div>
-              </Panel>
             ) : (
               <Panel title={`Follow-ups (${followups.length})`} description="Mirrors the Notion Client Follow-ups database. Due items go out in the morning Telegram digest.">
                 {followups.length === 0 ? <p className="text-sm text-muted-foreground">No open follow-ups.</p> : null}
