@@ -1,3 +1,4 @@
+import { ownerCodeForHeader } from "@shared/owner-code";
 import {
   createContext,
   useCallback,
@@ -124,7 +125,7 @@ export function useOwnerUnlock(options: {
 
   return useMutation({
     mutationFn: async (code: string) => {
-      const trimmed = code.trim();
+      const trimmed = ownerCodeForHeader(code);
       if (!trimmed) throw new Error("Enter your owner access code.");
       // Instant UI: open the page while the cheap session probe runs.
       unlock(trimmed);
@@ -204,6 +205,11 @@ export function OwnerUnlockPanel({
               id={`${testIdPrefix}-owner-code`}
               type="password"
               autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="text"
+              enterKeyHint="go"
               autoFocus
               value={codeDraft}
               onChange={(event) => setCodeDraft(event.target.value)}
