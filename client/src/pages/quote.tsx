@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Copy, ExternalLink, FileUp, Loader2, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink, FileUp, Loader2, RotateCcw, Save, Search, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import {
   formatDims,
   overallDims,
   scaleForTarget,
+  unmeasurableReason,
   type TargetSizeMode,
   PHROZEN_POWER_GUIDE_URL,
   computeStlQuote,
@@ -29,6 +30,16 @@ import {
   type QuotePart,
   type StlQuoteSettings,
 } from "@shared/stl-quote";
+import {
+  activeChips,
+  applyNoteChips,
+  interpretNotes,
+  markOverridden,
+  notesSummaryLines,
+  type NoteChip,
+  type NoteField,
+  type QuoteModifierState,
+} from "@shared/quote-notes";
 
 type LoadedPart = QuotePart & { id: string; stats: MeshStats };
 type PartError = { id: string; name: string; error: string };
@@ -88,15 +99,50 @@ function NumField({
   );
 }
 
-function AddOnRow({ id, label, on, onToggle, children }: { id: string; label: string; on: boolean; onToggle: (v: boolean) => void; children: React.ReactNode }) {
+function AddOnRow({ id, label, on, notes, onToggle, children }: { id: string; label: string; on: boolean; notes?: boolean; onToggle: (v: boolean) => void; children: React.ReactNode }) {
   return (
     <div className={`min-w-0 rounded-md border p-2 ${on ? "border-primary/50" : "border-border/70"}`}>
       <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid={`toggle-addon-${id}`}>
         <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={on} onChange={(e) => onToggle(e.target.checked)} />
         {label}
+        <FromNotes on={!!notes} />
       </label>
       {on ? <div className="mt-1">{children}</div> : null}
     </div>
+  );
+}
+
+function FromNotes({ on }: { on: boolean }) {
+  return on ? <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium normal-case tracking-normal text-primary" data-testid="badge-from-notes">from notes</span> : null;
+}
+
+function NoteChipRow({ chip, state, onRemove, onRestore, onAccept }: { chip: NoteChip; state: "applied" | "removed" | "suggested" | "overridden"; onRemove: () => void; onRestore: () => void; onAccept: () => void }) {
+  const tone =
+    state === "applied" ? "border-primary/60 bg-primary/10" : state === "suggested" ? "border-dashed border-amber-500/70 bg-amber-500/5" : "border-border/70 opacity-70";
+  return (
+    <li className={`flex min-w-0 items-start gap-2 rounded-md border p-2 ${tone}`} data-testid={`chip-note-${state}`} data-chip-field={chip.change.field}>
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm font-medium ${state === "removed" || state === "overridden" ? "line-through" : ""}`}>
+          {state === "applied" ? <Check className="mr-1 inline h-3.5 w-3.5 text-primary" aria-hidden /> : chip.origin === "ai" ? <Sparkles className="mr-1 inline h-3.5 w-3.5" aria-hidden /> : null}
+          {chip.label}
+        </p>
+        <p className="break-words text-[0.6875rem] leading-4 text-muted-foreground">
+          “{chip.source}”
+          {state === "suggested" ? " · suggested, tap Apply to use it" : state === "removed" ? " · removed" : state === "overridden" ? " · a later note for the same setting wins" : ""}
+          {chip.detail ? ` · ${chip.detail}` : ""}
+        </p>
+      </div>
+      {state === "applied" ? (
+        <Button type="button" size="icon" variant="ghost" className="h-11 w-11 shrink-0" aria-label={`Remove ${chip.label}`} onClick={onRemove} data-testid="button-chip-remove"><X className="h-4 w-4" /></Button>
+      ) : state === "suggested" ? (
+        <div className="flex shrink-0 gap-1">
+          <Button type="button" size="sm" className="h-11" onClick={onAccept} data-testid="button-chip-accept">Apply</Button>
+          <Button type="button" size="icon" variant="ghost" className="h-11 w-11" aria-label={`Dismiss ${chip.label}`} onClick={onRemove}><X className="h-4 w-4" /></Button>
+        </div>
+      ) : state === "removed" ? (
+        <Button type="button" size="sm" variant="ghost" className="h-11 shrink-0" onClick={onRestore} data-testid="button-chip-restore"><Undo2 className="mr-1 h-4 w-4" />Re-apply</Button>
+      ) : null}
+    </li>
   );
 }
 
@@ -141,6 +187,9 @@ export default function QuotePage() {
   const [sizeValue, setSizeValue] = useState("");
   const [separate, setSeparate] = useState(false);
   const [clientNotes, setClientNotes] = useState("");
+  const [removedChips, setRemovedChips] = useState<Set<string>>(() => new Set());
+  const [acceptedChips, setAcceptedChips] = useState<Set<string>>(() => new Set());
+  const [aiChips, setAiChips] = useState<NoteChip[]>([]);
   const [addOn, setAddOn] = useState({
     rush: false, rushUsd: DEFAULT_ADDON_AMOUNTS.rushUsd,
     base: false, baseUsd: DEFAULT_ADDON_AMOUNTS.baseMagnetUsdEach,
@@ -176,34 +225,86 @@ export default function QuotePage() {
     setParsing(false);
   }
 
+  // ---- client notes -> modifier chips (deterministic parser; AI only on request)
+  const interp = useMemo(() => interpretNotes(clientNotes), [clientNotes]);
+  const allChips = useMemo(() => {
+    const lc = clientNotes.toLowerCase();
+    const ai = aiChips.filter((c) => lc.includes(c.source.toLowerCase()) && !interp.chips.some((p) => p.change.field === c.change.field && JSON.stringify(p.change) === JSON.stringify(c.change)));
+    return [...interp.chips, ...ai];
+  }, [interp, aiChips, clientNotes]);
+  const liveChips = useMemo(() => activeChips(allChips, removedChips, acceptedChips), [allChips, removedChips, acceptedChips]);
+  const chipView = useMemo(() => {
+    const on = (c: NoteChip) => !removedChips.has(c.id) && (c.confidence === "sure" || acceptedChips.has(c.id));
+    return markOverridden(allChips, on).map((c) => ({
+      chip: c,
+      state: (c.overridden ? "overridden" : on(c) ? "applied" : removedChips.has(c.id) && c.confidence === "sure" ? "removed" : removedChips.has(c.id) ? "hidden" : "suggested") as "applied" | "removed" | "suggested" | "overridden" | "hidden",
+    })).filter((v) => v.state !== "hidden");
+  }, [allChips, removedChips, acceptedChips]);
+  const unparsedNotes = useMemo(() => {
+    const liveIds = new Set(liveChips.map((c) => c.id));
+    const covered = aiChips.filter((c) => liveIds.has(c.id)).map((c) => c.source.toLowerCase());
+    return interp.unparsed.filter((u) => !covered.some((src) => u.toLowerCase().includes(src)));
+  }, [interp, aiChips, liveChips]);
+  const manual: QuoteModifierState = { sizeMode, sizeValue, quantity, hollow, separate, addOn };
+  const eff = applyNoteChips(manual, liveChips);
+  const fromNotes = new Set<NoteField>(liveChips.map((c) => c.change.field));
+  /** A manual edit wins over notes: drop the live chips for that setting. */
+  const dismissField = (field: NoteField) => {
+    const ids = liveChips.filter((c) => c.change.field === field).map((c) => c.id);
+    if (ids.length) setRemovedChips((r) => new Set([...r, ...ids]));
+  };
+  const ADDON_FIELD = { rush: ["rush", "rushUsd"], baseMagnet: ["base", "baseUsd"], finishing: ["finishing", "finHours", "finRate"], custom: ["custom", "customLabel", "customUsd"] } as const;
+  const editAddOn = (field: keyof typeof ADDON_FIELD, patch: Partial<typeof addOn>) => {
+    const carry = Object.fromEntries(ADDON_FIELD[field].map((k) => [k, eff.addOn[k]]));
+    setAddOn((prev) => ({ ...prev, ...carry, ...patch }));
+    dismissField(field);
+  };
+  const aiStatus = useQuery<{ available: boolean; model: string | null }>({
+    queryKey: ["/api/stl-quote/notes-ai"],
+    enabled: isUnlocked,
+    staleTime: 5 * 60_000,
+    queryFn: async () => (await apiRequest("GET", "/api/stl-quote/notes-ai", undefined, { headers })).json(),
+  });
+  const askAi = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/stl-quote/notes-ai", { notes: clientNotes, unparsed: unparsedNotes }, { headers })).json() as Promise<{ chips: NoteChip[] }>,
+    onSuccess: (data) => {
+      setAiChips((prev) => [...prev.filter((p) => !data.chips.some((c) => c.id === p.id)), ...data.chips]);
+      toast({ title: data.chips.length ? `AI found ${data.chips.length} suggestion${data.chips.length > 1 ? "s" : ""}` : "AI found nothing it could apply", description: data.chips.length ? "Check each one and tap Apply." : "Those notes stay as plain notes." });
+    },
+    onError: (e: Error) => toast({ title: "AI read failed", description: e.message, variant: "destructive" }),
+  });
+
+  const unmeasurable = unmeasurableReason(parts);
   const origDims = parts.length ? overallDims(parts) : null;
-  const scale = origDims && sizeValue.trim() ? scaleForTarget(sizeMode, Number(sizeValue), origDims) : 1;
+  const scale = origDims && eff.sizeValue.trim() ? scaleForTarget(eff.sizeMode, Number(eff.sizeValue), origDims) : 1;
 
   const quote = useMemo(() => {
-    if (parts.length === 0) return null;
+    if (parts.length === 0 || unmeasurable) return null;
     const spl = Number(splOverride);
+    const a = eff.addOn;
     return computeStlQuote(parts, draft, {
       printerId,
-      hollow,
+      hollow: eff.hollow,
       packagingTier: tier === "auto" ? null : tier,
-      quantity,
+      quantity: eff.quantity,
       secondsPerLayer: splOverride.trim() && Number.isFinite(spl) && spl > 0 ? spl : null,
       scale,
-      separatePackages: separate,
+      separatePackages: eff.separate,
       addOns: {
-        rushUsd: addOn.rush ? addOn.rushUsd : null,
-        baseMagnetUsdEach: addOn.base ? addOn.baseUsd : null,
-        finishing: addOn.finishing ? { hours: addOn.finHours, usdPerHour: addOn.finRate } : null,
-        custom: addOn.custom ? { label: addOn.customLabel, usd: addOn.customUsd } : null,
+        rushUsd: a.rush ? a.rushUsd : null,
+        baseMagnetUsdEach: a.base ? a.baseUsd : null,
+        finishing: a.finishing ? { hours: a.finHours, usdPerHour: a.finRate } : null,
+        custom: a.custom ? { label: a.customLabel, usd: a.customUsd } : null,
       },
     });
-  }, [parts, draft, printerId, hollow, tier, quantity, splOverride, scale, separate, addOn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parts, draft, printerId, tier, splOverride, scale, unmeasurable, JSON.stringify(eff)]);
 
   const suggestion = quote ? suggestFinalPrice(quote, market?.stats ?? null) : null;
 
   async function copySummary() {
     if (!quote) return;
-    const text = buildQuoteSummary({ items: parts.map((p) => p.name), quote, hollow, clientNotes, suggested: suggestion });
+    const text = buildQuoteSummary({ items: parts.map((p) => p.name), quote, hollow: eff.hollow, clientNotes, suggested: suggestion, notesLines: notesSummaryLines(liveChips, unparsedNotes) });
     try {
       await navigator.clipboard.writeText(text);
       toast({ title: "Quote summary copied" });
@@ -323,24 +424,89 @@ export default function QuotePage() {
                   ))}
                 </ul>
               ) : null}
+              {unmeasurable ? (
+                <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-3" role="status" data-testid="notice-quote-load-stl">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">Load an STL to price</p>
+                    <p className="break-words text-xs text-muted-foreground">
+                      {unmeasurable === "none"
+                        ? "No model is loaded, so there is no quote yet. Notes and modifiers you set now are kept and apply as soon as a model is in."
+                        : `This model measures ${unmeasurable}, so there is nothing to price. The file may be empty, broken, or exported in meters. Load a real STL, OBJ, or 3MF.`}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </Panel>
 
             <Panel title="Modifiers" description="Adjust for what the client wants. Everything recomputes live." testId="panel-quote-modifiers">
               <div className="space-y-4">
+                <section aria-labelledby="mod-notes" className="min-w-0" data-testid="section-quote-notes">
+                  <Label htmlFor="quote-client-notes" id="mod-notes" className="rule-label">Client notes</Label>
+                  <Textarea id="quote-client-notes" className="mt-1 min-h-[88px]" placeholder={'What the client asked for, e.g. "6mm tall, set of 3, magnetized base, need it by Friday, +$10 for decals"'} value={clientNotes} onChange={(e) => setClientNotes(e.target.value)} data-testid="input-quote-client-notes" />
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Sizes, copies, rush/deadline, base/magnet, painting/cleanup, hollow/solid, separate packaging, and +$ fees are read from the notes and applied below. Remove a chip or change the setting by hand to override it.</p>
+                  {chipView.length || unparsedNotes.length ? (
+                    <div className="mt-2 space-y-2" data-testid="block-quote-notes-applied">
+                      {chipView.length ? (
+                        <>
+                          <p className="rule-label">Applied from notes</p>
+                          <ul className="space-y-1.5">
+                            {chipView.map(({ chip, state }) => (
+                              <NoteChipRow
+                                key={chip.id}
+                                chip={chip}
+                                state={state as "applied" | "removed" | "suggested" | "overridden"}
+                                onRemove={() => setRemovedChips((r) => new Set([...r, chip.id]))}
+                                onRestore={() => setRemovedChips((r) => { const n = new Set(r); n.delete(chip.id); return n; })}
+                                onAccept={() => {
+                                  setAcceptedChips((a) => new Set([...a, chip.id]));
+                                  setRemovedChips((r) => { const n = new Set(r); n.delete(chip.id); return n; });
+                                }}
+                              />
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                      {unparsedNotes.length ? (
+                        <div className="rounded-md border border-border/70 p-2" data-testid="block-quote-notes-unparsed">
+                          <p className="text-xs font-medium">Not applied (kept as notes)</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {unparsedNotes.map((u, i) => (
+                              <li key={`${u}-${i}`} className="break-words text-xs text-muted-foreground" data-testid="text-note-not-applied">“{u}” · no matching modifier, price it by hand if it matters</li>
+                            ))}
+                          </ul>
+                          {aiStatus.data?.available ? (
+                            <Button type="button" variant="outline" size="sm" className="mt-2 h-11" disabled={askAi.isPending} onClick={() => askAi.mutate()} data-testid="button-quote-notes-ai">
+                              {askAi.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
+                              Ask AI to read these
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <Button type="button" variant="outline" className="mt-2 h-11 w-full sm:w-auto" disabled={!quote} onClick={copySummary} data-testid="button-quote-copy-summary">
+                    <Copy className="mr-1.5 h-4 w-4" /> Copy quote summary
+                  </Button>
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Copies plain text (with the notes and what was applied) to your clipboard only. Nothing is sent or saved.</p>
+                </section>
+
                 <section aria-labelledby="mod-size" className="min-w-0">
-                  <h3 id="mod-size" className="rule-label mb-2">Target size (aspect locked)</h3>
+                  <h3 id="mod-size" className="rule-label mb-2">Target size (aspect locked)<FromNotes on={fromNotes.has("size")} /></h3>
                   <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
                     <div className="min-w-0 space-y-1">
                       <Label htmlFor="quote-size-mode" className="text-xs">By</Label>
-                      <select id="quote-size-mode" className={selectClass} value={sizeMode} onChange={(e) => setSizeMode(e.target.value as TargetSizeMode)} data-testid="select-quote-size-mode">
+                      <select id="quote-size-mode" className={selectClass} value={eff.sizeMode} onChange={(e) => { setSizeMode(e.target.value as TargetSizeMode); setSizeValue(eff.sizeValue); dismissField("size"); }} data-testid="select-quote-size-mode">
                         <option value="percent">Scale %</option>
                         <option value="height">Target height (mm)</option>
+                        <option value="width">Target width (mm)</option>
+                        <option value="depth">Target depth (mm)</option>
                         <option value="longest">Target longest side (mm)</option>
                       </select>
                     </div>
                     <div className="min-w-0 space-y-1">
-                      <Label htmlFor="quote-size-value" className="text-xs">{sizeMode === "percent" ? "Scale %" : "mm"}</Label>
-                      <Input id="quote-size-value" type="number" inputMode="decimal" step="any" placeholder={sizeMode === "percent" ? "100" : origDims ? String(sizeMode === "height" ? origDims.z.toFixed(1) : Math.max(origDims.x, origDims.y, origDims.z).toFixed(1)) : ""} value={sizeValue} onChange={(e) => setSizeValue(e.target.value)} data-testid="input-quote-size-value" />
+                      <Label htmlFor="quote-size-value" className="text-xs">{eff.sizeMode === "percent" ? "Scale %" : "mm"}</Label>
+                      <Input id="quote-size-value" type="number" inputMode="decimal" step="any" placeholder={eff.sizeMode === "percent" ? "100" : origDims ? (eff.sizeMode === "height" ? origDims.z : eff.sizeMode === "width" ? origDims.x : eff.sizeMode === "depth" ? origDims.y : Math.max(origDims.x, origDims.y, origDims.z)).toFixed(1) : ""} value={eff.sizeValue} onChange={(e) => { setSizeMode(eff.sizeMode); setSizeValue(e.target.value); dismissField("size"); }} data-testid="input-quote-size-value" />
                     </div>
                   </div>
                   {quote ? (
@@ -353,7 +519,7 @@ export default function QuotePage() {
                       <div className={`min-w-0 rounded-md border p-2 ${quote.scale !== 1 ? "border-primary/50 bg-primary/5" : "border-border/70"}`}>
                         <p className="rule-label">Scaled · {(quote.scale * 100).toFixed(quote.scale * 100 % 1 ? 1 : 0)}%</p>
                         <p className="tabular-nums font-medium">{formatDims(quote.scaledDims)}</p>
-                        <p className="text-muted-foreground tabular-nums">{(quote.modelMl / quote.quantity).toFixed(2)} ml each{hollow ? " (hollow)" : ""}</p>
+                        <p className="text-muted-foreground tabular-nums">{(quote.modelMl / quote.quantity).toFixed(2)} ml each{eff.hollow ? " (hollow)" : ""}</p>
                       </div>
                       {quote.fit.status === "too-big" ? (
                         <p className="col-span-2 rounded-md border border-destructive/60 bg-destructive/10 p-2 text-destructive" role="alert" data-testid="text-quote-fit-warning">{quote.fit.detail}</p>
@@ -362,13 +528,13 @@ export default function QuotePage() {
                       )}
                     </div>
                   ) : null}
-                  {sizeValue ? (
-                    <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={() => setSizeValue("")}>Reset to original size</Button>
+                  {eff.sizeValue ? (
+                    <Button type="button" variant="ghost" size="sm" className="mt-1 h-11" onClick={() => { setSizeValue(""); dismissField("size"); }}>Reset to original size</Button>
                   ) : null}
                 </section>
 
                 <section aria-labelledby="mod-print" className="min-w-0">
-                  <h3 id="mod-print" className="rule-label mb-2">Print and packaging</h3>
+                  <h3 id="mod-print" className="rule-label mb-2">Print and packaging<FromNotes on={fromNotes.has("quantity") || fromNotes.has("hollow") || fromNotes.has("separatePackages")} /></h3>
                   <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                     <div className="min-w-0 space-y-1">
                       <Label htmlFor="quote-printer" className="text-xs">Printer</Label>
@@ -389,18 +555,18 @@ export default function QuotePage() {
                         <option value="large">Large · {usd(draft.packagingUsd.large)}</option>
                       </select>
                     </div>
-                    <NumField id="quote-qty" label="Copies" value={quantity} step="1" onChange={(n) => setQuantity(Math.max(1, Math.floor(n)))} />
+                    <NumField id="quote-qty" label={fromNotes.has("quantity") ? "Copies (from notes)" : "Copies"} value={eff.quantity} step="1" onChange={(n) => { setQuantity(Math.max(1, Math.floor(n))); dismissField("quantity"); }} />
                     <div className="min-w-0 space-y-1">
                       <Label htmlFor="quote-spl" className="text-xs">Seconds per layer <span className="text-muted-foreground">(blank = printer default)</span></Label>
                       <Input id="quote-spl" type="number" inputMode="decimal" step="any" placeholder={String(draft.printers.find((p) => p.id === printerId)?.secondsPerLayer ?? 8)} value={splOverride} onChange={(e) => setSplOverride(e.target.value)} />
                     </div>
                     <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid="toggle-quote-separate">
-                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={separate} onChange={(e) => setSeparate(e.target.checked)} />
-                      Package each copy separately
+                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={eff.separate} onChange={(e) => { setSeparate(e.target.checked); dismissField("separatePackages"); }} />
+                      Package each copy separately<FromNotes on={fromNotes.has("separatePackages")} />
                     </label>
                     <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm" data-testid="toggle-quote-hollow">
-                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={hollow} onChange={(e) => setHollow(e.target.checked)} />
-                      Hollow (est. {draft.hollowWallMm} mm wall), else solid
+                      <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" checked={eff.hollow} onChange={(e) => { setHollow(e.target.checked); dismissField("hollow"); }} />
+                      Hollow (est. {draft.hollowWallMm} mm wall), else solid<FromNotes on={fromNotes.has("hollow")} />
                     </label>
                   </div>
                   {quote?.notes.length ? <ul className="mt-2 space-y-0.5 text-[0.6875rem] text-muted-foreground">{quote.notes.map((n) => <li key={n}>{n}</li>)}</ul> : null}
@@ -409,37 +575,28 @@ export default function QuotePage() {
                 <section aria-labelledby="mod-addons" className="min-w-0">
                   <h3 id="mod-addons" className="rule-label mb-2">Add-ons (added to cost before markups)</h3>
                   <div className="space-y-2">
-                    <AddOnRow id="rush" label="Rush" on={addOn.rush} onToggle={(v) => setAddOn({ ...addOn, rush: v })}>
-                      <NumField id="addon-rush" label="$ flat" value={addOn.rushUsd} onChange={(n) => setAddOn({ ...addOn, rushUsd: n })} />
+                    <AddOnRow id="rush" label="Rush" notes={fromNotes.has("rush")} on={eff.addOn.rush} onToggle={(v) => editAddOn("rush", { rush: v })}>
+                      <NumField id="addon-rush" label="$ flat" value={eff.addOn.rushUsd} onChange={(n) => editAddOn("rush", { rush: true, rushUsd: n })} />
                     </AddOnRow>
-                    <AddOnRow id="base" label="Base / magnet" on={addOn.base} onToggle={(v) => setAddOn({ ...addOn, base: v })}>
-                      <NumField id="addon-base" label="$ per copy" value={addOn.baseUsd} onChange={(n) => setAddOn({ ...addOn, baseUsd: n })} />
+                    <AddOnRow id="base" label="Base / magnet" notes={fromNotes.has("baseMagnet")} on={eff.addOn.base} onToggle={(v) => editAddOn("baseMagnet", { base: v })}>
+                      <NumField id="addon-base" label="$ per copy" value={eff.addOn.baseUsd} onChange={(n) => editAddOn("baseMagnet", { base: true, baseUsd: n })} />
                     </AddOnRow>
-                    <AddOnRow id="finishing" label="Supports cleanup / finishing" on={addOn.finishing} onToggle={(v) => setAddOn({ ...addOn, finishing: v })}>
+                    <AddOnRow id="finishing" label="Supports cleanup / finishing" notes={fromNotes.has("finishing")} on={eff.addOn.finishing} onToggle={(v) => editAddOn("finishing", { finishing: v })}>
                       <div className="grid grid-cols-2 gap-2">
-                        <NumField id="addon-fin-h" label="Hours" value={addOn.finHours} onChange={(n) => setAddOn({ ...addOn, finHours: n })} />
-                        <NumField id="addon-fin-r" label="$/hr" value={addOn.finRate} onChange={(n) => setAddOn({ ...addOn, finRate: n })} />
+                        <NumField id="addon-fin-h" label="Hours" value={eff.addOn.finHours} onChange={(n) => editAddOn("finishing", { finishing: true, finHours: n })} />
+                        <NumField id="addon-fin-r" label="$/hr" value={eff.addOn.finRate} onChange={(n) => editAddOn("finishing", { finishing: true, finRate: n })} />
                       </div>
                     </AddOnRow>
-                    <AddOnRow id="custom" label="Custom fee" on={addOn.custom} onToggle={(v) => setAddOn({ ...addOn, custom: v })}>
+                    <AddOnRow id="custom" label="Custom fee" notes={fromNotes.has("custom")} on={eff.addOn.custom} onToggle={(v) => editAddOn("custom", { custom: v })}>
                       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,7rem)] gap-2">
                         <div className="min-w-0 space-y-1">
                           <Label htmlFor="addon-custom-label" className="text-xs">Label</Label>
-                          <Input id="addon-custom-label" value={addOn.customLabel} onChange={(e) => setAddOn({ ...addOn, customLabel: e.target.value })} />
+                          <Input id="addon-custom-label" value={eff.addOn.customLabel} onChange={(e) => editAddOn("custom", { custom: true, customLabel: e.target.value })} />
                         </div>
-                        <NumField id="addon-custom" label="$" value={addOn.customUsd} onChange={(n) => setAddOn({ ...addOn, customUsd: n })} />
+                        <NumField id="addon-custom" label="$" value={eff.addOn.customUsd} onChange={(n) => editAddOn("custom", { custom: true, customUsd: n })} />
                       </div>
                     </AddOnRow>
                   </div>
-                </section>
-
-                <section aria-labelledby="mod-notes" className="min-w-0">
-                  <Label htmlFor="quote-client-notes" id="mod-notes" className="rule-label">Client notes</Label>
-                  <Textarea id="quote-client-notes" className="mt-1 min-h-[88px]" placeholder="What the client asked for (size, pose, finish, deadline)…" value={clientNotes} onChange={(e) => setClientNotes(e.target.value)} data-testid="input-quote-client-notes" />
-                  <Button type="button" variant="outline" className="mt-2 w-full sm:w-auto" disabled={!quote} onClick={copySummary} data-testid="button-quote-copy-summary">
-                    <Copy className="mr-1.5 h-4 w-4" /> Copy quote summary
-                  </Button>
-                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Copies plain text to your clipboard only. Nothing is sent or saved.</p>
                 </section>
               </div>
             </Panel>
@@ -448,7 +605,7 @@ export default function QuotePage() {
           <div className="min-w-0 space-y-4">
             <Panel title="Cost" description="Estimates from mesh volume, layer count, and your settings." testId="panel-quote-cost">
               {!quote ? (
-                <p className="text-sm text-muted-foreground">Add a model to see the cost breakdown.</p>
+                <p className="text-sm font-medium" data-testid="text-quote-cost-empty">Load an STL to price. {unmeasurable && unmeasurable !== "none" ? "The loaded model has no measurable size." : "No model loaded yet."}</p>
               ) : (
                 <div>
                   <Row label="Resin" value={usd(quote.costs.resin)} hint={`${quote.totalResinMl.toFixed(2)} ml incl. support estimate · ${quote.math.resin}`} />
