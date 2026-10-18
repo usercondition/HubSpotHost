@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#171717" />
-  <rect x="5.5" y="5.5" width="21" height="21" rx="5" stroke="#E5E5E5" stroke-width="1.6" opacity="0.45" />
-  <path d="M9 22h14" stroke="#E5E5E5" stroke-width="2.2" stroke-linecap="round" />
-  <path d="M11 17h10" stroke="#E5E5E5" stroke-width="2.2" stroke-linecap="round" opacity="0.8" />
-  <path d="M13 12h6" stroke="#E5E5E5" stroke-width="2.2" stroke-linecap="round" opacity="0.55" />
-  <circle cx="16" cy="8" r="1.7" fill="#E5E5E5" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Print Ops">
+  <rect width="32" height="32" rx="7.0400" fill="#1c1917"/>
+  <path d="M 11.6480 11.6480 A 4.3520 4.3520 0 0 0 20.3520 11.6480 Z" fill="#f59e0b"/>
+  <rect x="10.2400" y="12.5760" width="11.5200" height="1.6000" rx="0.8000" fill="#f59e0b"/>
+  <rect x="9.1200" y="15.1040" width="13.7600" height="1.6000" rx="0.8000" fill="#f59e0b"/>
+  <rect x="8.2240" y="17.6320" width="15.5520" height="1.6000" rx="0.8000" fill="#f59e0b"/>
+  <rect x="7.3920" y="20.1600" width="17.2160" height="1.6000" rx="0.8000" fill="#f59e0b"/>
+  <rect x="6.7040" y="22.6880" width="18.5920" height="1.9200" rx="0.9600" fill="#f59e0b"/>
 </svg>

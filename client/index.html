@@ -3,22 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Print Ops Workspace</title>
+    <title>Print Ops</title>
     <meta
       name="description"
       content="Secure order details form for your print order. Collects delivery details only — no payment is taken here."
     />
     <meta name="robots" content="noindex, nofollow" />
-    <meta property="og:title" content="Order form" />
+    <meta name="application-name" content="Print Ops" />
+    <meta name="apple-mobile-web-app-title" content="Print Ops" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta property="og:title" content="Print Ops" />
     <meta
       property="og:description"
       content="Confirm your print order details for the seller. This form does not take payment."
     />
     <meta property="og:type" content="website" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="./favicon-48x48.png" />
+    <link rel="shortcut icon" href="./favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./site.webmanifest" />
+    <meta name="theme-color" content="#1c1917" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <meta name="theme-color" content="#171717" />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap"
       rel="stylesheet"
@@ -30,7 +41,7 @@
           var isLight = theme === "light";
           document.documentElement.classList.toggle("dark", !isLight);
           var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute("content", isLight ? "#FAFAFA" : "#171717");
+          if (meta) meta.setAttribute("content", isLight ? "#FAFAFA" : "#1c1917");
         } catch (e) {}
       })();
     </script>

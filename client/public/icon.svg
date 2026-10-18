@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="Print Ops">
+  <rect width="512" height="512" rx="112.6400" fill="#1c1917"/>
+  <path d="M 186.3680 186.3680 A 69.6320 69.6320 0 0 0 325.6320 186.3680 Z" fill="#f59e0b"/>
+  <rect x="163.8400" y="201.2160" width="184.3200" height="25.6000" rx="12.8000" fill="#f59e0b"/>
+  <rect x="145.9200" y="241.6640" width="220.1600" height="25.6000" rx="12.8000" fill="#f59e0b"/>
+  <rect x="131.5840" y="282.1120" width="248.8320" height="25.6000" rx="12.8000" fill="#f59e0b"/>
+  <rect x="118.2720" y="322.5600" width="275.4560" height="25.6000" rx="12.8000" fill="#f59e0b"/>
+  <rect x="107.2640" y="363.0080" width="297.4720" height="30.7200" rx="15.3600" fill="#f59e0b"/>
+</svg>
