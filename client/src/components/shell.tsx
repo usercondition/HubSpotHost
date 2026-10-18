@@ -210,7 +210,7 @@ const NAV: Array<{
     group: "Take",
     phone: "more",
   },
-  { href: "/printers", label: "Printers", title: "Printer Fleet", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
+  { href: "/printers", label: "Printers", title: "Printers", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
   { href: "/supplies", label: "Supplies", title: "Supply Spend", icon: ShoppingBag, testId: "link-nav-supplies", group: "Keep", phone: "more" },
   { href: "/expenses", label: "Expenses", title: "Shop overhead", icon: ShoppingBag, testId: "link-nav-expenses", group: "Keep", phone: "more" },
   { href: "/deals", label: "HubSpot board", title: "Full HubSpot stage board", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },

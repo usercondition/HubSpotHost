@@ -15,8 +15,40 @@ import {
   updatePrinter,
 } from "./printers";
 import { firstIssue } from "./validation";
+import { startPrinterRunSchema } from "../../shared/printer-status";
+import { buildStatusBoard, finishPrinterRun, listStartablePlates, startPrinterRun } from "./printer-status";
 
 export function registerPrinterRoutes(app: Express, rejectOwner: (req: Request, res: Response) => boolean) {
+  /**
+   * Printers page: IDLE / PRINTING board. Built only from stored plates and the
+   * owner's started/done marks. Never contacts a printer.
+   */
+  app.get("/api/printers/status", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    try {
+      res.setHeader("cache-control", "no-store");
+      return res.json({ ok: true, ...buildStatusBoard(), plates: listStartablePlates() });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load printer status",
+      });
+    }
+  });
+  app.post("/api/printers/status/:key/start", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const parsed = startPrinterRunSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: firstIssue(parsed.error) });
+    const result = startPrinterRun(String(req.params.key), parsed.data);
+    if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
+    return res.status(201).json({ ok: true, run: result.run, ...buildStatusBoard() });
+  });
+  app.post("/api/printers/status/:key/done", (req, res) => {
+    if (rejectOwner(req, res)) return;
+    const result = finishPrinterRun(String(req.params.key));
+    if (!result.ok) return res.status(result.status).json({ ok: false, error: result.error });
+    return res.json({ ok: true, closed: result.closed, ...buildStatusBoard() });
+  });
   app.get("/api/printers", (req, res) => {
     if (rejectOwner(req, res)) return;
     try {
