@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Loader2, Play, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Layers, Loader2, Moon, Play, RefreshCw, Sparkles, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,9 +10,13 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
+import { PrinterArt } from "@/components/printer-art";
 import {
   buildPrinterStatusBoard,
   formatRemaining,
+  printerArt,
+  shortPrinterName,
+  splitJobLabel,
   type PrinterLiveStatus,
   type PrinterRun,
   type PrinterStatusBoard,
@@ -52,14 +56,47 @@ function StatusBadge({ state, testId }: { state: PrinterLiveStatus["state"]; tes
   const printing = state === "printing";
   return (
     <span
-      className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full px-3.5 text-sm font-bold uppercase tracking-wider ${
+      className={`inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-bold uppercase tracking-wider ${
         printing ? "bg-warn/15 text-warn ring-1 ring-inset ring-warn/40" : "bg-muted text-muted-foreground"
       }`}
       data-testid={testId}
     >
-      <span className={`h-2.5 w-2.5 rounded-full ${printing ? "animate-pulse bg-warn" : "bg-muted-foreground/50"}`} aria-hidden />
+      <span className={`h-2 w-2 rounded-full ${printing ? "animate-pulse bg-warn" : "bg-muted-foreground/50"}`} aria-hidden />
       {printing ? "Printing" : "Idle"}
     </span>
+  );
+}
+
+/** Friendly idle lines, picked by printer so each card keeps its own. */
+const IDLE_LINES = [
+  "Plate's up, vat's ready. Bring on the next one!",
+  "Taking a breather. Ready when you are.",
+  "All clear and waiting for the next masterpiece.",
+  "Napping with one eye open. Start a job to wake it.",
+  "Clean plate, happy printer.",
+];
+function idleLine(key: string): string {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return IDLE_LINES[h % IDLE_LINES.length]!;
+}
+
+function ProgressBar({ pct, label, testId }: { pct: number; label: string; testId: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        className="h-3.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted ring-1 ring-inset ring-border"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+        data-testid={testId}
+      >
+        <div className="printer-progress-fill h-full rounded-full" style={{ width: `${Math.max(pct, 3)}%` }} />
+      </div>
+      <span className="w-12 shrink-0 text-right text-lg font-bold tabular-nums text-warn">{pct}%</span>
+    </div>
   );
 }
 
@@ -158,74 +195,101 @@ function PrinterCard({
   const [starting, setStarting] = useState(false);
   const cur = printer.current;
   const pct = cur?.progress != null ? Math.round(cur.progress * 100) : null;
+  const printing = printer.state === "printing";
+  const art = printerArt(printer);
+  const short = shortPrinterName(printer.name);
+  const brand = /^phrozen\s+sonic\s+/i.test(printer.name) ? "Phrozen Sonic" : "";
+  const split = cur ? (cur.printName ? { printName: cur.printName, clientName: cur.clientName ?? null } : splitJobLabel(cur.jobLabel)) : null;
 
   return (
     <article
-      className={`min-w-0 rounded-lg border bg-card p-4 ${printer.state === "printing" ? "border-warn/40" : "border-border"}`}
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-colors ${printing ? "border-warn/50" : "border-border"}`}
       data-testid={`card-printer-${printer.key}`}
       data-state={printer.state}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="min-w-0 break-words pt-1.5 text-base font-semibold leading-snug">{printer.name}</h2>
-        <StatusBadge state={printer.state} testId={`status-printer-${printer.key}`} />
+      <div className="flex min-w-0 gap-3 p-3 sm:p-4">
+        <div
+          className={`flex w-[5.5rem] shrink-0 items-end justify-center rounded-lg sm:w-28 ${printing ? "printer-art-panel-printing" : "printer-art-panel-idle"}`}
+          data-testid={`art-printer-${printer.key}`}
+        >
+          <PrinterArt art={art} printing={printing} className="h-[6.5rem] w-full sm:h-32" title={`${printer.name} illustration`} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="break-words text-base font-semibold leading-snug" data-testid={`text-printer-name-${printer.key}`}>{short}</h2>
+              {brand ? <p className="truncate text-xs text-muted-foreground">{brand}</p> : null}
+            </div>
+            <StatusBadge state={printer.state} testId={`status-printer-${printer.key}`} />
+          </div>
+
+          {cur && split ? (
+            <div className="mt-2 min-w-0 space-y-1">
+              <p className="text-[0.7rem] font-semibold uppercase tracking-wider text-warn/90">Now printing</p>
+              <p className="line-clamp-2 break-words text-base font-semibold leading-snug" data-testid={`text-job-${printer.key}`} title={cur.jobLabel}>
+                {split.printName || cur.jobLabel}
+              </p>
+              {split.clientName ? (
+                <p className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium" data-testid={`text-client-${printer.key}`}>
+                  <User className="h-3 w-3 shrink-0" aria-hidden />
+                  <span className="truncate">for {split.clientName}</span>
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-2 min-w-0 space-y-1">
+              <p className="flex items-start gap-1.5 text-sm leading-snug" data-testid={`text-idle-${printer.key}`}>
+                <Moon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span>{idleLine(printer.key)}</span>
+              </p>
+              <p className="break-words text-xs text-muted-foreground" data-testid={`text-last-${printer.key}`}>
+                {printer.last ? `Last: ${splitJobLabel(printer.last.jobLabel).printName} · ${printer.last.autoEnded ? "est. done" : "done"} ${clock(printer.last.endedAt, nowMs)}` : "Nothing running"}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      {cur ? (
-        <div className="mt-3 space-y-3">
-          <div className="min-w-0">
-            <p className="break-words text-base font-medium" data-testid={`text-job-${printer.key}`}>{cur.jobLabel}</p>
-            {cur.fileName ? <p className="truncate text-sm text-muted-foreground" title={cur.fileName}>{cur.fileName}</p> : null}
-          </div>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Started</dt>
-              <dd className="tabular-nums" data-testid={`text-started-${printer.key}`}>{clock(cur.startedAt, nowMs)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Done by</dt>
-              <dd className="tabular-nums" data-testid={`text-eta-${printer.key}`}>
+      <div className="mt-auto space-y-3 px-3 pb-3 sm:px-4 sm:pb-4">
+        {cur ? (
+          <>
+            {pct != null ? <ProgressBar pct={pct} label={`${printer.name} progress`} testId={`progress-${printer.key}`} /> : null}
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
+              <span className="inline-flex items-center gap-1.5" data-testid={`text-eta-${printer.key}`}>
+                <Clock className="h-3.5 w-3.5 text-warn" aria-hidden />
                 {cur.etaAt ? (
                   <>
-                    <span className="font-semibold text-warn">{clock(cur.etaAt, nowMs)}</span>
-                    <span className="block text-muted-foreground">{formatRemaining(cur.remainingSeconds)}</span>
+                    <span className="text-muted-foreground">Done by</span>
+                    <span className="font-semibold tabular-nums text-warn">{clock(cur.etaAt, nowMs)}</span>
+                    <span className="tabular-nums text-muted-foreground">· {formatRemaining(cur.remainingSeconds)}</span>
                   </>
                 ) : (
                   <span className="text-muted-foreground">No print time</span>
                 )}
-              </dd>
+              </span>
+              <span className="text-xs tabular-nums text-muted-foreground" data-testid={`text-started-${printer.key}`}>Started {clock(cur.startedAt, nowMs)}</span>
             </div>
-          </dl>
-          {pct != null ? (
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${printer.name} progress`}>
-              <div className="h-full rounded-full bg-warn" style={{ width: `${pct}%` }} />
-            </div>
-          ) : null}
-          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onDone} disabled={busy} data-testid={`button-done-${printer.key}`}>
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-            Done, it's off
-          </Button>
-        </div>
-      ) : (
-        <div className="mt-3">
-          <p className="break-words text-sm text-muted-foreground" data-testid={`text-last-${printer.key}`}>
-            {printer.last ? `Last: ${printer.last.jobLabel} · ${printer.last.autoEnded ? "est. done" : "done"} ${clock(printer.last.endedAt, nowMs)}` : "Nothing running"}
-          </p>
-          {starting ? (
-            <StartForm
-              printer={printer}
-              plates={plates}
-              pending={busy}
-              onStart={(body) => onStart(body)}
-              onCancel={() => setStarting(false)}
-            />
-          ) : (
-            <Button type="button" variant="outline" className="mt-3 min-h-11 w-full" onClick={() => setStarting(true)} data-testid={`button-start-${printer.key}`}>
-              <Play className="mr-2 h-4 w-4" />
-              Start a job
+            {cur.fileName ? <p className="truncate text-xs text-muted-foreground" title={cur.fileName}>{cur.fileName}</p> : null}
+            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onDone} disabled={busy} data-testid={`button-done-${printer.key}`}>
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+              Done, it's off
             </Button>
-          )}
-        </div>
-      )}
+          </>
+        ) : starting ? (
+          <StartForm
+            printer={printer}
+            plates={plates}
+            pending={busy}
+            onStart={(body) => onStart(body)}
+            onCancel={() => setStarting(false)}
+          />
+        ) : (
+          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setStarting(true)} data-testid={`button-start-${printer.key}`}>
+            <Play className="mr-2 h-4 w-4" />
+            Start a job
+          </Button>
+        )}
+      </div>
     </article>
   );
 }
@@ -285,7 +349,29 @@ export default function PrintersPage() {
         : [],
     );
     const live = buildPrinterStatusBoard(board.printers, runs, Math.max(nowMs, Date.parse(board.now) || 0)).printers;
-    return live.map((p, i) => ({ ...p, last: p.current ? null : (p.last ?? board.printers[i]!.last) }));
+    const merged = live.map((p, i) => {
+      const src = board.printers[i]!.current;
+      return {
+        ...p,
+        current: p.current && src ? { ...p.current, printName: src.printName, clientName: src.clientName ?? null } : p.current,
+        last: p.current ? null : (p.last ?? board.printers[i]!.last),
+      };
+    });
+    // Printing first (soonest done on top), then idle in roster order.
+    return merged
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => {
+        const pa = a.p.current ? 0 : 1;
+        const pb = b.p.current ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        if (a.p.current && b.p.current) {
+          const ea = a.p.current.remainingSeconds ?? Number.MAX_SAFE_INTEGER;
+          const eb = b.p.current.remainingSeconds ?? Number.MAX_SAFE_INTEGER;
+          if (ea !== eb) return ea - eb;
+        }
+        return a.i - b.i;
+      })
+      .map(({ p }) => p);
   }, [board, nowMs]);
   const printingCount = printers.filter((p) => p.state === "printing").length;
   const idleCount = printers.length - printingCount;
@@ -335,14 +421,51 @@ export default function PrintersPage() {
           </Panel>
         ) : (
           <>
-            <section className="grid grid-cols-2 gap-3" aria-label="Printer summary" data-testid="printers-summary">
-              <div className="rounded-lg border border-warn/40 bg-warn/10 p-3 sm:p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-warn">Printing</p>
-                <p className="mt-1 text-3xl font-bold tabular-nums text-warn" data-testid="count-printing">{printingCount}</p>
+            <section
+              className="relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5"
+              aria-label="Printer summary"
+              data-testid="printers-summary"
+            >
+              <div className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-warn/10 blur-2xl" aria-hidden />
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#1c1917] ring-1 ring-warn/40">
+                  <Layers className="h-5 w-5 text-warn" aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-base font-semibold leading-snug" data-testid="text-summary-line">
+                    {printingCount === 0
+                      ? "All printers are resting"
+                      : printingCount === printers.length
+                        ? "Every printer is busy!"
+                        : `${printingCount} printing, ${idleCount} ready for more`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {printingCount === 0 ? "Plates up, vats ready. Start a job on any card." : "Layer by layer. Cards with the soonest finish are on top."}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Idle</p>
-                <p className="mt-1 text-3xl font-bold tabular-nums" data-testid="count-idle">{idleCount}</p>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className={`rounded-lg border p-3 ${printingCount > 0 ? "border-warn/40 bg-warn/10" : "border-border bg-background/40 opacity-80"}`}>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-warn">
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden /> Printing
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums text-warn" data-testid="count-printing">{printingCount}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Moon className="h-3.5 w-3.5" aria-hidden /> Idle
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums" data-testid="count-idle">{idleCount}</p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5" aria-hidden>
+                {printers.map((p) => (
+                  <span
+                    key={p.key}
+                    title={`${shortPrinterName(p.name)}: ${p.state}`}
+                    className={`h-2 w-6 rounded-full ${p.state === "printing" ? "bg-warn" : "bg-muted-foreground/30"}`}
+                  />
+                ))}
               </div>
             </section>
 

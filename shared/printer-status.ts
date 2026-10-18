@@ -81,6 +81,10 @@ export type PrinterLiveStatus = StatusRosterPrinter & {
     remainingSeconds: number | null;
     /** 0..1, null when there is no estimate. */
     progress: number | null;
+    /** Print name without the client suffix ("Leman Russ" from "Leman Russ - Alex R."). */
+    printName?: string;
+    /** Client for this job when Print Ops knows it (owner-only page). */
+    clientName?: string | null;
   };
   /** Most recent finished run (marked done, or its estimate ran out). */
   last: null | { jobLabel: string; endedAt: string; autoEnded: boolean };
@@ -173,6 +177,39 @@ export function buildPrinterStatusBoard(
   const printers = roster.map((p) => computePrinterStatus(p, runs, nowMs));
   const printingCount = printers.filter((p) => p.state === "printing").length;
   return { now: new Date(nowMs).toISOString(), printingCount, idleCount: printers.length - printingCount, printers };
+}
+
+/**
+ * Deal names made by Print Ops look like "<item> - <client>" (paid-orders.ts).
+ * Split that into the print name and the client. Anything else stays whole.
+ */
+export function splitJobLabel(label: string | null | undefined): { printName: string; clientName: string | null } {
+  const text = String(label ?? "").trim();
+  const at = text.lastIndexOf(" - ");
+  if (at <= 0) return { printName: text, clientName: null };
+  const printName = text.slice(0, at).trim();
+  const clientName = text.slice(at + 3).trim();
+  // A long tail is more likely part of the item ("Terrain - ruined chapel walls").
+  if (!printName || !clientName || clientName.length > 40 || clientName.split(/\s+/).length > 4 || /\d{2,}/.test(clientName)) {
+    return { printName: text, clientName: null };
+  }
+  return { printName, clientName };
+}
+
+/** Which illustration a printer gets. Uses only the roster key/name. */
+export type PrinterArt = "phrozen-mega" | "phrozen-mighty" | "heygears-reflex" | "generic";
+export function printerArt(printer: { key: string; name?: string }): PrinterArt {
+  const k = `${printer.key} ${printer.name ?? ""}`.toLowerCase();
+  if (k.includes("heygears") || k.includes("reflex") || k.includes("ultracraft")) return "heygears-reflex";
+  if (k.includes("mega")) return "phrozen-mega";
+  if (k.includes("mighty") || k.includes("phrozen")) return "phrozen-mighty";
+  return "generic";
+}
+
+/** Short, friendly name on the card: "Mighty 8K New X1" from "Phrozen Sonic Mighty 8K New X1". */
+export function shortPrinterName(name: string): string {
+  const short = name.replace(/^phrozen\s+sonic\s+/i, "").replace(/\s*\((.+)\)\s*$/, " $1").trim();
+  return short || name;
 }
 
 /** "4h 05m left" / "12m left" / "under 1m left". */
