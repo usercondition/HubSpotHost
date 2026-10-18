@@ -89,7 +89,13 @@ test("ETA already passed and not marked done -> IDLE, last job shown as estimate
   const s = computePrinterStatus(P, [r], NOW);
   assert.equal(s.state, "idle");
   assert.equal(s.current, null);
-  assert.deepEqual(s.last, { jobLabel: "Old plate", endedAt: new Date(NOW - 3_600_000).toISOString(), autoEnded: true });
+  assert.deepEqual(s.last, {
+    jobLabel: "Old plate",
+    startedAt: r.startedAt,
+    endedAt: new Date(NOW - 3_600_000).toISOString(),
+    autoEnded: true,
+    durationSeconds: 4 * 3_600,
+  });
 });
 
 test("marked done -> IDLE even before ETA", () => {

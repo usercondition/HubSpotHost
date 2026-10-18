@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Clock, Layers, Loader2, Moon, Play, RefreshCw, Sparkles, User, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, FileText, Layers, Loader2, Moon, Paperclip, Play, RefreshCw, Sparkles, Upload, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,9 +11,12 @@ import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-o
 import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
 import { PrinterArt } from "@/components/printer-art";
+import { VoiceStart, type VoiceResult } from "@/components/printer-voice";
+import { assignSliceFile, rejectSliceFileReason } from "@/lib/printer-assign";
+import { describeLastRun, describeRunTimes, formatDurationShort, formatHours } from "@shared/printer-times";
 import {
+  ASSIGNABLE_SLICE_EXTENSIONS,
   buildPrinterStatusBoard,
-  formatRemaining,
   printerArt,
   shortPrinterName,
   splitJobLabel,
@@ -26,15 +29,6 @@ import {
 type StatusResponse = PrinterStatusBoard & { ok: true; plates?: StartablePlate[] };
 
 const QUERY_KEY = ["/api/printers/status"];
-
-function clock(iso: string | null, nowMs: number): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return "—";
-  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  const sameDay = new Date(nowMs).toDateString() === d.toDateString();
-  return sameDay ? time : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
-}
 
 function hours(seconds: number | null): string {
   if (!seconds || seconds <= 0) return "no print time";
@@ -177,24 +171,137 @@ function StartForm({
   );
 }
 
+/** Assigned slice file: name, layers, estimated time, start / replace / clear. */
+function AssignedFile({
+  printer,
+  busy,
+  printing,
+  onStartAssigned,
+  onReplace,
+  onClear,
+}: {
+  printer: PrinterLiveStatus;
+  busy: boolean;
+  printing: boolean;
+  onStartAssigned: () => void;
+  onReplace: () => void;
+  onClear: () => void;
+}) {
+  const a = printer.assigned!;
+  const est = formatDurationShort(a.printTimeSeconds);
+  return (
+    <div className="rounded-lg border border-warn/40 bg-warn/5 p-3" data-testid={`assigned-${printer.key}`}>
+      <p className="text-[0.7rem] font-semibold uppercase tracking-wider text-warn/90">{printing ? "Up next" : "File on this printer"}</p>
+      <p className="mt-0.5 flex min-w-0 items-start gap-1.5 text-sm font-semibold" title={a.fileName}>
+        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
+        <span className="min-w-0 break-all" data-testid={`text-assigned-name-${printer.key}`}>{a.fileName}</span>
+      </p>
+      <p className="mt-1 text-xs tabular-nums text-muted-foreground" data-testid={`text-assigned-meta-${printer.key}`}>
+        {a.layerCount != null ? `${a.layerCount.toLocaleString()} layers` : "Layers unknown"}{est ? ` · est. ${est}` : " · no print time in file"}
+        {a.layerHeightMm ? ` · ${Number(a.layerHeightMm.toFixed(3))} mm` : ""}
+      </p>
+      <div className="mt-2 flex gap-2">
+        {printing ? null : (
+          <Button type="button" className="min-h-11 flex-1 bg-warn text-black hover:bg-warn/90" onClick={onStartAssigned} disabled={busy} data-testid={`button-start-assigned-${printer.key}`}>
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+            Start this job{est ? ` (${formatHours(a.printTimeSeconds)})` : ""}
+          </Button>
+        )}
+        <Button type="button" variant="outline" className={`min-h-11 ${printing ? "flex-1" : ""}`} onClick={onReplace} disabled={busy} data-testid={`button-replace-assigned-${printer.key}`}>
+          Replace
+        </Button>
+        <Button type="button" variant="outline" className="min-h-11 min-w-11" onClick={onClear} disabled={busy} aria-label="Clear file" data-testid={`button-clear-assigned-${printer.key}`}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function hasDraggedFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+}
+
 function PrinterCard({
   printer,
   plates,
   nowMs,
   busy,
+  headers,
   onStart,
   onDone,
+  onAssigned,
+  onClear,
 }: {
   printer: PrinterLiveStatus;
   plates: StartablePlate[];
   nowMs: number;
   busy: boolean;
-  onStart: (body: { recordId?: number; jobLabel?: string; estHours?: number }) => void;
+  headers: Record<string, string>;
+  onStart: (body: { recordId?: number; jobLabel?: string; estHours?: number; useAssigned?: boolean }) => void;
   onDone: () => void;
+  onAssigned: (fileName: string) => void;
+  onClear: () => void;
 }) {
   const [starting, setStarting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  const dragDepth = useRef(0);
+  const fileInput = useRef<HTMLInputElement>(null);
   const cur = printer.current;
-  const pct = cur?.progress != null ? Math.round(cur.progress * 100) : null;
+  const times = cur ? describeRunTimes({ startedAt: cur.startedAt, etaAt: cur.etaAt, estSeconds: cur.estSeconds ?? null }, nowMs) : null;
+  const pct = times?.pct ?? null;
+  const lastTimes = !cur && printer.last ? describeLastRun(printer.last, nowMs) : null;
+
+  async function takeFile(file: File | undefined | null) {
+    if (!file) return;
+    const reason = rejectSliceFileReason(file.name);
+    if (reason) {
+      setAssignError(reason);
+      return;
+    }
+    setAssignError("");
+    setUploading(true);
+    try {
+      await assignSliceFile(printer.key, file, headers);
+      setStarting(false);
+      onAssigned(file.name);
+    } catch (error) {
+      setAssignError(error instanceof Error ? error.message : "Could not read that slice file.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const dropHandlers = {
+    onDragEnter: (event: DragEvent) => {
+      if (!hasDraggedFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      setDragOver(true);
+    },
+    onDragOver: (event: DragEvent) => {
+      if (!hasDraggedFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      if (!dragOver) setDragOver(true);
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (!hasDraggedFiles(event)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragOver(false);
+    },
+    onDrop: (event: DragEvent) => {
+      if (!hasDraggedFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current = 0;
+      setDragOver(false);
+      const files = Array.from(event.dataTransfer.files ?? []);
+      if (files.length > 1) setAssignError("One file per printer. Using the first one.");
+      void takeFile(files[0]);
+    },
+  };
   const printing = printer.state === "printing";
   const art = printerArt(printer);
   const short = shortPrinterName(printer.name);
@@ -203,10 +310,35 @@ function PrinterCard({
 
   return (
     <article
-      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-colors ${printing ? "border-warn/50" : "border-border"}`}
+      className={`relative flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-colors ${
+        dragOver ? "border-warn ring-2 ring-warn ring-offset-2 ring-offset-background" : printing ? "border-warn/50" : "border-border"
+      }`}
       data-testid={`card-printer-${printer.key}`}
       data-state={printer.state}
+      data-dragover={dragOver ? "true" : undefined}
+      {...dropHandlers}
     >
+      {dragOver ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/85 text-center" data-testid={`dropzone-${printer.key}`}>
+          <Upload className="h-8 w-8 text-warn" aria-hidden />
+          <p className="text-base font-semibold">Drop to put it on {short}</p>
+          <p className="text-xs text-muted-foreground">{ASSIGNABLE_SLICE_EXTENSIONS.join(" / ")} slice files</p>
+        </div>
+      ) : null}
+      <input
+        ref={fileInput}
+        type="file"
+        accept={ASSIGNABLE_SLICE_EXTENSIONS.join(",")}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          void takeFile(file);
+        }}
+        data-testid={`input-assign-file-${printer.key}`}
+      />
       <div className="flex min-w-0 gap-3 p-3 sm:p-4">
         <div
           className={`flex w-[5.5rem] shrink-0 items-end justify-center rounded-lg sm:w-28 ${printing ? "printer-art-panel-printing" : "printer-art-panel-idle"}`}
@@ -243,7 +375,15 @@ function PrinterCard({
                 <span>{idleLine(printer.key)}</span>
               </p>
               <p className="break-words text-xs text-muted-foreground" data-testid={`text-last-${printer.key}`}>
-                {printer.last ? `Last: ${splitJobLabel(printer.last.jobLabel).printName} · ${printer.last.autoEnded ? "est. done" : "done"} ${clock(printer.last.endedAt, nowMs)}` : "Nothing running"}
+                {printer.last && lastTimes
+                  ? [
+                      `Last: ${splitJobLabel(printer.last.jobLabel).printName}`,
+                      lastTimes.duration ? `ran ${lastTimes.duration}` : "",
+                      lastTimes.ended ? `${printer.last.autoEnded ? "est. ended" : "ended"} ${lastTimes.ended}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : "Nothing running yet"}
               </p>
             </div>
           )}
@@ -254,28 +394,63 @@ function PrinterCard({
         {cur ? (
           <>
             {pct != null ? <ProgressBar pct={pct} label={`${printer.name} progress`} testId={`progress-${printer.key}`} /> : null}
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
-              <span className="inline-flex items-center gap-1.5" data-testid={`text-eta-${printer.key}`}>
-                <Clock className="h-3.5 w-3.5 text-warn" aria-hidden />
-                {cur.etaAt ? (
+            {times ? (
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm" data-testid={`times-${printer.key}`}>
+                <div className="min-w-0">
+                  <dt className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">Started</dt>
+                  <dd className="font-medium tabular-nums" data-testid={`text-started-${printer.key}`}>{times.started || "—"}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">Finish</dt>
+                  <dd className={`font-semibold tabular-nums ${times.hasEstimate ? "text-warn" : "text-muted-foreground"}`} data-testid={`text-eta-${printer.key}`}>
+                    <Clock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden />
+                    {times.finish}
+                  </dd>
+                </div>
+                {times.hasEstimate ? (
                   <>
-                    <span className="text-muted-foreground">Done by</span>
-                    <span className="font-semibold tabular-nums text-warn">{clock(cur.etaAt, nowMs)}</span>
-                    <span className="tabular-nums text-muted-foreground">· {formatRemaining(cur.remainingSeconds)}</span>
+                    <div className="min-w-0">
+                      <dt className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">Total est.</dt>
+                      <dd className="tabular-nums" data-testid={`text-total-${printer.key}`}>{times.total}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">Time left</dt>
+                      <dd className="font-medium tabular-nums" data-testid={`text-left-${printer.key}`}>{times.left}</dd>
+                    </div>
                   </>
                 ) : (
-                  <span className="text-muted-foreground">No print time</span>
+                  <p className="col-span-2 text-xs text-muted-foreground" data-testid={`text-no-estimate-${printer.key}`}>No print time on this job, so there's no countdown. Tap Done when it's off.</p>
                 )}
-              </span>
-              <span className="text-xs tabular-nums text-muted-foreground" data-testid={`text-started-${printer.key}`}>Started {clock(cur.startedAt, nowMs)}</span>
-            </div>
+              </dl>
+            ) : null}
             {cur.fileName ? <p className="truncate text-xs text-muted-foreground" title={cur.fileName}>{cur.fileName}</p> : null}
             <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onDone} disabled={busy} data-testid={`button-done-${printer.key}`}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
               Done, it's off
             </Button>
           </>
-        ) : starting ? (
+        ) : null}
+        {printer.assigned ? (
+          <AssignedFile
+            printer={printer}
+            busy={busy || uploading}
+            printing={printing}
+            onStartAssigned={() => onStart({ useAssigned: true })}
+            onReplace={() => fileInput.current?.click()}
+            onClear={onClear}
+          />
+        ) : null}
+        {assignError ? (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" data-testid={`text-assign-error-${printer.key}`}>
+            {assignError}
+          </p>
+        ) : null}
+        {uploading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" data-testid={`text-assign-reading-${printer.key}`}>
+            <Loader2 className="h-4 w-4 animate-spin" /> Reading slice file…
+          </p>
+        ) : null}
+        {cur ? null : starting ? (
           <StartForm
             printer={printer}
             plates={plates}
@@ -284,11 +459,27 @@ function PrinterCard({
             onCancel={() => setStarting(false)}
           />
         ) : (
-          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setStarting(true)} data-testid={`button-start-${printer.key}`}>
-            <Play className="mr-2 h-4 w-4" />
-            Start a job
-          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" className="min-h-11 flex-1" onClick={() => setStarting(true)} data-testid={`button-start-${printer.key}`}>
+              <Play className="mr-2 h-4 w-4" />
+              {printer.assigned ? "Other job" : "Start a job"}
+            </Button>
+            {printer.assigned ? null : (
+              <Button type="button" variant="outline" className="min-h-11 flex-1" onClick={() => fileInput.current?.click()} disabled={uploading} data-testid={`button-assign-file-${printer.key}`}>
+                <Paperclip className="mr-2 h-4 w-4" />
+                Assign file
+              </Button>
+            )}
+          </div>
         )}
+        {!printer.assigned && !cur && !starting ? (
+          <p className="hidden text-center text-xs text-muted-foreground sm:block" data-testid={`text-drop-hint-${printer.key}`}>or drag a {ASSIGNABLE_SLICE_EXTENSIONS.join(" / ")} onto this card</p>
+        ) : null}
+        {!printer.assigned && cur ? (
+          <button type="button" className="min-h-11 w-full text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => fileInput.current?.click()} disabled={uploading} data-testid={`button-assign-file-${printer.key}`}>
+            Queue the next file here
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -304,6 +495,19 @@ export default function PrintersPage() {
   const nowMs = useNow();
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
+  // A file dropped beside a card shouldn't make the browser navigate away and open it.
+  useEffect(() => {
+    const stop = (event: globalThis.DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes("Files")) event.preventDefault();
+    };
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+
   const status = useQuery<StatusResponse>({
     queryKey: [...QUERY_KEY, ownerCode],
     enabled: isUnlocked,
@@ -315,9 +519,12 @@ export default function PrintersPage() {
   });
 
   const act = useMutation({
-    mutationFn: async ({ key, action, body }: { key: string; action: "start" | "done"; body?: unknown }) => {
+    mutationFn: async ({ key, action, body }: { key: string; action: "start" | "done" | "clear"; body?: unknown }) => {
       setBusyKey(key);
-      const response = await apiRequest("POST", `/api/printers/status/${encodeURIComponent(key)}/${action}`, body ?? {}, { headers });
+      const response =
+        action === "clear"
+          ? await apiRequest("DELETE", `/api/printers/status/${encodeURIComponent(key)}/assign`, undefined, { headers })
+          : await apiRequest("POST", `/api/printers/status/${encodeURIComponent(key)}/${action}`, body ?? {}, { headers });
       return response.json();
     },
     onSettled: () => {
@@ -343,7 +550,9 @@ export default function PrintersPage() {
             jobLabel: p.current.jobLabel,
             fileName: p.current.fileName,
             startedAt: p.current.startedAt,
-            estSeconds: p.current.etaAt ? Math.round((Date.parse(p.current.etaAt) - Date.parse(p.current.startedAt)) / 1000) : null,
+            estSeconds:
+              p.current.estSeconds ??
+              (p.current.etaAt ? Math.round((Date.parse(p.current.etaAt) - Date.parse(p.current.startedAt)) / 1000) : null),
             finishedAt: null,
           }]
         : [],
@@ -373,6 +582,13 @@ export default function PrintersPage() {
       })
       .map(({ p }) => p);
   }, [board, nowMs]);
+  function onVoiceStarted(result: VoiceResult) {
+    toast({
+      title: `${shortPrinterName(result.printerName ?? "Printer")} started`,
+      description: result.estHours ? `Estimated ${result.estHours} from the assigned file.` : "Started from the assigned file.",
+    });
+    void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  }
   const printingCount = printers.filter((p) => p.state === "printing").length;
   const idleCount = printers.length - printingCount;
 
@@ -469,6 +685,10 @@ export default function PrintersPage() {
               </div>
             </section>
 
+            <section className="rounded-xl border border-border bg-card p-3 sm:p-4" aria-label="Voice start" data-testid="section-voice">
+              <VoiceStart headers={headers} onStarted={onVoiceStarted} />
+            </section>
+
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="list-printers">
               {printers.map((printer) => (
                 <PrinterCard
@@ -477,8 +697,14 @@ export default function PrintersPage() {
                   plates={board.plates ?? []}
                   nowMs={nowMs}
                   busy={busyKey === printer.key && act.isPending}
+                  headers={headers}
                   onStart={(body) => act.mutate({ key: printer.key, action: "start", body })}
                   onDone={() => act.mutate({ key: printer.key, action: "done" })}
+                  onAssigned={(fileName) => {
+                    toast({ title: `File on ${shortPrinterName(printer.name)}`, description: fileName });
+                    void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+                  }}
+                  onClear={() => act.mutate({ key: printer.key, action: "clear" })}
                 />
               ))}
             </section>
