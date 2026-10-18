@@ -326,13 +326,13 @@ export function overallDims(parts: Array<Pick<QuotePart, "bbox">>): Dims {
   };
 }
 
-export type TargetSizeMode = "percent" | "height" | "longest";
+export type TargetSizeMode = "percent" | "height" | "longest" | "width" | "depth";
 
 /** Uniform scale factor from a target (aspect locked). Returns 1 for empty/invalid input. */
 export function scaleForTarget(mode: TargetSizeMode, value: number, dims: Dims): number {
   if (!Number.isFinite(value) || value <= 0) return 1;
   if (mode === "percent") return value / 100;
-  const base = mode === "height" ? dims.z : Math.max(dims.x, dims.y, dims.z);
+  const base = mode === "height" ? dims.z : mode === "width" ? dims.x : mode === "depth" ? dims.y : Math.max(dims.x, dims.y, dims.z);
   return base > 0 ? value / base : 1;
 }
 
@@ -524,12 +524,21 @@ export function searchTermFromFileName(fileName: string): string {
   return core ? `${core} resin print` : "resin print miniature";
 }
 
+/** A model with no measurable size (empty, broken, or exported in meters) cannot be priced. */
+export function unmeasurableReason(parts: Array<Pick<QuotePart, "bbox" | "volumeMl">>): string | null {
+  if (parts.length === 0) return "none";
+  const d = overallDims(parts);
+  const ml = parts.reduce((s, p) => s + p.volumeMl, 0);
+  if (Math.max(d.x, d.y, d.z) < 1 || ml < 0.001) return `${formatDims(d)}, ${ml.toFixed(2)} ml`;
+  return null;
+}
+
 export function formatDims(d: Dims): string {
   return `${d.x.toFixed(1)} × ${d.y.toFixed(1)} × ${d.z.toFixed(1)} mm`;
 }
 
 /** Plain-text quote summary for the clipboard. Nothing is sent anywhere. */
-export function buildQuoteSummary(input: { items: string[]; quote: QuoteResult; hollow: boolean; clientNotes: string; suggested?: SuggestedPrice | null }): string {
+export function buildQuoteSummary(input: { items: string[]; quote: QuoteResult; hollow: boolean; clientNotes: string; suggested?: SuggestedPrice | null; notesLines?: string[] }): string {
   const q = input.quote;
   const lines = [
     `Quote: ${input.items.join(", ")}`,
@@ -542,5 +551,6 @@ export function buildQuoteSummary(input: { items: string[]; quote: QuoteResult; 
   if (input.suggested) lines.push(`Suggested price: $${input.suggested.price.toFixed(2)}`);
   lines.push("Postage at label cost.");
   if (input.clientNotes.trim()) lines.push("", "Client notes:", input.clientNotes.trim());
+  if (input.notesLines?.length) lines.push(...(input.clientNotes.trim() ? [] : [""]), ...input.notesLines);
   return lines.join("\n");
 }
