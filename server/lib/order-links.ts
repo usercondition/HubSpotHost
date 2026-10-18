@@ -651,6 +651,22 @@ function ensurePlateFileColumns(sqlite: Database.Database): void {
   if (!existing.has("mesh_version")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN mesh_version INTEGER NOT NULL DEFAULT 0`);
   if (!existing.has("stl_drive_file_id")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_drive_file_id TEXT NOT NULL DEFAULT ''`);
   if (!existing.has("stl_web_view_link")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN stl_web_view_link TEXT NOT NULL DEFAULT ''`);
+  if (!existing.has("drive_folder")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN drive_folder TEXT`);
+  if (!existing.has("drive_thumb_key")) sqlite.exec(`ALTER TABLE plate_files ADD COLUMN drive_thumb_key TEXT NOT NULL DEFAULT ''`);
+  /** Library Drive folder copies merged into one Library item (one plate = one item). */
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS plate_file_drive_copies (
+    copy_id TEXT PRIMARY KEY,
+    drive_file_id TEXT NOT NULL,
+    web_view_link TEXT NOT NULL DEFAULT '',
+    folder TEXT NOT NULL DEFAULT '',
+    size_bytes INTEGER,
+    modified_at TEXT,
+    matched_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS plate_file_drive_copies_file_idx ON plate_file_drive_copies (drive_file_id)`);
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS plate_library_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
 }
 
 function ensureDownloadTicketSchema(sqlite: Database.Database): void {
