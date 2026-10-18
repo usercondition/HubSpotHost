@@ -63,6 +63,8 @@ import { PageHeader } from "@/components/shell";
 import { Panel, StatCard, StatusPill } from "@/components/primitives";
 import { PlateBitsPanel, type PlateBitSummary } from "@/components/plate-bits-panel";
 import { Link } from "wouter";
+import { PcOnlyNote } from "@/components/pc-only";
+import { useIsPhone } from "@/hooks/use-is-phone";
 import type {
   PrintFileCandidateDeal,
   PrintFileDealBoard,
@@ -275,6 +277,7 @@ export default function Prints() {
   const dealNameRef = useRef("");
   const awaitingLogsRefreshRef = useRef(false);
   const { ownerCode, isUnlocked, headers } = useOwnerSession();
+  const isPhone = useIsPhone();
   const librarySend = useSendPlateToLibrary(headers);
   const unlock = useOwnerUnlock({
     successTitle: 'Print files unlocked',
@@ -854,6 +857,9 @@ export default function Prints() {
           </Panel>
         ) : (
           <>
+            {/* Plate upload, slicer logs, resin rate and cost defaults are PC work; phones get plate status only. */}
+            {!isPhone ? (
+            <>
             <section className="rounded-lg border border-primary/25 bg-primary/5 p-4" aria-label="Multi-plate workflow" data-testid="panel-multi-plate-guidance">
               <div className="flex items-start gap-3">
                 <Layers3 className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -1534,6 +1540,15 @@ export default function Prints() {
                 ) : null}
               </section>
             ) : null}
+            </>
+            ) : (
+              <PcOnlyNote
+                className="mx-0 mt-0"
+                testId="note-pc-only-plates"
+                what="Uploading .ctb / .ultx plates, Blueprint logs and cost defaults"
+                detail="happen on the PC. Below: the plates already attached to each order, plus part QC."
+              />
+            )}
 
             <Panel
               title="Order plate boards"
@@ -1668,7 +1683,11 @@ export default function Prints() {
 
             <Panel
               title="Recent plate history"
-              description="Each attached slice file is a plate on an active order. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
+              description={
+                isPhone
+                  ? "Each attached slice file is a plate on an active order. Mark parts good or reprint as they come off."
+                  : "Each attached slice file is a plate on an active order. Drop the .stl parts that were on that plate to track good vs reprint and preview meshes locally."
+              }
             >
               {dealId && (hiddenOtherDealCount > 0 || showAllPlateHistory) ? (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

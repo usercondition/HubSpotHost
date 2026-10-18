@@ -973,6 +973,25 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const checkLibrary = async (label: string) => {
       await page.goto(`${base}/#/library`, { waitUntil: "domcontentloaded" });
       const root = current();
+      if (label === "phone") {
+        // The slice library is PC work: phones get a short note instead of the page, and no Prints | Library switch.
+        await root.locator("[data-testid='note-pc-only']").waitFor();
+        const note = await root.locator("[data-testid='note-pc-only']").innerText();
+        check(/Do this on your PC/.test(note), `phone library note was ${note}`);
+        check((await root.locator("[data-testid='note-pc-only-alt']").getAttribute("href"))?.endsWith("/prints") ?? false, "phone library note does not link to plates");
+        check((await root.locator("[data-testid='library-row-file-castigator']").count()) === 0, "phone still renders the library list");
+        check((await page.locator("[data-testid='switch-prints-library']").count()) === 0, "phone Prints | Library switch still shows");
+        const pageScroll = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, inner: window.innerWidth }));
+        check(pageScroll.width <= pageScroll.inner + 1, `phone library scrolls horizontally (${pageScroll.width} > ${pageScroll.inner})`);
+        const tabLabels = await page.locator(".ops-tabbar > .ops-tab").evaluateAll((els) =>
+          els.map((el) => {
+            const spans = [...el.querySelectorAll(":scope > span")];
+            return (spans[spans.length - 1]?.textContent || "").trim();
+          }),
+        );
+        check(tabLabels.join("|") === "Work hub|Inbox|Printers|Print queue|More", `phone tabs were ${tabLabels.join("|")}`);
+        return;
+      }
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
       await root.locator("[data-testid='library-row-file-raider']").waitFor();
       const sizes = await root.locator("[data-testid='library-file-size']").evaluateAll((els) =>
@@ -1006,36 +1025,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
       const empty = await root.locator("[data-testid='text-library-empty']").innerText();
       check(/Upload/.test(empty) && /Google Drive/.test(empty), `${label} empty library copy was ${empty}`);
       check(!/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(empty), `${label} empty library has dev text`);
-      const switchCount = await page.locator("[data-testid='switch-prints-library']").evaluateAll((els) =>
-        els.filter((el) => el.getClientRects().length > 0).length,
-      );
-      if (label === "phone") {
-        check(switchCount === 1, "phone Prints | Library switch is missing");
-        const segments = await page.locator("[data-testid='switch-prints-library'] a").evaluateAll((els) =>
-          els.filter((el) => el.getClientRects().length > 0).map((el) => ({
-            text: (el.textContent || "").trim(),
-            active: el.getAttribute("data-active"),
-            right: el.getBoundingClientRect().right,
-            height: el.getBoundingClientRect().height,
-          })),
-        );
-        check(segments.map((segment) => segment.text).join("|") === "Prints|Library", `phone switch was ${segments.map((segment) => segment.text).join("|")}`);
-        check(segments[1]?.active === "true", "phone Library segment is not selected");
-        check(segments.every((segment) => segment.height >= 32 && segment.height <= 40), `phone switch height was ${segments.map((segment) => segment.height).join(",")}`);
-        const inner = await page.evaluate(() => window.innerWidth);
-        check(segments.every((segment) => segment.right <= inner + 1), "phone switch runs off screen");
-        const printsTab = await page.locator("[data-testid='link-phone-prints']").getAttribute("data-active");
-        check(printsTab === "true", "phone Prints tab is not selected on Library");
-        const tabLabels = await page.locator(".ops-tabbar > .ops-tab").evaluateAll((els) =>
-          els.map((el) => {
-            const spans = [...el.querySelectorAll(":scope > span")];
-            return (spans[spans.length - 1]?.textContent || "").trim();
-          }),
-        );
-        check(tabLabels.join("|") === "Work hub|Priority|Print queue|Prints|More", `phone tabs were ${tabLabels.join("|")}`);
-      } else {
-        check(switchCount === 0, "desktop shows the phone Prints | Library switch");
-      }
+      check((await page.locator("[data-testid='switch-prints-library']").count()) === 0, "desktop shows the phone Prints | Library switch");
       await page.goto(`${base}/#/stack`, { waitUntil: "domcontentloaded" });
       await page.goto(`${base}/#/library?kit=${encodeURIComponent("Castigator")}`, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelectorAll("[data-testid='page-transition']").length === 1);
@@ -1446,9 +1436,14 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
 
     await page.getByTestId("button-mobile-nav-more").click();
     await page.waitForSelector("[data-testid='panel-mobile-more']");
-    const moreText = await page.locator("[data-testid='panel-mobile-more']").innerText();
-    assert.equal(/\bOrders\b/.test(moreText), false);
-    assert.equal(/\bLibrary\b/.test(moreText), false);
+    const moreLinks = (await page.locator("[data-testid='panel-mobile-more'] a").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+    const moreHeads = (await page.locator("[data-testid='panel-mobile-more'] .ops-rail-label").allInnerTexts()).map((t) => t.trim().toLowerCase());
+    // PC-only pages never show on the phone; More is grouped by on-the-go task.
+    for (const pcOnly of ["Orders", "Library", "HubSpot board", "Profit", "Setup"]) {
+      assert.equal(moreLinks.some((t) => t === pcOnly || t.startsWith(`${pcOnly} `)), false, `phone More lists ${pcOnly}: ${moreLinks.join("|")}`);
+    }
+    assert.deepEqual(moreHeads.slice(0, 3), ["orders", "make", "shop"]);
+    assert.ok(moreLinks.some((t) => t.startsWith("Priority")), `phone More is missing Priority: ${moreLinks.join("|")}`);
     await page.getByTestId("button-mobile-nav-more").click();
     await page.locator("[data-testid='panel-mobile-more']").waitFor({ state: "hidden" });
 
@@ -1627,18 +1622,13 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(phoneQueueTitle === "Order q1", `phone queue title still includes the client: ${phoneQueueTitle}`);
 
     await page.goto(`${base}/#/deals`, { waitUntil: "domcontentloaded" });
-    await current().locator("[data-testid='text-orders-phone']").first().waitFor();
+    // The full HubSpot board is PC-only: phones get the "Do this on your PC" note with a Priority link.
+    await current().locator("[data-testid='note-pc-only']").first().waitFor();
     if (artifactPath("orders-phone-390.png")) {
       await page.screenshot({ path: artifactPath("orders-phone-390.png")!, fullPage: true });
     }
-    const dealRefresh = await page.locator("[data-testid='button-refresh-deals']").evaluateAll((els) =>
-      els.map((el) => getComputedStyle(el).display),
-    );
-    check(dealRefresh.length > 0 && dealRefresh.every((display) => display === "none"), `phone orders refresh displays: ${dealRefresh.join(",")}`);
-    const dealHubspot = await page.locator("[data-testid='button-open-hubspot-deals']").evaluateAll((els) =>
-      els.map((el) => getComputedStyle(el).display),
-    );
-    check(dealHubspot.some((display) => display !== "none"), "phone orders HubSpot link is hidden");
+    check((await current().locator("[data-testid='note-pc-only-alt']").first().getAttribute("href"))?.endsWith("/stack") ?? false, "phone HubSpot board note does not link to Priority");
+    check((await page.locator("[data-testid='button-refresh-deals']").count()) === 0, "phone still renders the HubSpot board");
     await page.locator("[data-testid='button-refresh-workspace-mobile']").waitFor();
 
     await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });

@@ -13,6 +13,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { floorWorkHref, labelsDealHref, readHashQueryParam } from "@/lib/workflow";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/hooks/use-is-phone";
 import {
   buyerTrackingEmailSubject,
   buyerTrackingMailtoHref,
@@ -86,6 +87,7 @@ export default function ShippingLabelsPage() {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
+  const isPhone = useIsPhone();
   const unlock = useOwnerUnlock({
     successTitle: "Labels unlocked",
     successDescription: "Buy ShipEngine labels or drop PDFs to pull tracking onto Print Orders.",
@@ -658,6 +660,8 @@ export default function ShippingLabelsPage() {
               description="Buy in Print Ops, or attach a PDF you already bought — one place."
               testId="panel-labels-ship"
             >
+              {/* Attach PDF (drop a Pirate Ship / ShipStation export) is PC work; phones buy only. */}
+              {isPhone ? null : (
               <div
                 className="mb-3 flex flex-wrap gap-1 rounded-md border border-border/60 bg-muted/25 p-1"
                 data-testid="panel-labels-mode"
@@ -689,8 +693,9 @@ export default function ShippingLabelsPage() {
                   Attach PDF
                 </button>
               </div>
+              )}
 
-              {labelMode === "buy" ? (
+              {labelMode === "buy" || isPhone ? (
                 <ShipEngineBuyPanel
                   embedded
                   headers={headers}

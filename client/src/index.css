@@ -2447,3 +2447,16 @@
 @media (prefers-reduced-motion: reduce) {
   .pa-plate, .pa-uv, .pa-screen, .pa-zzz, .pa-spark, .printer-progress-fill { animation: none; }
 }
+
+/* Phones: selects and textareas that carry text-xs / text-sm utilities still need 16px
+   (iOS zooms the page on focus below 16px). Desktop is untouched. */
+@media (max-width: 767px) {
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  /* The grouped phone More sheet: show more of it before it scrolls. */
+  .ops-more-sheet {
+    max-height: min(75dvh, 600px);
+  }
+}

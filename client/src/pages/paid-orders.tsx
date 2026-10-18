@@ -32,6 +32,7 @@ import { ShippingAddressFields } from "@/components/shipping-address-fields";
 import type { CaptureCheck } from "@shared/address-capture";
 import type { ShipAddressFields } from "@shared/ship-address";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/hooks/use-is-phone";
 import type {
   PaidOrderAnalysis,
   PaidOrderCreateResult,
@@ -77,6 +78,7 @@ function parseAmount(value: string): number {
 export default function PaidOrders() {
   const { toast } = useToast();
   const { isUnlocked, headers } = useOwnerSession();
+  const isPhone = useIsPhone();
   const unlock = useOwnerUnlock({
     successTitle: 'Manual entry unlocked',
     successDescription: 'Enter the paid order details, confirm payment, then create in HubSpot.',
@@ -451,11 +453,13 @@ export default function PaidOrders() {
             <section className="rounded-md border border-card-border bg-card px-4 py-3" data-testid="panel-manual-intro">
               <p className="text-sm text-muted-foreground">
                 Fill the form below for a paid Marketplace (or other) order. Prefer{" "}
-                <Link href="/orders" className="hs-link font-medium">
+                <Link href="/orders" className="hs-link tap-ext font-medium">
                   Intake
                 </Link>{" "}
                 when the buyer still needs a details link. Conversation paste is optional assist only.
               </p>
+              {/* Chrome helper install is desktop Chrome only. */}
+              {isPhone ? null : (
               <div
                 className="mt-3 rounded-md border border-border bg-muted/25 px-3 py-2.5 text-xs text-muted-foreground"
                 data-testid="panel-messenger-extension-install"
@@ -490,6 +494,7 @@ export default function PaidOrders() {
                   If Meta’s UI breaks the scrape, tell me what you saw — we improve or remove.
                 </p>
               </div>
+              )}
             </section>
 
             <Panel

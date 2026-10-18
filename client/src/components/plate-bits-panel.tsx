@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StlPreview } from "@/components/stl-preview";
+import { useIsPhone } from "@/hooks/use-is-phone";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import {
@@ -85,6 +86,7 @@ export function PlateBitsPanel({
   headers: Record<string, string>;
   onChanged: (next: { bits: PrintPlateBit[]; bitSummary: PlateBitSummary }) => void;
 }) {
+  const isPhone = useIsPhone();
   const [bits, setBits] = useState(initialBits);
   const [summary, setSummary] = useState(initialSummary);
   const [dragActive, setDragActive] = useState(false);
@@ -319,6 +321,8 @@ export function PlateBitsPanel({
         ) : null}
       </div>
 
+      {/* Adding STLs is a PC job (files live on the PC); phones keep the QC list below. */}
+      {isPhone ? null : (
       <div
         className={cn(
           "rounded-md border border-dashed px-3 py-2.5 transition-colors",
@@ -382,6 +386,7 @@ export function PlateBitsPanel({
           </label>
         </div>
       </div>
+      )}
 
       {note ? (
         <p className="text-xs text-muted-foreground" data-testid={`text-plate-bits-note-${recordId}`}>
