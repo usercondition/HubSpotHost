@@ -12,7 +12,7 @@
    - Commit drops rows not in the new generation; an empty push never wipes the index.
 4. `GET /api/files?q=&cat=&offset=&limit=` (owner code) returns results with thumbnails inline as `data:` URLs, so there is no unauthenticated image route.
 
-Storage: `drive-files.db` next to the other SQLite files on the `/data` volume (`DRIVE_FILES_DB_FILE` overrides). Expect ~60-80 MB for ~35k rows and ~7k thumbnails.
+Storage: `drive-files.db` next to the other SQLite files on the `/data` volume (`DRIVE_FILES_DB_FILE` overrides). Expect ~60-80 MB for ~35k Drive rows and ~7k thumbnails; with the shop source (~44k rows + ~7.8k thumbnails after the first night) the local copy was ~265 MB including WAL.
 
 ## Search
 
@@ -58,4 +58,4 @@ Shop drives: after deploy, run `/usr/bin/python3 ~/.hermes/scripts/shop_files_sy
 1. Railway: set `FILES_SYNC_TOKEN` (random, 32+ chars).
 2. Mac mini: write the same value to `~/.hermes/secrets/print-ops-files-sync-token` (0600), run `/usr/bin/python3 ~/.hermes/scripts/drive_files_sync.py`, then schedule it after `com.home.drive-thumbs`.
 
-Screenshots (local build, synced from a real business-only index subset): `docs/screenshots/files/`.
+Screenshots (local build, synced from a real business-only index subset): `docs/screenshots/files/` (08-10: shop drives + close spellings, from the real 34,986 Drive + 43,611 shop rows).

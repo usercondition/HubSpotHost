@@ -55,7 +55,8 @@ IMG_EXT = {"jpg", "jpeg", "png", "webp"}
 ARCHIVE_EXT = {"zip", "rar", "7z"}
 PREF_IMG = re.compile(r"(preview|render|cover|thumb|main|promo|front|box|banner|showcase)", re.I)
 BAD_IMG = re.compile(r"(scale|size|chart|guide|instruction|logo|qr|support|layout|plate)", re.I)
-TYPE_LABEL = [("stl", "STL"), ("lys", "LYS"), ("chitubox", "sliced"), ("archive", "archives"), ("image", "images")]
+TYPE_LABEL = [("stl", "STL", "STL"), ("lys", "LYS", "LYS"), ("chitubox", "sliced", "sliced"), ("archive", "archive", "archives"),
+              ("image", "image", "images")]
 STOP = {"stl", "lys", "obj", "the", "and", "for", "with", "supported", "presupported", "unsupported", "copy", "part",
         "parts", "file", "files", "jpg", "png", "zip"}
 
@@ -303,7 +304,7 @@ def build_thumbs(dirs, archives, state, a):
 
 
 def types_label(t):
-    parts = [f"{t[k]:,} {lab}" for k, lab in TYPE_LABEL if t.get(k)]
+    parts = [f"{t[k]:,} {one if t[k] == 1 else many}" for k, one, many in TYPE_LABEL if t.get(k)]
     return " · ".join(parts)[:80]
 
 

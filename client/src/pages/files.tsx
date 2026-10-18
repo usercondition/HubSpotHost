@@ -78,7 +78,7 @@ function Thumb({ f, className }: { f: DriveFileView; className?: string }) {
 
 export default function FilesPage() {
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
-  const unlock = useOwnerUnlock({ successTitle: "Files unlocked", successDescription: "Business Drive files only." });
+  const unlock = useOwnerUnlock({ successTitle: "Files unlocked", successDescription: "Business files only (Drive + shop drives)." });
   const params = useHashParams();
   const urlQ = params.get("q") ?? "";
   const urlCatRaw = params.get("cat");
