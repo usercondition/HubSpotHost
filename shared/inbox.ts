@@ -7,7 +7,9 @@
  * without breaking the push.
  */
 
-export type InboxMessage = { who: string; when: string; at: string | null; text: string };
+/** Photo / video / sticker / file on a message. `thumb` is a (short-lived) FB CDN thumbnail when the Mac captured one. */
+export type InboxAttachment = { kind: "image" | "video" | "sticker" | "file" | "attachment"; thumb: string; url: string; label: string };
+export type InboxMessage = { who: string; when: string; at: string | null; text: string; attachments?: InboxAttachment[] };
 
 export type InboxAnalysis = {
   summary: string;
@@ -54,6 +56,10 @@ export type InboxCard = {
   analysis: InboxAnalysis | null;
   firstSeen: string | null;
   lastScraped: string | null;
+  /** The chat was not in the Mac's latest FB list read; this is the last-known copy (kept because it owes a reply or is recent). */
+  notInLatestRead: boolean;
+  /** When the chat was last seen in the FB list (Mac's naive Pacific time). */
+  lastSeenInList: string | null;
 };
 
 export type InboxCardStatus = "open" | "replied" | "handled";
@@ -162,15 +168,34 @@ export function normalizeInboxAnalysis(value: unknown): InboxAnalysis | null {
   };
 }
 
+const ATT_KINDS = new Set(["image", "video", "sticker", "file", "attachment"]);
+export function normalizeAttachments(value: unknown): InboxAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).map((v) => {
+    const a = rec(v);
+    const kind = str(a.kind, 20).toLowerCase();
+    return {
+      kind: (ATT_KINDS.has(kind) ? kind : "attachment") as InboxAttachment["kind"],
+      thumb: safeUrl(a.thumb ?? a.src),
+      url: safeUrl(a.url ?? a.href),
+      label: str(a.label ?? a.alt, 120),
+    };
+  });
+}
+
 function normalizeMessages(value: unknown, max = MAX_RECENT): InboxMessage[] {
   if (!Array.isArray(value)) return [];
   return value
     .slice(-max)
     .map((m) => {
       const r = rec(m);
-      return { who: str(r.who, 40) || "unknown", when: str(r.when, 80), at: optStr(r.at, 40), text: str(r.text, 2000) };
+      const msg: InboxMessage = { who: str(r.who, 40) || "unknown", when: str(r.when, 80), at: optStr(r.at, 40), text: str(r.text, 2000) };
+      const attachments = normalizeAttachments(r.attachments);
+      if (attachments.length) msg.attachments = attachments;
+      return msg;
     })
-    .filter((m) => m.text.trim().length > 0);
+    // Keep photo/attachment-only messages (empty text) when the Mac flags them; drop truly blank rows.
+    .filter((m) => m.text.trim().length > 0 || (m.attachments?.length ?? 0) > 0);
 }
 
 export function normalizeInboxCard(value: unknown, fallbackId = ""): InboxCard | null {
@@ -204,6 +229,8 @@ export function normalizeInboxCard(value: unknown, fallbackId = ""): InboxCard |
     analysis,
     firstSeen: optStr(c.first_seen, 40),
     lastScraped: optStr(c.last_scraped, 40),
+    notInLatestRead: bool(c.not_in_latest),
+    lastSeenInList: optStr(c.last_seen_in_list ?? (bool(c.not_in_latest) ? c.last_scraped : null), 40),
   };
 }
 

@@ -30,6 +30,7 @@ import {
   getMeta,
   getOutbound,
   latestRefresh,
+  noteFbBusy,
   listFollowups,
   listOutbound,
   mergeThreadRead,
@@ -205,13 +206,16 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
 
   app.post("/api/inbox/mac/poll", (req, res) => {
     if (rejectInboxPush(req, res)) return;
-    const body = (req.body ?? {}) as { live?: unknown; maxSends?: unknown };
+    const body = (req.body ?? {}) as { live?: unknown; maxSends?: unknown; fbBusy?: unknown; fbBusyDetail?: unknown };
     const live = body.live === true;
     setInboxMeta("last_checkin_at", new Date().toISOString());
     setInboxMeta("mac_live", live ? "1" : "0");
     if (!live) return res.json({ ok: true, refresh: null, outbound: [] });
     const maxSends = typeof body.maxSends === "number" ? Math.max(0, Math.min(5, Math.floor(body.maxSends))) : 3;
-    return res.json({ ok: true, refresh: claimRefresh(), outbound: claimOutbound(maxSends) });
+    // FB browser busy with another job (lock / :9333): keep any refresh queued; never hand it out now.
+    const fbBusy = body.fbBusy === true;
+    noteFbBusy(fbBusy, typeof body.fbBusyDetail === "string" ? body.fbBusyDetail : "");
+    return res.json({ ok: true, refresh: fbBusy ? null : claimRefresh(), outbound: claimOutbound(maxSends), fbBusy });
   });
 
   app.post("/api/inbox/mac/refresh/:id", (req, res) => {
