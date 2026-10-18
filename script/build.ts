@@ -16,6 +16,8 @@ const allowlist = [
   "express-session",
   "jsonwebtoken",
   "memorystore",
+  // ESM-only (type: module); keep bundling it into the CJS server like before it was a declared dependency.
+  "meshoptimizer",
   "multer",
   "nanoid",
   "nodemailer",

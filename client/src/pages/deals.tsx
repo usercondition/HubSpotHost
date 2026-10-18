@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { hubspotDealHref, hubspotDealsListHref, labelsDealHref, printsDealHref, queueDealHref } from "@/lib/workflow";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsDrawer } from "@/components/deal-ops-panel";
+import { DealOpsDrawer } from "@/components/lazy-drawers";
 import {
   OrderPartsDialog,
   formatPartsBadge,

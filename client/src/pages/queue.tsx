@@ -15,7 +15,7 @@ import { parkedQueueHref, printsDealHref, readHashQueryParam, searchWithoutParam
 import { shipByCalendarDate, shopDateLabel } from "@shared/ship-by";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { PageHeader } from "@/components/shell";
-import { DealOpsDrawer } from "@/components/deal-ops-panel";
+import { DealOpsDrawer } from "@/components/lazy-drawers";
 import { Panel, StatusPill } from "@/components/primitives";
 import { formatMoney } from "@/lib/format";
 import { orderTitle } from "@/lib/order-title";
