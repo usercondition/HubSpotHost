@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, MoreHorizontal } from "lucide-react";
+import { ExternalLink, FolderOpen, MoreHorizontal, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/shell";
 import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +10,7 @@ import {
   LIBRARY_PRINTER_FILTERS,
   platePartName,
   usedOnOrders,
+  type LibraryDriveStatus,
   type PlateFileRecord,
 } from "@shared/plate-files";
 import { PlateFileMenu, PlatePreviewHost, PlateThumb, usePlatePreview } from "@/components/plate-file-menu";
@@ -36,6 +37,30 @@ function formatDuration(seconds: number | null | undefined): string {
 function formatResin(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return `${value.toFixed(2)} ml`;
+}
+
+function formatShortDate(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatSyncTime(value: string | null | undefined): string {
+  if (!value) return "not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "not yet";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+type LibrarySource = "" | "drive" | "upload";
+
+/** Where a Library item came from, for the row sub-line and the source chips. */
+export function librarySourceLabel(file: PlateFileRecord): { kind: "drive" | "both" | "upload"; label: string } {
+  const inFolder = file.driveFolder != null || (file.driveCopies?.length ?? 0) > 0;
+  if (file.source === "drive") return { kind: "drive", label: "Drive" };
+  if (inFolder) return { kind: "both", label: "Upload + Drive" };
+  return { kind: "upload", label: "Upload" };
 }
 
 function printerChipId(printer: string): string {
@@ -176,24 +201,39 @@ export default function PlateLibraryPage() {
   });
   const [q, setQ] = useState("");
   const [printer, setPrinter] = useState("");
+  const [source, setSource] = useState<LibrarySource>("");
+  const [syncing, setSyncing] = useState(false);
+  const queryClient = useQueryClient();
   const [kit, setKit] = useState(() => readHashQueryParam("kit") ?? "");
   useEffect(() => {
     const sync = () => setKit(readHashQueryParam("kit") ?? "");
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
-  const filtering = Boolean(q.trim() || printer || kit);
+  const filtering = Boolean(q.trim() || printer || kit || source);
   const preview = usePlatePreview();
   const library = useQuery({
     queryKey: ["/api/plate-files", "library", ownerCode],
     enabled: isUnlocked,
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/plate-files", undefined, { headers });
-      const body = (await response.json()) as { files?: PlateFileRecord[] };
-      return Array.isArray(body.files) ? body.files : [];
+      const body = (await response.json()) as { files?: PlateFileRecord[]; drive?: LibraryDriveStatus | null };
+      return { files: Array.isArray(body.files) ? body.files : [], drive: body.drive ?? null };
     },
   });
-  const files = library.data ?? [];
+  const files = library.data?.files ?? [];
+  const drive = library.data?.drive ?? null;
+  async function refreshFromDrive() {
+    setSyncing(true);
+    try {
+      await apiRequest("POST", "/api/plate-files/drive-sync", {}, { headers });
+      await queryClient.invalidateQueries({ queryKey: ["/api/plate-files"] });
+    } catch {
+      // The list still shows the last good sync.
+    } finally {
+      setSyncing(false);
+    }
+  }
   const kits = useMemo(() => {
     const names = new Set<string>();
     for (const file of files) names.add(file.kit.trim() || "Kit");
@@ -206,10 +246,15 @@ export default function PlateLibraryPage() {
       const filePart = platePartName(file.name);
       if (kit && fileKit !== kit) return false;
       if (printer && file.printer !== printer) return false;
+      if (source) {
+        const kind = librarySourceLabel(file).kind;
+        if (source === "drive" && kind === "upload") return false;
+        if (source === "upload" && kind === "drive") return false;
+      }
       if (!query) return true;
-      return [fileKit, filePart, file.name, file.printer].join(" ").toLowerCase().includes(query);
+      return [fileKit, filePart, file.name, file.printer, file.driveFolder ?? ""].join(" ").toLowerCase().includes(query);
     });
-  }, [files, kit, printer, q]);
+  }, [files, kit, printer, q, source]);
   const grouped = useMemo(() => {
     const groups = new Map<string, PlateFileRecord[]>();
     for (const file of visible) {
@@ -236,6 +281,30 @@ export default function PlateLibraryPage() {
           />
         ) : (
           <>
+            {drive ? (
+              <div className="library-drive-bar" data-testid="library-drive-status">
+                <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+                  From Drive folder{" "}
+                  <a className="text-primary underline-offset-2 hover:underline" href={drive.folderLink} target="_blank" rel="noopener noreferrer" data-testid="link-library-drive-folder">
+                    {drive.folderName}
+                  </a>
+                  {drive.indexed ? ` · ${drive.plates} plate${drive.plates === 1 ? "" : "s"}` : " · waiting for the nightly Drive index"}
+                  {drive.merged > 0 ? ` · ${drive.merged} matched an upload` : ""}
+                  {` · index ${formatSyncTime(drive.indexGeneratedAt)}`}
+                </p>
+                <button
+                  type="button"
+                  className="library-drive-refresh"
+                  onClick={() => void refreshFromDrive()}
+                  disabled={syncing}
+                  aria-label="Refresh from the Drive folder"
+                  data-testid="button-library-drive-refresh"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+            ) : null}
             <div className="mb-3 flex min-w-0 flex-col gap-2">
               <input
                 className="h-9 min-w-0 w-full rounded-md border border-input bg-background px-2 text-sm"
@@ -264,6 +333,23 @@ export default function PlateLibraryPage() {
                     onClick={() => setPrinter(option)}
                   >
                     {option}
+                  </button>
+                ))}
+                {(
+                  [
+                    ["drive", "Drive folder"],
+                    ["upload", "Uploaded"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="library-printer-chip"
+                    data-testid={`chip-library-source-${value}`}
+                    data-active={source === value ? "true" : "false"}
+                    onClick={() => setSource(source === value ? "" : value)}
+                  >
+                    {label}
                   </button>
                 ))}
                 {kit ? (
@@ -308,6 +394,9 @@ export default function PlateLibraryPage() {
                       const time = formatDuration(file.stats?.printTimeSeconds);
                       const resin = formatResin(file.stats?.resinVolumeMl);
                       const used = usedOnOrders(file.orderKeys?.length ?? 0);
+                      const origin = librarySourceLabel(file);
+                      const modified = formatShortDate(file.modifiedAt);
+                      const folderLabel = file.driveFolder ? file.driveFolder : "";
                       return (
                         <article key={file.driveFileId} className="library-row" data-testid={`library-row-${file.driveFileId}`}>
                           <PlateThumb file={file} headers={headers} onPreview={preview.setPreview} />
@@ -323,6 +412,11 @@ export default function PlateLibraryPage() {
                               <span>{filePart}</span>
                               <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                             </a>
+                            <span className="library-sub" data-testid="library-file-origin">
+                              <span className={`library-origin library-origin-${origin.kind}`}>{origin.label}</span>
+                              {folderLabel ? <span className="library-sub-part">{folderLabel}</span> : null}
+                              {modified ? <span className="library-sub-part">{modified}</span> : null}
+                            </span>
                           </div>
                           <span className="library-printer truncate text-sm" data-testid="library-file-printer" title={file.printer || "Printer not set"}>
                             {file.printer || "Printer not set"}

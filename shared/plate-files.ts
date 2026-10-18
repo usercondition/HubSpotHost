@@ -6,7 +6,8 @@ export const PLATE_FILE_EXTENSIONS = [".ctb", ".ultx", ".chitubox", ".cbddlp", "
 export const PLATE_PRINTERS = ["Mighty 8K", "Mighty 12K", "MEGA 8K", "HeyGears", "other"] as const;
 export type PlatePrinter = (typeof PLATE_PRINTERS)[number];
 
-export const PLATE_FILE_SOURCES = ["upload", "indexed"] as const;
+/** upload = sent from Print Ops; indexed = pushed by a script; drive = found in the Library Drive folder (read-only). */
+export const PLATE_FILE_SOURCES = ["upload", "indexed", "drive"] as const;
 export type PlateFileSource = (typeof PLATE_FILE_SOURCES)[number];
 
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -216,6 +217,63 @@ export interface PlateFileRecord {
   /** Optional source STL attached by the owner. It is preferred over the CTB reconstruction. */
   stlDriveFileId: string;
   stlWebViewLink: string;
+  /** Subfolder inside the Library Drive folder ("" = folder root). Empty when the plate is not in that folder. */
+  driveFolder?: string;
+  /** Copies of this plate found in the Library Drive folder (same plate, merged into this one item). */
+  driveCopies?: PlateDriveCopy[];
+  /** Files-index thumbnail key for Drive-folder plates that have one. */
+  driveThumbKey?: string;
+}
+
+export interface PlateDriveCopy {
+  driveFileId: string;
+  webViewLink: string;
+  folder: string;
+  modifiedAt: string | null;
+  matchedBy: "sha256" | "name+size";
+}
+
+/** Status of the Library <- Drive folder sync, returned with the Library list. */
+export interface LibraryDriveStatus {
+  folderId: string;
+  folderName: string;
+  folderLink: string;
+  /** False until the nightly Files index has seen the folder. */
+  indexed: boolean;
+  plates: number;
+  merged: number;
+  indexGeneratedAt: string | null;
+  reconciledAt: string | null;
+}
+
+export const LIBRARY_DRIVE_FOLDER_ID_DEFAULT = "1MnLB0U8mm-rVrmtxposF-GWI3LJG6kui";
+export const LIBRARY_DRIVE_FOLDER_NAME_DEFAULT = "Chitubox Sliced files";
+
+/**
+ * One plate = one Library item, whichever way it arrived. Same file name (catalog form, case and
+ * spacing folded) and the exact same byte size. Different size = a re-slice, kept separate.
+ */
+export function libraryDedupeKey(name: string, sizeBytes: number | null | undefined): string {
+  if (sizeBytes == null || !Number.isFinite(sizeBytes) || sizeBytes <= 0) return "";
+  const folded = librarySliceName(name).toLowerCase().replace(/[\s_]+/g, " ").trim();
+  return folded ? `${folded}|${Math.floor(sizeBytes)}` : "";
+}
+
+/**
+ * Display-only client mask for Drive-folder plate names (the Mac pipeline already masks client job
+ * folders; slicer file names like "CTB Pricing for William" sit in a product folder and are not).
+ * Known contact names are replaced anywhere; "pricing/quote/order/job for <Name>" hides the name.
+ */
+export function maskLibraryClientText(text: string, contactNames: readonly string[] = []): string {
+  let out = text;
+  const names = Array.from(new Set(contactNames.map((name) => name.trim()).filter((name) => name.length >= 3)))
+    .sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    const body = name.split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_.-]+");
+    out = out.replace(new RegExp(`(^|[^A-Za-z])${body}(?=$|[^A-Za-z])`, "gi"), (_m, lead: string) => `${lead}Client job`);
+  }
+  out = out.replace(/\b([Pp]ricing|[Pp]rice|[Qq]uote|[Oo]rder|[Jj]ob|[Cc]ommission)(\s+)for(\s+)([A-Z][a-z]+(?:[\s_]+[A-Z][a-z]+)?)(?=$|[^A-Za-z])/g, (_m, word: string, s1: string, s2: string) => `${word}${s1}for${s2}Client job`);
+  return out;
 }
 
 export interface PlateLibraryPending {

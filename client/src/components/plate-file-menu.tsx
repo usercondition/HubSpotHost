@@ -97,7 +97,9 @@ function PreviewPanel({
   headers: Record<string, string>;
   onClose: () => void;
 }) {
-  const canLayers = /\.ctb$/i.test(file.name);
+  // Drive-folder plates are links only: Print Ops cannot read their bytes (read-only, drive.file scope).
+  const driveOnly = file.source === "drive";
+  const canLayers = /\.ctb$/i.test(file.name) && !driveOnly;
   const meshReady = Boolean(file.meshDriveFileId);
   const [mode, setMode] = useState<"layers" | "model">("model");
   const [imageUrl, setImageUrl] = useState("");
@@ -209,6 +211,13 @@ function PreviewPanel({
           <PlateLayerView file={file} headers={headers} />
         ) : imageUrl ? (
           <img src={imageUrl} alt="" className="mb-3 max-h-48 w-full rounded-md bg-black object-contain md:max-h-80" data-testid="img-plate-preview" />
+        ) : driveOnly ? (
+          <p className="mb-3 text-sm text-muted-foreground" data-testid="text-plate-drive-only">
+            In the Drive folder{file.driveFolder ? ` (${file.driveFolder})` : ""}. Slicer stats appear once this plate is uploaded from an order.{" "}
+            <a className="text-primary underline" href={file.webViewLink} target="_blank" rel="noopener noreferrer">
+              Open in Drive
+            </a>
+          </p>
         ) : (
           <p className="mb-3 text-sm text-muted-foreground" data-testid="text-plate-preview-missing">
             No thumbnail in this file.
@@ -279,6 +288,7 @@ export function PlateFileMenu({
           >
             Preview
           </button>
+          {file.source === "drive" ? null : (
           <button
             type="button"
             className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
@@ -294,6 +304,7 @@ export function PlateFileMenu({
           >
             Download
           </button>
+          )}
           <a className="block rounded px-2 py-1.5 hover:bg-muted" href={file.webViewLink} target="_blank" rel="noopener noreferrer">
             Open in Drive
           </a>
@@ -339,6 +350,24 @@ export function PlateThumb({
       if (url) URL.revokeObjectURL(url);
     };
   }, [file.hasPreview, file.sha256, file.driveFileId, headers]);
+  useEffect(() => {
+    if (file.hasPreview || !file.driveThumbKey) return;
+    let cancelled = false;
+    let url = "";
+    void apiRequest("GET", `/api/plate-files/drive-thumbs/${encodeURIComponent(file.driveThumbKey)}`, undefined, { headers })
+      .then((response) => response.blob())
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setImageUrl(url);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [file.hasPreview, file.driveThumbKey, headers]);
+  const ext = (file.extension || "").replace(/^\./, "").toUpperCase().slice(0, 4);
   return (
     <button
       type="button"
@@ -347,7 +376,15 @@ export function PlateThumb({
       aria-label={`Preview ${file.name}`}
       onClick={() => onPreview(file)}
     >
-      {imageUrl ? <img src={imageUrl} alt="" /> : <span className="plate-thumb-empty" />}
+      {imageUrl ? (
+        <img src={imageUrl} alt="" />
+      ) : file.source === "drive" && ext ? (
+        <span className="plate-thumb-empty plate-thumb-ext" data-testid="plate-thumb-ext">
+          {ext}
+        </span>
+      ) : (
+        <span className="plate-thumb-empty" />
+      )}
     </button>
   );
 }

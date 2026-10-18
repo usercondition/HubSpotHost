@@ -3,7 +3,7 @@
  * This table never writes to HubSpot.
  */
 import crypto from "node:crypto";
-import type { PlateFileRecord, PlateFileSource, PlateLibraryPending, PlatePreviewStats, PlateUploadFailure, PrintLibraryMark } from "../../shared/plate-files";
+import type { PlateDriveCopy, PlateFileRecord, PlateFileSource, PlateLibraryPending, PlatePreviewStats, PlateUploadFailure, PrintLibraryMark } from "../../shared/plate-files";
 import { libraryCatalogRecord, libraryCatalogText, libraryKitName, librarySliceName, plateExtension, platePartName } from "../../shared/plate-files";
 import { getSqlite } from "./order-links";
 import { PLATE_MESH_VERSION } from "./plate-mesh";
@@ -28,6 +28,8 @@ type FileRow = {
   mesh_version?: number;
   stl_drive_file_id?: string;
   stl_web_view_link?: string;
+  drive_folder?: string | null;
+  drive_thumb_key?: string;
 };
 
 export interface PlateIndexInput {
@@ -94,8 +96,26 @@ function printIdsFor(driveFileId: string): number[] {
   return rows.map((row) => row.print_record_id);
 }
 
+function driveCopiesFor(driveFileId: string): PlateDriveCopy[] {
+  const rows = getSqlite()
+    .prepare(
+      `SELECT copy_id, web_view_link, folder, modified_at, matched_by FROM plate_file_drive_copies
+       WHERE drive_file_id = ? ORDER BY copy_id`,
+    )
+    .all(driveFileId) as Array<{ copy_id: string; web_view_link: string; folder: string; modified_at: string | null; matched_by: string }>;
+  return rows.map((row) => ({
+    driveFileId: row.copy_id,
+    webViewLink: driveLink(row.copy_id, row.web_view_link),
+    folder: row.folder,
+    modifiedAt: row.modified_at,
+    matchedBy: row.matched_by === "sha256" ? "sha256" : "name+size",
+  }));
+}
+
 function toRecord(row: FileRow): PlateFileRecord {
-  const source: PlateFileSource = row.source === "upload" ? "upload" : "indexed";
+  const source: PlateFileSource = row.source === "upload" ? "upload" : row.source === "drive" ? "drive" : "indexed";
+  const driveCopies = driveCopiesFor(row.drive_file_id);
+  const ownFolder = row.drive_folder ?? null;
   const preview = previewFor(row.sha256 || "");
   return libraryCatalogRecord({
     driveFileId: row.drive_file_id,
@@ -121,6 +141,9 @@ function toRecord(row: FileRow): PlateFileRecord {
     meshVersion: row.mesh_version ?? 0,
     stlDriveFileId: row.stl_drive_file_id || "",
     stlWebViewLink: row.stl_web_view_link || "",
+    driveFolder: ownFolder ?? driveCopies[0]?.folder ?? undefined,
+    driveCopies,
+    driveThumbKey: row.drive_thumb_key || "",
   });
 }
 
@@ -306,6 +329,7 @@ export function listPlateIdsNeedingMesh(): string[] {
     .prepare(
       `SELECT drive_file_id FROM plate_files
        WHERE (lower(extension) = '.ctb' OR lower(name) LIKE '%.ctb')
+         AND source != 'drive'
          AND (mesh_state != 'ready' OR IFNULL(mesh_version, 0) < ?)
        ORDER BY id ASC
        LIMIT 40`,

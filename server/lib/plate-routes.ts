@@ -38,6 +38,7 @@ import {
   type CtbLayerPlan,
 } from "./ctb";
 import { extractCtbPreviewFromPrefix, extractUltxPreviewPng } from "./ctb-preview";
+import { libraryDriveStatus, maybeReconcileLibraryDrive, readLibraryDriveThumb, reconcileLibraryDrive } from "./library-drive";
 import {
   DriveReconnectError,
   DriveUnreadableError,
@@ -244,6 +245,8 @@ async function readDriveBounded(fileId: string, start: number, length: number): 
 
 function plateHeaderBlank(file: PlateFileRecord): boolean {
   if (!/\.ctb$/i.test(file.name)) return false;
+  // Drive-folder plates are read-only links; the server's drive.file token cannot read their bytes.
+  if (file.source === "drive") return false;
   const stats = file.stats;
   return !stats || stats.layerCount == null || stats.printTimeSeconds == null || stats.resinVolumeMl == null;
 }
@@ -380,7 +383,15 @@ function oauthFailure(res: Response): void {
     );
 }
 
+let libraryDriveTimer: NodeJS.Timeout | null = null;
+
 export function registerPlateLibraryRoutes(app: Express): void {
+  // Nightly Files index -> Library: pick up a new index within 30 minutes even if Library is not opened.
+  if (!libraryDriveTimer && process.env.NODE_ENV !== "test") {
+    libraryDriveTimer = setInterval(() => maybeReconcileLibraryDrive(), 30 * 60 * 1000);
+    libraryDriveTimer.unref();
+  }
+
   app.get("/api/google/oauth/start", (req: Request, res: Response) => {
     if (rejectOwner(req, res)) return;
     if (!googleDriveConfigured()) {
@@ -435,8 +446,30 @@ export function registerPlateLibraryRoutes(app: Express): void {
     return res.json({ ok: true, from: parsed.data.from, to, changed });
   });
 
+  app.get("/api/plate-files/drive-thumbs/:key", (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    const thumb = readLibraryDriveThumb(String(req.params.key || ""));
+    if (!thumb) return res.status(404).json({ ok: false, error: "No thumbnail for that plate." });
+    res.set("cache-control", "private, max-age=86400");
+    res.type(thumb.mime);
+    return res.send(thumb.data);
+  });
+
+  /** Owner "refresh from Drive folder": re-reads the synced Files index (no Drive call). */
+  app.post("/api/plate-files/drive-sync", (req: Request, res: Response) => {
+    if (rejectOwner(req, res)) return;
+    try {
+      const result = reconcileLibraryDrive();
+      return res.json({ ok: true, ...result, drive: libraryDriveStatus() });
+    } catch (error) {
+      console.error("[library-drive] sync failed", error instanceof Error ? error.message : String(error));
+      return res.status(500).json({ ok: false, error: "Could not refresh from the Drive folder." });
+    }
+  });
+
   app.get("/api/plate-files", (req: Request, res: Response) => {
     if (rejectOwner(req, res)) return;
+    maybeReconcileLibraryDrive();
     if (queryValue(req.query.summary) === "1") {
       return res.json({ ok: true, total: countPlateFiles(), files: [], failures: [] });
     }
@@ -449,7 +482,14 @@ export function registerPlateLibraryRoutes(app: Express): void {
       printer: queryValue(req.query.printer),
       orderKey,
     });
-    return res.json({ ok: true, ...listed });
+    if (orderKey) return res.json({ ok: true, ...listed });
+    let drive = null;
+    try {
+      drive = libraryDriveStatus();
+    } catch {
+      drive = null;
+    }
+    return res.json({ ok: true, ...listed, drive });
   });
 
   app.post("/api/plate-files", (req: Request, res: Response) => {
@@ -799,7 +839,15 @@ export function registerPlateLibraryRoutes(app: Express): void {
         });
       }
       if (/\.ctb$/i.test(file.name)) enqueuePlateMesh(file.driveFileId);
-      return res.status(201).json({ ok: true, file });
+      // One plate = one item: an upload whose twin is already in the Drive folder absorbs it.
+      let merged = file;
+      try {
+        reconcileLibraryDrive();
+        merged = getPlateFile(file.driveFileId) ?? file;
+      } catch (error) {
+        console.error("[library-drive] post-upload merge failed", error instanceof Error ? error.message : String(error));
+      }
+      return res.status(201).json({ ok: true, file: merged });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error || "");
       console.error("[drive] upload failed", raw);
