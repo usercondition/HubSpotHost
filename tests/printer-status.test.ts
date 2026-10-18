@@ -15,7 +15,10 @@ import {
   computePrinterStatus,
   formatRemaining,
   isRunPrinting,
+  printerArt,
   runEtaMs,
+  shortPrinterName,
+  splitJobLabel,
   startPrinterRunSchema,
   statusRoster,
   type PrinterRun,
@@ -137,6 +140,29 @@ test("formatRemaining and start schema", () => {
 });
 
 // ---- API (temp SQLite, fake HubSpot) ----
+test("job label splits into print name + client; printer art + short names", () => {
+  assert.deepEqual(splitJobLabel("Leman Russ - Alex R."), { printName: "Leman Russ", clientName: "Alex R." });
+  assert.deepEqual(splitJobLabel("Knight armor - plates - Sam"), { printName: "Knight armor - plates", clientName: "Sam" });
+  assert.deepEqual(splitJobLabel("Order 9101"), { printName: "Order 9101", clientName: null });
+  assert.deepEqual(splitJobLabel("Terrain - ruined chapel walls and five more pieces"), { printName: "Terrain - ruined chapel walls and five more pieces", clientName: null });
+  assert.deepEqual(splitJobLabel("Bits - 2024"), { printName: "Bits - 2024", clientName: null });
+  assert.deepEqual(splitJobLabel(""), { printName: "", clientName: null });
+  const arts = statusRoster(DEFAULT_QUOTE_PRINTERS).map((p) => [p.key, printerArt(p)]);
+  assert.deepEqual(Object.fromEntries(arts), {
+    "mega-8k-s": "phrozen-mega",
+    "mighty-12k-new": "phrozen-mighty",
+    "mighty-12k-old": "phrozen-mighty",
+    "mighty-8k-old": "phrozen-mighty",
+    "mighty-8k-newx2": "phrozen-mighty",
+    "mighty-8k-newx1": "phrozen-mighty",
+    "mighty-8k-newx3": "phrozen-mighty",
+    "heygears-reflex": "heygears-reflex",
+  });
+  assert.equal(printerArt({ key: "x", name: "Something else" }), "generic");
+  assert.equal(shortPrinterName("Phrozen Sonic Mighty 8K New X1"), "Mighty 8K New X1");
+  assert.equal(shortPrinterName("HeyGears (UltraCraft Reflex)"), "HeyGears UltraCraft Reflex");
+});
+
 const dbFile = path.join(os.tmpdir(), `printer-status-test-${crypto.randomUUID()}.db`);
 const OWNER_CODE = "printer-status-owner";
 process.env.ORDER_LINKS_DB_FILE = dbFile;
@@ -285,4 +311,26 @@ test("start a plate -> PRINTING with CTB print time as ETA; done -> IDLE", async
 
   const again = await owner("GET", "/api/printers/status");
   assert.equal(again.body.plates.find((p: any) => p.recordId === record.id).started, true);
+});
+
+test("running job carries print name and client from the deal name (no HubSpot call)", async () => {
+  const staged = stagePrintFile("mega-plate.ctb", fixtureCtb("MEGA 8K"));
+  const record = createPrintFileRecord({
+    analysisId: staged.analysisId,
+    hubspotDealId: "9202",
+    hubspotDealName: "Land Raider hull - Sam T.",
+    dealStage: "In work",
+    metrics: staged.metrics,
+  });
+  const started = await owner("POST", "/api/printers/status/mega-8k-s/start", { recordId: record.id });
+  assert.equal(started.status, 201);
+  const status = await owner("GET", "/api/printers/status");
+  const card = status.body.printers.find((p: any) => p.key === "mega-8k-s");
+  assert.equal(card.state, "printing");
+  assert.equal(card.current.jobLabel, "Land Raider hull - Sam T.");
+  assert.equal(card.current.printName, "Land Raider hull");
+  assert.equal(card.current.clientName, "Sam T.");
+  assert.equal(status.body.printers.some((p: any) => p.key === "mighty-revo"), false);
+  const done = await owner("POST", "/api/printers/status/mega-8k-s/done");
+  assert.equal(done.status, 200);
 });

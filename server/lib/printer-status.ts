@@ -11,6 +11,7 @@ import { printFileRecords, type PrintFileRecord } from "../../shared/schema";
 import {
   QUOTE_PRINTER_TO_FLEET_NAME,
   buildPrinterStatusBoard,
+  splitJobLabel,
   statusRoster,
   type PrinterRun,
   type PrinterStatusBoard,
@@ -80,8 +81,45 @@ export function listRecentRuns(limit = 400): PrinterRun[] {
   return rows.map(toRun);
 }
 
+/**
+ * Client name for a HubSpot deal from data Print Ops already stores locally
+ * (Priority stack contact name). No HubSpot call. Null when unknown.
+ */
+function localClientNames(dealIds: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!dealIds.length) return out;
+  try {
+    const marks = dealIds.map(() => "?").join(",");
+    const rows = getSqlite()
+      .prepare(
+        `SELECT hubspot_deal_id AS dealId, contact_name AS name FROM priority_stack_entries
+         WHERE hubspot_deal_id IN (${marks}) AND TRIM(contact_name) <> '' ORDER BY updated_at DESC`,
+      )
+      .all(...dealIds) as Array<{ dealId: string; name: string }>;
+    for (const r of rows) if (!out.has(r.dealId)) out.set(r.dealId, r.name.trim().slice(0, 80));
+  } catch {
+    // Table not created yet on a fresh database: fall back to the deal name.
+  }
+  return out;
+}
+
+/** Add print name + client to each running job (owner-only page). */
+export function withJobDetails(board: PrinterStatusBoard): PrinterStatusBoard {
+  const dealIds = [...new Set(board.printers.map((p) => p.current?.dealId).filter((v): v is string => !!v))];
+  const names = localClientNames(dealIds);
+  return {
+    ...board,
+    printers: board.printers.map((p) => {
+      if (!p.current) return p;
+      const split = splitJobLabel(p.current.jobLabel);
+      const stored = p.current.dealId ? names.get(p.current.dealId) ?? null : null;
+      return { ...p, current: { ...p.current, printName: split.printName, clientName: stored ?? split.clientName } };
+    }),
+  };
+}
+
 export function buildStatusBoard(nowMs = Date.now()): PrinterStatusBoard {
-  return buildPrinterStatusBoard(getStatusRoster(), listRecentRuns(), nowMs);
+  return withJobDetails(buildPrinterStatusBoard(getStatusRoster(), listRecentRuns(), nowMs));
 }
 
 /** Fleet printer id (legacy registry) -> status board key. */
