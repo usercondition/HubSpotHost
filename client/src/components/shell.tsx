@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, Redirect, useLocation } from "wouter";
 import {
   Activity,
   BarChart3,
@@ -27,6 +27,9 @@ import {
   Sun,
   Tag,
   Calculator,
+  ChevronLeft,
+  ChevronRight,
+  MessageSquareText,
 } from "lucide-react";
 import { AttentionBell } from "@/components/attention-bell";
 import { HubspotSyncDialog } from "@/components/hubspot-sync-chip";
@@ -34,7 +37,15 @@ import { OpsAssistantSheet } from "@/components/ops-assistant-sheet";
 import { PageTransition } from "@/components/page-transition";
 import { PcOnlyNote } from "@/components/pc-only";
 import { useIsPhone } from "@/hooks/use-is-phone";
-import { PHONE_LABELS, pcOnlyRouteFor, phoneMoreSections, phoneTabs } from "@/lib/phone";
+import {
+  PHONE_DESCRIPTIONS,
+  PHONE_LABELS,
+  PHONE_MORE_HREF,
+  pcOnlyRouteFor,
+  phoneBackTarget,
+  phoneMoreSections,
+  phoneTabs,
+} from "@/lib/phone";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { useShopCounts } from "@/hooks/use-shop-counts";
 import { queryClient } from "@/lib/queryClient";
@@ -82,13 +93,24 @@ export function ThemeToggle({
   className,
   testId = "button-theme-toggle",
   rail = false,
+  row = false,
 }: {
   className?: string;
   testId?: string;
   rail?: boolean;
+  /** Phone More page row: icon tile, label, one-line description. */
+  row?: boolean;
 }) {
   const { theme, toggle } = useContext(ThemeContext);
   const label = theme === "dark" ? "Light mode" : "Dark mode";
+  if (row) {
+    const Icon = theme === "dark" ? Sun : Moon;
+    return (
+      <button type="button" onClick={toggle} data-testid={testId} className={cn("more-row", className)}>
+        <MoreRowBody icon={<Icon className="h-[18px] w-[18px]" />} label={label} description="Switch the app theme" />
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -181,6 +203,34 @@ export function Mark({ className }: { className?: string }) {
   );
 }
 
+/* ------------------------------------------------------ phone More rows --- */
+
+function MoreRowBody({
+  icon,
+  label,
+  description,
+  trailing,
+}: {
+  icon: ReactNode;
+  label: string;
+  description?: string;
+  trailing?: ReactNode;
+}) {
+  return (
+    <>
+      <span className="more-row-icon" aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="more-row-label">{label}</span>
+        {description ? <span className="more-row-desc">{description}</span> : null}
+      </span>
+      {trailing}
+      <ChevronRight className="more-row-chevron" aria-hidden />
+    </>
+  );
+}
+
 /* ---------------------------------------------------------------- shell --- */
 
 type NavGroup = "Run" | "Take" | "Keep" | "Office";
@@ -239,6 +289,18 @@ const PHONE_TABS = phoneTabs(NAV);
 const PHONE_MORE_SECTIONS = phoneMoreSections(NAV);
 const PHONE_MORE = PHONE_MORE_SECTIONS.flatMap((section) => section.items);
 const phoneLabel = (item: { href: string; label: string }) => PHONE_LABELS[item.href] ?? item.label;
+
+type ShopCounts = ReturnType<typeof useShopCounts>;
+
+function navCountFor(shop: ShopCounts, href: string): { value: number | null; hot?: boolean; testId?: string } | null {
+  if (href === "/") return { value: shop.needsYou, hot: true, testId: "badge-nav-floor" };
+  if (href === "/stack") return { value: shop.stackCount, testId: "badge-nav-stack" };
+  if (href === "/queue") return { value: shop.queueCount, testId: "badge-nav-queue" };
+  if (href === "/library") return { value: shop.libraryCount, testId: "badge-nav-library" };
+  return null;
+}
+
+const FROM_MORE_KEY = "print-ops-from-more";
 
 function refreshShop() {
   void queryClient.invalidateQueries({ queryKey: ["/api/health"] });
@@ -302,25 +364,22 @@ function NavCount({ value, hot, testId }: { value: number | null; hot?: boolean;
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const pathOnly = location.split("?")[0] || "/";
   const { isUnlocked, lock } = useOwnerSession();
   const shop = useShopCounts();
   const activeItem = NAV.find((item) => item.href === pathOnly);
   const activeGroup = activeItem?.group ?? "Run";
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = PHONE_MORE.some((item) => item.href === pathOnly);
+  const onMorePage = pathOnly === PHONE_MORE_HREF;
+  const moreActive = onMorePage || PHONE_MORE.some((item) => item.href === pathOnly);
+  const backTo = phoneBackTarget(pathOnly, PHONE_MORE.map((item) => item.href));
   const isPhone = useIsPhone();
   // On a phone, PC-only pages show a short "Do this on your PC" note instead.
   const pcOnly = isPhone ? pcOnlyRouteFor(pathOnly) : null;
 
   useEffect(() => {
-    document.title = activeItem ? `${activeItem.label} · Print Ops` : "Print Ops";
-  }, [pathOnly, activeItem]);
-
-  useEffect(() => {
-    setMoreOpen(false);
-  }, [pathOnly]);
+    document.title = activeItem ? `${activeItem.label} · Print Ops` : onMorePage ? "More · Print Ops" : "Print Ops";
+  }, [pathOnly, activeItem, onMorePage]);
 
   useEffect(() => {
     if (!isUnlocked) return;
@@ -332,12 +391,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [pathOnly, isUnlocked]);
 
-  const countFor = (href: string): { value: number | null; hot?: boolean; testId?: string } | null => {
-    if (href === "/") return { value: shop.needsYou, hot: true, testId: "badge-nav-floor" };
-    if (href === "/stack") return { value: shop.stackCount, testId: "badge-nav-stack" };
-    if (href === "/queue") return { value: shop.queueCount, testId: "badge-nav-queue" };
-    if (href === "/library") return { value: shop.libraryCount, testId: "badge-nav-library" };
-    return null;
+  const countFor = (href: string) => navCountFor(shop, href);
+
+  // Phone Back on a page opened from More: pop history when we came from More, else go to More.
+  const goBack = () => {
+    let fromMore: string | null = null;
+    try {
+      fromMore = window.sessionStorage.getItem(FROM_MORE_KEY);
+      window.sessionStorage.removeItem(FROM_MORE_KEY);
+    } catch {
+      /* private mode */
+    }
+    if (fromMore === pathOnly && window.history.length > 1) window.history.back();
+    else navigate(PHONE_MORE_HREF);
   };
 
   return (
@@ -434,11 +500,25 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <header className="ops-phone-bar flex md:hidden">
+          {backTo && isPhone ? (
+            <button
+              type="button"
+              onClick={goBack}
+              className="ops-phone-back"
+              data-testid="button-phone-back"
+              aria-label="Back to More"
+              title="Back to More"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          ) : null}
           <Link href="/" className="flex min-w-0 items-center gap-2" data-testid="link-home-mobile" title="Print Ops">
             <span className="ops-mark-wrap h-[26px] w-[26px] rounded-[7px]">
               <Mark className="h-full w-full" />
             </span>
-            <span className="truncate text-[17px] font-semibold tracking-tight">{activeItem ? phoneLabel(activeItem) : "Print Ops"}</span>
+            <span className="truncate text-[17px] font-semibold tracking-tight" data-testid="text-phone-title">
+              {activeItem ? phoneLabel(activeItem) : onMorePage ? "More" : "Print Ops"}
+            </span>
           </Link>
           <div className="ml-auto flex items-center gap-1">
             <RefreshButton testId="button-refresh-workspace-mobile" />
@@ -463,39 +543,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           </PageTransition>
         </main>
 
-        {moreOpen ? (
-          <div className="ops-more-sheet flex md:hidden" data-testid="panel-mobile-more">
-            {PHONE_MORE_SECTIONS.map((section, index) => (
-              <div key={section.title} className="flex flex-col gap-0.5" data-testid={`group-phone-more-${section.title.toLowerCase()}`}>
-                <p className={cn("ops-rail-label px-1", index > 0 && "pt-2")}>{section.title}</p>
-                {section.items.map((item) => {
-                  const count = countFor(item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      data-testid={`link-phone-${item.label.toLowerCase()}`}
-                      className={cn("ops-rail-link", pathOnly === item.href && "bg-[hsl(var(--raised))] font-semibold text-foreground")}
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{phoneLabel(item)}</span>
-                      <NavCount
-                        value={count?.value ?? null}
-                        hot={count?.hot}
-                        testId={item.href === "/stack" ? "badge-phone-stack" : `badge-phone-${item.label.toLowerCase()}`}
-                      />
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
-            <p className="ops-rail-label px-1 pt-2">Tools</p>
-            <OpsAssistantSheet rail />
-            <ThemeToggle rail />
-            <p className="ops-rail-label px-1 pt-2">Apps</p>
-            <AppSwitcher className="flex-col items-stretch px-1" />
-          </div>
-        ) : null}
 
         <nav aria-label="Mobile navigation" className="ops-tabbar grid md:hidden">
           {PHONE_TABS.map((item) => {
@@ -528,19 +575,99 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
-          <button
-            type="button"
+          <Link
+            href={PHONE_MORE_HREF}
             className="ops-tab"
-            data-active={moreOpen || moreActive ? "true" : "false"}
+            data-active={moreActive ? "true" : "false"}
             data-testid="button-mobile-nav-more"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((open) => !open)}
+            aria-current={onMorePage ? "page" : undefined}
           >
             <Menu className="h-5 w-5" />
             <span>More</span>
-          </button>
+          </Link>
         </nav>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Phone More page (#/more): every on-the-go page not in the tab bar, grouped
+ * Orders / Make / Shop, then Tools and Apps. Desktop never shows it (the rail
+ * has everything), so a PC opening #/more lands on the Work hub.
+ */
+export function MorePage() {
+  const isPhone = useIsPhone();
+  const shop = useShopCounts();
+  const rememberFromMore = (href: string) => {
+    try {
+      window.sessionStorage.setItem(FROM_MORE_KEY, href);
+    } catch {
+      /* private mode */
+    }
+  };
+  if (!isPhone) return <Redirect to="/" />;
+  return (
+    <div className="more-page" data-testid="page-more">
+      {PHONE_MORE_SECTIONS.map((section) => (
+        <section key={section.title} className="more-section" data-testid={`group-phone-more-${section.title.toLowerCase()}`}>
+          <h2 className="more-heading">{section.title}</h2>
+          <div className="more-card">
+            {section.items.map((item) => {
+              const count = navCountFor(shop, item.href);
+              const value = count?.value != null && count.value > 0 ? count.value : null;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="more-row"
+                  data-testid={`link-phone-${item.label.toLowerCase()}`}
+                  onClick={() => rememberFromMore(item.href)}
+                >
+                  <MoreRowBody
+                    icon={<item.icon className="h-[18px] w-[18px]" />}
+                    label={phoneLabel(item)}
+                    description={PHONE_DESCRIPTIONS[item.href]}
+                    trailing={
+                      value != null ? (
+                        <span
+                          className={cn("nav-count numeric", count?.hot && "nav-count-hot")}
+                          data-testid={item.href === "/stack" ? "badge-phone-stack" : `badge-phone-${item.label.toLowerCase()}`}
+                        >
+                          {value}
+                        </span>
+                      ) : null
+                    }
+                  />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      <section className="more-section" data-testid="group-phone-more-tools">
+        <h2 className="more-heading">Tools</h2>
+        <div className="more-card">
+          <OpsAssistantSheet
+            row={<MoreRowBody icon={<MessageSquareText className="h-[18px] w-[18px]" />} label="Ask Ops" description="Quick answers on queue, labels, plates" />}
+          />
+          <ThemeToggle row testId="button-theme-toggle-more" />
+        </div>
+      </section>
+      <section className="more-section" data-testid="group-phone-more-apps">
+        <h2 className="more-heading">Apps</h2>
+        <div className="more-card">
+          {APP_LINKS.filter((app) => !app.current).map((app) => (
+            <a key={app.label} href={app.href} target="_blank" rel="noopener noreferrer" className="more-row" data-testid={app.testId}>
+              <MoreRowBody
+                icon={<ExternalLink className="h-[18px] w-[18px]" />}
+                label={app.label}
+                description={app.label === "HubSpot" ? "Open the HubSpot deal board" : "Agents and tasks on the Mac mini"}
+              />
+            </a>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

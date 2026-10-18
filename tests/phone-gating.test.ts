@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PHONE_DESCRIPTIONS,
+  PHONE_MORE_HREF,
+  phoneBackTarget,
   PC_ONLY_ROUTES,
   PHONE_LANDSCAPE_QUERY,
   PHONE_WIDTH_QUERY,
@@ -78,4 +81,18 @@ test("pcOnlyRouteFor ignores query strings and trailing slashes; phone pages are
   for (const route of Object.values(PC_ONLY_ROUTES)) {
     if (route.alt) assert.equal(pcOnlyRouteFor(route.alt.href), null, `alt ${route.alt.href} must work on a phone`);
   }
+});
+
+test("phone More page: every More row has a one-line description and Back goes to #/more", () => {
+  const nav = [...NAV, { href: "/files", label: "Files" }, { href: "/nerve", label: "Nerve" }];
+  for (const item of phoneMoreSections(nav).flatMap((s) => s.items)) {
+    const desc = PHONE_DESCRIPTIONS[item.href];
+    assert.ok(desc && desc.length <= 40, `More row ${item.href} needs a short description`);
+  }
+  assert.equal(PHONE_MORE_HREF, "/more");
+  const more = phoneMoreSections(nav).flatMap((s) => s.items).map((i) => i.href);
+  assert.equal(phoneBackTarget("/labels", more), "/more");
+  assert.equal(phoneBackTarget("/labels?tab=buy", more), "/more");
+  assert.equal(phoneBackTarget("/inbox", more), null);
+  assert.equal(phoneBackTarget("/", more), null);
 });

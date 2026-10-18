@@ -44,6 +44,31 @@ export const PHONE_LABELS: Record<string, string> = {
   "/prints": "Plates",
 };
 
+/** The phone More page lives at its own route (not an overlay). */
+export const PHONE_MORE_HREF = "/more";
+
+/** One-line descriptions for rows on the phone More page. */
+export const PHONE_DESCRIPTIONS: Record<string, string> = {
+  "/stack": "Order lineup, status and tracking",
+  "/orders": "Send a buyer the order-form link",
+  "/paid-orders": "Type in an order by hand",
+  "/shipments": "Where every package is",
+  "/labels": "Buy a label, copy the tracking note",
+  "/quote": "Price an STL with modifiers",
+  "/files": "Search Drive files and thumbnails",
+  "/prints": "Plates per order and part QC",
+  "/supplies": "Snap a receipt, resin to buy",
+  "/expenses": "Add a shop charge",
+  "/performance": "Sales, profit and print time",
+  "/nerve": "Mac mini and agent status",
+};
+
+/** Where the phone Back button on a More page goes. */
+export function phoneBackTarget(path: string, moreHrefs: string[]): string | null {
+  const clean = (path.split("?")[0] || "/").replace(/\/+$/, "") || "/";
+  return moreHrefs.includes(clean) ? PHONE_MORE_HREF : null;
+}
+
 /* ------------------------------------------------------- PC-only routes --- */
 
 export type PcOnlyRoute = {

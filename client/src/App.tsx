@@ -7,7 +7,7 @@ import { queryClient } from "./lib/queryClient";
 import { useAppHashLocation } from "./lib/hash-location";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppShell, ThemeProvider } from "@/components/shell";
+import { AppShell, MorePage, ThemeProvider } from "@/components/shell";
 import { OwnerSessionProvider } from "@/hooks/use-owner-session";
 import Dashboard from "@/pages/dashboard";
 import DealsPage from "@/pages/deals";
@@ -74,6 +74,8 @@ function ShellRoutes() {
           {/* Focus shortcuts redirect to workspaces; Floor chips skip the intermediate list. */}
           <Route path="/performance" component={PerformanceRoute} />
           <Route path="/setup" component={Setup} />
+          {/* Phone More page (own route, not an overlay). Desktop redirects to the Work hub. */}
+          <Route path="/more" component={MorePage} />
           <Route component={NotFound} />
         </Switch>
       </AppShell>
