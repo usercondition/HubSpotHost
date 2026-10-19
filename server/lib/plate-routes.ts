@@ -3,7 +3,7 @@
  * The OAuth callback is the only route without the owner header; a one-time state is the gate.
  * None of these routes write to HubSpot.
  */
-import crypto from "node:crypto";
+import { OWNER_CODE_ERRORS, verifyOwnerCode } from "./owner-code";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Express, Request, Response } from "express";
@@ -146,24 +146,10 @@ function layerFailure(res: Response, error: unknown): void {
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 function rejectOwner(req: Request, res: Response): boolean {
-  const expected = process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim() || "";
-  if (!expected) {
-    res.status(503).json({ ok: false, error: "Paid Order Intake access code is not configured" });
-    return true;
-  }
-  const provided = (req.get("x-paid-order-access-code") || "").trim().replace(/^Bearer\s+/i, "");
-  if (!provided) {
-    res.status(401).json({ ok: false, error: "No intake access code reached the live service" });
-    return true;
-  }
-  const actual = crypto.createHash("sha256").update(provided, "utf8").digest("hex");
-  const a = Buffer.from(actual, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    res.status(401).json({ ok: false, error: "The intake access code does not match the active code" });
-    return true;
-  }
-  return false;
+  const status = verifyOwnerCode(req.get("x-paid-order-access-code") || "");
+  if (status === "authorized") return false;
+  res.status(status === "not-configured" ? 503 : 401).json({ ok: false, error: OWNER_CODE_ERRORS[status] });
+  return true;
 }
 
 function releaseBody(req: Request): void {

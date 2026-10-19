@@ -4,22 +4,17 @@
  * Option B: the browser still calls Nerve on the Mac mini directly over Tailscale (private, never
  * exposed to the internet); this endpoint just removes the separate "Nerve key" prompt.
  * Auth: the normal Print Ops owner code (x-paid-order-access-code), checked against
- * PAID_ORDER_INTAKE_ACCESS_CODE_HASH. 401 on a bad/missing code, 503 when NERVE_KEY is unset.
+ * PAID_ORDER_INTAKE_ACCESS_CODE_HASH (or the optional _NORM_HASH) via lib/owner-code. 401 on a bad/missing code, 503 when NERVE_KEY is unset.
  * Always Cache-Control: no-store. The key is never logged.
  */
-import crypto from "node:crypto";
 import type { Express, Request, Response } from "express";
+import { verifyOwnerCode } from "./owner-code";
 
 type Env = NodeJS.ProcessEnv;
 
 export function ownerAuthorized(req: Request, env: Env = process.env): "ok" | "not-configured" | "denied" {
-  const expected = env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim().toLowerCase() || "";
-  if (!expected) return "not-configured";
-  const provided = (req.get("x-paid-order-access-code") ?? "").trim().replace(/^Bearer\s+/i, "");
-  if (!provided) return "denied";
-  const a = Buffer.from(crypto.createHash("sha256").update(provided, "utf8").digest("hex"), "utf8");
-  const b = Buffer.from(expected, "utf8");
-  return a.length === b.length && crypto.timingSafeEqual(a, b) ? "ok" : "denied";
+  const status = verifyOwnerCode(req.get("x-paid-order-access-code") ?? "", env);
+  return status === "authorized" ? "ok" : status === "not-configured" ? "not-configured" : "denied";
 }
 
 export function registerNerveSessionKeyRoute(app: Express, deps: { env?: Env } = {}) {

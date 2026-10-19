@@ -59,3 +59,21 @@ test("client keeps the Nerve key out of storage and away from the owner-lock pat
   assert.ok(!/apiRequest\(|notifyOwnerAuthFailure\(|onOwnerAuthFailure\(|from "@\/lib\/queryClient"/.test(src));
   assert.ok(!src.includes("server/lib/nerve-proxy"));
 });
+
+test("session-key accepts a lookalike-mangled code when NORM_HASH is set", async () => {
+  const { normalizeOwnerCode } = await import("../server/lib/owner-code");
+  const e = {
+    ...env,
+    PAID_ORDER_INTAKE_ACCESS_CODE_NORM_HASH: crypto.createHash("sha256").update(normalizeOwnerCode(OWNER)).digest("hex"),
+  } as NodeJS.ProcessEnv;
+  await withServer(e, async (url) => {
+    const ok = await fetch(url, { headers: { "x-paid-order-access-code": OWNER.toUpperCase().replace(/O/g, "0") } });
+    assert.equal(ok.status, 200);
+    const bad = await fetch(url, { headers: { "x-paid-order-access-code": "OWNER-CODE-FOR-TESTZ" } });
+    assert.equal(bad.status, 401);
+  });
+  await withServer(env, async (url) => {
+    const r = await fetch(url, { headers: { "x-paid-order-access-code": OWNER.toUpperCase() } });
+    assert.equal(r.status, 401, "without NORM_HASH only the exact code works");
+  });
+});

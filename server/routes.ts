@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { cleanProvidedOwnerCode, ownerCodeHashes, verifyOwnerCode, type OwnerCodeStatus } from "./lib/owner-code";
 import type { Server } from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -508,27 +509,14 @@ function firstQueryValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function intakeAccessCodeHash(): string {
-  return process.env.PAID_ORDER_INTAKE_ACCESS_CODE_HASH?.trim() || "";
-}
-
 function normalizedAccessCode(value: string): string {
-  const withoutBearer = value.trim().replace(/^Bearer\s+/i, "");
-  const hasMatchingQuotes =
-    withoutBearer.length >= 2 &&
-    ((withoutBearer.startsWith("\"") && withoutBearer.endsWith("\"")) ||
-      (withoutBearer.startsWith("'") && withoutBearer.endsWith("'")));
-  return hasMatchingQuotes ? withoutBearer.slice(1, -1).trim() : withoutBearer;
+  return cleanProvidedOwnerCode(value);
 }
 
 function timingSafeMatch(actual: string, expected: string): boolean {
   const a = Buffer.from(actual, "utf8");
   const b = Buffer.from(expected, "utf8");
   return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-function hashAccessCode(value: string): string {
-  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function providedIntakeAccessCode(req: Request): string {
@@ -540,12 +528,8 @@ function providedIntakeAccessCode(req: Request): string {
   return normalizedAccessCode(headerValue || (typeof bodyValue === "string" ? bodyValue : ""));
 }
 
-function intakeAuthorizationStatus(req: Request): "authorized" | "not-configured" | "missing" | "mismatch" {
-  const expected = intakeAccessCodeHash();
-  if (!expected) return "not-configured";
-  const provided = providedIntakeAccessCode(req);
-  if (!provided) return "missing";
-  return timingSafeMatch(hashAccessCode(provided), expected) ? "authorized" : "mismatch";
+function intakeAuthorizationStatus(req: Request): OwnerCodeStatus {
+  return verifyOwnerCode(providedIntakeAccessCode(req));
 }
 
 function paidOrderDraftFrom(body: unknown): PaidOrderDraft {
@@ -907,7 +891,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         tokenSource: config.tokenSource,
       },
       paidOrderIntake: {
-        accessCodeConfigured: Boolean(intakeAccessCodeHash()),
+        accessCodeConfigured: Boolean(ownerCodeHashes().exact),
         buildId: INTAKE_BUILD_ID,
         clientLinkWorkflow: "enabled",
       },
