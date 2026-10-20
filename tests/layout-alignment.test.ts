@@ -1438,14 +1438,14 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal((await page.getByTestId("text-phone-title").innerText()).trim(), "More");
     const moreLinks = (await page.locator("[data-testid='page-more'] a.more-row .more-row-label").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
     const moreHeads = (await page.locator("[data-testid='page-more'] .more-heading").allInnerTexts()).map((t) => t.trim().toLowerCase());
-    // PC-only pages never show on the phone; More is grouped by on-the-go task.
-    for (const pcOnly of ["Orders", "Library", "HubSpot board", "Profit", "Setup"]) {
+    // Contextual pages never show on the phone; More is grouped by primary task.
+    for (const pcOnly of ["Library", "HubSpot board", "Profit", "Priority"]) {
       assert.equal(moreLinks.some((t) => t === pcOnly || t.startsWith(`${pcOnly} `)), false, `phone More lists ${pcOnly}: ${moreLinks.join("|")}`);
     }
-    assert.deepEqual(moreHeads.slice(0, 3), ["orders", "make", "shop"]);
+    assert.deepEqual(moreHeads.slice(0, 3), ["run", "take", "keep"]);
     assert.ok(moreHeads.includes("tools") && moreHeads.includes("apps"), moreHeads.join("|"));
-    assert.ok(moreLinks.includes("Priority"), `phone More is missing Priority: ${moreLinks.join("|")}`);
-    // Spending replaces Supplies + Expenses under Shop.
+    assert.ok(moreLinks.includes("Setup"), `phone More is missing Setup: ${moreLinks.join("|")}`);
+    // Spending replaces Supplies + Expenses under Keep.
     assert.ok(moreLinks.includes("Spending"), `phone More is missing Spending: ${moreLinks.join("|")}`);
     assert.equal(moreLinks.some((t) => t === "Supplies" || t === "Expenses"), false, moreLinks.join("|"));
     const rowHeights = await page.locator("[data-testid='page-more'] .more-row").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
