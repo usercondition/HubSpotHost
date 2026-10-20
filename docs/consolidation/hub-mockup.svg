@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" role="img" aria-labelledby="title description">
+  <title id="title">Print Ops proposed Hub rough mockup</title>
+  <desc id="description">A desktop wireframe that puts urgent work, today's print queue, coming up orders, and shipped work on one page.</desc>
+  <style>
+    .bg{fill:#fafaf9}.rail{fill:#1c1917}.panel{fill:#fff;stroke:#dedbd5;stroke-width:1}.muted{fill:#78716c}.ink{fill:#292524}.white{fill:#fff}.amber{fill:#d97706}.orange{fill:#fff7ed;stroke:#fed7aa;stroke-width:1}.red{fill:#fef2f2;stroke:#fecaca;stroke-width:1}.green{fill:#f0fdf4;stroke:#bbf7d0;stroke-width:1}.blue{fill:#eff6ff;stroke:#bfdbfe;stroke-width:1}.h1{font:700 28px Inter,Arial,sans-serif}.h2{font:700 18px Inter,Arial,sans-serif}.body{font:500 14px Inter,Arial,sans-serif}.small{font:500 12px Inter,Arial,sans-serif}.label{font:700 11px Inter,Arial,sans-serif;letter-spacing:1px}.num{font:700 14px ui-monospace,monospace}.line{stroke:#e7e5e4;stroke-width:1}
+  </style>
+  <rect class="bg" width="1440" height="1024"/>
+  <rect class="rail" width="220" height="1024"/>
+  <text class="white h2" x="28" y="48">Print Ops</text>
+  <text class="muted small" x="28" y="70">Resin print shop</text>
+  <text class="amber label" x="28" y="122">RUN</text>
+  <rect x="16" y="136" width="188" height="38" rx="8" fill="#44403c"/>
+  <text class="white body" x="32" y="160">Hub</text>
+  <text class="white num" x="176" y="160">6</text>
+  <text class="white body" x="32" y="204">Inbox</text>
+  <text class="white body" x="32" y="244">Files</text>
+  <text class="amber label" x="28" y="302">MAKE</text>
+  <text class="white body" x="32" y="336">Print files</text>
+  <text class="white body" x="32" y="376">Printers</text>
+  <text class="white body" x="32" y="416">Labels</text>
+  <text class="amber label" x="28" y="474">SHOP</text>
+  <text class="white body" x="32" y="508">Intake</text>
+  <text class="white body" x="32" y="548">Quote</text>
+  <text class="white body" x="32" y="588">Spending</text>
+  <text class="white body" x="32" y="628">Setup</text>
+  <text class="muted small" x="28" y="980">Mockup · sample data</text>
+
+  <text class="ink h1" x="260" y="58">Hub</text>
+  <text class="muted body" x="260" y="84">One working view of orders and flow · Tue, Oct 20</text>
+  <rect x="1168" y="33" width="222" height="32" rx="16" fill="#f5f5f4"/>
+  <circle cx="1186" cy="49" r="5" fill="#16a34a"/>
+  <text class="ink small" x="1200" y="53">HubSpot connected · Refresh</text>
+
+  <rect class="red" x="260" y="116" width="1130" height="182" rx="12"/>
+  <text class="ink h2" x="284" y="148">Needs attention</text>
+  <text class="muted body" x="284" y="171">Do these first. Ordered by overdue, due today, then blocker.</text>
+  <rect x="284" y="192" width="1078" height="34" rx="6" fill="#fff"/>
+  <circle cx="302" cy="209" r="5" fill="#dc2626"/><text class="ink body" x="318" y="214">Overdue · Castigator legs</text><text class="muted body" x="668" y="214">Missing plate</text><text class="amber body" x="1010" y="214">Sep 27 · set</text><text class="ink num" x="1292" y="214">$280</text>
+  <rect x="284" y="236" width="1078" height="34" rx="6" fill="#fff"/>
+  <circle cx="302" cy="253" r="5" fill="#d97706"/><text class="ink body" x="318" y="258">Due today · Knight kit</text><text class="muted body" x="668" y="258">Needs reply</text><text class="amber body" x="1010" y="258">Due today</text><text class="ink num" x="1292" y="258">$165</text>
+
+  <text class="ink h2" x="260" y="344">Todays print queue</text>
+  <text class="muted body" x="260" y="367">Priority order; printer assignment and plate time stay visible.</text>
+  <rect class="panel" x="260" y="390" width="540" height="252" rx="12"/>
+  <text class="ink h2" x="284" y="424">Next print <tspan class="muted">2</tspan></text>
+  <text class="muted small" x="284" y="447">Start when a printer clears</text>
+  <line class="line" x1="284" y1="464" x2="776" y2="464"/>
+  <text class="ink body" x="284" y="493">1 · Land Raider doors</text><text class="muted small" x="284" y="515">2 plates · 8h 20m · Mighty 12K</text><text class="amber small" x="684" y="504">Due today</text>
+  <line class="line" x1="284" y1="533" x2="776" y2="533"/>
+  <text class="ink body" x="284" y="562">2 · Rhino tracks</text><text class="muted small" x="284" y="584">1 plate · 4h 10m · unassigned</text><text class="muted small" x="684" y="573">Oct 22</text>
+  <line class="line" x1="284" y1="602" x2="776" y2="602"/>
+  <text class="amber small" x="284" y="625">Open printer / plate details ’</text>
+  <rect class="panel" x="826" y="390" width="564" height="252" rx="12"/>
+  <text class="ink h2" x="850" y="424">In production <tspan class="muted">2</tspan></text>
+  <text class="muted small" x="850" y="447">Running now; only problems surface here</text>
+  <line class="line" x1="850" y1="464" x2="1366" y2="464"/>
+  <text class="ink body" x="850" y="493">Mega 8K S · Defiler torso</text><text class="muted small" x="850" y="515">62% · 3h 12m left</text><text class="green small" x="1262" y="504">On track</text>
+  <line class="line" x1="850" y1="533" x2="1366" y2="533"/>
+  <text class="ink body" x="850" y="562">Mighty Revo · Tank hull</text><text class="muted small" x="850" y="584">Finished · wash / cure next</text><text class="amber small" x="1254" y="573">Needs QC</text>
+  <line class="line" x1="850" y1="602" x2="1366" y2="602"/>
+  <text class="amber small" x="850" y="625">Open printer fleet ’</text>
+
+  <rect class="blue" x="260" y="680" width="752" height="280" rx="12"/>
+  <text class="ink h2" x="284" y="714">Coming up</text>
+  <text class="muted body" x="284" y="737">Open orders after today, automatically ordered by target date and readiness.</text>
+  <text class="label muted" x="284" y="774">ORDER</text><text class="label muted" x="600" y="774">STATUS</text><text class="label muted" x="762" y="774">SHIP BY</text><text class="label muted" x="916" y="774">AMOUNT</text>
+  <line class="line" x1="284" y1="786" x2="988" y2="786"/>
+  <text class="ink body" x="284" y="816">3 · Vindicators</text><text class="muted body" x="600" y="816">Plate attached</text><text class="ink body" x="762" y="816">Oct 23 · plan</text><text class="ink num" x="916" y="816">$310</text>
+  <line class="line" x1="284" y1="834" x2="988" y2="834"/>
+  <text class="ink body" x="284" y="864">4 · Pickup bundle · 3</text><text class="muted body" x="600" y="864">Queued</text><text class="ink body" x="762" y="864">Oct 25 · set</text><text class="ink num" x="916" y="864">$220</text>
+  <line class="line" x1="284" y1="882" x2="988" y2="882"/>
+  <text class="amber small" x="284" y="922">All open orders and priority controls ’</text>
+  <rect class="green" x="1038" y="680" width="352" height="280" rx="12"/>
+  <text class="ink h2" x="1062" y="714">Out the door</text>
+  <text class="muted body" x="1062" y="737">Completed this week</text>
+  <text class="ink h1" x="1062" y="785">$645</text>
+  <text class="muted small" x="1062" y="808">4 orders · counted once</text>
+  <line class="line" x1="1062" y1="834" x2="1366" y2="834"/>
+  <text class="ink body" x="1062" y="864">Tank accessories</text><text class="green small" x="1287" y="864">Shipped</text>
+  <text class="ink body" x="1062" y="894">Knight arms</text><text class="green small" x="1283" y="894">Picked up</text>
+  <text class="amber small" x="1062" y="930">Shipment history ’</text>
+</svg>
