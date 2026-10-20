@@ -248,7 +248,7 @@ const NAV: Array<{
   { href: "/prints", label: "Print files", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
   { href: "/printers", label: "Printers", title: "Printers", icon: Printer, testId: "link-nav-printers", group: "Run", phone: "tab" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Tag, testId: "link-nav-labels", group: "Run", phone: "more" },
-  { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Take", phone: "more" },
+  { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   { href: "/quote", label: "Quote", title: "STL Quote", icon: Calculator, testId: "link-nav-quote", group: "Take", phone: "more" },
   { href: "/files", label: "Files", title: "Search Drive files", icon: FolderSearch, testId: "link-nav-files", group: "Take", phone: "more" },
