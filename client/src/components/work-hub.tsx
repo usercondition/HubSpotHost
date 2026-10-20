@@ -17,6 +17,8 @@ import {
 } from "@/components/priority-stack-list";
 import { orderTitle } from "@/lib/order-title";
 import { cn } from "@/lib/utils";
+import { shopDateLabel } from "@shared/ship-by";
+import type { ProductionQueueItem, ProductionQueueResponse } from "@shared/schema";
 
 type Sort = "priority" | "ship-by" | "amount";
 
@@ -32,7 +34,44 @@ function orderHref(row: StackRowModel): string {
   return row.dealId ? stackHref(row.dealId) : "/stack";
 }
 
-export function WorkHub({ needs, stack, today }: { needs: FloorNeed[]; stack: StackView | undefined; today: string }) {
+function QueueLane({ title, items, today }: { title: string; items: ProductionQueueItem[]; today: string }) {
+  return (
+    <section className="hub-queue-lane" aria-label={title}>
+      <div className="hub-queue-head">
+        <h3>{title}</h3>
+        <span className="numeric">{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="work-hub-empty">Nothing here right now.</p>
+      ) : (
+        items.map((item, index) => (
+          <Link key={item.dealId} href={`/queue?dealId=${encodeURIComponent(item.dealId)}`} className="hub-queue-row">
+            <span className="hub-queue-rank numeric">{index + 1}</span>
+            <span className="min-w-0">
+              <strong>{orderTitle(item.dealName, item.contactName)}</strong>
+              <small>{item.plateCount ? `${item.plateCount} plate${item.plateCount === 1 ? "" : "s"}` : item.stage}{item.totalPrintTimeSeconds ? ` · ${Math.round(item.totalPrintTimeSeconds / 3600)}h` : ""}{item.assignedPrinterNames.length ? ` · ${item.assignedPrinterNames.join(", ")}` : ""}</small>
+            </span>
+            <span className={cn("hub-queue-date", item.shipBy <= today && "is-due")}>
+              {shopDateLabel({ date: item.shipBy, today, source: item.shipBySource, tentative: item.tentative })}
+            </span>
+          </Link>
+        ))
+      )}
+    </section>
+  );
+}
+
+export function WorkHub({
+  needs,
+  stack,
+  queue,
+  today,
+}: {
+  needs: FloorNeed[];
+  stack: StackView | undefined;
+  queue: ProductionQueueResponse | undefined;
+  today: string;
+}) {
   const [filter, setFilter] = useState<OutstandingFilter>("all");
   const [sort, setSort] = useState<Sort>("priority");
   const rows = stack?.rows ?? [];
@@ -45,24 +84,22 @@ export function WorkHub({ needs, stack, today }: { needs: FloorNeed[]; stack: St
   }, [filter, rows, sort, today]);
   const overdue = rows.filter((row) => row.targetDate < today).length;
   const dueToday = rows.filter((row) => row.targetDate === today).length;
+  const outTheDoor = stack?.outTheDoor ?? [];
 
   return (
     <div className="work-hub" data-testid="work-hub">
       <section className="work-hub-summary">
         <div>
-          <p className="work-hub-eyebrow">Today’s work</p>
-          <h2>What needs your attention</h2>
-          <p className="work-hub-note">
-            {overdue > 0 ? `${overdue} overdue` : "Nothing overdue"}{dueToday > 0 ? ` · ${dueToday} due today` : ""} · {needs.length} actions open
-          </p>
+          <p className="work-hub-eyebrow">Print Ops</p>
+          <h2>Hub</h2>
+          <p className="work-hub-note">{overdue > 0 ? `${overdue} overdue` : "Nothing overdue"}{dueToday > 0 ? ` · ${dueToday} due today` : ""} · {rows.length} open orders</p>
         </div>
-        <Link href="/stack" className="work-hub-open">Open priority controls <ChevronRight className="h-4 w-4" /></Link>
+        <Link href="/stack" className="work-hub-open">Advanced priority <ChevronRight className="h-4 w-4" /></Link>
       </section>
 
-      <div className="work-hub-layout">
-        <section className="work-hub-actions" aria-labelledby="work-hub-actions">
+      <section className="work-hub-actions" aria-labelledby="work-hub-actions">
           <div className="work-hub-section-head">
-            <h3 id="work-hub-actions">Do next</h3>
+            <div><h3 id="work-hub-actions">Needs attention</h3><p>Overdue, due today, then blockers.</p></div>
             <span className="numeric">{needs.length}</span>
           </div>
           {needs.length === 0 ? (
@@ -80,13 +117,24 @@ export function WorkHub({ needs, stack, today }: { needs: FloorNeed[]; stack: St
               </Link>
             ))
           )}
-        </section>
+      </section>
 
-        <section className="work-hub-outstanding" aria-labelledby="work-hub-outstanding">
+      <section className="hub-production" aria-labelledby="hub-production">
+        <div className="work-hub-section-head">
+          <div><h3 id="hub-production">Today’s print queue</h3><p>Only the next jobs and work already in production.</p></div>
+          <Link href="/queue" className="work-hub-open">Queue details <ChevronRight className="h-4 w-4" /></Link>
+        </div>
+        <div className="hub-queue-grid">
+          <QueueLane title="Next print" items={queue?.nextPrint ?? []} today={today} />
+          <QueueLane title="In production" items={queue?.inProduction ?? []} today={today} />
+        </div>
+      </section>
+
+      <section className="work-hub-outstanding" aria-labelledby="work-hub-outstanding">
           <div className="work-hub-section-head">
             <div>
-              <h3 id="work-hub-outstanding">Outstanding orders</h3>
-              <p>Every open order, ordered by the work that is due first.</p>
+              <h3 id="work-hub-outstanding">Coming up</h3>
+              <p>Every open order, ordered by Stack auto priority.</p>
             </div>
             <span className="numeric">{rows.length} open</span>
           </div>
@@ -134,8 +182,25 @@ export function WorkHub({ needs, stack, today }: { needs: FloorNeed[]; stack: St
               );
             })}
           </div>
-        </section>
-      </div>
+      </section>
+
+      <section className="hub-out-door" aria-labelledby="hub-out-door">
+        <div className="work-hub-section-head">
+          <div><h3 id="hub-out-door">Out the door</h3><p>Completed this week · counted once.</p></div>
+          <span className="hub-out-door-total numeric">{stack ? formatMoney(stack.totals.outTheDoor) : "—"}</span>
+        </div>
+        {outTheDoor.length === 0 ? <p className="work-hub-empty">No completed orders this week.</p> : (
+          <div className="hub-out-door-list">
+            {outTheDoor.slice(0, 4).map((row) => (
+              <Link key={row.key} href={orderHref(row)} className="hub-out-door-row">
+                <span className="min-w-0"><strong>{orderTitle(row.name, row.contactName)}</strong><small>{statusForRow(row).label}</small></span>
+                <span className="numeric">{row.amount == null ? "—" : formatMoney(row.amount)}</span>
+              </Link>
+            ))}
+            {outTheDoor.length > 4 ? <Link className="work-hub-open px-4 pb-4" href="/shipments">Shipment history <ChevronRight className="h-4 w-4" /></Link> : null}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
