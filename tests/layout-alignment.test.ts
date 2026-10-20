@@ -985,7 +985,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             return (spans[spans.length - 1]?.textContent || "").trim();
           }),
         );
-        check(tabLabels.join("|") === "Hub|Inbox|Print files|Printers|More", `phone tabs were ${tabLabels.join("|")}`);
+        check(tabLabels.join("|") === "Hub|Inbox|Plates|Printers|More", `phone tabs were ${tabLabels.join("|")}`);
         return;
       }
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
