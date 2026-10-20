@@ -233,7 +233,7 @@ function MoreRowBody({
 
 /* ---------------------------------------------------------------- shell --- */
 
-type NavGroup = "Run" | "Take" | "Keep" | "Office";
+type NavGroup = "Run" | "Take" | "Keep";
 
 const NAV: Array<{
   href: string;
@@ -244,46 +244,26 @@ const NAV: Array<{
   group: NavGroup;
   phone?: "tab" | "more" | "never";
 }> = [
-  { href: "/", label: "Work hub", title: "Actions and outstanding orders", icon: LayoutDashboard, testId: "link-nav-home", group: "Run", phone: "tab" },
-  { href: "/stack", label: "Priority", title: "Priority order and fulfillment controls", icon: ListChecks, testId: "link-nav-stack", group: "Run", phone: "tab" },
-  { href: "/queue", label: "Print queue", title: "Next print and in-production jobs", icon: ListOrdered, testId: "link-nav-queue", group: "Run", phone: "tab" },
-  { href: "/prints", label: "Prints", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
-  { href: "/library", label: "Library", title: "Slice file library", icon: Library, testId: "link-nav-library", group: "Run", phone: "never" },
+  { href: "/", label: "Hub", title: "Orders, production flow, and priority", icon: LayoutDashboard, testId: "link-nav-home", group: "Run", phone: "tab" },
+  { href: "/prints", label: "Print files", title: "Plates & print files", icon: FileUp, testId: "link-nav-prints", group: "Run", phone: "tab" },
+  { href: "/printers", label: "Printers", title: "Printers", icon: Printer, testId: "link-nav-printers", group: "Run", phone: "tab" },
   { href: "/labels", label: "Labels", title: "Shipping labels", icon: Tag, testId: "link-nav-labels", group: "Run", phone: "more" },
-  { href: "/shipments", label: "Shipments", title: "Shipment tracking", icon: Ship, testId: "link-nav-shipments", group: "Run", phone: "more" },
-  { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Take", phone: "more" },
-  { href: "/files", label: "Files", title: "Search Drive files", icon: FolderSearch, testId: "link-nav-files", group: "Take", phone: "more" },
+  { href: "/inbox", label: "Inbox", title: "Client chats and follow-ups", icon: MessagesSquare, testId: "link-nav-inbox", group: "Run", phone: "more" },
   { href: "/orders", label: "Intake", title: "Paid Order Intake", icon: Link2, testId: "link-nav-order-links", group: "Take", phone: "more" },
   { href: "/quote", label: "Quote", title: "STL Quote", icon: Calculator, testId: "link-nav-quote", group: "Take", phone: "more" },
-  {
-    href: "/paid-orders",
-    label: "Manual",
-    title: "Manual Order Entry",
-    icon: ClipboardCheck,
-    testId: "link-nav-paid-orders",
-    group: "Take",
-    phone: "more",
-  },
-  { href: "/printers", label: "Printers", title: "Printers", icon: Printer, testId: "link-nav-printers", group: "Keep", phone: "more" },
+  { href: "/files", label: "Files", title: "Search Drive files", icon: FolderSearch, testId: "link-nav-files", group: "Take", phone: "more" },
   { href: "/spending", label: "Spending", title: "Supplies, overhead and the bottom line", icon: ShoppingBag, testId: "link-nav-spending", group: "Keep", phone: "more" },
-  { href: "/deals", label: "HubSpot board", title: "Full HubSpot stage board", icon: Boxes, testId: "link-nav-deals", group: "Office", phone: "never" },
-  { href: "/operations", label: "Profit", title: "Profit Automation", icon: Activity, testId: "link-nav-operations", group: "Office", phone: "more" },
-  { href: "/performance", label: "Stats", title: "Performance", icon: BarChart3, testId: "link-nav-performance", group: "Office", phone: "more" },
-  { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Office", phone: "more" },
-  ...(NERVE_SECTION_ENABLED
-    ? [{ href: "/nerve", label: "Nerve", title: "Nerve (Mac mini, Tailscale)", icon: Radar, testId: "link-nav-nerve", group: "Office" as NavGroup, phone: "more" as const }]
-    : []),
+  { href: "/setup", label: "Setup", title: "System Setup", icon: Settings2, testId: "link-nav-setup", group: "Keep", phone: "more" },
 ];
 
 const GROUPS: Array<{ id: NavGroup; hint: string }> = [
-  { id: "Run", hint: "Today’s jobs" },
+  { id: "Run", hint: "Today’s work" },
   { id: "Take", hint: "Buyers in" },
   { id: "Keep", hint: "Machines & stock" },
-  { id: "Office", hint: "Numbers & setup" },
 ];
 
 // Phone nav is built from lib/phone.ts (on-the-go tasks), not the desktop groups.
-// PC-only pages (Library, HubSpot board, Profit, Expenses, Setup) are left out.
+// Contextual and PC-only pages are left out.
 const PHONE_TABS = phoneTabs(NAV);
 const PHONE_MORE_SECTIONS = phoneMoreSections(NAV);
 const PHONE_MORE = PHONE_MORE_SECTIONS.flatMap((section) => section.items);
@@ -293,9 +273,6 @@ type ShopCounts = ReturnType<typeof useShopCounts>;
 
 function navCountFor(shop: ShopCounts, href: string): { value: number | null; hot?: boolean; testId?: string } | null {
   if (href === "/") return { value: shop.needsYou, hot: true, testId: "badge-nav-floor" };
-  if (href === "/stack") return { value: shop.stackCount, testId: "badge-nav-stack" };
-  if (href === "/queue") return { value: shop.queueCount, testId: "badge-nav-queue" };
-  if (href === "/library") return { value: shop.libraryCount, testId: "badge-nav-library" };
   return null;
 }
 

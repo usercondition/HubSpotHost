@@ -25,7 +25,7 @@ export function isPhoneFrom(matches: (query: string) => boolean): boolean {
 /* ------------------------------------------------------------ phone nav --- */
 
 /** Bottom tab bar on phones, in order (More is always last). */
-export const PHONE_TAB_HREFS = ["/", "/inbox", "/printers", "/queue"] as const;
+export const PHONE_TAB_HREFS = ["/", "/inbox", "/prints", "/printers"] as const;
 
 export type PhoneMoreSection = { title: string; hrefs: string[] };
 
@@ -34,9 +34,9 @@ export type PhoneMoreSection = { title: string; hrefs: string[] };
  * desktop NAV has it (so Files appears once that page ships).
  */
 export const PHONE_MORE_SECTIONS: PhoneMoreSection[] = [
-  { title: "Orders", hrefs: ["/stack", "/orders", "/paid-orders", "/shipments", "/labels"] },
-  { title: "Make", hrefs: ["/quote", "/files", "/prints"] },
-  { title: "Shop", hrefs: ["/spending", "/performance", "/nerve"] },
+  { title: "Run", hrefs: ["/labels"] },
+  { title: "Take", hrefs: ["/orders", "/quote", "/files"] },
+  { title: "Keep", hrefs: ["/spending", "/setup"] },
 ];
 
 /** Short phone labels where the desktop label is too long or unclear on a phone. */
@@ -49,17 +49,13 @@ export const PHONE_MORE_HREF = "/more";
 
 /** One-line descriptions for rows on the phone More page. */
 export const PHONE_DESCRIPTIONS: Record<string, string> = {
-  "/stack": "Order lineup, status and tracking",
   "/orders": "Send a buyer the order-form link",
-  "/paid-orders": "Type in an order by hand",
-  "/shipments": "Where every package is",
   "/labels": "Buy a label, copy the tracking note",
   "/quote": "Price an STL with modifiers",
   "/files": "Search Drive files and thumbnails",
   "/prints": "Plates per order and part QC",
   "/spending": "Supplies, overhead and the bottom line",
-  "/performance": "Sales, profit and print time",
-  "/nerve": "Mac mini and agent status",
+  "/setup": "Connections and shop settings",
 };
 
 /** Where the phone Back button on a More page goes. */
@@ -78,7 +74,7 @@ export type PcOnlyRoute = {
 };
 
 /**
- * Whole pages that are PC work (Library, HubSpot board, Profit, Setup, plus the
+ * Whole pages that are PC work (Library, HubSpot board, Profit, plus the
  * off-nav Marketplace brief and Resin tables). On a phone the shell shows a short
  * "Do this on your PC" note instead of the page, and they are not in the phone nav.
  */
@@ -86,7 +82,6 @@ export const PC_ONLY_ROUTES: Record<string, PcOnlyRoute> = {
   "/library": { what: "The slice file library (CTB / ULTX plates)", alt: { href: "/prints", label: "See plates per order" } },
   "/deals": { what: "The full HubSpot stage board", alt: { href: "/stack", label: "Open Priority" } },
   "/operations": { what: "Profit automation and recalculation", alt: { href: "/performance", label: "See Stats" } },
-  "/setup": { what: "System setup and connections", alt: { href: "/nerve", label: "Check Nerve status" } },
   "/marketplace-brief": { what: "The Marketplace brief and Chrome helper", alt: { href: "/inbox", label: "Open Inbox" } },
   "/resin": { what: "Resin inventory tables", alt: { href: "/spending", label: "Open Spending" } },
 };

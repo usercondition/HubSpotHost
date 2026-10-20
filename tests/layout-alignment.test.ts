@@ -751,22 +751,18 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.waitForFunction(
       () => document.querySelector('[data-testid="badge-nav-floor"]')?.textContent?.trim() === "2",
     );
-    await page.waitForFunction(
-      () => document.querySelector('[data-testid="badge-nav-library"]')?.textContent?.trim() === "2",
-    );
-    await page.locator("[data-testid='link-nav-library']").waitFor();
     const assertOneStatsPage = async () => {
       await page.locator("[data-testid='stats-origin-svg']").waitFor();
       assert.equal(await page.locator("main [data-testid='page-transition']").count(), 1, "one page transition remains after navigation");
       assert.equal(await page.locator("main [data-testid='stats-origin-svg']").count(), 1, "one origin map remains after navigation");
     };
-    await page.locator("[data-testid='link-nav-performance']").click();
+    await page.goto(`${base}/#/performance`, { waitUntil: "domcontentloaded" });
     await assertOneStatsPage();
     if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
-    assert.ok(nav.length >= 3, "nav count slots rendered");
+    assert.ok(nav.length >= 1, "nav count slots rendered");
     const navRight = spread(nav.map((box) => box.right));
     const navCenter = spread(nav.map((box) => box.center));
     check(navRight.delta <= 1, `nav right edges differ by ${navRight.delta}`);
@@ -989,7 +985,7 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
             return (spans[spans.length - 1]?.textContent || "").trim();
           }),
         );
-        check(tabLabels.join("|") === "Work hub|Inbox|Printers|Print queue|More", `phone tabs were ${tabLabels.join("|")}`);
+        check(tabLabels.join("|") === "Hub|Inbox|Plates|Printers|More", `phone tabs were ${tabLabels.join("|")}`);
         return;
       }
       await root.locator("[data-testid='library-row-file-castigator']").waitFor();
@@ -1442,14 +1438,14 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     assert.equal((await page.getByTestId("text-phone-title").innerText()).trim(), "More");
     const moreLinks = (await page.locator("[data-testid='page-more'] a.more-row .more-row-label").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
     const moreHeads = (await page.locator("[data-testid='page-more'] .more-heading").allInnerTexts()).map((t) => t.trim().toLowerCase());
-    // PC-only pages never show on the phone; More is grouped by on-the-go task.
-    for (const pcOnly of ["Orders", "Library", "HubSpot board", "Profit", "Setup"]) {
+    // Contextual pages never show on the phone; More is grouped by primary task.
+    for (const pcOnly of ["Library", "HubSpot board", "Profit", "Priority"]) {
       assert.equal(moreLinks.some((t) => t === pcOnly || t.startsWith(`${pcOnly} `)), false, `phone More lists ${pcOnly}: ${moreLinks.join("|")}`);
     }
-    assert.deepEqual(moreHeads.slice(0, 3), ["orders", "make", "shop"]);
+    assert.deepEqual(moreHeads.slice(0, 3), ["run", "take", "keep"]);
     assert.ok(moreHeads.includes("tools") && moreHeads.includes("apps"), moreHeads.join("|"));
-    assert.ok(moreLinks.includes("Priority"), `phone More is missing Priority: ${moreLinks.join("|")}`);
-    // Spending replaces Supplies + Expenses under Shop.
+    assert.ok(moreLinks.includes("Setup"), `phone More is missing Setup: ${moreLinks.join("|")}`);
+    // Spending replaces Supplies + Expenses under Keep.
     assert.ok(moreLinks.includes("Spending"), `phone More is missing Spending: ${moreLinks.join("|")}`);
     assert.equal(moreLinks.some((t) => t === "Supplies" || t === "Expenses"), false, moreLinks.join("|"));
     const rowHeights = await page.locator("[data-testid='page-more'] .more-row").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));

@@ -167,9 +167,7 @@ function TodaysWork() {
     fepDue,
   });
 
-  return (
-    <WorkHub needs={floorNeeds} stack={stack.data} today={today} />
-  );
+  return <WorkHub needs={floorNeeds} stack={stack.data} queue={productionQueue.data} today={today} />;
 }
 
 export default function Dashboard() {
@@ -188,8 +186,8 @@ export default function Dashboard() {
   return (
     <div className="mx-auto flex w-full max-w-[1208px] flex-col" data-testid="page-floor">
       <PageHeader
-        title="Work hub"
-        subtitle={`Actions and outstanding orders · ${pacificDayLabel()}`}
+        title="Hub"
+        subtitle={`Orders, production flow, and priority · ${pacificDayLabel()}`}
         hideActionsOnPhone
         actions={
           <>
@@ -197,13 +195,13 @@ export default function Dashboard() {
             <Button asChild size="sm" variant="outline" className="h-8">
               <Link href="/stack">
                 <ListChecks className="h-3.5 w-3.5" />
-                Priority controls
+                Advanced priority
               </Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="h-8" data-testid="link-floor-open-queue">
               <Link href="/queue">
                 <ListOrdered className="h-3.5 w-3.5" />
-                Print queue
+                Queue details
               </Link>
             </Button>
           </>
