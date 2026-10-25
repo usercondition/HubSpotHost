@@ -1,45 +1,41 @@
 /**
  * Client Inbox API.
  *
- * - Mac → Print Ops: POST /api/inbox/cards and GET /api/inbox/edits, secured
- *   by INBOX_PUSH_TOKEN (Authorization: Bearer … or x-inbox-push-token).
+ * - Watcher → Print Ops: POST /api/inbox/ingest (Gmail message notifications) and
+ *   POST /api/inbox/cards (full snapshot), plus GET /api/inbox/edits. All three use
+ *   INBOX_PUSH_TOKEN (Authorization: Bearer … or x-inbox-push-token).
  * - Owner UI: everything else, behind the existing owner access code.
  * - Scheduler: POST /api/cron/followup-reminders, behind OWNER_DIGEST_CRON_SECRET.
- * - Live mirror (Mac → Print Ops, push token): POST /api/inbox/mac/poll (heartbeat + claim refresh/sends),
- *   POST /api/inbox/mac/refresh/:id, POST /api/inbox/mac/outbound/:id, POST /api/inbox/mac/thread/:id.
- * - Live mirror (owner): POST /api/inbox/refresh, POST /api/inbox/cards/:id/send, POST /api/inbox/outbound/:id/retry.
  *
- * Nothing here messages a buyer by itself. A message is only queued when the owner presses Send
- * (owner code + idempotency key); the Mac sends it through the FB browser and reports back.
- * Retries happen only when the owner taps Retry.
+ * The Inbox shows eBay, Etsy, and MyMiniFactory. Facebook Marketplace is paused:
+ * those cards are dropped and deleted, and no Facebook read is queued.
+ *
+ * Buyer Send is off. POST /api/inbox/cards/:id/send and /api/inbox/outbound/:id/retry
+ * refuse before anything is queued. The Mac poll records a heartbeat and does not
+ * claim a refresh or a send. Draft replies and follow-ups still save.
  */
 import crypto from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { channelForSource, normalizeInboxPayload } from "../../shared/inbox";
+import { BUYER_SEND_OFF_ERROR, channelForSource, normalizeInboxPayload, sellerInboxChannel } from "../../shared/inbox";
+import { normalizeSellerMailBatch } from "../../shared/inbox-mail";
 import {
   VersionConflictError,
   createFollowup,
   getFollowup,
   getInboxCard,
-  OutboundKeyConflictError,
-  claimOutbound,
-  claimRefresh,
   finishOutbound,
   finishRefresh,
   getMeta,
   getOutbound,
   latestRefresh,
-  noteFbBusy,
   listFollowups,
-  listOutbound,
   mergeThreadRead,
   purgeInboxCards,
-  queueOutbound,
-  requestInboxRefresh,
-  retryOutbound,
+  purgePausedFacebookCards,
   setInboxMeta,
   listInboxCards,
+  mergeInboxCards,
   listReplyEditsSince,
   saveReplyEdit,
   setCardStatus,
@@ -114,6 +110,20 @@ const macThreadSchema = z.object({
     .array(z.object({ who: z.string().min(1), text: z.string(), when: z.string().optional(), at: z.string().max(40).nullable().optional() }))
     .max(400),
 });
+const ingestMessageSchema = z.object({
+  id: z.string().min(1).max(160),
+  threadId: z.string().max(160).optional(),
+  from: z.string().max(300).optional(),
+  subject: z.string().max(300).optional(),
+  snippet: z.string().max(4000).optional(),
+  text: z.string().max(4000).optional(),
+  date: z.string().max(40).optional(),
+  channel: z.string().max(40).optional(),
+  buyer: z.string().max(160).optional(),
+  listing: z.string().max(300).optional(),
+  listingUrl: z.string().max(1000).optional(),
+});
+const ingestSchema = z.object({ messages: z.array(ingestMessageSchema).max(100) });
 const followupPatchSchema = z.object({
   status: z.enum(["open", "done", "snoozed"]).optional(),
   reminderDate: dateSchema.nullable().optional(),
@@ -139,9 +149,26 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
     if (cards.length === 0 && rejected > 0) {
       return res.status(400).json({ ok: false, error: "No valid cards in payload", rejected });
     }
-    const purged = purgeInboxCards(excludeIds);
-    const result = upsertInboxCards(cards, updatedAt);
-    return res.json({ ok: true, ...result, rejected, purged });
+    const seller = cards.filter((card) => sellerInboxChannel(card.source));
+    const dropped = cards.length - seller.length;
+    const purged = purgeInboxCards(excludeIds) + purgePausedFacebookCards();
+    const result = seller.length
+      ? upsertInboxCards(seller, updatedAt)
+      : { received: 0, changed: 0, reopened: 0, removed: 0 };
+    return res.json({ ok: true, ...result, rejected, purged, dropped, buyerSend: "off" as const });
+  });
+
+  app.post("/api/inbox/ingest", (req, res) => {
+    if (rejectInboxPush(req, res)) return;
+    const parsed = ingestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { messages: [...] }" });
+    const { cards, skipped } = normalizeSellerMailBatch(parsed.data.messages);
+    const purged = purgePausedFacebookCards();
+    const result = mergeInboxCards(cards);
+    const at = new Date().toISOString();
+    setInboxMeta("last_ingest_at", at);
+    setInboxMeta("last_checkin_at", at);
+    return res.json({ ok: true, ...result, skipped, purged, buyerSend: "off" as const });
   });
 
   app.get("/api/inbox/edits", (req, res) => {
@@ -153,15 +180,20 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
 
   app.get("/api/inbox/cards", (req, res) => {
     if (rejectOwner(req, res)) return;
+    purgePausedFacebookCards();
     return res.json({
       ok: true,
-      cards: listInboxCards(),
+      cards: listInboxCards().filter((card) => sellerInboxChannel(card.source)),
       lastPushAt: getMeta("last_push_at"),
       lastCheckinAt: getMeta("last_checkin_at"),
+      lastIngestAt: getMeta("last_ingest_at"),
       liveMirror: getMeta("mac_live") === "1",
       sourceUpdatedAt: getMeta("source_updated_at"),
-      refresh: latestRefresh(),
-      outbound: listOutbound(),
+      refresh: null,
+      outbound: [],
+      buyerSend: "off" as const,
+      facebookPaused: true,
+      ingest: "gmail" as const,
       pushConfigured: inboxPushToken().length >= 24,
       notionConfigured: Boolean(getNotionFollowupsConfig()),
     });
@@ -173,8 +205,13 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
     if (rejectOwner(req, res)) return;
     const parsed = refreshSchema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ ok: false, error: "Expected { reason: 'open' | 'manual' }" });
-    const result = requestInboxRefresh(parsed.data.reason);
-    return res.status(result.queued ? 202 : 200).json({ ok: true, ...result });
+    return res.status(200).json({
+      ok: true,
+      queued: false,
+      reason: "paused",
+      detail: "Facebook Marketplace refresh is paused. eBay, Etsy, and MyMiniFactory chats show up when a Gmail watcher posts message notifications.",
+      refresh: null,
+    });
   });
 
   app.post("/api/inbox/cards/:id/send", (req, res) => {
@@ -184,38 +221,24 @@ export function registerInboxRoutes(app: Express, rejectOwner: Gate, rejectCron:
     const text = parsed.data.text.replace(/\r/g, "").trim();
     if (!text) return res.status(400).json({ ok: false, error: "Empty message" });
     if (!getInboxCard(req.params.id)) return res.status(404).json({ ok: false, error: "Chat not found" });
-    try {
-      const { created, outbound } = queueOutbound(req.params.id, text, parsed.data.idempotencyKey);
-      return res.status(created ? 202 : 200).json({ ok: true, created, outbound });
-    } catch (error) {
-      if (error instanceof OutboundKeyConflictError) return res.status(409).json({ ok: false, error: error.message });
-      throw error;
-    }
+    return res.status(403).json({ ok: false, error: BUYER_SEND_OFF_ERROR });
   });
 
   app.post("/api/inbox/outbound/:id/retry", (req, res) => {
     if (rejectOwner(req, res)) return;
-    const current = getOutbound(req.params.id);
-    if (!current) return res.status(404).json({ ok: false, error: "Message not found" });
-    const outbound = retryOutbound(req.params.id);
-    if (!outbound) return res.status(409).json({ ok: false, error: `Only failed messages can be retried (this one is ${current.status})`, outbound: current });
-    return res.json({ ok: true, outbound });
+    return res.status(403).json({ ok: false, error: BUYER_SEND_OFF_ERROR });
   });
 
   /* ------------------------------------------------ live mirror: Mac side --- */
 
   app.post("/api/inbox/mac/poll", (req, res) => {
     if (rejectInboxPush(req, res)) return;
-    const body = (req.body ?? {}) as { live?: unknown; maxSends?: unknown; fbBusy?: unknown; fbBusyDetail?: unknown };
+    const body = (req.body ?? {}) as { live?: unknown };
     const live = body.live === true;
     setInboxMeta("last_checkin_at", new Date().toISOString());
     setInboxMeta("mac_live", live ? "1" : "0");
-    if (!live) return res.json({ ok: true, refresh: null, outbound: [] });
-    const maxSends = typeof body.maxSends === "number" ? Math.max(0, Math.min(5, Math.floor(body.maxSends))) : 3;
-    // FB browser busy with another job (lock / :9333): keep any refresh queued; never hand it out now.
-    const fbBusy = body.fbBusy === true;
-    noteFbBusy(fbBusy, typeof body.fbBusyDetail === "string" ? body.fbBusyDetail : "");
-    return res.json({ ok: true, refresh: fbBusy ? null : claimRefresh(), outbound: claimOutbound(maxSends), fbBusy });
+    // Facebook sync and buyer send stay off. A poll is only a heartbeat.
+    return res.json({ ok: true, refresh: null, outbound: [], facebookPaused: true, buyerSend: "off" as const });
   });
 
   app.post("/api/inbox/mac/refresh/:id", (req, res) => {

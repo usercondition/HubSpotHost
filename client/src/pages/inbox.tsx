@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessagesSquare, RefreshCw } from "lucide-react";
@@ -12,7 +12,7 @@ import { Panel, StatusPill } from "@/components/primitives";
 import { FollowupDialog, type FollowupDraft } from "@/components/followup-dialog";
 import type { Followup, InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import { InboxChat } from "@/components/inbox-chat";
-import { heartbeatLabel, needsMe, refreshBusy } from "@/lib/inbox-live";
+import { heartbeatLabel, needsMe } from "@/lib/inbox-live";
 
 type CardsResponse = {
   ok: boolean;
@@ -25,6 +25,9 @@ type CardsResponse = {
   outbound?: InboxOutboundView[];
   pushConfigured: boolean;
   notionConfigured: boolean;
+  lastIngestAt?: string | null;
+  buyerSend?: "off";
+  facebookPaused?: boolean;
 };
 
 /** Query string inside the hash route (`#/inbox?tab=chats&thread=…`), reactive to hash changes. */
@@ -116,39 +119,11 @@ export default function InboxPage() {
   const cardsQuery = useQuery<CardsResponse>({
     queryKey: ["/api/inbox/cards"],
     enabled: isUnlocked,
-    // Poll fast only while a refresh or a send is in flight; otherwise every 30 s.
-    refetchInterval: (query) => {
-      const d = query.state.data as CardsResponse | undefined;
-      const inFlight = refreshBusy(d?.refresh) || (d?.outbound ?? []).some((o) => o.status === "queued" || o.status === "sending");
-      return inFlight ? 3_000 : 30_000;
-    },
+    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
     queryFn: async () => (await apiRequest("GET", "/api/inbox/cards", undefined, { headers })).json(),
   });
 
-  // Ask the Mac for an FB read: once when the Inbox opens (server skips it if data is < 15 min old), and on Refresh taps.
-  const refreshMutation = useMutation({
-    mutationFn: async (reason: "open" | "manual") =>
-      (await apiRequest("POST", "/api/inbox/refresh", { reason }, { headers })).json() as Promise<{
-        queued: boolean;
-        reason?: string;
-        retryAfterMs?: number;
-      }>,
-    onSuccess: (r, reason) => {
-      if (reason === "manual" && !r.queued && r.reason === "cooldown") {
-        toast({ title: "Just refreshed", description: `Try again in ${Math.ceil((r.retryAfterMs ?? 0) / 1000)} s.` });
-      }
-      void queryClient.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
-    },
-    onError: (e: Error, reason) => reason === "manual" && toast({ title: "Could not start a refresh", description: e.message, variant: "destructive" }),
-  });
-  const openedRef = useRef(false);
-  useEffect(() => {
-    if (!isUnlocked || openedRef.current) return;
-    openedRef.current = true;
-    refreshMutation.mutate("open");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUnlocked]);
   const followupsQuery = useQuery<{ followups: Followup[] }>({
     queryKey: ["/api/followups"],
     enabled: isUnlocked,
@@ -187,21 +162,21 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Client chats with suggested drafts, and follow-ups. A message goes out only when you press Send."
+        subtitle="eBay, Etsy, and MyMiniFactory chats. Drafts and follow-ups stay here. Sending is off, and Facebook Marketplace stays paused."
         actions={
           isUnlocked ? (
             <Button
               size="sm"
               variant="outline"
-              disabled={refreshMutation.isPending || refreshBusy(cardsQuery.data?.refresh)}
+              disabled={cardsQuery.isFetching}
               onClick={() => {
-                refreshMutation.mutate("manual");
+                void cardsQuery.refetch();
                 void followupsQuery.refetch();
               }}
               data-testid="button-inbox-refresh"
             >
-              <RefreshCw className={`h-4 w-4 ${refreshBusy(cardsQuery.data?.refresh) ? "animate-spin" : ""}`} />
-              {refreshBusy(cardsQuery.data?.refresh) ? "Refreshing…" : "Refresh"}
+              <RefreshCw className={`h-4 w-4 ${cardsQuery.isFetching ? "animate-spin" : ""}`} />
+              {cardsQuery.isFetching ? "Refreshing…" : "Refresh"}
             </Button>
           ) : null
         }
@@ -218,15 +193,15 @@ export default function InboxPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2" role="tablist">
-              <Button size="sm" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto" role="tablist">
+              <Button size="sm" className="shrink-0" variant={tab === "chats" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=chats")} data-testid="tab-inbox-chats">
                 <MessagesSquare className="h-4 w-4" /> Chats{needCount ? ` (${needCount})` : ""}
               </Button>
-              <Button size="sm" variant={tab === "followups" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=followups")} data-testid="tab-inbox-followups">
+              <Button size="sm" className="shrink-0" variant={tab === "followups" ? "default" : "outline"} onClick={() => navigate("/inbox?tab=followups")} data-testid="tab-inbox-followups">
                 Follow-ups{dueCount ? ` (${dueCount} due)` : ""}
               </Button>
               <span
-                className={`ml-auto text-xs max-sm:w-full max-sm:ml-0 ${heartbeat.stale && cardsQuery.data ? "text-destructive" : "text-muted-foreground"}`}
+                className={`shrink-0 whitespace-nowrap text-xs ${heartbeat.stale && cardsQuery.data ? "text-destructive" : "text-muted-foreground"}`}
                 title={`Last data push: ${fmtTime(cardsQuery.data?.lastPushAt ?? null)}`}
                 data-testid="text-mac-sync"
               >
@@ -242,10 +217,10 @@ export default function InboxPage() {
                   cardsQuery.data
                     ? {
                         cards: cardsQuery.data.cards,
-                        sourceUpdatedAt: cardsQuery.data.sourceUpdatedAt,
-                        refresh: cardsQuery.data.refresh ?? null,
-                        outbound: cardsQuery.data.outbound ?? [],
-                        liveMirror: !!cardsQuery.data.liveMirror,
+                        sourceUpdatedAt: cardsQuery.data.lastIngestAt ?? cardsQuery.data.sourceUpdatedAt,
+                        refresh: null,
+                        outbound: [],
+                        liveMirror: false,
                       }
                     : undefined
                 }
@@ -253,8 +228,10 @@ export default function InboxPage() {
                 headers={headers}
                 selected={chatThread}
                 onSelect={openThread}
-                onRefresh={() => refreshMutation.mutate("manual")}
-                refreshPending={refreshMutation.isPending}
+                onRefresh={() => {
+                  void cardsQuery.refetch();
+                }}
+                refreshPending={cardsQuery.isFetching}
                 onMark={(c, status, reply) => setMarking({ card: c, status, reply })}
               />
             ) : (

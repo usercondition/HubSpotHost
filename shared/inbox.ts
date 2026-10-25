@@ -1,11 +1,21 @@
 /**
- * Client inbox cards pushed from the Mac (Hermes `~/.hermes/data/inbox/marketplace.json`).
+ * Buyer inbox cards for eBay, Etsy, and MyMiniFactory.
+ *
+ * Cards arrive from a token-authenticated push. The Gmail watcher posts message
+ * notifications to `/api/inbox/ingest`. A full snapshot can still use
+ * `/api/inbox/cards`. Facebook Marketplace cards are paused and are not shown.
  *
  * The normalizer is deliberately tolerant: unknown keys are kept under `extra`,
- * missing keys fall back to safe defaults, and the Hermes `analysis` block
- * (summary, stage, agreed terms, risk flags, confidence, ...) may grow fields
- * without breaking the push.
+ * missing keys fall back to safe defaults, and an `analysis` block may grow
+ * fields without breaking the push.
  */
+
+/** Shops the Inbox shows. Facebook Marketplace is paused and is not one of these. */
+export const SELLER_INBOX_CHANNELS = ["ebay", "etsy", "myminifactory"] as const;
+export type SellerInboxChannel = (typeof SELLER_INBOX_CHANNELS)[number];
+
+/** Buyer Send stays off until a shop has its own send worker. Nothing is queued. */
+export const BUYER_SEND_OFF_ERROR = "Buyer send is off until this shop has its own send worker. Nothing was queued.";
 
 /** Photo / video / sticker / file on a message. `thumb` is a (short-lived) FB CDN thumbnail when the Mac captured one. */
 export type InboxAttachment = { kind: "image" | "video" | "sticker" | "file" | "attachment"; thumb: string; url: string; label: string };
@@ -80,7 +90,7 @@ export type Followup = {
   client: string;
   listing: string;
   listingUrl: string;
-  channel: "Marketplace" | "OfferUp" | "Other";
+  channel: "eBay" | "Etsy" | "MMF" | "Marketplace" | "OfferUp" | "Other";
   said: string;
   nextAction: string;
   reminderDate: string | null;
@@ -205,9 +215,11 @@ export function normalizeInboxCard(value: unknown, fallbackId = ""): InboxCard |
   const analysis = normalizeInboxAnalysis(c.analysis);
   const riskRaw = c.risk;
   const risk = typeof riskRaw === "string" && riskRaw.trim() ? riskRaw.slice(0, 600) : null;
+  const rawSource = str(c.source, 60).trim();
+  const seller = sellerInboxChannel(rawSource);
   return {
     id,
-    source: str(c.source, 60) || "facebook_marketplace",
+    source: seller ?? (rawSource || "unknown"),
     name: str(c.name, 160) || "Unknown",
     listing: str(c.listing, 300),
     listingUrl: safeUrl(c.listing_url),
@@ -310,8 +322,54 @@ export function shopToday(now = new Date(), timeZone = "America/Los_Angeles"): s
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
+export function sellerInboxChannel(source: string): SellerInboxChannel | null {
+  const s = source.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!s) return null;
+  if (s === "ebay" || s.startsWith("ebay_") || s.startsWith("ebay.")) return "ebay";
+  if (s === "etsy" || s.startsWith("etsy_") || s.startsWith("etsy.")) return "etsy";
+  if (
+    s === "mmf" ||
+    s === "myminifactory" ||
+    s === "my_mini_factory" ||
+    s.startsWith("myminifactory_") ||
+    s.startsWith("mmf_") ||
+    s.startsWith("my_mini_factory_")
+  ) {
+    return "myminifactory";
+  }
+  return null;
+}
+
+export function sellerChannelLabel(channel: SellerInboxChannel): "eBay" | "Etsy" | "MMF" {
+  switch (channel) {
+    case "ebay":
+      return "eBay";
+    case "etsy":
+      return "Etsy";
+    case "myminifactory":
+      return "MMF";
+    default: {
+      const neverChannel: never = channel;
+      return neverChannel;
+    }
+  }
+}
+
+/** Facebook Marketplace / Messenger sources stay paused and are purged from the owner inbox. */
+export function isPausedFacebookInboxSource(source: string): boolean {
+  if (sellerInboxChannel(source)) return false;
+  return /facebook|messenger|marketplace/i.test(source);
+}
+
+/** Snapshot pushes replace cards only inside the channels they actually contain. */
+export function inboxReplaceScope(source: string): string {
+  return sellerInboxChannel(source) ?? `source:${source}`;
+}
+
 export function channelForSource(source: string): Followup["channel"] {
+  const seller = sellerInboxChannel(source);
+  if (seller) return sellerChannelLabel(seller);
   if (/offerup/i.test(source)) return "OfferUp";
-  if (/marketplace|facebook|messenger/i.test(source)) return "Marketplace";
+  if (isPausedFacebookInboxSource(source)) return "Marketplace";
   return "Other";
 }
