@@ -1,26 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, Save, Image as ImageIcon, Link2, Loader2, RefreshCw, RotateCcw, Search, Send } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, Save, Image as ImageIcon, Link2, Loader2, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { sellerChannelLabel, sellerInboxChannel, type SellerInboxChannel } from "@shared/inbox";
 import type { InboxCardView, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import { buildChatItems, initialOf, listTime, splitLinks, visibleThreads, attachmentLabel } from "@/lib/nerve-chat";
 import type { ChatAttachment, ChatItem } from "@/lib/nerve-chat";
 import {
   cardMessages,
   cardRows,
-  loadComposerDraft,
   needsMe,
   riskText,
-  newIdempotencyKey,
   outboundForCard,
   outboundLabel,
   parsePacific,
   refreshBusy,
   refreshLabel,
-  saveComposerDraft,
 } from "@/lib/inbox-live";
 import type { LiveThreadRow } from "@/lib/inbox-live";
 
@@ -33,9 +31,9 @@ export type LiveInboxData = {
 };
 
 /**
- * Inbox > Chats: iMessage-style mirror of the FB Marketplace Selling chats, from Print Ops' own store (the Mac mini
- * pushes the full history). Personal chats are filtered on the Mac and never reach Print Ops.
- * Sending: only when the owner presses Send. The message is queued here and the Mac sends it through its FB browser.
+ * Inbox > Chats: eBay, Etsy, and MyMiniFactory buyer threads.
+ * Facebook Marketplace stays paused and is filtered out. Sending is off;
+ * suggested drafts and Replied / Handled follow-ups still save.
  */
 export function InboxChat({
   data,
@@ -58,16 +56,24 @@ export function InboxChat({
   onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
 }) {
   const [q, setQ] = useState("");
+  const [shop, setShop] = useState<"all" | SellerInboxChannel>("all");
   // "Needs me" is on by default (as it was in the old Replies tab).
   const [filter, setFilter] = useState<"needs" | "all">("needs");
-  const rows = useMemo(() => visibleThreads(cardRows(data?.cards ?? [])), [data]);
-  const needCount = useMemo(() => rows.filter((t) => needsMe(t.card)).length, [rows]);
+  const rows = useMemo(
+    () => visibleThreads(cardRows(data?.cards ?? [])).filter((t) => sellerInboxChannel(t.card.source)),
+    [data],
+  );
+  const shopRows = useMemo(
+    () => (shop === "all" ? rows : rows.filter((t) => sellerInboxChannel(t.card.source) === shop)),
+    [rows, shop],
+  );
+  const needCount = useMemo(() => shopRows.filter((t) => needsMe(t.card)).length, [shopRows]);
   const threads = useMemo(() => {
     const s = q.trim().toLowerCase();
-    const base = filter === "needs" ? rows.filter((t) => needsMe(t.card)) : rows;
+    const base = filter === "needs" ? shopRows.filter((t) => needsMe(t.card)) : shopRows;
     return s ? base.filter((t) => `${t.name} ${t.listing}`.toLowerCase().includes(s)) : base;
-  }, [rows, q, filter]);
-  const current = rows.find((t) => t.uid === selected) ?? null;
+  }, [shopRows, q, filter]);
+  const current = shopRows.find((t) => t.uid === selected) ?? null;
   const uid = current ? selected : null;
 
   if (loading && !data) return <Skeleton className="h-[60vh] w-full" />;
@@ -80,8 +86,8 @@ export function InboxChat({
         <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3">
           <div className="min-w-0">
             <h2 className="text-[17px] font-semibold tracking-tight">Messages</h2>
-            <p className="text-xs text-muted-foreground" data-testid="text-chat-synced">
-              {needCount ? `${needCount} need${needCount === 1 ? "s" : ""} you` : "All caught up"} · FB read {listTime(data?.sourceUpdatedAt ? sourceIso(data.sourceUpdatedAt) : null) || "—"}
+            <p className="truncate text-xs text-muted-foreground" data-testid="text-chat-synced">
+              {needCount ? `${needCount} need${needCount === 1 ? "s" : ""} you` : "All caught up"} · sending off
             </p>
             {rl ? (
               <p className={cn("text-xs", data?.refresh?.status === "failed" ? "text-destructive" : "text-muted-foreground")} data-testid="text-refresh-status">
@@ -94,8 +100,8 @@ export function InboxChat({
             onClick={onRefresh}
             disabled={busy}
             className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-60"
-            aria-label="Refresh from Facebook"
-            title="Read Facebook now"
+            aria-label="Reload chats"
+            title="Reload chats"
             data-testid="button-chat-refresh"
           >
             <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
@@ -112,8 +118,34 @@ export function InboxChat({
             data-testid="input-chat-search"
           />
         </label>
+        <div className="mx-4 mb-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Shops">
+          {([
+            ["all", "All"],
+            ["ebay", "eBay"],
+            ["etsy", "Etsy"],
+            ["myminifactory", "MMF"],
+          ] as const).map(([id, label]) => {
+            const count = id === "all" ? rows.length : rows.filter((t) => sellerInboxChannel(t.card.source) === id).length;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={shop === id}
+                onClick={() => setShop(id)}
+                className={cn(
+                  "min-h-11 shrink-0 rounded-full px-3 text-sm font-medium",
+                  shop === id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                )}
+                data-testid={`button-chat-shop-${id}`}
+              >
+                {label} ({count})
+              </button>
+            );
+          })}
+        </div>
         <div className="mx-4 mb-2 grid grid-cols-2 gap-1 rounded-lg bg-muted p-0.5 text-sm" role="group" aria-label="Filter chats">
-          {([["needs", `Needs me (${needCount})`], ["all", `All (${rows.length})`]] as const).map(([id, label]) => (
+          {([["needs", `Needs me (${needCount})`], ["all", `All (${shopRows.length})`]] as const).map(([id, label]) => (
             <button
               key={id}
               type="button"
@@ -128,8 +160,14 @@ export function InboxChat({
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="list-chat-threads">
           {threads.length === 0 ? (
-            <li className="px-4 py-6 text-sm text-muted-foreground">
-              {rows.length && filter === "needs" && !q ? "Nothing needs you right now." : rows.length ? "No matches." : "No conversations yet. They appear after the Mac pushes the inbox."}
+            <li className="px-4 py-6 text-sm text-muted-foreground" data-testid="text-chat-empty-shop">
+              {shopRows.length && filter === "needs" && !q
+                ? "Nothing needs you right now."
+                : shopRows.length
+                  ? "No matches."
+                  : shop === "all"
+                    ? "No eBay, Etsy, or MyMiniFactory chats yet. They show up when message notifications are posted. Sending stays off."
+                    : `No ${sellerChannelLabel(shop)} chats yet. Sending stays off.`}
             </li>
           ) : null}
           {threads.map((t) => (
@@ -144,7 +182,6 @@ export function InboxChat({
             row={current}
             outbound={outboundForCard(current.card, data?.outbound ?? [])}
             headers={headers}
-            liveMirror={!!data?.liveMirror}
             onBack={() => onSelect(null)}
             onMark={onMark}
           />
@@ -179,6 +216,7 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
 
 function ThreadRow({ t, active, onClick }: { t: LiveThreadRow; active: boolean; onClick: () => void }) {
   const mine = t.lastSpeaker === "me";
+  const channel = sellerInboxChannel(t.card.source);
   return (
     <li>
       <button
@@ -194,13 +232,18 @@ function ThreadRow({ t, active, onClick }: { t: LiveThreadRow; active: boolean; 
           <span className="flex items-baseline justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1">
               <span className="truncate text-[15px] font-semibold text-foreground" data-private="name">{t.name}</span>
+              {channel ? (
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground" data-testid={`text-chat-channel-${t.uid}`}>
+                  {sellerChannelLabel(channel)}
+                </span>
+              ) : null}
               {riskText(t.card) ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="Risk flagged" data-testid={`icon-chat-risk-${t.uid}`} /> : null}
             </span>
             <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-testid={`text-chat-time-${t.uid}`}>{listTime(t.sortAt || t.at) || t.when}</span>
           </span>
           {t.listing ? <span className="block min-w-0 truncate text-xs text-[hsl(var(--text-3))]" data-private="text" data-testid={`text-chat-listing-${t.uid}`}>{t.listing}</span> : null}
           {t.card.notInLatestRead ? (
-            <span className="block truncate text-[11px] text-warn" data-testid={`text-chat-not-latest-${t.uid}`}>Not in latest FB read{t.card.lastSeenInList ? ` · seen ${listTime(sourceIso(t.card.lastSeenInList)) || ""}` : ""}</span>
+            <span className="block truncate text-[11px] text-warn" data-testid={`text-chat-not-latest-${t.uid}`}>Not in the latest read{t.card.lastSeenInList ? ` · seen ${listTime(sourceIso(t.card.lastSeenInList)) || ""}` : ""}</span>
           ) : null}
           <span className="line-clamp-2 text-[13px] leading-snug text-muted-foreground" data-private="text">
             {mine ? "You: " : ""}
@@ -216,14 +259,12 @@ function Conversation({
   row,
   outbound,
   headers,
-  liveMirror,
   onBack,
   onMark,
 }: {
   row: LiveThreadRow;
   outbound: InboxOutboundView[];
   headers: Record<string, string>;
-  liveMirror: boolean;
   onBack: () => void;
   onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
 }) {
@@ -273,10 +314,10 @@ function Conversation({
         </p>
       ) : null}
       <div className="imsg-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5" data-testid="list-chat-messages">
-        {partial ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing recent messages (full history arrives with the next Mac push)</p> : null}
+        {partial ? <p className="pb-2 text-center text-[11px] text-muted-foreground">Showing recent messages. The full thread arrives with the next ingest.</p> : null}
         {card.notInLatestRead ? (
           <p className="pb-2 text-center text-[11px] text-warn" data-testid="text-chat-not-latest">
-            Not in the latest Facebook read. Showing the last-known copy{card.lastSeenInList ? ` (seen ${listTime(sourceIso(card.lastSeenInList)) || card.lastSeenInList})` : ""}.
+            Not in the latest read. Showing the last-known copy{card.lastSeenInList ? ` (seen ${listTime(sourceIso(card.lastSeenInList)) || card.lastSeenInList})` : ""}.
           </p>
         ) : null}
         {items.map((it) => (
@@ -287,7 +328,7 @@ function Conversation({
         ))}
         <div ref={end} />
       </div>
-      <Composer card={card} headers={headers} liveMirror={liveMirror} onMark={onMark} />
+      <Composer card={card} headers={headers} onMark={onMark} />
     </>
   );
 }
@@ -332,79 +373,21 @@ function PendingBubble({ o, headers }: { o: InboxOutboundView; headers: Record<s
 function Composer({
   card,
   headers,
-  liveMirror,
   onMark,
 }: {
   card: InboxCardView;
   headers: Record<string, string>;
-  liveMirror: boolean;
   onMark: (card: InboxCardView, status: "replied" | "handled", reply: string) => void;
 }) {
-  const cardId = card.id;
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const [text, setText] = useState(() => loadComposerDraft(cardId));
-  // One key per Send press; a network retry of the same press reuses it so the server never queues twice.
-  const keyRef = useRef<string | null>(null);
-  useEffect(() => saveComposerDraft(cardId, text), [cardId, text]);
-  const send = useMutation({
-    mutationFn: async (body: { text: string; idempotencyKey: string }) =>
-      (await apiRequest("POST", `/api/inbox/cards/${encodeURIComponent(cardId)}/send`, body, { headers })).json(),
-    onSuccess: () => {
-      keyRef.current = null;
-      setText("");
-      saveComposerDraft(cardId, "");
-      void qc.invalidateQueries({ queryKey: ["/api/inbox/cards"] });
-    },
-    onError: (e: Error) => toast({ title: "Not queued", description: `${e.message}. Nothing was sent.`, variant: "destructive" }),
-  });
-  const submit = () => {
-    const t = text.trim();
-    if (!t || send.isPending) return;
-    if (!keyRef.current) keyRef.current = newIdempotencyKey();
-    send.mutate({ text: t, idempotencyKey: keyRef.current });
-  };
   return (
     <footer className="border-t border-border px-3 py-2" data-testid="chat-composer">
       <SuggestedDraft
         card={card}
         headers={headers}
-        onUse={(reply) => {
-          // Fill the message box only. Sending still needs a Send press.
-          keyRef.current = null;
-          setText(reply);
-        }}
-        onMark={(status) => onMark(card, status, text.trim() || card.editedReply || card.suggestedReply)}
+        onMark={(status) => onMark(card, status, card.editedReply || card.suggestedReply)}
       />
-      <div className="flex items-end gap-2">
-        <textarea
-          value={text}
-          onChange={(e) => {
-            keyRef.current = null;
-            setText(e.target.value);
-          }}
-          rows={Math.min(5, Math.max(1, text.split("\n").length))}
-          maxLength={2000}
-          placeholder="Message"
-          aria-label="Message"
-          className="min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-ring sm:text-sm"
-          data-testid="input-chat-message"
-        />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!text.trim() || send.isPending}
-          className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
-          data-testid="button-chat-send"
-        >
-          {send.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          <span>Send</span>
-        </button>
-      </div>
       <p className="mt-1 text-center text-[11px] text-muted-foreground" data-testid="text-composer-note">
-        {liveMirror
-          ? "Sends from the Mac mini's Facebook only when you press Send. Nothing is ever sent automatically."
-          : "Sending turns on once the Mac mini live sync is enabled. Messages you queue wait until then."}
+        Sending is off for eBay, Etsy, and MyMiniFactory. Drafts stay here. Nothing is sent to the buyer.
       </p>
     </footer>
   );
@@ -463,7 +446,7 @@ function AttachmentBubble({ a, className }: { a: ChatAttachment; className: stri
       <>
         <ImageIcon className="h-4 w-4 shrink-0" />
         <span>{label}</span>
-        {a.href ? <span className="text-[11px] underline opacity-80">Open in Facebook</span> : null}
+        {a.href ? <span className="text-[11px] underline opacity-80">Open attachment</span> : null}
       </>
     );
   return a.href ? (
@@ -482,12 +465,10 @@ function AttachmentBubble({ a, className }: { a: ChatAttachment; className: stri
 function SuggestedDraft({
   card,
   headers,
-  onUse,
   onMark,
 }: {
   card: InboxCardView;
   headers: Record<string, string>;
-  onUse: (reply: string) => void;
   onMark: (status: "replied" | "handled") => void;
 }) {
   const qc = useQueryClient();
@@ -558,15 +539,6 @@ function SuggestedDraft({
             data-testid="input-draft-reply"
           />
           <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              disabled={!reply.trim()}
-              onClick={() => onUse(reply)}
-              className="inline-flex min-h-9 items-center gap-1 rounded-full bg-secondary px-3 text-xs font-medium text-secondary-foreground disabled:opacity-50"
-              data-testid="button-draft-use"
-            >
-              Use this (fills the box)
-            </button>
             <button
               type="button"
               disabled={!dirty || save.isPending}

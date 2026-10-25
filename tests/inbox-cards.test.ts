@@ -82,7 +82,12 @@ test("analysis-only fields fill in and odd types are coerced", () => {
   assert.deepEqual(card.analysis?.riskFlags, ["late"]);
   assert.deepEqual(card.analysis?.agreed, { note: "cash" });
   assert.equal(card.listingUrl, "", "non-https URLs dropped");
+  assert.equal(card.source, "unknown", "a missing source is not treated as Facebook");
   assert.equal(channelForSource("offerup"), "OfferUp");
+  assert.equal(channelForSource("ebay"), "eBay");
+  assert.equal(channelForSource("Etsy"), "Etsy");
+  assert.equal(channelForSource("mmf"), "MMF");
+  assert.equal(channelForSource("facebook_marketplace"), "Marketplace");
   assert.equal(shopToday(new Date("2026-10-14T05:00:00Z")), "2026-10-13");
 });
 
@@ -107,6 +112,21 @@ test("store: push, edit with version guard, status, reopen on new buyer message"
   assert.equal(store.getInboxCard("s1")?.status, "open");
   assert.equal(store.getInboxCard("s1")?.editedReply, "edited");
   assert.deepEqual(store.listInboxCards().map((c) => c.id), ["s1"]);
+});
+
+test("store: a push replaces only cards from the channels it contains", () => {
+  store.resetInboxStoreForTests();
+  const ebay = normalizeInboxPayload({ threads: { e1: hermesCard("e1", { source: "ebay" }) } }).cards;
+  const etsy = normalizeInboxPayload({ threads: { y1: hermesCard("y1", { source: "Etsy" }) } }).cards;
+  store.upsertInboxCards(ebay, null);
+  const r = store.upsertInboxCards(etsy, null);
+  assert.equal(r.removed, 0, "an Etsy push does not retire eBay chats");
+  assert.deepEqual(store.listInboxCards().map((c) => c.id).sort(), ["e1", "y1"]);
+  assert.equal(store.purgePausedFacebookCards(), 0);
+  store.upsertInboxCards(normalizeInboxPayload({ threads: { fb: hermesCard("fb") } }).cards, null);
+  assert.equal(store.purgePausedFacebookCards(), 1);
+  assert.equal(store.getInboxCard("fb"), null);
+  assert.deepEqual(store.listInboxCards().map((c) => c.id).sort(), ["e1", "y1"]);
 });
 
 test("follow-ups: due list, digest text, Notion properties", () => {
@@ -188,7 +208,7 @@ test("routes: push token, owner gate, mark handled logs a local follow-up", asyn
   const server = http.createServer(app).listen(0);
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const body = JSON.stringify({ threads: { r1: hermesCard("r1") } });
+    const body = JSON.stringify({ threads: { r1: hermesCard("r1", { source: "etsy", name: "Pat" }), fb: hermesCard("fb") } });
     const json = { "Content-Type": "application/json" };
     assert.equal((await fetch(`${base}/api/inbox/cards`, { method: "POST", headers: json, body })).status, 401);
     assert.equal((await fetch(`${base}/api/inbox/cards`, { method: "POST", headers: { ...json, Authorization: "Bearer wrong" }, body })).status, 401);
@@ -196,9 +216,19 @@ test("routes: push token, owner gate, mark handled logs a local follow-up", asyn
     assert.equal(push.status, 200);
     assert.equal((await fetch(`${base}/api/inbox/cards`)).status, 401);
     const list = await (await fetch(`${base}/api/inbox/cards`, { headers: { "x-paid-order-access-code": "owner" } })).json();
-    assert.equal(list.cards.length, 1);
+    assert.equal(list.cards.length, 1, "Facebook Marketplace cards stay out of the inbox");
+    assert.equal(list.cards[0].id, "r1");
+    assert.equal(list.cards[0].source, "etsy");
+    assert.equal(list.buyerSend, "off");
+    assert.equal(list.facebookPaused, true);
+    assert.deepEqual(list.outbound, []);
     assert.equal(list.notionConfigured, false);
     const ownerJson = { ...json, "x-paid-order-access-code": "owner" };
+    const send = await fetch(`${base}/api/inbox/cards/r1/send`, {
+      method: "POST", headers: ownerJson, body: JSON.stringify({ text: "hello", idempotencyKey: "send-abcdefgh" }),
+    });
+    assert.equal(send.status, 403);
+    assert.equal(store.listOutbound().length, 0, "buyer send does not queue a Mac message");
     const edit = await fetch(`${base}/api/inbox/cards/r1/reply`, { method: "PATCH", headers: ownerJson, body: JSON.stringify({ reply: "new", version: 0 }) });
     assert.equal(edit.status, 200);
     const conflict = await fetch(`${base}/api/inbox/cards/r1/reply`, { method: "PATCH", headers: ownerJson, body: JSON.stringify({ reply: "x", version: 0 }) });
@@ -210,7 +240,8 @@ test("routes: push token, owner gate, mark handled logs a local follow-up", asyn
       body: JSON.stringify({ status: "handled", followup: { said: "quoted $60", nextAction: "await payment", reminderDate: "2026-10-15" } }),
     })).json();
     assert.equal(mark.card.status, "handled");
-    assert.equal(mark.followup.client, "Dave");
+    assert.equal(mark.followup.client, "Pat");
+    assert.equal(mark.followup.channel, "Etsy");
     assert.equal(mark.followup.notionPageId, null);
     assert.match(mark.followup.notionError, /not configured/);
     const fus = await (await fetch(`${base}/api/followups`, { headers: { "x-paid-order-access-code": "owner" } })).json();

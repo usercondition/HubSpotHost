@@ -150,45 +150,44 @@ test("routes: owner gate on refresh/send/retry, push token on Mac endpoints, hea
   const macH = { ...json, Authorization: `Bearer ${TOKEN}` };
   const post = (p: string, h: Record<string, string>, b: unknown) => fetch(base + p, { method: "POST", headers: h, body: JSON.stringify(b) });
   try {
-    await post("/api/inbox/cards", macH, { updated_at: "2026-10-17T17:34:05", threads: { a: card("a", { full_history: true }), z: card("z") }, exclude_ids: ["z"] });
+    await post("/api/inbox/cards", macH, {
+      updated_at: "2026-10-17T17:34:05",
+      threads: {
+        a: card("a", { source: "ebay", full_history: true }),
+        fb: card("fb", { source: "facebook_marketplace" }),
+        z: card("z", { source: "ebay" }),
+      },
+      exclude_ids: ["z"],
+    });
     assert.equal((await post("/api/inbox/refresh", json, { reason: "manual" })).status, 401);
     assert.equal((await post("/api/inbox/cards/a/send", json, { text: "x", idempotencyKey: "send-abcdefgh" })).status, 401);
     assert.equal((await post("/api/inbox/mac/poll", ownerH, { live: true })).status, 401, "owner code is not the push token");
     assert.equal((await post("/api/inbox/cards/a/send", ownerH, { text: "x", idempotencyKey: "bad" })).status, 400);
     assert.equal((await post("/api/inbox/cards/missing/send", ownerH, { text: "x", idempotencyKey: "send-abcdefgh" })).status, 404);
     const s1 = await post("/api/inbox/cards/a/send", ownerH, { text: "on my way", idempotencyKey: "send-abcdefgh" });
-    const s2 = await post("/api/inbox/cards/a/send", ownerH, { text: "on my way", idempotencyKey: "send-abcdefgh" });
-    assert.equal(s1.status, 202);
-    assert.equal(s2.status, 200);
-    const id = (await s1.json()).outbound.id;
-    assert.equal((await s2.json()).outbound.id, id);
-    assert.equal((await post("/api/inbox/refresh", ownerH, { reason: "manual" })).status, 202);
+    assert.equal(s1.status, 403, "buyer send stays off");
+    assert.equal(store.listOutbound().length, 0);
+    const refresh = await (await post("/api/inbox/refresh", ownerH, { reason: "manual" })).json();
+    assert.equal(refresh.queued, false);
+    assert.equal(refresh.reason, "paused");
+    assert.equal(store.latestRefresh(), null, "a refresh tap does not queue a Facebook read");
 
-    // Mac with live off: heartbeat only, claims nothing.
     const off = await (await post("/api/inbox/mac/poll", macH, { live: false })).json();
-    assert.equal(off.outbound.length, 0);
+    assert.deepEqual(off.outbound, []);
     assert.equal(off.refresh, null);
     const on = await (await post("/api/inbox/mac/poll", macH, { live: true })).json();
-    assert.equal(on.outbound.length, 1);
-    assert.equal(on.outbound[0].cardId, "a");
-    assert.equal(on.refresh.status, "running");
-    assert.equal((await (await post("/api/inbox/mac/poll", macH, { live: true })).json()).outbound.length, 0);
-
-    assert.equal((await post(`/api/inbox/outbound/${id}/retry`, ownerH, {})).status, 409, "no retry while sending");
-    assert.equal((await post(`/api/inbox/mac/outbound/${id}`, macH, { attempt: 1, status: "failed", detail: "needs login" })).status, 200);
-    assert.equal((await post(`/api/inbox/mac/outbound/${id}`, macH, { attempt: 1, status: "sent" })).status, 409);
-    assert.equal((await post(`/api/inbox/outbound/${id}/retry`, ownerH, {})).status, 200);
-    assert.equal((await post(`/api/inbox/mac/refresh/${on.refresh.id}`, macH, { ok: true, detail: "15 threads" })).status, 200);
+    assert.deepEqual(on.outbound, [], "the Mac poll does not claim a buyer send");
+    assert.equal(on.refresh, null, "the Mac poll does not claim a Facebook refresh");
     assert.equal((await post("/api/inbox/mac/thread/a", macH, { messages: [{ who: "miguel", text: "on my way" }] })).status, 200);
 
     const list = await (await fetch(`${base}/api/inbox/cards`, { headers: ownerH })).json();
-    assert.equal(list.cards.length, 1, "personal chat excluded");
+    assert.equal(list.cards.length, 1, "Facebook chat hidden and personal chat excluded");
+    assert.equal(list.cards[0].source, "ebay");
     assert.equal(list.cards[0].history.length, 4);
     assert.ok(list.lastCheckinAt);
-    assert.equal(list.liveMirror, true);
-    assert.equal(list.refresh.status, "done");
-    assert.equal(list.outbound[0].status, "queued");
-    assert.equal(list.outbound[0].attempt, 2);
+    assert.equal(list.buyerSend, "off");
+    assert.equal(list.refresh, null);
+    assert.deepEqual(list.outbound, []);
     // Old Mac script (GET edits only) also counts as a check-in.
     store.setInboxMeta("last_checkin_at", "2000-01-01T00:00:00Z");
     await fetch(`${base}/api/inbox/edits`, { headers: macH });

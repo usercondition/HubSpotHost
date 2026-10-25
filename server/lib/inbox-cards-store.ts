@@ -18,7 +18,7 @@ import type {
   InboxOutboundView,
   InboxRefreshView,
 } from "../../shared/inbox";
-import { MAX_HISTORY } from "../../shared/inbox";
+import { MAX_HISTORY, inboxReplaceScope, isPausedFacebookInboxSource } from "../../shared/inbox";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS inbox_cards (
@@ -143,8 +143,10 @@ export function upsertInboxCards(cards: InboxCard[], sourceUpdatedAt: string | n
   );
   const tx = d.transaction(() => {
     const ids = new Set<string>();
+    const scopes = new Set<string>();
     for (const card of cards) {
       ids.add(card.id);
+      scopes.add(inboxReplaceScope(card.source));
       const hash = hashCard(card);
       const row = get.get(card.id) as { content_hash: string; status: string; status_last_message_at: string | null } | undefined;
       const params = { id: card.id, json: JSON.stringify(card), hash, lastAt: card.lastMessageAt, at };
@@ -168,13 +170,19 @@ export function upsertInboxCards(cards: InboxCard[], sourceUpdatedAt: string | n
         d.prepare("UPDATE inbox_cards SET present=1 WHERE id=?").run(card.id);
       }
     }
-    const present = d.prepare("SELECT id FROM inbox_cards WHERE present=1").all() as Array<{ id: string }>;
+    const present = d.prepare("SELECT id, card_json FROM inbox_cards WHERE present=1").all() as Array<{ id: string; card_json: string }>;
     const gone = d.prepare("UPDATE inbox_cards SET present=0 WHERE id=?");
-    for (const { id } of present) {
-      if (!ids.has(id)) {
-        gone.run(id);
-        result.removed += 1;
+    for (const row of present) {
+      if (ids.has(row.id) || scopes.size === 0) continue;
+      let scope = "source:";
+      try {
+        scope = inboxReplaceScope(String((JSON.parse(row.card_json) as { source?: string }).source ?? ""));
+      } catch {
+        scope = "source:";
       }
+      if (!scopes.has(scope)) continue;
+      gone.run(row.id);
+      result.removed += 1;
     }
     setMeta("last_push_at", at);
     setMeta("last_checkin_at", at);
@@ -191,6 +199,93 @@ export function upsertInboxCards(cards: InboxCard[], sourceUpdatedAt: string | n
  * Personal / hidden threads the Mac excludes: delete every stored trace (card, reply edit, queued sends)
  * so nothing personal stays on the server. Returns how many cards were removed.
  */
+/** Delete stored Facebook Marketplace cards. Seller-channel cards stay. */
+export function purgePausedFacebookCards(): number {
+  const rows = db().prepare("SELECT id, card_json FROM inbox_cards").all() as Array<{ id: string; card_json: string }>;
+  const ids: string[] = [];
+  for (const row of rows) {
+    try {
+      const source = String((JSON.parse(row.card_json) as { source?: string }).source ?? "");
+      if (isPausedFacebookInboxSource(source)) ids.push(row.id);
+    } catch {
+      /* leave a row we cannot read */
+    }
+  }
+  return purgeInboxCards(ids);
+}
+
+function combineHistory(prev: InboxCard, incoming: InboxCard): InboxCard {
+  const key = (m: InboxMessage) => `${m.who}|${m.at ?? ""}|${m.text.replace(/\s+/g, " ").trim()}`;
+  const seen = new Set((Array.isArray(prev.history) ? prev.history : []).map(key));
+  const history = [...(Array.isArray(prev.history) ? prev.history : [])];
+  for (const message of incoming.history ?? []) {
+    const id = key(message);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    history.push(message);
+  }
+  history.sort((a, b) => (a.at && b.at && a.at !== b.at ? (a.at < b.at ? -1 : 1) : 0));
+  const trimmed = history.slice(-MAX_HISTORY);
+  const last = trimmed[trimmed.length - 1];
+  return {
+    ...incoming,
+    history: trimmed,
+    recent: trimmed.slice(-8),
+    lastMessage: last?.text || incoming.lastMessage,
+    lastMessageAt: last?.at || incoming.lastMessageAt,
+    lastSpeaker: last?.who || incoming.lastSpeaker,
+    owesReply: last ? last.who === "buyer" : incoming.owesReply,
+    firstSeen: prev.firstSeen ?? incoming.firstSeen,
+  };
+}
+
+/**
+ * Insert or update these cards only. Other channels and other threads stay.
+ * Used by Gmail ingest, which is a stream of notifications, not a full snapshot.
+ */
+export function mergeInboxCards(cards: InboxCard[], now = new Date()): PushResult {
+  const at = now.toISOString();
+  const d = db();
+  const result: PushResult = { received: cards.length, changed: 0, reopened: 0, removed: 0 };
+  const get = d.prepare("SELECT card_json, content_hash, status, status_last_message_at FROM inbox_cards WHERE id = ?");
+  const insert = d.prepare(
+    `INSERT INTO inbox_cards (id, card_json, content_hash, last_message_at, status, present, updated_at)
+     VALUES (@id, @json, @hash, @lastAt, 'open', 1, @at)`,
+  );
+  const update = d.prepare(
+    `UPDATE inbox_cards SET card_json=@json, content_hash=@hash, last_message_at=@lastAt, present=1, updated_at=@at,
+       status = CASE WHEN @reopen = 1 THEN 'open' ELSE status END,
+       status_changed_at = CASE WHEN @reopen = 1 THEN @at ELSE status_changed_at END
+     WHERE id=@id`,
+  );
+  const tx = d.transaction(() => {
+    for (const incoming of cards) {
+      const row = get.get(incoming.id) as
+        | { card_json: string; content_hash: string; status: string; status_last_message_at: string | null }
+        | undefined;
+      const card = row ? combineHistory(JSON.parse(row.card_json) as InboxCard, incoming) : incoming;
+      const hash = hashCard(card);
+      const params = { id: card.id, json: JSON.stringify(card), hash, lastAt: card.lastMessageAt, at };
+      if (!row) {
+        insert.run(params);
+        result.changed += 1;
+        continue;
+      }
+      const reopen =
+        row.status !== "open" && card.owesReply && Boolean(card.lastMessageAt) && card.lastMessageAt !== row.status_last_message_at
+          ? 1
+          : 0;
+      if (row.content_hash !== hash || reopen) {
+        update.run({ ...params, reopen });
+        result.changed += 1;
+        result.reopened += reopen;
+      }
+    }
+  });
+  tx();
+  return result;
+}
+
 export function purgeInboxCards(ids: string[]): number {
   if (ids.length === 0) return 0;
   const d = db();

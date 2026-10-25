@@ -1,6 +1,6 @@
 /**
- * Pure helpers for the live FB Marketplace mirror in Inbox > Chats (data from Print Ops' own /api/inbox/cards,
- * pushed by the Mac mini). No DOM, no fetch: unit-tested in tests/inbox-live.test.ts.
+ * Pure helpers for Inbox > Chats (eBay, Etsy, MyMiniFactory cards from /api/inbox/cards).
+ * No DOM, no fetch: unit-tested in tests/inbox-live.test.ts.
  */
 import type { InboxCardView, InboxMessage, InboxOutboundView, InboxRefreshView } from "@shared/inbox";
 import type { ChatMessage, ChatThreadRow } from "./nerve-chat";
@@ -32,7 +32,7 @@ export function cardMessages(card: Pick<InboxCardView, "history" | "recent"> & {
   return src.map((m, i) => {
     const out: ChatMessage = { id: `h-${i}`, who: isMine(m.who) ? "me" : "them", when: m.when, at: parsePacific(m.at), text: m.text };
     if (m.attachments?.length) {
-      // Thumbnail when the Mac captured one; otherwise a placeholder that links to the chat on Facebook.
+      // Thumbnail when the ingest captured one; otherwise a placeholder that links to the thread.
       out.attachments = m.attachments.map((a) => ({ kind: a.kind, label: a.label, thumb: a.thumb || undefined, href: a.url || card.threadUrl || undefined }));
     }
     return out;
@@ -92,13 +92,13 @@ export function refreshLabel(r: InboxRefreshView | null | undefined): string {
   return `Refresh failed${r.detail ? `: ${r.detail}` : ""}`;
 }
 
-/** "Mac sync" is a heartbeat: last check-in, not last data change. Offline after 10 min of silence. */
+/** Ingest heartbeat: last watcher check-in, not last data change. Offline after 10 min of silence. */
 export function heartbeatLabel(lastCheckinAt: string | null | undefined, lastPushAt: string | null | undefined, now = Date.now()): { text: string; stale: boolean } {
   const at = lastCheckinAt || lastPushAt;
-  if (!at) return { text: "Mac sync: never", stale: true };
+  if (!at) return { text: "Ingest: never", stale: true };
   const age = now - Date.parse(at);
   const stale = !Number.isFinite(age) || age > 10 * 60_000;
-  return { text: `Mac sync: ${stale ? "offline since" : "checked in"} ${t(at)}`, stale };
+  return { text: `Ingest: ${stale ? "offline since" : "checked in"} ${t(at)}`, stale };
 }
 
 /** Idempotency key for one Send press (kept across network retries of that same press). */
