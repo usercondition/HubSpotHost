@@ -627,7 +627,7 @@
   .floor-page {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 16px;
     padding: 4px 16px 24px;
   }
 
@@ -803,7 +803,7 @@
   .work-hub {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 1.25rem;
     padding: 4px 16px 24px;
   }
 
