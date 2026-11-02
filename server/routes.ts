@@ -81,6 +81,7 @@ import { registerStlQuoteRoutes } from "./lib/stl-quote-routes";
 import { registerInboxRoutes } from "./lib/inbox-routes";
 import { registerHubRoutes } from "./lib/hub-routes";
 import { registerMarketplaceTrackingRoutes } from "./lib/marketplace-tracking-routes";
+import { registerListingsHealthRoutes } from "./lib/listings-health-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
 import { registerNerveSessionKeyRoute } from "./lib/nerve-session-key";
 import { registerDriveFilesRoutes } from "./lib/drive-files";
@@ -1101,6 +1102,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerInboxRoutes(app, rejectUnsecuredIntake, rejectUnsecuredOwnerDigestCron);
   registerHubRoutes(app, rejectUnsecuredIntake);
   registerMarketplaceTrackingRoutes(app, rejectUnsecuredIntake);
+  registerListingsHealthRoutes(app, rejectUnsecuredIntake);
   registerOpsSummaryRoutes(app);
   registerNerveSessionKeyRoute(app);
   registerDriveFilesRoutes(app, rejectUnsecuredIntake);
