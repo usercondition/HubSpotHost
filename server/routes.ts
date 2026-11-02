@@ -79,6 +79,7 @@ import { registerExpenseRoutes } from "./lib/expense-routes";
 import { registerSpendingRoutes } from "./lib/spending-routes";
 import { registerStlQuoteRoutes } from "./lib/stl-quote-routes";
 import { registerInboxRoutes } from "./lib/inbox-routes";
+import { registerHubRoutes } from "./lib/hub-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
 import { registerNerveSessionKeyRoute } from "./lib/nerve-session-key";
 import { registerDriveFilesRoutes } from "./lib/drive-files";
@@ -1097,6 +1098,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSpendingRoutes(app, rejectUnsecuredIntake);
   registerStlQuoteRoutes(app, rejectUnsecuredIntake);
   registerInboxRoutes(app, rejectUnsecuredIntake, rejectUnsecuredOwnerDigestCron);
+  registerHubRoutes(app, rejectUnsecuredIntake);
   registerOpsSummaryRoutes(app);
   registerNerveSessionKeyRoute(app);
   registerDriveFilesRoutes(app, rejectUnsecuredIntake);
