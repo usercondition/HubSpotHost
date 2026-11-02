@@ -1,7 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "wouter";
 import { ExternalLink, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/primitives";
 import { useOwnerSession } from "@/hooks/use-owner-session";
 import { apiRequest } from "@/lib/queryClient";
@@ -22,10 +24,15 @@ function money(value: number | null): string {
 
 export function PrintOpsHub() {
   const { isUnlocked, headers, ownerCode } = useOwnerSession();
+  const [dealId, setDealId] = useState("");
   const hub = useQuery<HubData>({
     queryKey: ["/api/hub", ownerCode],
     enabled: isUnlocked,
     queryFn: async () => (await apiRequest("GET", "/api/hub", undefined, { headers })).json(),
+  });
+  const push = useMutation({
+    mutationFn: async (marketplace: "ebay" | "etsy") =>
+      (await apiRequest("POST", "/api/marketplace-tracking/push", { dealId, marketplace }, { headers })).json() as Promise<{ ok: boolean; message?: string; error?: string }>,
   });
   if (!isUnlocked) return null;
 
@@ -58,6 +65,7 @@ export function PrintOpsHub() {
         </Panel>
       </section>
       <section id="hub-listings-pricing" className="scroll-mt-14"><Panel title="Listings + Pricing" description="Approval-only feed. Feed pending." ><p className="text-sm text-muted-foreground">No listings or pricing changes are applied automatically.</p></Panel></section>
+      <section id="hub-flow" className="scroll-mt-14"><Panel title="Tracking push" description="Confirm a tracking push to write an audit note. Marketplace adapters are dry-run."><div className="flex gap-2 overflow-x-auto"><Input aria-label="HubSpot deal ID" className="h-9 min-w-36" value={dealId} onChange={(event) => setDealId(event.target.value)} placeholder="Deal ID" />{(["ebay", "etsy"] as const).map((marketplace) => <Button key={marketplace} size="sm" variant="outline" disabled={push.isPending || !dealId.trim()} onClick={() => { if (window.confirm(`Record a ${marketplace} tracking push for this order?`)) push.mutate(marketplace); }}>Push to {marketplace === "ebay" ? "eBay" : "Etsy"}</Button>)}</div>{push.data ? <p className="mt-2 text-sm text-muted-foreground">{push.data.ok ? push.data.message : push.data.error}</p> : null}</Panel></section>
       <section id="hub-systems" className="scroll-mt-14"><Panel title="Systems" description="Paperclip, Syncthing, network, and auto-heal heartbeats."><p className="text-sm text-muted-foreground">Feed pending.</p></Panel></section>
     </div>
   );
