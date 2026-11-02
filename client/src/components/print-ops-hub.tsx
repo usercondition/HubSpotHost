@@ -68,8 +68,8 @@ export function PrintOpsHub({ today }: { today?: ReactNode }) {
   if (!isUnlocked) return <>{today}</>;
 
   return (
-    <div className="space-y-4" data-testid="print-ops-hub">
-      <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto border-y border-border bg-background/95 py-2 backdrop-blur" aria-label="Hub sections">
+    <div className="min-w-0 max-w-full space-y-4" data-testid="print-ops-hub">
+      <nav className="sticky top-0 z-10 flex min-w-0 max-w-full gap-2 overflow-x-auto border-y border-border bg-background/95 py-2 backdrop-blur" aria-label="Hub sections">
         {["Today", "Storefronts", "Flow", "Listings + Pricing", "Systems", "Money"].map((label) => (
           <a key={label} href={`#hub-${label.toLowerCase().replace(/\s+\+\s+|\s+/g, "-")}`} className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-muted">{label}</a>
         ))}
@@ -79,7 +79,7 @@ export function PrintOpsHub({ today }: { today?: ReactNode }) {
         <Panel title="Storefronts" description="Manage buyer conversations and compare only data that is connected.">
           <div className="grid gap-3 md:grid-cols-3">
             {STORES.map((store) => {
-              const metric = hub.data?.storefronts[store.source];
+              const metric = hub.data?.storefronts?.[store.source];
               return (
                 <article key={store.source} className="rounded-lg border border-border bg-card p-3" data-testid={`hub-storefront-${store.source}`}>
                   <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{store.name}</h3><Store className="h-4 w-4 text-muted-foreground" /></div>
@@ -94,12 +94,12 @@ export function PrintOpsHub({ today }: { today?: ReactNode }) {
               );
             })}
           </div>
-          <div className="mt-4 overflow-x-auto" data-testid="hub-storefront-comparison">
+          <div className="mt-4 min-w-0 max-w-full overflow-x-auto" data-testid="hub-storefront-comparison">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead><tr className="text-muted-foreground"><th className="py-1 pr-3">Storefront</th><th>Sales</th><th>Orders</th><th>AOV</th><th>Listings</th><th>Attention</th></tr></thead>
               <tbody>
                 {STORES.map((store) => {
-                  const metric = hub.data?.storefronts[store.source];
+                  const metric = hub.data?.storefronts?.[store.source];
                   return <tr key={store.source} className="border-t border-border"><td className="py-2 pr-3">{store.name}</td><td>{money(metric?.sales ?? null)}</td><td>{metric?.orders ?? "—"}</td><td>{money(metric?.averageOrderValue ?? null)}</td><td>— Feed pending</td><td>— Feed pending</td></tr>;
                 })}
               </tbody>
@@ -109,8 +109,8 @@ export function PrintOpsHub({ today }: { today?: ReactNode }) {
       </section>
       <section id="hub-flow" className="scroll-mt-14">
         <Panel title="Intake, production, and ship" description="Existing shop routes stay in place.">
-          <div className="flex gap-2 overflow-x-auto">{[["Orders", "/orders"], ["Queue", "/queue"], ["Labels", "/labels"], ["Stack", "/stack"]].map(([label, href]) => <Button key={href} asChild size="sm" variant="outline" className="shrink-0"><Link href={href}>{label}</Link></Button>)}</div>
-          <div className="mt-3 flex gap-2 overflow-x-auto"><Input aria-label="HubSpot deal ID" className="h-9 min-w-36" value={dealId} onChange={(event) => setDealId(event.target.value)} placeholder="Deal ID" />{(["ebay", "etsy"] as const).map((marketplace) => <Button key={marketplace} size="sm" variant="outline" className="shrink-0" disabled={push.isPending || !dealId.trim()} onClick={() => { if (window.confirm(`Record a ${marketplace} tracking push for this order?`)) void push.mutateAsync(marketplace).then((result) => setNotice(result.message ?? result.error ?? "")); }}>Push to {marketplace === "ebay" ? "eBay" : "Etsy"}</Button>)}</div>
+          <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto">{[["Orders", "/orders"], ["Queue", "/queue"], ["Labels", "/labels"], ["Stack", "/stack"]].map(([label, href]) => <Button key={href} asChild size="sm" variant="outline" className="shrink-0"><Link href={href}>{label}</Link></Button>)}</div>
+          <div className="mt-3 flex min-w-0 max-w-full gap-2 overflow-x-auto"><Input aria-label="HubSpot deal ID" className="h-9 min-w-36" value={dealId} onChange={(event) => setDealId(event.target.value)} placeholder="Deal ID" />{(["ebay", "etsy"] as const).map((marketplace) => <Button key={marketplace} size="sm" variant="outline" className="shrink-0" disabled={push.isPending || !dealId.trim()} onClick={() => { if (window.confirm(`Record a ${marketplace} tracking push for this order?`)) void push.mutateAsync(marketplace).then((result) => setNotice(result.message ?? result.error ?? "")); }}>Push to {marketplace === "ebay" ? "eBay" : "Etsy"}</Button>)}</div>
         </Panel>
       </section>
       <section id="hub-listings-pricing" className="scroll-mt-14">
@@ -127,7 +127,7 @@ export function PrintOpsHub({ today }: { today?: ReactNode }) {
         <Panel title="Systems" description="Heartbeat files only. Wake and restart requests are recorded and do not run a command.">
           <div className="grid gap-3 sm:grid-cols-2">
             {SYSTEMS.map((label) => {
-              const beat = systems.data?.heartbeats.find((row) => normalizeService(row.service) === normalizeService(label));
+              const beat = systems.data?.heartbeats?.find((row) => normalizeService(row.service) === normalizeService(label));
               return (
                 <article key={label} className={`rounded-lg border p-3 ${beat ? statusClass(beat.status) : "border-border"}`} data-testid={`system-${normalizeService(label)}`}>
                   <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{label}</h3><span className="text-xs uppercase">{beat?.status ?? "Feed pending"}</span></div>
