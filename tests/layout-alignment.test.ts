@@ -658,6 +658,19 @@ function bodyFor(input: string | URL) {
       ],
     };
   }
+  if (pathname.startsWith("/api/hub")) {
+    const empty = { orders: null, sales: null, averageOrderValue: null, listingCount: null, attentionFlags: null };
+    return {
+      ok: true,
+      storefronts: {
+        ebay: { source: "ebay", ...empty },
+        etsy: { source: "etsy", ...empty },
+        offerup: { source: "offerup", ...empty },
+      },
+    };
+  }
+  if (pathname.startsWith("/api/listings-health")) return { ok: true, pending: true, items: [] };
+  if (pathname.startsWith("/api/systems")) return { ok: true, pending: true, heartbeats: [] };
   return { ok: true };
 }
 
@@ -760,6 +773,13 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await assertOneStatsPage();
     if (artifactPath("stats-nav-1440.png")) await page.screenshot({ path: artifactPath("stats-nav-1440.png")!, fullPage: true });
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
+    await page.getByTestId("print-ops-hub").waitFor();
+    const ebayCard = await page.getByTestId("hub-storefront-ebay").innerText();
+    assert.match(ebayCard, /feed pending/i);
+    assert.equal(/\$/.test(ebayCard), false, `storefront card invented a dollar amount: ${ebayCard}`);
+    const systemsCard = await page.getByTestId("hub-systems").innerText();
+    assert.match(systemsCard, /feed pending/i);
+    assert.match(systemsCard, /Syncthing/);
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
     assert.ok(nav.length >= 1, "nav count slots rendered");

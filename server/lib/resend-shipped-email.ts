@@ -16,6 +16,24 @@ function envTrim(name: string): string {
   return String(process.env[name] ?? "").trim();
 }
 
+export type EmailSendMode = "off" | "draft" | "live";
+
+/**
+ * Buyer shipment email is fail-closed. Only an explicit live setting can
+ * reach Resend; draft is reserved for a future owner-approved draft queue.
+ */
+export function emailSendMode(env: NodeJS.ProcessEnv = process.env): EmailSendMode {
+  switch (String(env.EMAIL_SEND_MODE ?? "").trim().toLowerCase()) {
+    case "live":
+      return "live";
+    case "draft":
+      return "draft";
+    case "off":
+    default:
+      return "off";
+  }
+}
+
 export function resendConfigured(): boolean {
   return Boolean(envTrim("RESEND_API_KEY") && envTrim("RESEND_FROM_EMAIL"));
 }
@@ -41,6 +59,14 @@ export async function sendShippedEmailViaResend(input: {
   service?: string | null;
   carrier?: string | null;
 }): Promise<ResendSendResult> {
+  const mode = emailSendMode();
+  if (mode !== "live") {
+    return {
+      ok: true,
+      skipped: true,
+      reason: `Buyer shipment emails are off (EMAIL_SEND_MODE=${mode})`,
+    };
+  }
   const apiKey = envTrim("RESEND_API_KEY");
   const from = envTrim("RESEND_FROM_EMAIL");
   const to = input.to.trim();

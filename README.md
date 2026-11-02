@@ -342,6 +342,14 @@ This works well for a single service and keeps the current SQLite queue across r
 
 With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp ship-note, HubSpot webhook, and outbound HubSpot write jobs. A label attach returns after enqueueing; the in-process worker resolves the deal's current HubSpot contact, sends through Resend, and retries failed jobs with exponential backoff. Job IDs and the existing shipment records are keyed by deal plus tracking number, so duplicate attaches do not create duplicate notices. Webhook batches are stored in SQLite and acked before processing. The latest delivery (time, event count, result) is one SQLite row on the `/data` volume, so a deploy does not clear it. `/api/health` reports `webhook.publicBaseHostMatches`: whether `PUBLIC_BASE_URL`'s host matches the live request host. It does not print either host. Ship-by, stage, cost, and pickup writes stay in SQLite until HubSpot accepts them, and retries honor Retry-After. If Redis is unavailable at boot, the app logs a warning without failing `/api/health`; when `REDIS_URL` is unset, local development uses the synchronous fallback. The 15-minute sync check remains the backstop.
 
+### Buyer shipment email safety
+
+Resend shipment email is disabled unless `EMAIL_SEND_MODE=live`. Unset, `off`, and `draft` skip the Resend request and retain a clear skipped-notification result; `draft` does not create or send a Resend draft. Keep this variable unset until Miguel has approved live buyer shipment email.
+
+`LISTINGS_HEALTH_FILE` points at a JSON array of listing-health and pricing suggestions. The Hub can approve or dismiss each item, and that decision stays in local SQLite. It does not edit a marketplace listing or price. When the variable is unset, the Hub says the feed is pending.
+
+`SYSTEM_HEARTBEATS_DIR` points at a directory of JSON files with `service`, `status` (`green`, `yellow`, or `red`), `metrics`, and `timestamp`. The Hub colors a tile from a valid file and shows Feed pending when a service has no valid heartbeat. Wake and restart buttons record a local request and do not run a system command.
+
 ### Durable production direction
 
 Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. Returning-buyer prefill already works from the local intake history: put their Marketplace username on the next private link and the form asks them to confirm last time’s shipping details. A dedicated customer table is still the longer-term home for that data. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.

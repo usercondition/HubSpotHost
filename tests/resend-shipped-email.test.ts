@@ -6,8 +6,46 @@ import {
   resetShippedEmailStore,
   wasShippedEmailSent,
 } from "../server/lib/shipped-email-store";
-import { resendConfigured, sendShippedEmailViaResend } from "../server/lib/resend-shipped-email";
+import { emailSendMode, resendConfigured, sendShippedEmailViaResend } from "../server/lib/resend-shipped-email";
 import { buyerEmailToastHint } from "../shared/shipping-email-template";
+
+test("buyer shipment email mode defaults off and only live enables sending", () => {
+  assert.equal(emailSendMode({}), "off");
+  assert.equal(emailSendMode({ EMAIL_SEND_MODE: "off" }), "off");
+  assert.equal(emailSendMode({ EMAIL_SEND_MODE: "draft" }), "draft");
+  assert.equal(emailSendMode({ EMAIL_SEND_MODE: "live" }), "live");
+  assert.equal(emailSendMode({ EMAIL_SEND_MODE: "unexpected" }), "off");
+});
+
+test("draft mode skips Resend even when credentials are configured", async () => {
+  const previous = {
+    mode: process.env.EMAIL_SEND_MODE,
+    key: process.env.RESEND_API_KEY,
+    from: process.env.RESEND_FROM_EMAIL,
+    fetch: globalThis.fetch,
+  };
+  process.env.EMAIL_SEND_MODE = "draft";
+  process.env.RESEND_API_KEY = "re_test";
+  process.env.RESEND_FROM_EMAIL = "Print Ops <shipping@example.com>";
+  globalThis.fetch = (async () => {
+    throw new Error("Resend must not be called in draft mode");
+  }) as typeof fetch;
+
+  const result = await sendShippedEmailViaResend({
+    to: "buyer@example.com",
+    trackingNumber: "1ZTEST",
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    skipped: true,
+    reason: "Buyer shipment emails are off (EMAIL_SEND_MODE=draft)",
+  });
+
+  process.env.EMAIL_SEND_MODE = previous.mode;
+  process.env.RESEND_API_KEY = previous.key;
+  process.env.RESEND_FROM_EMAIL = previous.from;
+  globalThis.fetch = previous.fetch;
+});
 
 test("shipped email store is idempotent per deal+tracking", () => {
   process.env.SHIPPED_EMAIL_DB_FILE = ":memory:";

@@ -4,6 +4,7 @@ import { ListChecks, ListOrdered, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkHub } from "@/components/work-hub";
+import { PrintOpsHub } from "@/components/print-ops-hub";
 import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
 import { Panel } from "@/components/primitives";
@@ -209,7 +210,7 @@ export default function Dashboard() {
       />
 
       <div className="page-stack">
-        <TodaysWork />
+        <PrintOpsHub today={<section id="hub-today" className="scroll-mt-14"><TodaysWork /></section>} />
       </div>
     </div>
   );

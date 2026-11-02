@@ -109,6 +109,8 @@ export default function InboxPage() {
   const [, navigate] = useLocation();
   const sp = new URLSearchParams(search);
   const rawTab = sp.get("tab");
+  const storefront = sp.get("storefront");
+  const storefrontFilter = storefront === "ebay" || storefront === "etsy" ? storefront : null;
   // Chats (live mirror, with suggested drafts, risk flags and Replied/Handled) is the default view.
   // The old Replies tab (`tab=cards`) was merged into Chats; old links land there.
   const tab: "chats" | "followups" = rawTab === "followups" ? "followups" : "chats";
@@ -154,6 +156,9 @@ export default function InboxPage() {
   });
 
   const needCount = (cardsQuery.data?.cards ?? []).filter(needsMe).length;
+  const visibleCards = storefrontFilter
+    ? (cardsQuery.data?.cards ?? []).filter((card) => card.source.toLowerCase() === storefrontFilter)
+    : cardsQuery.data?.cards ?? [];
   const followups = followupsQuery.data?.followups ?? [];
   const heartbeat = heartbeatLabel(cardsQuery.data?.lastCheckinAt, cardsQuery.data?.lastPushAt);
   const dueCount = followups.filter((f) => f.status === "open" && f.reminderDate && f.reminderDate <= todayPT()).length;
@@ -162,7 +167,7 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        subtitle="eBay, Etsy, and MyMiniFactory chats. Drafts and follow-ups stay here. Sending is off, and Facebook Marketplace stays paused."
+        subtitle={storefrontFilter ? `${storefrontFilter === "ebay" ? "eBay" : "Etsy"} buyer conversations. Drafts and sending stay off.` : "eBay, Etsy, and MyMiniFactory chats. Drafts and follow-ups stay here. Sending is off, and Facebook Marketplace stays paused."}
         actions={
           isUnlocked ? (
             <Button
@@ -216,7 +221,7 @@ export default function InboxPage() {
                 data={
                   cardsQuery.data
                     ? {
-                        cards: cardsQuery.data.cards,
+                        cards: visibleCards,
                         sourceUpdatedAt: cardsQuery.data.lastIngestAt ?? cardsQuery.data.sourceUpdatedAt,
                         refresh: null,
                         outbound: [],
