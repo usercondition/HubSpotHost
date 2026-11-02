@@ -4,6 +4,7 @@ import { ListChecks, ListOrdered, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkHub } from "@/components/work-hub";
+import { buildHomeConnections } from "@/lib/home-connections";
 import { PrintOpsHub } from "@/components/print-ops-hub";
 import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
@@ -101,6 +102,20 @@ function TodaysWork() {
     },
   });
 
+  const systems = useQuery<{ ok: true; pending: boolean; heartbeats: Array<{ service: string; status: "green" | "yellow" | "red"; metrics: Record<string, unknown>; timestamp: string }> }>({
+    queryKey: ["/api/systems", ownerCode],
+    enabled: isUnlocked,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/systems", undefined, { headers });
+      return (await response.json()) as {
+        ok: true;
+        pending: boolean;
+        heartbeats: Array<{ service: string; status: "green" | "yellow" | "red"; metrics: Record<string, unknown>; timestamp: string }>;
+      };
+    },
+    staleTime: 30_000,
+  });
+
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
 
   if (!isUnlocked) {
@@ -168,7 +183,26 @@ function TodaysWork() {
     fepDue,
   });
 
-  return <WorkHub needs={floorNeeds} stack={stack.data} queue={productionQueue.data} today={today} />;
+  // Paperclip/HubSpot/Railway hrefs mirror APP_LINKS in components/shell.tsx.
+  const connections = buildHomeConnections({
+    heartbeats: systems.data?.heartbeats ?? [],
+    pending: systems.data?.pending ?? true,
+    offerUpPaused: true, // standing Miguel OfferUp free-post pause until he resumes
+    paperclipHref: "https://miguels-mac-mini.tailc0d52c.ts.net/",
+    hubspotHref: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board",
+    railwayHref: "https://hubspothost-production.up.railway.app/",
+  });
+
+  return (
+    <WorkHub
+      needs={floorNeeds}
+      stack={stack.data}
+      queue={productionQueue.data}
+      today={today}
+      connections={connections}
+      openOrderCount={stack.data?.rows?.length ?? 0}
+    />
+  );
 }
 
 export default function Dashboard() {

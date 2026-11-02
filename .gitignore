@@ -18,3 +18,4 @@ data.db-journal
 
 # Tesseract OCR language pack downloaded at runtime — do not commit
 *.traineddata
+.worktrees/
