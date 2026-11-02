@@ -4,6 +4,7 @@ import { ListChecks, ListOrdered, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkHub } from "@/components/work-hub";
+import { buildHomeConnections } from "@/lib/home-connections";
 import { PrintOpsHub } from "@/components/print-ops-hub";
 import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
 import { PageHeader } from "@/components/shell";
@@ -168,7 +169,26 @@ function TodaysWork() {
     fepDue,
   });
 
-  return <WorkHub needs={floorNeeds} stack={stack.data} queue={productionQueue.data} today={today} />;
+  // Task 3 replaces this stub with live /api/systems heartbeats.
+  const connections = buildHomeConnections({
+    heartbeats: [],
+    pending: true,
+    offerUpPaused: true,
+    paperclipHref: "https://miguels-mac-mini.tailc0d52c.ts.net/",
+    hubspotHref: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board",
+    railwayHref: "https://hubspothost-production.up.railway.app/",
+  });
+
+  return (
+    <WorkHub
+      needs={floorNeeds}
+      stack={stack.data}
+      queue={productionQueue.data}
+      today={today}
+      connections={connections}
+      openOrderCount={stack.data?.rows?.length ?? 0}
+    />
+  );
 }
 
 export default function Dashboard() {

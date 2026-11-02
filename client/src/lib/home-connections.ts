@@ -91,3 +91,7 @@ export function buildHomeConnections(input: {
     },
   ];
 }
+
+export function homeSectionOrder(): Array<"needs" | "production" | "connections"> {
+  return ["needs", "production", "connections"];
+}

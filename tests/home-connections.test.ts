@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildHomeConnections } from "../client/src/lib/home-connections";
+import { buildHomeConnections, homeSectionOrder } from "../client/src/lib/home-connections";
 
 describe("buildHomeConnections", () => {
   it("maps Syncthing heartbeat and marks OfferUp paused", () => {
@@ -33,5 +33,11 @@ describe("buildHomeConnections", () => {
     });
     const make = tiles.find((t) => t.id === "make");
     assert.equal(make?.tone, "unknown");
+  });
+});
+
+describe("homeSectionOrder", () => {
+  it("locks Home section order", () => {
+    assert.deepEqual(homeSectionOrder(), ["needs", "production", "connections"]);
   });
 });

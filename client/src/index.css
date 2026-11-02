@@ -627,7 +627,7 @@
   .floor-page {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 1.25rem;
     padding: 4px 16px 24px;
   }
 
@@ -964,6 +964,19 @@
   .work-hub-order-name small, .work-hub-date small { margin-top: 2px; font-size: 12px; color: hsl(var(--text-3)); }
   .work-hub-date strong { font-size: 12px; font-weight: 600; }
   .work-hub-amount { font-size: 13px; font-weight: 600; }
+  .hub-connections { min-width: 0; }
+  .hub-connections .work-hub-section-head { padding-left: 0; padding-right: 0; }
+  .hub-connections-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+  .hub-connection-tile { display: block; min-width: 0; border: 1px solid hsl(var(--border) / 0.1); border-radius: 0.75rem; background: hsl(var(--card)); padding: 0.875rem 1rem; }
+  .hub-connection-tile:hover { background: hsl(var(--hover)); }
+  .hub-connection-tile strong, .hub-connection-tile small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-connection-tile strong { font-size: 13px; font-weight: 650; }
+  .hub-connection-tile small { margin-top: 2px; font-size: 12px; color: hsl(var(--text-2)); }
+  .hub-connection-tile[data-tone='paused'] { opacity: 0.7; }
+  .hub-connection-tile[data-tone='warn'] { border-color: hsl(var(--warn) / 0.45); }
+  .hub-connection-tile[data-tone='bad'] { border-color: hsl(var(--bad) / 0.45); }
+  .hub-open-orders { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 12px; color: hsl(var(--text-2)); }
+  .hub-open-orders:hover { color: hsl(var(--foreground)); }
   .work-hub-empty { padding: 20px 16px; color: hsl(var(--text-2)); font-size: 13px; text-align: center; }
 
   .hub-queue-grid {
@@ -1064,6 +1077,7 @@
     .work-hub-date { grid-area: date; justify-self: end; text-align: right; }
     .work-hub-amount { grid-area: amount; }
     .hub-queue-grid, .hub-out-door-list { grid-template-columns: 1fr; }
+    .hub-connections-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .hub-queue-lane + .hub-queue-lane { border-top: 1px solid var(--hairline); border-left: 0; }
     .hub-queue-row { padding: 10px 12px; }
     .hub-queue-date { max-width: 78px; }
