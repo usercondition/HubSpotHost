@@ -908,3 +908,58 @@ describe("address capture save", { concurrency: 1 }, () => {
     delete process.env.SHIPENGINE_API_KEY;
   });
 });
+
+test("marketplace paid orders reuse an existing external order id", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousToken = process.env.HUBSPOT_ACCESS_TOKEN;
+  process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+  const requests: Array<{ url: string; method: string; properties: Record<string, string> }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const body = init?.body ? (JSON.parse(String(init.body)) as { properties?: Record<string, string> }) : {};
+    requests.push({ url, method, properties: body.properties ?? {} });
+    if (url.includes("/crm/v3/properties/deals")) return jsonResponse({ results: [] });
+    if (url.includes("/contacts/search")) return jsonResponse({ results: [] });
+    if (url.includes("/objects/deals/search")) return jsonResponse({ results: [{ id: "deal-existing" }] });
+    if (method === "POST" && url.includes("/objects/contacts")) return jsonResponse({ id: "contact-1", properties: {} });
+    if (method === "PUT" && url.includes("/associations/")) return jsonResponse({});
+    throw new Error(`${method} ${url}`);
+  }) as typeof fetch;
+
+  const result = await createPaidOrder(
+    {
+      paymentConfirmed: true,
+      fullName: "Ada Lovelace",
+      marketplaceUsername: "ada",
+      email: "ada@example.com",
+      phone: "",
+      address: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "US",
+      productName: "Knight",
+      amount: "40",
+      conversationSummary: "paid",
+    },
+    { externalOrderId: "ebay-123", orderSource: "ebay" },
+  );
+
+  assert.equal(result.dealId, "deal-existing");
+  const search = requests.find((request) => request.url.includes("/objects/deals/search"));
+  assert.equal(search?.properties.external_order_id, undefined);
+  assert.equal(
+    requests.some(
+      (request) =>
+        request.method === "POST" &&
+        request.url.includes("/objects/deals") &&
+        !request.url.includes("/objects/deals/search"),
+    ),
+    false,
+  );
+
+  globalThis.fetch = previousFetch;
+  if (previousToken === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+  else process.env.HUBSPOT_ACCESS_TOKEN = previousToken;
+});

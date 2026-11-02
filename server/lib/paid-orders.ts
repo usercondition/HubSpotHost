@@ -11,6 +11,16 @@ import { normalizeOrderLineKind, PRINT_LINE_KIND_PROPERTY, formatShippingStreetL
 import { normalizeShipAddress, type ShipAddressFields } from "../../shared/ship-address";
 
 export const DEPOSIT_RECEIVED_STAGE = "4096856781";
+export const MARKETPLACE_ORDER_SOURCES = [
+  "ebay",
+  "etsy",
+  "offerup",
+  "mmf",
+  "facebook_marketplace",
+  "referral",
+  "other",
+] as const;
+export type MarketplaceOrderSource = (typeof MARKETPLACE_ORDER_SOURCES)[number];
 
 interface HubSpotRecord {
   id: string;
@@ -38,6 +48,24 @@ async function findContactByEmail(email: string): Promise<HubSpotRecord | null> 
         },
       ],
       properties: ["firstname", "lastname", "email"],
+      limit: 1,
+    }),
+  });
+  return Array.isArray(data?.results) && data.results.length ? (data.results[0] as HubSpotRecord) : null;
+}
+
+async function findDealByExternalOrderId(externalOrderId: string): Promise<HubSpotRecord | null> {
+  const id = clean(externalOrderId, 200);
+  if (!id) return null;
+  const data = await hubspotRequest("/crm/v3/objects/deals/search", {
+    method: "POST",
+    body: JSON.stringify({
+      filterGroups: [
+        {
+          filters: [{ propertyName: "external_order_id", operator: "EQ", value: id }],
+        },
+      ],
+      properties: ["dealname", "amount", "external_order_id", "print_order_source"],
       limit: 1,
     }),
   });
@@ -355,11 +383,18 @@ async function createDeal(input: {
   lineCount?: number;
   kind?: OrderLineKind;
   keptShipTo?: string;
+  externalOrderId?: string;
+  orderSource?: MarketplaceOrderSource;
 }): Promise<HubSpotRecord> {
   const product = clean(input.productName, 180);
   const name = clean(input.contactName || input.marketplaceUsername || "Marketplace customer", 100);
   const kind = normalizeOrderLineKind(input.kind);
   const dealName = `${product} - ${name}`.slice(0, 250);
+  const externalOrderId = clean(input.externalOrderId, 200);
+  if (externalOrderId) {
+    const existing = await findDealByExternalOrderId(externalOrderId);
+    if (existing) return existing;
+  }
   const detailLines = [
     "Source: Facebook Marketplace",
     "Payment status: Confirmed before HubSpot creation",
@@ -390,6 +425,8 @@ async function createDeal(input: {
         dealstage: DEPOSIT_RECEIVED_STAGE,
         description: detailLines.join("\n"),
         [PRINT_LINE_KIND_PROPERTY]: kind,
+        print_order_source: input.orderSource ?? "facebook_marketplace",
+        ...(externalOrderId ? { external_order_id: externalOrderId } : {}),
       },
     }),
   });
@@ -411,6 +448,8 @@ export async function createPaidOrder(
   options?: {
     lineItems?: Array<{ productName: string; amount: string; kind?: OrderLineKind }>;
     orderGroup?: string;
+    externalOrderId?: string;
+    orderSource?: MarketplaceOrderSource;
     replaceHubspot?: boolean;
     keepOnOrder?: boolean;
     /** Manual create shows Replace HubSpot address before a non-blank contact address changes. */
@@ -462,6 +501,11 @@ export async function createPaidOrder(
       lineCount: lines.length,
       kind,
       keptShipTo,
+      externalOrderId:
+        options?.externalOrderId && lines.length > 1
+          ? `${options.externalOrderId}:${index + 1}`
+          : options?.externalOrderId,
+      orderSource: options?.orderSource,
     });
     await associateDealToContact(deal.id, contact.id);
     const dealName = `${clean(line.productName, 180)} - ${clean(contactName, 100)}`.slice(0, 250);
