@@ -346,6 +346,10 @@ With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp s
 
 Resend shipment email is disabled unless `EMAIL_SEND_MODE=live`. Unset, `off`, and `draft` skip the Resend request and retain a clear skipped-notification result; `draft` does not create or send a Resend draft. Keep this variable unset until Miguel has approved live buyer shipment email.
 
+`LISTINGS_HEALTH_FILE` points at a JSON array of listing-health and pricing suggestions. The Hub can approve or dismiss each item, and that decision stays in local SQLite. It does not edit a marketplace listing or price. When the variable is unset, the Hub says the feed is pending.
+
+`SYSTEM_HEARTBEATS_DIR` points at a directory of JSON files with `service`, `status` (`green`, `yellow`, or `red`), `metrics`, and `timestamp`. The Hub colors a tile from a valid file and shows Feed pending when a service has no valid heartbeat. Wake and restart buttons record a local request and do not run a system command.
+
 ### Durable production direction
 
 Use GitHub for the application source, deployment history, and change review. Use Railway PostgreSQL for customer profiles, delivery addresses, recurring customer preferences, paid-order submissions, approvals, and HubSpot IDs. Returning-buyer prefill already works from the local intake history: put their Marketplace username on the next private link and the form asks them to confirm last time’s shipping details. A dedicated customer table is still the longer-term home for that data. Never store HubSpot tokens, owner codes, or raw payment credentials in GitHub.

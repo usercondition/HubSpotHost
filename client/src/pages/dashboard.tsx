@@ -210,8 +210,7 @@ export default function Dashboard() {
       />
 
       <div className="page-stack">
-        <PrintOpsHub />
-        <TodaysWork />
+        <PrintOpsHub today={<section id="hub-today" className="scroll-mt-14"><TodaysWork /></section>} />
       </div>
     </div>
   );
