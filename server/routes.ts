@@ -82,6 +82,7 @@ import { registerInboxRoutes } from "./lib/inbox-routes";
 import { registerHubRoutes } from "./lib/hub-routes";
 import { registerMarketplaceTrackingRoutes } from "./lib/marketplace-tracking-routes";
 import { registerListingsHealthRoutes } from "./lib/listings-health-routes";
+import { registerSystemsRoutes } from "./lib/systems-routes";
 import { registerOpsSummaryRoutes } from "./lib/ops-summary-routes";
 import { registerNerveSessionKeyRoute } from "./lib/nerve-session-key";
 import { registerDriveFilesRoutes } from "./lib/drive-files";
@@ -1103,6 +1104,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerHubRoutes(app, rejectUnsecuredIntake);
   registerMarketplaceTrackingRoutes(app, rejectUnsecuredIntake);
   registerListingsHealthRoutes(app, rejectUnsecuredIntake);
+  registerSystemsRoutes(app, rejectUnsecuredIntake);
   registerOpsSummaryRoutes(app);
   registerNerveSessionKeyRoute(app);
   registerDriveFilesRoutes(app, rejectUnsecuredIntake);
