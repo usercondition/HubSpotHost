@@ -2659,3 +2659,28 @@
   flex-shrink: 0;
   color: hsl(var(--text-3));
 }
+.print-ops-home { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.print-ops-home .ops-card strong, .print-ops-home .ops-card small, .print-ops-home .ops-card p { display: block; }
+.print-ops-home .ops-card small { margin-top: 2px; color: hsl(var(--text-2)); font-size: 12px; }
+.print-ops-jumps { display: flex; min-width: 0; max-width: 100%; gap: 8px; overflow-x: auto; white-space: nowrap; }
+.print-ops-section-head > .print-ops-jumps { flex: 1; }
+.print-ops-jumps a, .print-ops-jumps button { flex: none; border: 0; background: transparent; color: hsl(var(--text-2)); font-size: 13px; font-weight: 600; }
+.print-ops-jumps button[data-active="true"] { color: hsl(var(--foreground)); }
+.print-ops-strip { border: 1px solid; border-radius: var(--radius); padding: 12px 14px; }
+.print-ops-strip header, .print-ops-section-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: nowrap; }
+.print-ops-strip h2, .print-ops-section-head h2 { font-size: 15px; font-weight: 650; white-space: nowrap; }
+.print-ops-strip ul { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.print-ops-strip li a, .print-ops-strip li span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.print-ops-strip span { color: hsl(var(--text-2)); font-size: 12px; }
+.print-ops-systems { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.print-ops-systems article { border: 1px solid; border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+.print-ops-systems header { display: flex; justify-content: space-between; gap: 8px; }
+.print-ops-systems h3 { font-size: 13px; font-weight: 650; }
+.print-ops-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.print-ops-table-wrap { width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; }
+.print-ops-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
+.print-ops-table th { text-align: left; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: hsl(var(--text-3)); padding: 6px 8px; white-space: nowrap; }
+.print-ops-table td { padding: 8px; border-top: 1px solid var(--hairline); max-width: 280px; }
+.print-ops-table tr[data-stuck="true"] td:nth-child(3) { color: hsl(var(--bad)); }
+.print-ops-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.print-ops-actions input { min-width: 0; max-width: 100%; height: 32px; border: 1px solid var(--hairline-strong); border-radius: 6px; background: hsl(var(--surface)); padding: 0 8px; color: hsl(var(--foreground)); }

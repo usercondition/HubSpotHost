@@ -184,7 +184,7 @@ export function buildHealthDigestEdition(
   const allClear =
     attention.length === 0 && pending === 0 && awaiting === 0 && overdue.length === 0 && dueToday.length === 0;
   const now = options?.now ?? new Date();
-  const timeZone = options?.timeZone || "America/New_York";
+  const timeZone = options?.timeZone || "America/Los_Angeles";
   const { weekday } = localParts(now, timeZone);
 
   const sections: DigestSection[] = [];

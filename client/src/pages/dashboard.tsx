@@ -2,29 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ListChecks, ListOrdered, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { WorkHub } from "@/components/work-hub";
-import { buildHomeConnections } from "@/lib/home-connections";
-import { PrintOpsHub } from "@/components/print-ops-hub";
-import { HubspotSyncChip } from "@/components/hubspot-sync-chip";
+import { PrintOpsHome } from "@/components/print-ops-home";
 import { PageHeader } from "@/components/shell";
-import { Panel } from "@/components/primitives";
-import type { StackView } from "@/components/priority-stack-list";
-import { apiRequest } from "@/lib/queryClient";
-import { OwnerUnlockPanel, useOwnerSession, useOwnerUnlock } from "@/hooks/use-owner-session";
-import { buildFloorNeeds, fepDuePrinters } from "@/lib/floor-needs";
 import { pacificDayLabel } from "@/lib/stage-chip";
-import { shipByCalendarDate } from "@shared/ship-by";
-import type {
-  HealthResponse,
-  PerformanceResponse,
-  PrinterFleetSnapshot,
-  ProductionQueueResponse,
-  ResinReorderResponse,
-} from "@shared/schema";
-
-type QueueResponse = ProductionQueueResponse & { ok: true };
-
+import type { HealthResponse } from "@shared/schema";
 
 function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
   if (!health) return null;
@@ -46,183 +27,14 @@ function SystemStatusPill({ health }: { health: HealthResponse | undefined }) {
   );
 }
 
-
-function TodaysWork() {
-  const { ownerCode, isUnlocked, headers } = useOwnerSession();
-  const unlockMutation = useOwnerUnlock({
-    successTitle: "Work hub unlocked",
-    successDescription: "Your actions and outstanding orders are ready.",
-  });
-
-  const performance = useQuery<PerformanceResponse>({
-    queryKey: ["/api/performance", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/performance", undefined, { headers });
-      return (await response.json()) as PerformanceResponse;
-    },
-  });
-
-  const resinReorder = useQuery<ResinReorderResponse>({
-    queryKey: ["/api/resin-reorder", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/resin-reorder", undefined, { headers });
-      return (await response.json()) as ResinReorderResponse;
-    },
-    staleTime: 60_000,
-  });
-
-  const printers = useQuery<{ ok: true } & PrinterFleetSnapshot>({
-    queryKey: ["/api/printers", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/printers", undefined, { headers });
-      return (await response.json()) as { ok: true } & PrinterFleetSnapshot;
-    },
-    staleTime: 60_000,
-  });
-
-  const productionQueue = useQuery<QueueResponse>({
-    queryKey: ["/api/production-queue", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/production-queue", undefined, { headers });
-      return (await response.json()) as QueueResponse;
-    },
-    staleTime: 30_000,
-  });
-
-  const stack = useQuery<StackView>({
-    queryKey: ["/api/priority-stack", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/priority-stack", undefined, { headers });
-      return (await response.json()) as StackView;
-    },
-  });
-
-  const systems = useQuery<{ ok: true; pending: boolean; heartbeats: Array<{ service: string; status: "green" | "yellow" | "red"; metrics: Record<string, unknown>; timestamp: string }> }>({
-    queryKey: ["/api/systems", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/systems", undefined, { headers });
-      return (await response.json()) as {
-        ok: true;
-        pending: boolean;
-        heartbeats: Array<{ service: string; status: "green" | "yellow" | "red"; metrics: Record<string, unknown>; timestamp: string }>;
-      };
-    },
-    staleTime: 30_000,
-  });
-
-  const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-
-  if (!isUnlocked) {
-    return (
-      <div className="space-y-4">
-        <HubspotSyncChip />
-        <OwnerUnlockPanel
-          title="Unlock the work hub"
-          description="See what needs attention and every outstanding order in one place."
-          buttonLabel="Unlock work hub"
-          testIdPrefix="dashboard"
-          pending={unlockMutation.isPending}
-          onUnlock={(code) => unlockMutation.mutate(code)}
-        />
-      </div>
-    );
-  }
-
-  if (performance.isLoading) {
-    return (
-      <div className="grid gap-3 md:grid-cols-4" data-testid="skeleton-todays-work">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 rounded-lg" />
-        ))}
-      </div>
-    );
-  }
-
-  if (performance.isError || !performance.data) {
-    return (
-      <Panel title="Floor board could not be loaded" testId="panel-todays-work-error">
-        <Button size="sm" onClick={() => performance.refetch()}>
-          Try again
-        </Button>
-      </Panel>
-    );
-  }
-
-  const snapshot = performance.data;
-  const attention = snapshot.attention ?? [];
-  const portalId = snapshot.hubspotPortalId;
-  const queueItems = productionQueue.data
-    ? [
-        ...productionQueue.data.nextPrint,
-        ...productionQueue.data.inProduction,
-        ...productionQueue.data.blocked,
-        ...productionQueue.data.shipReady,
-      ]
-    : [];
-  const today = shipByCalendarDate();
-  const pendingReview = snapshot.intake.pendingReview;
-  const awaitingClient = snapshot.intake.awaitingClient;
-  const buyNow = resinReorder.data?.buyNow ?? [];
-  const fepDue = fepDuePrinters(printers.data?.printers ?? []);
-
-  const floorNeeds = buildFloorNeeds({
-    today,
-    portalId,
-    attention,
-    deals: snapshot.activeDeals ?? [],
-    queue: queueItems,
-    pendingReview,
-    awaitingClient,
-    resinBuyNow: buyNow,
-    fepDue,
-  });
-
-  // Paperclip/HubSpot/Railway hrefs mirror APP_LINKS in components/shell.tsx.
-  const connections = buildHomeConnections({
-    heartbeats: systems.data?.heartbeats ?? [],
-    pending: systems.data?.pending ?? true,
-    offerUpPaused: true, // standing Miguel OfferUp free-post pause until he resumes
-    paperclipHref: "https://miguels-mac-mini.tailc0d52c.ts.net/",
-    hubspotHref: "https://app-na2.hubspot.com/contacts/246947621/objects/0-3/views/all/board",
-    railwayHref: "https://hubspothost-production.up.railway.app/",
-  });
-
-  return (
-    <WorkHub
-      needs={floorNeeds}
-      stack={stack.data}
-      queue={productionQueue.data}
-      today={today}
-      connections={connections}
-      openOrderCount={stack.data?.rows?.length ?? 0}
-    />
-  );
-}
-
 export default function Dashboard() {
   const health = useQuery<HealthResponse>({ queryKey: ["/api/health"] });
-  const { isUnlocked, headers, ownerCode } = useOwnerSession();
-
-  const performance = useQuery<PerformanceResponse>({
-    queryKey: ["/api/performance", ownerCode],
-    enabled: isUnlocked,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/performance", undefined, { headers });
-      return (await response.json()) as PerformanceResponse;
-    },
-  });
 
   return (
     <div className="mx-auto flex w-full max-w-[1208px] flex-col" data-testid="page-floor">
       <PageHeader
-        title="Hub"
-        subtitle={`Orders, production flow, and priority · ${pacificDayLabel()}`}
+        title="Print Ops"
+        subtitle={`Needs you, orders, tracking, and systems · ${pacificDayLabel()}`}
         hideActionsOnPhone
         actions={
           <>
@@ -230,21 +42,20 @@ export default function Dashboard() {
             <Button asChild size="sm" variant="outline" className="h-8">
               <Link href="/stack">
                 <ListChecks className="h-3.5 w-3.5" />
-                Advanced priority
+                Stack
               </Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="h-8" data-testid="link-floor-open-queue">
               <Link href="/queue">
                 <ListOrdered className="h-3.5 w-3.5" />
-                Queue details
+                Queue
               </Link>
             </Button>
           </>
         }
       />
-
       <div className="page-stack">
-        <PrintOpsHub today={<section id="hub-today" className="scroll-mt-14"><TodaysWork /></section>} />
+        <PrintOpsHome />
       </div>
     </div>
   );
