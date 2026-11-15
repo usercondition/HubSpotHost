@@ -110,7 +110,7 @@ export function getHealthNudgeSchedule(env: NodeJS.ProcessEnv = process.env): {
     (env.OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED || "").trim().toLowerCase() === "true" ||
     (env.OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED || "").trim() === "1";
   const timeZone =
-    env.OWNER_HEALTH_NUDGE_TZ?.trim() || env.OWNER_DIGEST_TZ?.trim() || "America/New_York";
+    env.OWNER_HEALTH_NUDGE_TZ?.trim() || env.OWNER_DIGEST_TZ?.trim() || "America/Los_Angeles";
   const rawHours =
     env.OWNER_HEALTH_NUDGE_HOURS?.trim() || env.OWNER_HEALTH_NUDGE_HOUR?.trim() || "12";
   const hours = [

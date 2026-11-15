@@ -218,7 +218,7 @@ export function buildOwnerDigestEdition(
   options?: { title?: string; now?: Date; timeZone?: string },
 ): HealthDigestEdition {
   const now = options?.now ?? new Date();
-  const timeZone = options?.timeZone || "America/New_York";
+  const timeZone = options?.timeZone || "America/Los_Angeles";
   const { snapshot, fleet, resin } = ctx;
   const attention = snapshot.attention;
   const plates = attention.filter((item) => item.issueKey === "no_plates").length;
@@ -574,7 +574,7 @@ export function getOwnerDigestSchedule(env: NodeJS.ProcessEnv = process.env): {
   const enabled =
     (env.OWNER_DIGEST_SCHEDULE_ENABLED || "").trim().toLowerCase() === "true" ||
     (env.OWNER_DIGEST_SCHEDULE_ENABLED || "").trim() === "1";
-  const timeZone = env.OWNER_DIGEST_TZ?.trim() || "America/New_York";
+  const timeZone = env.OWNER_DIGEST_TZ?.trim() || "America/Los_Angeles";
   const parsed = Number.parseInt(env.OWNER_DIGEST_HOUR?.trim() || "7", 10);
   const hour = Number.isFinite(parsed) ? Math.min(23, Math.max(0, parsed)) : 7;
   return { enabled, timeZone, hour };

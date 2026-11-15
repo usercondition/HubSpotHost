@@ -313,12 +313,12 @@ For the initial single-service setup:
    TELEGRAM_BOT_TOKEN=<BotFather token>
    TELEGRAM_CHAT_ID=<your numeric Telegram chat id>
    OWNER_DIGEST_SCHEDULE_ENABLED=true
-   OWNER_DIGEST_TZ=America/New_York
+   OWNER_DIGEST_TZ=America/Los_Angeles
    OWNER_DIGEST_HOUR=7
    OWNER_DIGEST_CRON_SECRET=<long random secret for POST /api/cron/owner-digest>
    # Optional health-check nudges (same Telegram bot):
    OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED=true
-   OWNER_HEALTH_NUDGE_TZ=America/New_York
+   OWNER_HEALTH_NUDGE_TZ=America/Los_Angeles
    OWNER_HEALTH_NUDGE_HOURS=9,12,17
    # Optional ship-by → Google Calendar (all-day FREE Ship · events):
    # Share the calendar with the service account (or use OAuth refresh token).
@@ -346,9 +346,32 @@ With `REDIS_URL`, Print Ops uses BullMQ for shipped-email, Marketplace/OfferUp s
 
 Resend shipment email is disabled unless `EMAIL_SEND_MODE=live`. Unset, `off`, and `draft` skip the Resend request and retain a clear skipped-notification result; `draft` does not create or send a Resend draft. Keep this variable unset until Miguel has approved live buyer shipment email.
 
-`LISTINGS_HEALTH_FILE` points at a JSON array of listing-health and pricing suggestions. The Hub can approve or dismiss each item, and that decision stays in local SQLite. It does not edit a marketplace listing or price. When the variable is unset, the Hub says the feed is pending.
+`LISTINGS_HEALTH_FILE` points at a JSON array of listing-health and pricing suggestions. A decision stays in local SQLite and does not edit a marketplace listing or price. When the variable is unset, there is nothing to review.
 
 `SYSTEM_HEARTBEATS_DIR` points at a directory of JSON files with `service`, `status` (`green`, `yellow`, or `red`), `metrics`, and `timestamp`. The Hub colors a tile from a valid file and shows Feed pending when a service has no valid heartbeat. Wake and restart buttons record a local request and do not run a system command.
+
+### System status ingest
+
+Print Ops polls HubSpot sync, the HubSpot webhook, ShipEngine, and local shipment rows itself. Grok Bot routines, Paperclip, Make, Syncthing, drives and backups, the Mac mini, the MacBook Pro, and marketplace APIs are not polled. Watchdogs POST a report. Until a report arrives, that tile says **No data yet**.
+
+Set `SYSTEM_STATUS_INGEST_TOKEN` on the Railway service (a long random secret). Do not commit it. The route is `POST /api/systems/status` with header `x-print-ops-status-token: <token>` or `Authorization: Bearer <token>`. A missing token variable returns 503. A wrong token returns 401.
+
+```json
+{
+  "checkedAt": "2026-11-14T21:00:00.000Z",
+  "systems": [
+    {
+      "id": "grok-bot",
+      "status": "red",
+      "summary": "Progress digest timed out",
+      "checkedAt": "2026-11-14T21:00:00.000Z",
+      "metrics": { "failed": 1 }
+    }
+  ]
+}
+```
+
+`id` is one of `grok-bot`, `paperclip`, `make`, `syncthing`, `drives-backups`, `mac-mini`, `macbook-pro`, `marketplace-apis`. `status` is `green`, `amber`, or `red` (`yellow` is stored as amber). Do not push `hubspot-sync`, `hubspot-webhook`, `shipengine`, or `shipment-tracking`; the hub fills those. `summary` is required and is trimmed to 240 characters. Owner-gated `GET /api/systems/status` returns one tile per system with `checkedAt`.
 
 ### Durable production direction
 

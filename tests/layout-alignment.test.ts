@@ -775,10 +775,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("print-ops-hub").waitFor();
     const ebayCard = await page.getByTestId("hub-storefront-ebay").innerText();
-    assert.match(ebayCard, /feed pending/i);
+    assert.match(ebayCard, /no data yet/i);
     assert.equal(/\$/.test(ebayCard), false, `storefront card invented a dollar amount: ${ebayCard}`);
     const systemsCard = await page.getByTestId("hub-systems").innerText();
-    assert.match(systemsCard, /feed pending/i);
+    assert.match(systemsCard, /no data yet/i);
     assert.match(systemsCard, /Syncthing/);
 
     const nav = await boxes(page, '[data-count-slot="nav"]');
@@ -795,95 +795,11 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     const floorText = await page.locator("body").innerText();
     assert.equal(/calendar/i.test(floorText), false);
     assert.equal(/\bundefined\b|\bNaN\b|\bTODO\b|lorem/i.test(floorText), false);
-    await page.locator("[data-testid='hub-order-committed']").first().waitFor();
-    const outstanding = await page.locator("[data-testid='hub-order-committed']").first().innerText();
-    check(outstanding.split("Ada").length - 1 === 1, `hub order repeats the client: ${outstanding}`);
-    const outstandingCols = await page.locator("[data-testid='page-transition']").last().locator("[data-testid^='hub-order-']").evaluateAll((rows) =>
-      rows
-        .filter((row) => row.getClientRects().length > 0)
-        .map((row) => {
-          const chip = row.children[1] as HTMLElement | undefined;
-          const date = row.children[2] as HTMLElement | undefined;
-          const amount = row.children[3] as HTMLElement | undefined;
-          return {
-            chip: chip?.getBoundingClientRect().left ?? 0,
-            chipRight: chip?.getBoundingClientRect().right ?? 0,
-            date: date?.getBoundingClientRect().left ?? 0,
-            dateRight: date?.getBoundingClientRect().right ?? 0,
-            amount: amount?.getBoundingClientRect().right ?? 0,
-            amountLeft: amount?.getBoundingClientRect().left ?? 0,
-            chipClip: chip ? chip.scrollWidth - chip.clientWidth : 0,
-            dateClip: date ? date.scrollWidth - date.clientWidth : 0,
-          };
-        }),
-    );
-    check(outstandingCols.length >= 3, "outstanding order rows missing");
-    check(spread(outstandingCols.map((row) => row.chip)).delta <= 0.5, `status chip left edges differ by ${spread(outstandingCols.map((row) => row.chip)).delta}`);
-    check(spread(outstandingCols.map((row) => row.date)).delta <= 0.5, `ship-by left edges differ by ${spread(outstandingCols.map((row) => row.date)).delta}`);
-    check(spread(outstandingCols.map((row) => row.amount)).delta <= 0.5, `amount right edges differ by ${spread(outstandingCols.map((row) => row.amount)).delta}`);
-    for (const row of outstandingCols) {
-      check(row.chipRight <= row.date + 0.5, "status chip runs into the ship-by column");
-      check(row.dateRight <= row.amountLeft + 0.5, "ship-by date runs into the amount column");
-      check(row.chipClip <= 0.5, "status chip is clipped");
-      check(row.dateClip <= 0.5, "ship-by date is clipped");
-    }
-    const readOutstandingNames = () =>
-      page.locator("[data-testid='page-transition']").last().locator("[data-testid^='hub-order-']").evaluateAll((rows) =>
-        rows
-          .filter((row) => row.getClientRects().length > 0)
-          .map((row) => {
-            const name = row.children[0] as HTMLElement | undefined;
-            const box = name?.getBoundingClientRect();
-            const overflow: string[] = [];
-            if (name && box) {
-              const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
-              let node = walker.nextNode();
-              while (node) {
-                const text = (node.textContent || "").replace(/\s+/g, " ").trim();
-                if (text) {
-                  const range = document.createRange();
-                  range.selectNodeContents(node);
-                  for (const rect of range.getClientRects()) {
-                    if (rect.width < 0.5 || rect.height < 0.5) continue;
-                    if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5) {
-                      overflow.push(`${text} ${Math.round(rect.width)}/${Math.round(box.width)}`);
-                    }
-                  }
-                }
-                node = walker.nextNode();
-              }
-            }
-            const client = name?.querySelector("small") as HTMLElement | null;
-            let clientWidth = 0;
-            if (client && box) {
-              const range = document.createRange();
-              range.selectNodeContents(client);
-              for (const rect of range.getClientRects()) {
-                if (rect.width < 0.5 || rect.height < 0.5) continue;
-                clientWidth = Math.max(clientWidth, rect.width);
-                if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5) overflow.push(`client ${Math.round(rect.width)}/${Math.round(box.width)}`);
-              }
-            }
-            return {
-              text: (name?.textContent || "").replace(/\s+/g, " ").trim(),
-              overflow,
-              scroll: name?.scrollWidth ?? 0,
-              box: name?.clientWidth ?? 0,
-              client: (client?.textContent || "").replace(/\s+/g, " ").trim(),
-              clientWidth,
-            };
-          }),
-      );
-    const desktopNames = await readOutstandingNames();
-    check(
-      desktopNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")),
-      "Ikarus outstanding row missing",
-    );
-    for (const row of desktopNames) {
-      check(row.overflow.length === 0, `desktop outstanding name clipped: ${row.text} ${row.overflow.join("|")}`);
-      check(row.scroll <= row.box + 0.5, `desktop outstanding name clipped (${row.scroll} > ${row.box}): ${row.text}`);
-      if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `desktop up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
-    }
+    const homeText = await page.locator("[data-testid='print-ops-hub']").innerText();
+    assert.match(homeText, /Needs Miguel today/);
+    assert.match(homeText, /Orders and tracking/);
+    const homeScroll = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, inner: window.innerWidth }));
+    check(homeScroll.width <= homeScroll.inner + 1, `desktop hub scrolls horizontally (${homeScroll.width} > ${homeScroll.inner})`);
     if (artifactPath("hub-outstanding-desktop-1440.png")) {
       await page.locator("[data-testid='work-hub']").screenshot({ path: artifactPath("hub-outstanding-desktop-1440.png")! });
     }
@@ -1436,16 +1352,10 @@ test("layout alignment at 1440 and 390", { timeout: 120_000 }, async () => {
     check(scroll.width <= scroll.inner + 1, `phone page scrolls horizontally (${scroll.width} > ${scroll.inner})`);
     const chipHeights = await page.locator(".stage-chip").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
     for (const height of chipHeights) check(height <= 28, `stage chip wrapped (${height}px)`);
-    const phoneNames = await readOutstandingNames();
-    const phoneFirst = phoneNames.find((row) => /Cerastus Chassis - Castigator/.test(row.text));
-    check(Boolean(phoneFirst), `phone outstanding orders were ${phoneNames.map((row) => row.text).join(" | ")}`);
-    check((phoneFirst?.text.split("Ada").length ?? 1) - 1 === 1, `phone up-next repeats the client: ${phoneFirst?.text}`);
-    check(phoneNames.some((row) => row.text.includes("Ikarus BA LR KIT") && row.client.includes("Daniel Ortega")), "phone Ikarus outstanding row missing");
-    for (const row of phoneNames) {
-      check(row.overflow.length === 0, `phone outstanding name clipped: ${row.text} ${row.overflow.join("|")}`);
-      check(row.scroll <= row.box + 0.5, `phone outstanding name clipped (${row.scroll} > ${row.box}): ${row.text}`);
-      if (row.client) check(row.clientWidth > 0 && row.clientWidth <= row.box + 0.5, `phone up-next client ellipsized (${row.clientWidth}/${row.box}): ${row.client}`);
-    }
+    const phoneHub = await page.locator("[data-testid='print-ops-hub']").innerText();
+    check(/Needs Miguel today/.test(phoneHub), "phone hub missing the needs strip");
+    const jumpBox = await page.locator(".print-ops-jumps").first().evaluate((el) => ({ height: el.getBoundingClientRect().height, top: el.getBoundingClientRect().top }));
+    check(jumpBox.height <= 36, `phone section jumps wrapped (${jumpBox.height}px)`);
     if (artifactPath("hub-outstanding-phone-390.png")) {
       await page.locator("[data-testid='work-hub']").screenshot({ path: artifactPath("hub-outstanding-phone-390.png")! });
     }

@@ -12,7 +12,7 @@ import { getDb } from "./order-links";
 import { fulfillmentChecklists } from "../../shared/schema";
 import { lastHubspotWriteSuccessAt } from "./hubspot-write-log";
 import { hubspotWriteCounts, listFailedHubspotWrites, processPendingHubspotWrites, reopenFailedHubspotWrites } from "./hubspot-writes";
-import { listStackState } from "./priority-stack";
+import { listStackState, markStackDone } from "./priority-stack";
 import { dropNotFoundWebhookEvents, failedWebhookCount, listFailedWebhookEvents, processWebhookInbox, reopenFailedWebhookEvents } from "./webhook-inbox";
 import { loadProductionQueue } from "./queue-loader";
 import { recalculateDeal } from "./service";
@@ -51,7 +51,7 @@ export interface SyncDriftItem {
 
 export interface SyncRepair {
   dealId: string;
-  field: "tracking" | "notes" | "ship_by" | "retry" | "requeue_write" | "requeue_webhook";
+  field: "tracking" | "notes" | "ship_by" | "retry" | "requeue_write" | "requeue_webhook" | "mark_local_done";
   value: string;
 }
 
@@ -78,6 +78,8 @@ export interface SyncHubspotDeal {
   labor: string;
   packaging: string;
   shipping: string;
+  /** HubSpot close or last-modified time. Used only to date a local done mark. */
+  activityAt: string;
 }
 
 export interface SyncLocalDeal {
@@ -255,9 +257,10 @@ export function compareSyncHealth(input: SyncCompareInput): SyncHealthReport {
         "stage",
         local.doneAt,
         remote.stage,
-        false,
-        "HubSpot has this deal Completed or Closed Won, but the Stack has not marked it done.",
+        true,
+        "HubSpot has this deal Completed, Closed Won, or Shipped, but the Stack has not marked it done. Print Ops can mark it done locally and will not change the HubSpot stage.",
       ));
+      repairs.push({ dealId: local.dealId, field: "mark_local_done", value: remote.activityAt });
     }
 
     if (remote?.found && !remote.closed && locallyDone(local.doneAt)) {
@@ -530,6 +533,7 @@ export async function loadSyncCompareInput(now = new Date()): Promise<SyncCompar
       labor: String(props.print_labor_cost ?? ""),
       packaging: String(props.print_packaging_cost ?? ""),
       shipping: String(props.print_actual_shipping_cost ?? ""),
+      activityAt: String(props.closedate || props.hs_lastmodifieddate || ""),
     };
     hubspotById[deal.id] = row;
     if (!closed) openDealIds.push(deal.id);
@@ -611,6 +615,13 @@ export async function applySyncRepairs(
 ): Promise<Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" | "not-found" }>> {
   const results: Array<{ dealId: string; field: string; wrote: boolean; dryRun: boolean; skipped?: "hubspot-not-blank" | "local-not-blank" | "read-failed" | "not-found" }> = [];
   for (const repair of repairs) {
+    if (repair.field === "mark_local_done") {
+      const parsed = Date.parse(repair.value);
+      const when = Number.isFinite(parsed) ? new Date(parsed) : new Date();
+      const wrote = markStackDone(`deal:${repair.dealId}`, [], when);
+      results.push({ dealId: repair.dealId, field: repair.field, wrote, dryRun: false });
+      continue;
+    }
     if (repair.field === "requeue_write") {
       reopenFailedHubspotWrites();
       await processPendingHubspotWrites();
@@ -824,6 +835,7 @@ function repairFieldForKind(kind: SyncDriftKind): string {
   if (kind === "shipNotes") return "notes";
   if (kind === "shipBy") return "ship_by";
   if (kind === "failedWrites" || kind === "failedRecalcs") return "retry";
+  if (kind === "closedNotDone") return "mark_local_done";
   return "";
 }
 

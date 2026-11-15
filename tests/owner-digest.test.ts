@@ -11,6 +11,7 @@ import {
   localDigestHour,
   nextPrintCandidates,
   platesOnOpenOrders,
+  getOwnerDigestSchedule,
   shouldRunScheduledDigest,
   writeLastDigestDateKey,
   readLastDigestDateKey,
@@ -298,6 +299,13 @@ function sampleContext(): OwnerDigestContext {
     recentPlates: [samplePlate()],
   };
 }
+
+test("owner digest defaults to 7:00 America/Los_Angeles", () => {
+  const schedule = getOwnerDigestSchedule({});
+  assert.equal(schedule.timeZone, "America/Los_Angeles");
+  assert.equal(schedule.hour, 7);
+  assert.equal(schedule.enabled, false);
+});
 
 test("telegram config requires token and chat id shape", () => {
   assert.equal(getTelegramConfig({}), null);

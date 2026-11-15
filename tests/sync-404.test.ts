@@ -54,6 +54,7 @@ function remote(dealId: string): SyncHubspotDeal {
     labor: "",
     packaging: "",
     shipping: "",
+    activityAt: "",
   };
 }
 

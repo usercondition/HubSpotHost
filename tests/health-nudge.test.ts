@@ -239,6 +239,12 @@ test("health nudge includes overdue ship-bys even when attention is clear", () =
   assert.notEqual(withShip, withoutShip);
 });
 
+test("health nudge defaults to America/Los_Angeles when no zone is set", () => {
+  const schedule = getHealthNudgeSchedule({});
+  assert.equal(schedule.timeZone, "America/Los_Angeles");
+  assert.equal(schedule.enabled, false);
+});
+
 test("getHealthNudgeSchedule parses hour lists", () => {
   const schedule = getHealthNudgeSchedule({
     OWNER_HEALTH_NUDGE_SCHEDULE_ENABLED: "true",

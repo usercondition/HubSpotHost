@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import type { AuditEntry } from "../server/lib/audit";
 import { getDb, resetOrderLinkStore } from "../server/lib/order-links";
 import { registerRoutes } from "../server/routes";
-import { fulfillmentChecklists } from "../shared/schema";
+import { fulfillmentChecklists, priorityStackEntries } from "../shared/schema";
 import { registerSyncHealthJobScheduler } from "../server/lib/print-ops-jobs";
 import { shopWeekEnd, shopWeekStart } from "../shared/priority-stack";
 import {
@@ -48,6 +48,7 @@ function remote(partial: Partial<SyncHubspotDeal> & Pick<SyncHubspotDeal, "dealI
     labor: "",
     packaging: "",
     shipping: "",
+    activityAt: "",
     ...partial,
   };
 }
@@ -288,7 +289,7 @@ test("Stack done still open in HubSpot, and Closed Won not marked done", () => {
   const report = compareSyncHealth(input({
     hubspotById: {
       "51": remote({ dealId: "51", stage: "Ready to Ship" }),
-      "52": remote({ dealId: "52", stage: "Completed", closed: true, closedWon: true }),
+      "52": remote({ dealId: "52", stage: "Completed", closed: true, closedWon: true, activityAt: "2026-09-20T00:00:00.000Z" }),
     },
     localDeals: [
       local({ dealId: "51", doneAt: "2026-09-25T16:00:00.000Z" }),
@@ -296,7 +297,65 @@ test("Stack done still open in HubSpot, and Closed Won not marked done", () => {
     ],
   }));
   assert.deepEqual(kinds(report), ["doneStillOpen", "closedNotDone"]);
-  assert.deepEqual(report.repairs, []);
+  assert.deepEqual(report.repairs, [
+    { dealId: "52", field: "mark_local_done", value: "2026-09-20T00:00:00.000Z" },
+  ]);
+});
+
+test("closedNotDone repair marks the Stack done locally and does not call HubSpot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sync-done-"));
+  const previous = {
+    db: process.env.ORDER_LINKS_DB_FILE,
+    dry: process.env.DRY_RUN,
+    writes: process.env.ALLOW_HUBSPOT_WRITES,
+    base: process.env.HUBSPOT_API_BASE,
+    token: process.env.HUBSPOT_ACCESS_TOKEN,
+  };
+  const calls: string[] = [];
+  const mock = http.createServer((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => mock.listen(0, "127.0.0.1", () => resolve()));
+  const port = (mock.address() as { port: number }).port;
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "done.db");
+  process.env.HUBSPOT_API_BASE = `http://127.0.0.1:${port}`;
+  process.env.HUBSPOT_ACCESS_TOKEN = "test-token";
+  process.env.DRY_RUN = "false";
+  process.env.ALLOW_HUBSPOT_WRITES = "true";
+  resetOrderLinkStore();
+  try {
+    const report = compareSyncHealth(input({
+      hubspotById: {
+        "52": remote({ dealId: "52", stage: "Shipped", closed: true, closedWon: true, activityAt: "2026-11-08T02:24:35.385Z" }),
+      },
+      localDeals: [local({ dealId: "52", doneAt: null })],
+    }));
+    const applied = await applySyncRepairs(report.repairs);
+    assert.equal(applied[0]?.wrote, true);
+    assert.equal(applied[0]?.dryRun, false);
+    const row = getDb().select().from(priorityStackEntries).where(eq(priorityStackEntries.hubspotDealId, "52")).get();
+    assert.equal(row?.doneAt, "2026-11-08T02:24:35.385Z");
+    const again = await applySyncRepairs(report.repairs);
+    assert.equal(again[0]?.wrote, true);
+    const kept = getDb().select().from(priorityStackEntries).where(eq(priorityStackEntries.hubspotDealId, "52")).get();
+    assert.equal(kept?.doneAt, "2026-11-08T02:24:35.385Z");
+    assert.equal(calls.length, 0);
+  } finally {
+    if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previous.db;
+    if (previous.dry === undefined) delete process.env.DRY_RUN;
+    else process.env.DRY_RUN = previous.dry;
+    if (previous.writes === undefined) delete process.env.ALLOW_HUBSPOT_WRITES;
+    else process.env.ALLOW_HUBSPOT_WRITES = previous.writes;
+    if (previous.base === undefined) delete process.env.HUBSPOT_API_BASE;
+    else process.env.HUBSPOT_API_BASE = previous.base;
+    if (previous.token === undefined) delete process.env.HUBSPOT_ACCESS_TOKEN;
+    else process.env.HUBSPOT_ACCESS_TOKEN = previous.token;
+    resetOrderLinkStore();
+    await new Promise<void>((resolve) => mock.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a prior-week local done still counts as done after shop-week rollover", () => {

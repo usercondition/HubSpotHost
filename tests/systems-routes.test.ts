@@ -65,3 +65,59 @@ test("systems routes stay pending without a feed and record actions without exec
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("status ingest requires its token and does not accept the owner code", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "systems-ingest-"));
+  const previous = { db: process.env.ORDER_LINKS_DB_FILE, token: process.env.SYSTEM_STATUS_INGEST_TOKEN };
+  process.env.ORDER_LINKS_DB_FILE = join(dir, "test.db");
+  delete process.env.SYSTEM_STATUS_INGEST_TOKEN;
+  resetOrderLinkStore();
+  const app = express();
+  app.use(express.json());
+  registerSystemsRoutes(app, (req, res) => {
+    if (req.get("x-paid-order-access-code") !== "owner") {
+      res.status(401).json({ ok: false });
+      return true;
+    }
+    return false;
+  });
+  const server = await new Promise<Server>((resolve) => {
+    const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+  });
+  const port = (server.address() as { port: number }).port;
+  try {
+    const missing = await fetch(`http://127.0.0.1:${port}/api/systems/status`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-paid-order-access-code": "owner" },
+      body: JSON.stringify({ systems: [] }),
+    });
+    assert.equal(missing.status, 503);
+    process.env.SYSTEM_STATUS_INGEST_TOKEN = "watchdog-token";
+    const denied = await fetch(`http://127.0.0.1:${port}/api/systems/status`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-print-ops-status-token": "nope" },
+      body: JSON.stringify({ systems: [{ id: "make", status: "green", summary: "on", checkedAt: "2026-11-14T21:00:00.000Z" }] }),
+    });
+    assert.equal(denied.status, 401);
+    const stored = await fetch(`http://127.0.0.1:${port}/api/systems/status`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer watchdog-token" },
+      body: JSON.stringify({ systems: [{ id: "make", status: "green", summary: "scenario on", checkedAt: "2026-11-14T21:00:00.000Z" }] }),
+    });
+    assert.deepEqual(await stored.json(), { ok: true, stored: 1 });
+    const locked = await fetch(`http://127.0.0.1:${port}/api/systems/status`);
+    assert.equal(locked.status, 401);
+    const board = await fetch(`http://127.0.0.1:${port}/api/systems/status`, { headers: { "x-paid-order-access-code": "owner" } });
+    const body = await board.json() as { tiles: Array<{ id: string; summary: string; status: string }> };
+    assert.equal(body.tiles.find((tile) => tile.id === "make")?.summary, "scenario on");
+    assert.equal(body.tiles.find((tile) => tile.id === "paperclip")?.summary, "No data yet");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    resetOrderLinkStore();
+    if (previous.db === undefined) delete process.env.ORDER_LINKS_DB_FILE;
+    else process.env.ORDER_LINKS_DB_FILE = previous.db;
+    if (previous.token === undefined) delete process.env.SYSTEM_STATUS_INGEST_TOKEN;
+    else process.env.SYSTEM_STATUS_INGEST_TOKEN = previous.token;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
